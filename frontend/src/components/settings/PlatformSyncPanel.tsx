@@ -1,9 +1,11 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { platformsApi, type BulkListingSyncResult, type SyncCommitResult, type SyncPreviewResult } from "../../api/platforms";
 import type { ListingPlatform } from "../../api/types";
 import { PLATFORM_LABELS } from "../../lib/platforms";
 import { ErrorBanner } from "../common/ErrorBanner";
+
+const SYNC_LOG_PAGE_SIZE = 10;
 
 export function PlatformSyncPanel({ platform }: { platform: ListingPlatform }) {
   const label = PLATFORM_LABELS[platform];
@@ -12,11 +14,15 @@ export function PlatformSyncPanel({ platform }: { platform: ListingPlatform }) {
   const [commitResult, setCommitResult] = useState<SyncCommitResult | null>(null);
   const [bulkSyncResult, setBulkSyncResult] = useState<BulkListingSyncResult | null>(null);
   const [syncStartDate, setSyncStartDate] = useState("");
+  const [logPage, setLogPage] = useState(0);
 
-  const { data: log } = useQuery({
-    queryKey: ["platforms", platform, "sync-log"],
-    queryFn: () => platformsApi.syncLog(platform),
+  const { data: logData } = useQuery({
+    queryKey: ["platforms", platform, "sync-log", logPage],
+    queryFn: () => platformsApi.syncLog(platform, SYNC_LOG_PAGE_SIZE, logPage * SYNC_LOG_PAGE_SIZE),
+    placeholderData: keepPreviousData,
   });
+  const log = logData?.items;
+  const logTotal = logData?.total ?? 0;
   const { data: platformStatus } = useQuery({
     queryKey: ["platforms", platform, "status"],
     queryFn: () => platformsApi.status(platform),
@@ -36,6 +42,7 @@ export function PlatformSyncPanel({ platform }: { platform: ListingPlatform }) {
     onSuccess: (result) => {
       setPreview(result);
       setCommitResult(null);
+      setLogPage(0);
       queryClient.invalidateQueries({ queryKey: ["platforms", platform, "sync-log"] });
     },
   });
@@ -44,6 +51,7 @@ export function PlatformSyncPanel({ platform }: { platform: ListingPlatform }) {
     mutationFn: () => platformsApi.syncOrders(platform),
     onSuccess: (result) => {
       setCommitResult(result);
+      setLogPage(0);
       queryClient.invalidateQueries({ queryKey: ["platforms", platform, "sync-log"] });
       queryClient.invalidateQueries({ queryKey: ["orders"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
@@ -146,36 +154,62 @@ export function PlatformSyncPanel({ platform }: { platform: ListingPlatform }) {
       {log && log.length > 0 && (
         <div>
           <p className="mb-1 text-sm font-medium text-slate-600">Recent sync activity</p>
-          <table className="w-full border-collapse bg-white text-left text-xs shadow-sm">
-            <thead>
-              <tr className="border-b border-slate-200">
-                <th className="p-1.5">When</th>
-                <th className="p-1.5">Mode</th>
-                <th className="p-1.5">Status</th>
-                <th className="p-1.5">Fetched</th>
-                <th className="p-1.5">New</th>
-                <th className="p-1.5">Shipped</th>
-                <th className="p-1.5">Needs mapping</th>
-                <th className="p-1.5">Error</th>
-              </tr>
-            </thead>
-            <tbody>
-              {log.map((run) => (
-                <tr key={run.id} className="border-b border-slate-100">
-                  <td className="p-1.5">{new Date(run.started_at).toLocaleString()}</td>
-                  <td className="p-1.5">{run.mode}</td>
-                  <td className="p-1.5">
-                    <span className={run.status === "success" ? "text-green-700" : "text-red-600"}>{run.status}</span>
-                  </td>
-                  <td className="p-1.5">{run.fetched_count}</td>
-                  <td className="p-1.5">{run.new_count}</td>
-                  <td className="p-1.5">{run.shipped_count}</td>
-                  <td className="p-1.5">{run.needs_mapping_count}</td>
-                  <td className="p-1.5 text-red-600">{run.error_message ?? ""}</td>
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse bg-white text-left text-xs shadow-sm">
+              <thead>
+                <tr className="border-b border-slate-200">
+                  <th className="p-1.5">When</th>
+                  <th className="p-1.5">Mode</th>
+                  <th className="p-1.5">Status</th>
+                  <th className="p-1.5">Fetched</th>
+                  <th className="p-1.5">New</th>
+                  <th className="p-1.5">Shipped</th>
+                  <th className="p-1.5">Needs mapping</th>
+                  <th className="p-1.5">Error</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {log.map((run) => (
+                  <tr key={run.id} className="border-b border-slate-100">
+                    <td className="p-1.5">{new Date(run.started_at).toLocaleString()}</td>
+                    <td className="p-1.5">{run.mode}</td>
+                    <td className="p-1.5">
+                      <span className={run.status === "success" ? "text-green-700" : "text-red-600"}>
+                        {run.status}
+                      </span>
+                    </td>
+                    <td className="p-1.5">{run.fetched_count}</td>
+                    <td className="p-1.5">{run.new_count}</td>
+                    <td className="p-1.5">{run.shipped_count}</td>
+                    <td className="p-1.5">{run.needs_mapping_count}</td>
+                    <td className="p-1.5 text-red-600">{run.error_message ?? ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="mt-1.5 flex items-center justify-between text-xs text-slate-500">
+            <span>
+              Showing {logPage * SYNC_LOG_PAGE_SIZE + 1}–{Math.min(logPage * SYNC_LOG_PAGE_SIZE + log.length, logTotal)}{" "}
+              of {logTotal}
+            </span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setLogPage((p) => Math.max(0, p - 1))}
+                disabled={logPage === 0}
+                className="rounded border border-slate-300 px-2 py-1 disabled:opacity-40"
+              >
+                Prev
+              </button>
+              <button
+                onClick={() => setLogPage((p) => p + 1)}
+                disabled={(logPage + 1) * SYNC_LOG_PAGE_SIZE >= logTotal}
+                className="rounded border border-slate-300 px-2 py-1 disabled:opacity-40"
+              >
+                Next
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

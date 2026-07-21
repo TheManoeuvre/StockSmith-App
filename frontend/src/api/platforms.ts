@@ -4,6 +4,8 @@ import type { ListingPlatform } from "./types";
 export interface PlatformStatus {
   connected: boolean;
   account_id: string | null;
+  shop_name: string | null;
+  has_shop_icon: boolean;
   scopes: string | null;
   connected_at: string | null;
   sync_start_date: string | null;
@@ -62,6 +64,11 @@ export interface SyncRunRead {
   error_message: string | null;
 }
 
+export interface SyncRunPage {
+  items: SyncRunRead[];
+  total: number;
+}
+
 export type ListingSyncStatus = "synced" | "listing_not_active" | "not_found" | "not_tested";
 export type ProductSyncStatus = "synced" | "partial" | "not_found" | "not_tested";
 
@@ -97,7 +104,8 @@ export const platformsApi = {
   disconnect: (platform: ListingPlatform) => api.post<void>(`/platforms/${platform}/disconnect`),
   previewSync: (platform: ListingPlatform) => api.post<SyncPreviewResult>(`/platforms/${platform}/preview-sync`),
   syncOrders: (platform: ListingPlatform) => api.post<SyncCommitResult>(`/platforms/${platform}/sync-orders`),
-  syncLog: (platform: ListingPlatform) => api.get<SyncRunRead[]>(`/platforms/${platform}/sync-log`),
+  syncLog: (platform: ListingPlatform, limit: number, offset: number) =>
+    api.get<SyncRunPage>(`/platforms/${platform}/sync-log?limit=${limit}&offset=${offset}`),
   checkProductSync: (platform: ListingPlatform, productId: number) =>
     api.post<ProductListingSyncSummary>(`/platforms/${platform}/products/${productId}/check-sync`),
   getProductSyncStatus: (platform: ListingPlatform, productId: number) =>

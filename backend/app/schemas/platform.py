@@ -12,6 +12,8 @@ class PlatformConnectResponse(BaseModel):
 class PlatformStatus(BaseModel):
     connected: bool
     account_id: str | None
+    shop_name: str | None
+    has_shop_icon: bool
     scopes: str | None
     connected_at: datetime | None
     sync_start_date: date | None
@@ -74,3 +76,8 @@ class SyncRunRead(BaseModel):
     needs_mapping_count: int
     shipped_count: int
     error_message: str | None
+
+
+class SyncRunPage(BaseModel):
+    items: list[SyncRunRead]
+    total: int

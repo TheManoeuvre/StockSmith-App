@@ -112,6 +112,10 @@ export async function materialImageUploadUrl(materialId: number): Promise<string
   return `${await baseUrl()}/api/v1/materials/${materialId}/image`;
 }
 
+export async function shopIconUrl(platform: string): Promise<{ url: string; headers: Record<string, string> }> {
+  return { url: `${await baseUrl()}/api/v1/platforms/${platform}/shop-icon`, headers: await authHeaders() };
+}
+
 export interface CsvImportResult {
   created: number;
   updated: number;

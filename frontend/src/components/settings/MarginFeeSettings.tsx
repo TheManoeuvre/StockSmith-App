@@ -113,40 +113,42 @@ function FeeComponentTable({ platform, label }: { platform: ListingPlatform; lab
   return (
     <div className="flex flex-col gap-2">
       <p className="text-sm font-medium">{label}</p>
-      <table className="w-full border-collapse bg-white text-left text-xs shadow-sm">
-        <thead>
-          <tr className="border-b border-slate-200">
-            <th className="p-1.5">Name</th>
-            <th className="p-1.5">Applies to</th>
-            <th className="p-1.5">Rate %</th>
-            <th className="p-1.5">Fixed £</th>
-            <th className="p-1.5">Enabled</th>
-            <th className="p-1.5" />
-          </tr>
-        </thead>
-        <tbody>
-          {components?.map((c) => (
-            <tr key={c.id} className="border-b border-slate-100">
-              <td className="p-1.5">{c.name}</td>
-              <td className="p-1.5">{BASIS_LABELS[c.basis]}</td>
-              <td className="p-1.5">{c.rate_percent ?? "—"}</td>
-              <td className="p-1.5">{c.fixed_amount ?? "—"}</td>
-              <td className="p-1.5">
-                <input
-                  type="checkbox"
-                  checked={c.enabled}
-                  onChange={(e) => updateMutation.mutate({ id: c.id, input: { enabled: e.target.checked } })}
-                />
-              </td>
-              <td className="p-1.5">
-                <button onClick={() => deleteMutation.mutate(c.id)} className="text-red-600">
-                  Remove
-                </button>
-              </td>
+      <div className="overflow-x-auto">
+        <table className="w-full border-collapse bg-white text-left text-xs shadow-sm">
+          <thead>
+            <tr className="border-b border-slate-200">
+              <th className="p-1.5">Name</th>
+              <th className="p-1.5">Applies to</th>
+              <th className="p-1.5">Rate %</th>
+              <th className="p-1.5">Fixed £</th>
+              <th className="p-1.5">Enabled</th>
+              <th className="p-1.5" />
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {components?.map((c) => (
+              <tr key={c.id} className="border-b border-slate-100">
+                <td className="p-1.5">{c.name}</td>
+                <td className="p-1.5">{BASIS_LABELS[c.basis]}</td>
+                <td className="p-1.5">{c.rate_percent ?? "—"}</td>
+                <td className="p-1.5">{c.fixed_amount ?? "—"}</td>
+                <td className="p-1.5">
+                  <input
+                    type="checkbox"
+                    checked={c.enabled}
+                    onChange={(e) => updateMutation.mutate({ id: c.id, input: { enabled: e.target.checked } })}
+                  />
+                </td>
+                <td className="p-1.5">
+                  <button onClick={() => deleteMutation.mutate(c.id)} className="text-red-600">
+                    Remove
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       <ErrorBanner error={updateMutation.error ?? deleteMutation.error ?? createMutation.error} />
       <form
         className="flex flex-wrap items-end gap-2"

@@ -1,12 +1,13 @@
 import base64
 import hashlib
+import logging
 import secrets
 import time
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import HTMLResponse
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import FileResponse, HTMLResponse
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -20,12 +21,16 @@ from app.schemas.platform import (
     PlatformStatus,
     SyncCommitResult,
     SyncPreviewResult,
-    SyncRunRead,
+    SyncRunPage,
     SyncStartDateUpdate,
 )
 from app.services import listing_sync, order_sync
+from app.services.file_storage import resolve_asset_path, save_platform_icon
 from app.services.platforms import get_adapter
 from app.services.platforms.errors import PlatformAuthError, PlatformError, PlatformRateLimitError, PlatformSyncError
+from app.services.url_import import fetch_image_bytes
+
+logger = logging.getLogger("stocksmith.platforms")
 
 router = APIRouter(prefix="/platforms", tags=["platforms"])
 
@@ -120,6 +125,8 @@ def _status_from_connection(connection: PlatformConnection | None) -> PlatformSt
         return PlatformStatus(
             connected=False,
             account_id=None,
+            shop_name=None,
+            has_shop_icon=False,
             scopes=None,
             connected_at=None,
             sync_start_date=None,
@@ -129,12 +136,34 @@ def _status_from_connection(connection: PlatformConnection | None) -> PlatformSt
     return PlatformStatus(
         connected=True,
         account_id=connection.external_account_id,
+        shop_name=connection.shop_name,
+        has_shop_icon=bool(connection.shop_icon_path),
         scopes=connection.scopes,
         connected_at=connection.connected_at,
         sync_start_date=connection.sync_start_date,
         last_orders_synced_at=connection.last_orders_synced_at,
         last_refreshed_at=connection.last_refreshed_at,
     )
+
+
+async def _enrich_etsy_shop_details(connection: PlatformConnection, adapter, access_token: str) -> None:
+    """Best-effort shop name/icon lookup — sets connection.shop_name/shop_icon_path when
+    available, leaves them unset otherwise. Must never raise: called both from the OAuth
+    callback (where a failure must not break the connect) and from /status (where a
+    failure must not break reading connection state, and will simply retry next load)."""
+    try:
+        shop_name, icon_url = await adapter.fetch_shop_details(access_token, connection.external_account_id)
+    except Exception:
+        logger.exception("Failed to fetch Etsy shop details")
+        return
+    if shop_name:
+        connection.shop_name = shop_name
+    if icon_url:
+        try:
+            data, filename = await fetch_image_bytes(icon_url)
+            connection.shop_icon_path = save_platform_icon(ListingPlatform.etsy.value, data, filename)
+        except Exception:
+            logger.exception("Failed to download Etsy shop icon")
 
 
 @router.post("/{platform}/connect", response_model=PlatformConnectResponse, dependencies=[Depends(require_auth)])
@@ -186,6 +215,8 @@ async def platform_callback(
     connection.scopes = tokens.scopes
     connection.external_account_id = account_id
     connection.connected_at = datetime.now(timezone.utc)
+    if platform == ListingPlatform.etsy:
+        await _enrich_etsy_shop_details(connection, adapter, tokens.access_token)
     await session.commit()
 
     return _html(f"{label} connected", f"Account {account_id} is now connected to StockSmith.")
@@ -194,7 +225,24 @@ async def platform_callback(
 @router.get("/{platform}/status", response_model=PlatformStatus, dependencies=[Depends(require_auth)])
 async def platform_status(platform: ListingPlatform, session: AsyncSession = Depends(get_db)) -> PlatformStatus:
     result = await session.execute(select(PlatformConnection).where(PlatformConnection.platform == platform))
-    return _status_from_connection(result.scalar_one_or_none())
+    connection = result.scalar_one_or_none()
+    if platform == ListingPlatform.etsy and connection is not None and connection.is_connected and not connection.shop_name:
+        adapter = get_adapter(platform)
+        await _enrich_etsy_shop_details(connection, adapter, connection.access_token)
+        await session.commit()
+    return _status_from_connection(connection)
+
+
+@router.get("/{platform}/shop-icon", dependencies=[Depends(require_auth)])
+async def platform_shop_icon(platform: ListingPlatform, session: AsyncSession = Depends(get_db)) -> FileResponse:
+    result = await session.execute(select(PlatformConnection).where(PlatformConnection.platform == platform))
+    connection = result.scalar_one_or_none()
+    if connection is None or not connection.shop_icon_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No shop icon stored")
+    path = resolve_asset_path(connection.shop_icon_path)
+    if not path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Shop icon file missing on disk")
+    return FileResponse(path)
 
 
 @router.patch("/{platform}/sync-start-date", response_model=PlatformStatus, dependencies=[Depends(require_auth)])
@@ -229,6 +277,10 @@ async def disconnect_platform(platform: ListingPlatform, session: AsyncSession =
     connection.connected_at = None
     connection.last_orders_synced_at = None
     connection.last_refreshed_at = None
+    if connection.shop_icon_path:
+        resolve_asset_path(connection.shop_icon_path).unlink(missing_ok=True)
+    connection.shop_name = None
+    connection.shop_icon_path = None
     await session.commit()
 
 
@@ -251,15 +303,24 @@ async def sync_orders(platform: ListingPlatform, session: AsyncSession = Depends
         raise _map_platform_error(e)
 
 
-@router.get("/{platform}/sync-log", response_model=list[SyncRunRead], dependencies=[Depends(require_auth)])
-async def sync_log(platform: ListingPlatform, session: AsyncSession = Depends(get_db)) -> list[PlatformSyncRun]:
+@router.get("/{platform}/sync-log", response_model=SyncRunPage, dependencies=[Depends(require_auth)])
+async def sync_log(
+    platform: ListingPlatform,
+    limit: int = Query(10, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    session: AsyncSession = Depends(get_db),
+) -> SyncRunPage:
+    total = await session.scalar(
+        select(func.count()).select_from(PlatformSyncRun).where(PlatformSyncRun.platform == platform)
+    )
     result = await session.execute(
         select(PlatformSyncRun)
         .where(PlatformSyncRun.platform == platform)
         .order_by(PlatformSyncRun.started_at.desc())
-        .limit(20)
+        .limit(limit)
+        .offset(offset)
     )
-    return list(result.scalars())
+    return SyncRunPage(items=list(result.scalars()), total=total or 0)
 
 
 @router.post(

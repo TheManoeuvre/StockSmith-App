@@ -135,6 +135,25 @@ class EtsyAdapter:
             raise PlatformSyncError("Etsy shops response did not include a shop_id")
         return str(shop_id)
 
+    async def fetch_shop_details(self, access_token: str, shop_id: str) -> tuple[str | None, str | None]:
+        """Best-effort shop name/icon lookup for display purposes only — unlike
+        fetch_account_id, a failure here must never block a connect or a status check,
+        so this swallows errors and returns (None, None) instead of raising."""
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                response = await client.get(
+                    f"{API_BASE}/shops/{shop_id}",
+                    headers={"Authorization": f"Bearer {access_token}", "x-api-key": self._api_key},
+                )
+            if response.status_code != 200:
+                logger.warning("Failed to fetch Etsy shop details: %s %s", response.status_code, response.text)
+                return None, None
+            body = response.json()
+        except httpx.HTTPError as e:
+            logger.warning("Failed to fetch Etsy shop details: %s", e)
+            return None, None
+        return body.get("shop_name"), body.get("icon_url_fullxfull")
+
     @staticmethod
     def _extract_shops(body) -> list[dict]:
         """Etsy's shops-by-user response shape wasn't fully verifiable against live docs

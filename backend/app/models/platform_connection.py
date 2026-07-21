@@ -37,6 +37,12 @@ class PlatformConnection(Base):
     access_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     scopes: Mapped[str | None] = mapped_column(String, nullable=True)
     external_account_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Etsy-only enrichment (best-effort, fetched from GET /v3/application/shops/{shop_id}
+    # after external_account_id is resolved) — shop_name is the human-readable store
+    # name, shop_icon_path is a relative path under asset_root to a locally-downloaded
+    # copy of the shop's icon (see app/services/file_storage.save_platform_icon).
+    shop_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    shop_icon_path: Mapped[str | None] = mapped_column(String, nullable=True)
     # Floor on order sync — never import orders placed before this date, regardless of
     # last_orders_synced_at. Defaults to 14 days before the connection is first created,
     # so a first sync doesn't pull in a shop's entire historical order backlog. Editable

@@ -109,6 +109,21 @@ def save_material_image(material_id: int, material_name: str, original_filename:
     return relative_path.as_posix(), filename
 
 
+def save_platform_icon(platform: str, data: bytes, original_filename: str) -> str:
+    """Writes a platform connection's shop icon to disk as a fixed `icon.<ext>` filename
+    (one icon per platform, like save_material_image) — overwrites any previous icon on
+    reconnect. Returns the relative_path."""
+    folder = asset_root() / "platforms" / platform
+    folder.mkdir(parents=True, exist_ok=True)
+
+    suffix = Path(original_filename).suffix or ""
+    filename = f"icon{suffix}"
+    (folder / filename).write_bytes(data)
+
+    relative_path = Path("platforms") / platform / filename
+    return relative_path.as_posix()
+
+
 def resolve_asset_path(relative_path: str) -> Path:
     return asset_root() / relative_path
 
