@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:17.2
+    container_name: stocksmith-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: stocksmith
+      POSTGRES_PASSWORD: stocksmith
+      POSTGRES_DB: stocksmith
+    ports:
+      - "5432:5432"
+    volumes:
+      - stocksmith-postgres-data:/var/lib/postgresql/data
+
+volumes:
+  stocksmith-postgres-data:

@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "frontend",
+      "runtimeExecutable": "cmd.exe",
+      "runtimeArgs": ["/c", "set PATH=C:\\PROGRA~1\\nodejs;%PATH% && cd /d D:\\Projects\\StockSmith\\frontend && C:\\PROGRA~1\\nodejs\\npm.cmd run dev"],
+      "port": 1420
+    },
+    {
+      "name": "backend",
+      "runtimeExecutable": "cmd.exe",
+      "runtimeArgs": ["/c", "cd /d D:\\Projects\\StockSmith\\backend && C:\\Users\\Benja\\AppData\\Local\\Microsoft\\WinGet\\Packages\\astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe\\uv.exe run uvicorn app.main:app --host 127.0.0.1 --port 8000"],
+      "port": 8000
+    }
+  ]
+}
