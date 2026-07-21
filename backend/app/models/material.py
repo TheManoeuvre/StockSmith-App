@@ -14,6 +14,7 @@ class MaterialCategory(str, enum.Enum):
     pigment = "pigment"
     hardware = "hardware"
     packaging = "packaging"
+    blanks = "blanks"
     other = "other"
 
 

@@ -17,7 +17,7 @@ export const Route = createFileRoute("/materials/")({
   component: MaterialsList,
 });
 
-const CATEGORIES: MaterialCategory[] = ["filament", "resin", "pigment", "hardware", "packaging", "other"];
+const CATEGORIES: MaterialCategory[] = ["filament", "resin", "pigment", "hardware", "packaging", "blanks", "other"];
 const UNITS: MaterialUnit[] = ["g", "ml", "each"];
 
 type SortKey = "name" | "current_qty" | "on_order_qty" | "reorder_threshold" | "avg_unit_cost";

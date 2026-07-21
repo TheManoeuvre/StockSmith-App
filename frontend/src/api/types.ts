@@ -1,4 +1,4 @@
-export type MaterialCategory = "filament" | "resin" | "pigment" | "hardware" | "packaging" | "other";
+export type MaterialCategory = "filament" | "resin" | "pigment" | "hardware" | "packaging" | "blanks" | "other";
 export type MaterialUnit = "g" | "ml" | "each";
 export type AssetType = "main_image" | "listing_image" | "step" | "threemf" | "gcode";
 

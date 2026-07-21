@@ -6,6 +6,7 @@ const CATEGORY_LABELS: Record<MaterialCategory, string> = {
   pigment: "Pigment",
   hardware: "Hardware",
   packaging: "Packaging",
+  blanks: "Blanks",
   other: "Other",
 };
 
