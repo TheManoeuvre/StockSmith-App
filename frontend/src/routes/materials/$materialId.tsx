@@ -18,7 +18,7 @@ export const Route = createFileRoute("/materials/$materialId")({
   component: MaterialDetail,
 });
 
-const CATEGORIES: MaterialCategory[] = ["filament", "resin", "pigment", "hardware", "packaging", "other"];
+const CATEGORIES: MaterialCategory[] = ["filament", "resin", "pigment", "hardware", "packaging", "blanks", "other"];
 const UNITS: MaterialUnit[] = ["g", "ml", "each"];
 
 function MaterialDetail() {
@@ -507,7 +507,7 @@ function MaterialDetail() {
                           params={{ productId: String(h.product_id) }}
                           className="underline"
                         >
-                          {h.product_name ?? h.reason}
+                          {h.product_name ? `${h.reason} - ${h.product_name}` : h.reason}
                         </Link>
                       ) : (
                         h.reason
