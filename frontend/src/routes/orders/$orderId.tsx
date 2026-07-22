@@ -43,6 +43,7 @@ function OrderDetail() {
 
   const cancelMutation = useMutation({ mutationFn: () => ordersApi.cancel(id), onSuccess: invalidate });
   const shipMutation = useMutation({ mutationFn: () => ordersApi.ship(id), onSuccess: invalidate });
+  const allocateMutation = useMutation({ mutationFn: () => ordersApi.allocate(id), onSuccess: invalidate });
   const unassignMutation = useMutation({
     mutationFn: ({ lineId, qty }: { lineId: number; qty: number }) => ordersApi.unassignLine(lineId, qty),
     onSuccess: invalidate,
@@ -52,6 +53,7 @@ function OrderDetail() {
 
   const canCancel = order.status !== "cancelled" && order.status !== "shipped";
   const canShip = order.status === "pending" || order.status === "allocated";
+  const canAllocate = order.status === "pending" || order.status === "allocated";
   const anyAllocated = order.lines.some((l) => l.allocated_qty > l.shipped_qty);
 
   return (
@@ -120,6 +122,15 @@ function OrderDetail() {
       <OrderKittingSection orderId={id} />
 
       <div className="flex gap-2">
+        {canAllocate && (
+          <button
+            onClick={() => allocateMutation.mutate()}
+            disabled={allocateMutation.isPending}
+            className="rounded border border-slate-300 px-4 py-2 disabled:opacity-50"
+          >
+            Allocate stock
+          </button>
+        )}
         {canShip && (
           <button
             onClick={() => shipMutation.mutate()}
@@ -135,7 +146,7 @@ function OrderDetail() {
           </button>
         )}
       </div>
-      <ErrorBanner error={cancelMutation.error ?? shipMutation.error ?? unassignMutation.error} />
+      <ErrorBanner error={cancelMutation.error ?? shipMutation.error ?? allocateMutation.error ?? unassignMutation.error} />
     </div>
   );
 }

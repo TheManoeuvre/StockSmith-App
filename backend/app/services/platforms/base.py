@@ -28,6 +28,11 @@ class ExternalOrder:
     buyer_name: str | None
     buyer_note: str | None
     placed_at: datetime
+    # When the marketplace last touched this order (shipment, cancellation, etc.) — the
+    # value order_sync advances its sync watermark to, so a receipt that stops changing
+    # keeps satisfying future min_last_modified fetches instead of aging out of the query
+    # window forever.
+    last_modified: datetime
     is_cancelled: bool
     is_shipped: bool
     lines: list[ExternalOrderLine] = field(default_factory=list)

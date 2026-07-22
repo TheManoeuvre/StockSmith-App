@@ -210,6 +210,7 @@ class EbayAdapter:
         buyer_name = buyer.get("username")
         placed_at_raw = order.get("creationDate")
         placed_at = self._parse_timestamp(placed_at_raw) or datetime.now(timezone.utc)
+        last_modified = self._parse_timestamp(order.get("lastModifiedDate")) or placed_at
 
         status = str(order.get("orderPaymentStatus", "")).upper()
         is_cancelled = status == "FAILED" or str(order.get("cancelStatus", {}).get("cancelState", "")).upper() == "CANCELED"
@@ -231,6 +232,7 @@ class EbayAdapter:
             buyer_name=buyer_name,
             buyer_note=order.get("buyerCheckoutNotes"),
             placed_at=placed_at,
+            last_modified=last_modified,
             is_cancelled=is_cancelled,
             is_shipped=is_shipped,
             lines=lines,

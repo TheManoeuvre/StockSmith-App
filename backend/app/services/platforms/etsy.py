@@ -299,6 +299,11 @@ class EtsyAdapter:
         is_cancelled = status in ("canceled", "cancelled") or bool(receipt.get("is_canceled"))
         is_shipped = bool(receipt.get("is_shipped", False))
 
+        modified_ts = receipt.get("update_timestamp") or receipt.get("updated_timestamp")
+        last_modified = (
+            datetime.fromtimestamp(modified_ts, tz=timezone.utc) if modified_ts is not None else placed_at
+        )
+
         transactions = receipt.get("transactions")
         if transactions is None:
             # The `includes=Transactions` embed didn't come through — fall back to a
@@ -326,6 +331,7 @@ class EtsyAdapter:
             buyer_name=buyer_name,
             buyer_note=receipt.get("message_from_buyer"),
             placed_at=placed_at,
+            last_modified=last_modified,
             is_cancelled=is_cancelled,
             is_shipped=is_shipped,
             lines=lines,

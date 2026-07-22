@@ -280,6 +280,23 @@ async def ship_order_endpoint(order_id: int, session: AsyncSession = Depends(get
     return _serialize_order(await _get_order_with_lines(session, order_id))
 
 
+@router.post("/{order_id}/allocate", response_model=OrderRead)
+async def allocate_order_endpoint(order_id: int, session: AsyncSession = Depends(get_db)) -> OrderRead:
+    """Re-runs allocation against current free stock — the only way to grant newly
+    available stock to an order that's already past creation (a manual stock
+    adjustment, or a sync that flagged sync_issue for lack of allocation, don't
+    retrigger allocation on their own). Safe to call repeatedly: allocate_order only
+    ever tops lines up toward ordered_qty and is a no-op once nothing's left to grant."""
+    order = await _get_order_with_lines(session, order_id)
+    if order.status in (OrderStatus.shipped, OrderStatus.cancelled):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=f"Cannot allocate a {order.status.value} order"
+        )
+    await allocation.allocate_order(session, order, source="manual")
+    await session.commit()
+    return _serialize_order(await _get_order_with_lines(session, order_id))
+
+
 @router.patch("/lines/{line_id}", response_model=OrderRead)
 async def update_line_qty(
     line_id: int, payload: OrderLineQtyUpdate, session: AsyncSession = Depends(get_db)

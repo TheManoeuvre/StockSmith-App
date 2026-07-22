@@ -1,4 +1,4 @@
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 
 from fastapi import HTTPException, status
@@ -182,9 +182,9 @@ async def commit_sync(session: AsyncSession, platform: ListingPlatform) -> SyncC
     adapter = get_adapter(platform)
 
     try:
-        external_orders = await adapter.fetch_orders_since(session, connection, _effective_since(connection))
-        existing_ids = await _get_existing_external_ids(session, platform, external_orders)
-        external_orders = _drop_unknown_orders_predating_cutoff(connection, external_orders, existing_ids)
+        raw_external_orders = await adapter.fetch_orders_since(session, connection, _effective_since(connection))
+        existing_ids = await _get_existing_external_ids(session, platform, raw_external_orders)
+        external_orders = _drop_unknown_orders_predating_cutoff(connection, raw_external_orders, existing_ids)
 
         created_count = 0
         updated_count = 0
@@ -208,7 +208,19 @@ async def commit_sync(session: AsyncSession, platform: ListingPlatform) -> SyncC
                 shipped_count += 1
             order_ids.append(order.id)
 
-        connection.last_orders_synced_at = datetime.now(timezone.utc)
+        if raw_external_orders:
+            # Advance the watermark to the newest last_modified actually seen — across
+            # every order the platform returned, including ones _drop_unknown_orders_
+            # predating_cutoff just excluded from this batch, since those still need to
+            # age out of future fetches too. Stamping wall-clock "now" here instead (the
+            # previous behavior) would push the watermark past any receipt whose
+            # last_modified never changes again, permanently hiding it from every later
+            # fetch_orders_since(min_last_modified=...) call — exactly the state a
+            # not-yet-reconciled order (e.g. one that arrived already shipped, see
+            # _reconcile_status) needs a future sync to revisit. The +1s past the max
+            # keeps that same boundary receipt from being re-fetched every single sync.
+            newest_modified = max(o.last_modified for o in raw_external_orders)
+            connection.last_orders_synced_at = newest_modified + timedelta(seconds=1)
 
         run = PlatformSyncRun(
             platform=platform,
@@ -344,9 +356,15 @@ async def _reconcile_status(session: AsyncSession, order: Order, ext_order: Exte
         if order.status != OrderStatus.cancelled:
             await allocation.cancel_order(session, order)
         return False
+
     if is_new:
+        # A brand-new order can arrive already shipped on Etsy's side (seller fulfilled it
+        # before this sync ever ran) — allocate first so the is_shipped check right below
+        # has something to ship, instead of returning early and losing that signal forever
+        # (fetch_orders_since's min_last_modified watermark means a later sync may never
+        # see this receipt again if nothing about it changes further).
         await allocation.allocate_order(session, order, source="etsy-sync")
-        return False
+
     if ext_order.is_shipped and order.status not in (OrderStatus.shipped, OrderStatus.cancelled):
         lines = list((await session.execute(select(OrderLine).where(OrderLine.order_id == order.id))).scalars())
         has_allocated = any(line.allocated_qty > line.shipped_qty for line in lines)

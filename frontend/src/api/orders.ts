@@ -30,6 +30,7 @@ export const ordersApi = {
   remove: (id: number) => api.delete<void>(`/orders/${id}`),
   cancel: (id: number) => api.post<Order>(`/orders/${id}/cancel`),
   ship: (id: number) => api.post<Order>(`/orders/${id}/ship`),
+  allocate: (id: number) => api.post<Order>(`/orders/${id}/allocate`),
   updateLineQty: (lineId: number, orderedQty: number) =>
     api.patch<Order>(`/orders/lines/${lineId}`, { ordered_qty: orderedQty }),
   unassignLine: (lineId: number, qty: number) => api.post<Order>(`/orders/lines/${lineId}/unassign`, { qty }),
