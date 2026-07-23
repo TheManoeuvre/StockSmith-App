@@ -3,9 +3,10 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use tauri::{Manager, State};
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
+use tauri_plugin_updater::UpdaterExt;
 
 const BACKEND_HEALTH_URL: &str = "http://127.0.0.1:8000/healthz";
 const READY_TIMEOUT_SECS: u64 = 20;
@@ -100,7 +101,44 @@ async fn spawn_sidecar_if_needed(app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Checks GitHub Releases (via the endpoint configured in tauri.conf.json) for a newer
+/// signed release. Silently does nothing if the check fails (e.g. no release published
+/// yet, no network) or the user declines — either way, normal startup continues. Never
+/// returns if the user accepts and the install succeeds: `app.restart()` diverges.
+async fn check_for_update_and_maybe_install(app: &tauri::AppHandle) {
+    let updater = match app.updater() {
+        Ok(u) => u,
+        Err(_) => return,
+    };
+    let update = match updater.check().await {
+        Ok(Some(update)) => update,
+        _ => return,
+    };
+
+    let confirmed = app
+        .dialog()
+        .message(format!(
+            "A new version ({}) is available. Install it now? The app will restart.",
+            update.version
+        ))
+        .title("StockSmith Update Available")
+        .buttons(MessageDialogButtons::YesNo)
+        .blocking_show();
+
+    if !confirmed {
+        return;
+    }
+
+    if update.download_and_install(|_, _| {}, || {}).await.is_err() {
+        return;
+    }
+
+    app.restart();
+}
+
 async fn start_backend_and_show_window(app: tauri::AppHandle) {
+    check_for_update_and_maybe_install(&app).await;
+
     if let Err(message) = spawn_sidecar_if_needed(&app).await {
         show_startup_error(&app, &message);
         return;
@@ -128,6 +166,7 @@ pub fn run() {
         .plugin(tauri_plugin_upload::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(SidecarState(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![greet])
         .setup(|app| {

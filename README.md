@@ -17,6 +17,11 @@ launches its own bundled backend automatically and shows its window once it's re
 the installer isn't code-signed. Click "More info" → "Run anyway" — this is a one-time
 step, not a sign anything's wrong.
 
+The app checks for updates automatically on startup. If a newer published release exists,
+it'll ask before downloading/installing (installing always restarts the app). No update
+check happens if there's no internet connection or no release has been published yet —
+that's not an error, it just means you're already on the latest version.
+
 ### Where your data lives
 
 Everything the app stores lives under `%LOCALAPPDATA%\StockSmith\`:
@@ -71,9 +76,40 @@ Register-ScheduledTask -TaskName "StockSmith Backend" -Action $action -Trigger $
 
 To remove it later: `Unregister-ScheduledTask -TaskName "StockSmith Backend"`.
 
-## Building the installer
+## Building the installer locally
 
 ```bash
 powershell -File backend/build.ps1   # packages the backend into frontend/src-tauri/binaries/
 cd frontend && npm run tauri build   # produces the Windows installer
 ```
+
+## Releasing a new version
+
+Releases are built and signed by GitHub Actions (`.github/workflows/release.yml`) and
+published to [GitHub Releases](https://github.com/TheManoeuvre/StockSmith-App/releases) —
+that's also where the installed app's auto-updater looks for new versions.
+
+To ship a new version:
+
+1. Bump `version` in **both** `frontend/src-tauri/tauri.conf.json` and
+   `frontend/package.json` (keep them in sync) and commit.
+2. Tag and push:
+   ```bash
+   git tag vX.Y.Z
+   git push origin vX.Y.Z
+   ```
+3. Wait for the [Release workflow](https://github.com/TheManoeuvre/StockSmith-App/actions)
+   to finish — it builds the backend sidecar, builds and signs the Tauri app, and creates
+   a **draft** GitHub Release with the installer, `latest.json`, and signature attached.
+4. Review the draft release (edit the notes if you like), then click **Publish release**.
+5. Any already-installed copy of StockSmith will offer this update the next time it's
+   launched.
+
+### One-time setup (already done for this repo)
+
+The updater requires a signing keypair: the public key lives in `tauri.conf.json`
+(`plugins.updater.pubkey`), and the private key is stored as the `TAURI_SIGNING_PRIVATE_KEY`
+GitHub Actions secret (with `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` alongside it) — never
+committed to the repo. If this keypair is ever lost, existing installs can no longer
+receive signed updates and a new keypair (and a fresh non-updating release for users to
+manually reinstall) would be needed.

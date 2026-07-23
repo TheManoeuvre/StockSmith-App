@@ -1,0 +1,55 @@
+name: Release
+
+# Builds and publishes a signed StockSmith release whenever a version tag (v*) is pushed.
+# The resulting GitHub Release is a draft — review it and click Publish manually before
+# it becomes the "latest" release the installed app's auto-updater will pick up.
+#
+# Windows-only: this app only targets Windows (NSIS installer), so there's no
+# cross-platform build matrix here.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - uses: astral-sh/setup-uv@v3
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Install backend dependencies
+        run: uv sync --group build
+        working-directory: backend
+
+      - name: Build backend sidecar
+        run: powershell -File backend/build.ps1
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: frontend
+          tagName: ${{ github.ref_name }}
+          releaseName: "StockSmith v__VERSION__"
+          releaseDraft: true
+          prerelease: false

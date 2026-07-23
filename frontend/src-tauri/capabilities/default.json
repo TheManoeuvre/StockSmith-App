@@ -10,6 +10,7 @@
     "store:default",
     "upload:default",
     "shell:allow-execute",
+    "updater:default",
     {
       "identifier": "http:default",
       "allow": [
