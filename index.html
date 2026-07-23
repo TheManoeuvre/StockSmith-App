@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StockSmith</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    margin: 0;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem 1rem;
+  }
+  main {
+    max-width: 560px;
+    width: 100%;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: #94a3b8;
+    border: 1px solid #334155;
+    border-radius: 999px;
+    padding: 0.2rem 0.7rem;
+    margin-bottom: 1rem;
+  }
+  h1 {
+    font-size: 2.25rem;
+    margin: 0 0 0.5rem;
+  }
+  .tagline {
+    color: #94a3b8;
+    font-size: 1.05rem;
+    margin: 0 0 2rem;
+  }
+  ul {
+    list-style: none;
+    padding: 0;
+    margin: 0 0 2rem;
+    display: grid;
+    gap: 0.6rem;
+  }
+  li {
+    background: #1e293b;
+    border: 1px solid #334155;
+    border-radius: 0.5rem;
+    padding: 0.75rem 1rem;
+    font-size: 0.95rem;
+  }
+  li strong { color: #f1f5f9; }
+  footer {
+    color: #64748b;
+    font-size: 0.85rem;
+    border-top: 1px solid #1e293b;
+    padding-top: 1rem;
+  }
+</style>
+</head>
+<body>
+<main>
+  <span class="badge">Private tool</span>
+  <h1>StockSmith</h1>
+  <p class="tagline">Inventory, production, and order management for a small maker business.</p>
+  <ul>
+    <li><strong>Materials &amp; purchasing</strong> — raw material stock, purchase orders, weighted-average costing, low-stock alerts</li>
+    <li><strong>Products &amp; builds</strong> — bills of materials, variants, bundles, and tracking finished-goods stock as it's built</li>
+    <li><strong>Orders &amp; allocation</strong> — reserving on-hand or soon-to-be-built stock against incoming orders through to shipment</li>
+    <li><strong>Etsy sync</strong> — pulling shop orders and keeping listing quantities in sync with real inventory</li>
+  </ul>
+  <footer>
+    This is a private, single-store tool — not a public product or service. It's used exclusively by its owner to run their own Etsy shop.
+  </footer>
+</main>
+</body>
+</html>
