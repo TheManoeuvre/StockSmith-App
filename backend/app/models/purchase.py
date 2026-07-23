@@ -2,10 +2,9 @@ import enum
 from datetime import date, datetime
 
 from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Numeric, String, func
-from sqlalchemy.dialects.postgresql import ENUM as PgEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base
+from app.models.base import Base, portable_enum
 
 
 class PurchaseStatus(str, enum.Enum):
@@ -27,7 +26,7 @@ class Purchase(Base):
     supplier_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id", ondelete="SET NULL"), nullable=True)
     order_date: Mapped[date] = mapped_column(Date, server_default=func.current_date())
     status: Mapped[PurchaseStatus] = mapped_column(
-        PgEnum(PurchaseStatus, name="purchase_status", create_type=False),
+        portable_enum(PurchaseStatus, name="purchase_status"),
         nullable=False,
         default=PurchaseStatus.ordered,
     )

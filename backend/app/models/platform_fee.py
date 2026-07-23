@@ -2,10 +2,9 @@ import enum
 from datetime import datetime
 
 from sqlalchemy import Boolean, CheckConstraint, DateTime, Integer, Numeric, String, func
-from sqlalchemy.dialects.postgresql import ENUM as PgEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import Base, portable_enum
 from app.models.listing import ListingPlatform
 
 
@@ -38,10 +37,10 @@ class PlatformFeeComponent(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     platform: Mapped[ListingPlatform] = mapped_column(
-        PgEnum(ListingPlatform, name="listing_platform", create_type=False), nullable=False
+        portable_enum(ListingPlatform, name="listing_platform"), nullable=False
     )
     name: Mapped[str] = mapped_column(String, nullable=False)
-    basis: Mapped[FeeBasis] = mapped_column(PgEnum(FeeBasis, name="fee_basis", create_type=False), nullable=False)
+    basis: Mapped[FeeBasis] = mapped_column(portable_enum(FeeBasis, name="fee_basis"), nullable=False)
     rate_percent: Mapped[float | None] = mapped_column(Numeric(6, 3), nullable=True)
     fixed_amount: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     display_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -68,7 +67,7 @@ class MarginFeeConfig(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     fee_source: Mapped[MarginFeeSource] = mapped_column(
-        PgEnum(MarginFeeSource, name="margin_fee_source", create_type=False),
+        portable_enum(MarginFeeSource, name="margin_fee_source"),
         nullable=False,
         default=MarginFeeSource.manual,
     )

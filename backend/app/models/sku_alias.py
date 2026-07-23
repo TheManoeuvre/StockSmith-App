@@ -1,10 +1,9 @@
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, String, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import ENUM as PgEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import Base, portable_enum
 from app.models.listing import ListingPlatform
 
 
@@ -22,7 +21,7 @@ class SkuAlias(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     platform: Mapped[ListingPlatform] = mapped_column(
-        PgEnum(ListingPlatform, name="listing_platform", create_type=False), nullable=False
+        portable_enum(ListingPlatform, name="listing_platform"), nullable=False
     )
     external_sku: Mapped[str] = mapped_column(String, nullable=False)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id", ondelete="CASCADE"), nullable=False)

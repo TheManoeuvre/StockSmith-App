@@ -30,3 +30,12 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Local SQLite dev databases
+backend/*.db
+backend/*.dump
+
+# PyInstaller build output
+backend/build/
+backend/dist/
+frontend/src-tauri/binaries/

@@ -1,3 +1,6 @@
+# Optional — only needed if you want to develop against real Postgres instead of the
+# default SQLite dev path (see README.md's "Development against Postgres" section). The
+# packaged desktop app doesn't use this at all.
 services:
   postgres:
     image: postgres:17.2

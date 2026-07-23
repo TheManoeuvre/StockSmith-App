@@ -2,10 +2,9 @@ import enum
 from datetime import datetime
 
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import ENUM as PgEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base
+from app.models.base import Base, portable_enum
 from app.models.listing import ListingPlatform
 
 
@@ -30,11 +29,11 @@ class Order(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     platform: Mapped[ListingPlatform | None] = mapped_column(
-        PgEnum(ListingPlatform, name="listing_platform", create_type=False), nullable=True
+        portable_enum(ListingPlatform, name="listing_platform"), nullable=True
     )
     external_order_id: Mapped[str | None] = mapped_column(String, nullable=True)
     status: Mapped[OrderStatus] = mapped_column(
-        PgEnum(OrderStatus, name="order_status", create_type=False), nullable=False, default=OrderStatus.pending
+        portable_enum(OrderStatus, name="order_status"), nullable=False, default=OrderStatus.pending
     )
     buyer_name: Mapped[str | None] = mapped_column(String, nullable=True)
     buyer_note: Mapped[str | None] = mapped_column(String, nullable=True)

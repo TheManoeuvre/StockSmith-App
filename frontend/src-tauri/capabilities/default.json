@@ -9,6 +9,7 @@
     "dialog:default",
     "store:default",
     "upload:default",
+    "shell:allow-execute",
     {
       "identifier": "http:default",
       "allow": [

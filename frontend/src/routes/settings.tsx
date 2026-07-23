@@ -39,6 +39,7 @@ function Settings() {
   const [showPassword, setShowPassword] = useState(false);
   const [testResult, setTestResult] = useState<"idle" | "ok" | "fail" | "testing">("idle");
   const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [showConnectionFields, setShowConnectionFields] = useState(false);
 
   useEffect(() => {
     getSettings().then((s) => {
@@ -47,6 +48,10 @@ function Settings() {
       setSavedBackendUrl(s.backendUrl ?? "");
       setSavedSharedPassword(s.sharedPassword ?? "");
       setSettingsLoaded(true);
+      // Auto-provisioned connections (the common case for the packaged app) start
+      // collapsed — nothing for the user to do here. Show the fields up front only when
+      // there's actually something missing to fill in.
+      setShowConnectionFields(!s.backendUrl || !s.sharedPassword);
     });
   }, []);
 
@@ -72,53 +77,71 @@ function Settings() {
 
       {activeTab === "connection" && (
         <div className="max-w-md flex flex-col gap-4">
-          <label className="flex flex-col gap-1">
-            <span className="text-sm font-medium">Backend URL</span>
-            <input
-              className="rounded border border-slate-300 px-3 py-2 disabled:bg-slate-50 disabled:text-slate-400"
-              placeholder="http://homebase.tailnet-name.ts.net:8000"
-              value={backendUrl}
-              disabled={!settingsLoaded}
-              onChange={(e) => setBackendUrl(e.target.value)}
-            />
-          </label>
+          {settingsLoaded && backendUrl && sharedPassword && (
+            <p className="text-sm text-slate-500">
+              Connected to <span className="font-medium text-slate-700">{backendUrl}</span>.
+            </p>
+          )}
 
-          <label className="flex flex-col gap-1">
-            <span className="text-sm font-medium">Shared password</span>
-            <div className="flex gap-2">
-              <input
-                type={showPassword ? "text" : "password"}
-                className="flex-1 rounded border border-slate-300 px-3 py-2 disabled:bg-slate-50 disabled:text-slate-400"
-                value={sharedPassword}
-                disabled={!settingsLoaded}
-                onChange={(e) => setSharedPassword(e.target.value)}
-              />
-              <button
-                type="button"
-                onClick={() => setShowPassword((v) => !v)}
-                className="rounded border border-slate-300 px-3 py-1.5 text-sm"
-              >
-                {showPassword ? "Hide" : "Show"}
-              </button>
-            </div>
-          </label>
+          <button
+            type="button"
+            onClick={() => setShowConnectionFields((v) => !v)}
+            className="self-start text-sm text-slate-600 underline"
+          >
+            {showConnectionFields ? "Hide" : "Show"} advanced connection settings
+          </button>
 
-          <div className="flex gap-2">
-            <button
-              onClick={handleSave}
-              disabled={!isDirty}
-              className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Save
-            </button>
-            <button onClick={handleTest} className="rounded border border-slate-300 px-4 py-2">
-              Test connection
-            </button>
-          </div>
+          {showConnectionFields && (
+            <>
+              <label className="flex flex-col gap-1">
+                <span className="text-sm font-medium">Backend URL</span>
+                <input
+                  className="rounded border border-slate-300 px-3 py-2 disabled:bg-slate-50 disabled:text-slate-400"
+                  placeholder="http://homebase.tailnet-name.ts.net:8000"
+                  value={backendUrl}
+                  disabled={!settingsLoaded}
+                  onChange={(e) => setBackendUrl(e.target.value)}
+                />
+              </label>
 
-          {testResult === "testing" && <p className="text-slate-500">Testing…</p>}
-          {testResult === "ok" && <p className="text-green-600">Connected successfully.</p>}
-          {testResult === "fail" && <p className="text-red-600">Could not reach the backend.</p>}
+              <label className="flex flex-col gap-1">
+                <span className="text-sm font-medium">Shared password</span>
+                <div className="flex gap-2">
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    className="flex-1 rounded border border-slate-300 px-3 py-2 disabled:bg-slate-50 disabled:text-slate-400"
+                    value={sharedPassword}
+                    disabled={!settingsLoaded}
+                    onChange={(e) => setSharedPassword(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="rounded border border-slate-300 px-3 py-1.5 text-sm"
+                  >
+                    {showPassword ? "Hide" : "Show"}
+                  </button>
+                </div>
+              </label>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={handleSave}
+                  disabled={!isDirty}
+                  className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Save
+                </button>
+                <button onClick={handleTest} className="rounded border border-slate-300 px-4 py-2">
+                  Test connection
+                </button>
+              </div>
+
+              {testResult === "testing" && <p className="text-slate-500">Testing…</p>}
+              {testResult === "ok" && <p className="text-green-600">Connected successfully.</p>}
+              {testResult === "fail" && <p className="text-red-600">Could not reach the backend.</p>}
+            </>
+          )}
         </div>
       )}
 

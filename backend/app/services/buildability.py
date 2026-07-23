@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.dashboard import BuildableProduct, DashboardSummary, LowStockMaterial, MarginAlert, OrderAwaitingInventory
@@ -75,7 +75,7 @@ _ACTIVE_VARIANT_STOCK_TOTALS_BY_PRODUCT_SQL = text(
 _RESOLVED_VARIANT_BOM_SQL = text(
     """
     SELECT pm.material_id, COALESCE(pvm.qty_required, pm.qty_required) AS effective_qty_required,
-           NULL::int AS replaces_material_id
+           CAST(NULL AS INTEGER) AS replaces_material_id
     FROM product_materials pm
     LEFT JOIN product_variant_materials pvm
         ON pvm.variant_id = :variant_id AND pvm.material_id = pm.material_id AND pvm.replaces_material_id IS NULL
@@ -101,7 +101,7 @@ _RESOLVED_PRODUCT_VARIANTS_BOM_SQL = text(
     """
     SELECT v.id AS variant_id, pm.material_id,
            COALESCE(qo.qty_required, pm.qty_required) AS effective_qty_required,
-           NULL::int AS replaces_material_id
+           CAST(NULL AS INTEGER) AS replaces_material_id
     FROM product_variants v
     CROSS JOIN product_materials pm
     LEFT JOIN product_variant_materials qo
@@ -217,9 +217,9 @@ async def compute_variant_buildability(
             SELECT m.id, m.current_qty, m.avg_unit_cost, COALESCE(oo.on_order_qty, 0) AS on_order_qty
             FROM materials m
             LEFT JOIN ({_ON_ORDER_BY_MATERIAL_SUBQUERY}) oo ON oo.material_id = m.id
-            WHERE m.id = ANY(:ids)
+            WHERE m.id IN :ids
             """
-        ),
+        ).bindparams(bindparam("ids", expanding=True)),
         {"ids": material_ids},
     )
     materials = {row.id: row for row in rows}
@@ -282,9 +282,9 @@ async def compute_variants_buildability_bulk(
                 SELECT m.id, m.current_qty, m.avg_unit_cost, COALESCE(oo.on_order_qty, 0) AS on_order_qty
                 FROM materials m
                 LEFT JOIN ({_ON_ORDER_BY_MATERIAL_SUBQUERY}) oo ON oo.material_id = m.id
-                WHERE m.id = ANY(:ids)
+                WHERE m.id IN :ids
                 """
-            ),
+            ).bindparams(bindparam("ids", expanding=True)),
             {"ids": list(all_material_ids)},
         )
         materials = {row.id: row for row in rows}

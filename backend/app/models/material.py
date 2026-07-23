@@ -2,10 +2,9 @@ import enum
 from datetime import datetime
 
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Numeric, String, func
-from sqlalchemy.dialects.postgresql import ENUM as PgEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base
+from app.models.base import Base, portable_enum
 
 
 class MaterialCategory(str, enum.Enum):
@@ -43,10 +42,10 @@ class Material(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     category: Mapped[MaterialCategory] = mapped_column(
-        PgEnum(MaterialCategory, name="material_category", create_type=False), nullable=False
+        portable_enum(MaterialCategory, name="material_category"), nullable=False
     )
     unit: Mapped[MaterialUnit] = mapped_column(
-        PgEnum(MaterialUnit, name="material_unit", create_type=False), nullable=False
+        portable_enum(MaterialUnit, name="material_unit"), nullable=False
     )
     current_qty: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False, default=0)
     # Soft-reserved by kitting-BOM allocation (services/kitting.py) — mirrors
@@ -122,7 +121,7 @@ class MaterialAdjustment(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     material_id: Mapped[int] = mapped_column(ForeignKey("materials.id", ondelete="CASCADE"), nullable=False)
     mode: Mapped[MaterialAdjustmentMode] = mapped_column(
-        PgEnum(MaterialAdjustmentMode, name="material_adjustment_mode", create_type=False),
+        portable_enum(MaterialAdjustmentMode, name="material_adjustment_mode"),
         nullable=False,
         default=MaterialAdjustmentMode.adjust,
     )

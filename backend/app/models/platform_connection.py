@@ -1,10 +1,9 @@
 from datetime import date, datetime, timedelta
 
 from sqlalchemy import Date, DateTime, String, func
-from sqlalchemy.dialects.postgresql import ENUM as PgEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import Base, portable_enum
 from app.models.listing import ListingPlatform
 from app.services.crypto import EncryptedString
 
@@ -30,7 +29,7 @@ class PlatformConnection(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     platform: Mapped[ListingPlatform] = mapped_column(
-        PgEnum(ListingPlatform, name="listing_platform", create_type=False), nullable=False, unique=True
+        portable_enum(ListingPlatform, name="listing_platform"), nullable=False, unique=True
     )
     access_token: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
     refresh_token: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)

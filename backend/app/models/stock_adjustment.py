@@ -2,10 +2,9 @@ import enum
 from datetime import datetime
 
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String, func
-from sqlalchemy.dialects.postgresql import ENUM as PgEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import Base, portable_enum
 
 
 class StockAdjustmentMode(str, enum.Enum):
@@ -40,7 +39,7 @@ class StockAdjustment(Base):
         ForeignKey("product_variants.id", ondelete="CASCADE"), nullable=True
     )
     mode: Mapped[StockAdjustmentMode] = mapped_column(
-        PgEnum(StockAdjustmentMode, name="stock_adjustment_mode", create_type=False),
+        portable_enum(StockAdjustmentMode, name="stock_adjustment_mode"),
         nullable=False,
         default=StockAdjustmentMode.adjust,
     )

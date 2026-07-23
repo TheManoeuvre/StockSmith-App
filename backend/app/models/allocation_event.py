@@ -2,10 +2,9 @@ import enum
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Integer, String, func
-from sqlalchemy.dialects.postgresql import ENUM as PgEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import Base, portable_enum
 
 
 class AllocationEventType(str, enum.Enum):
@@ -29,7 +28,7 @@ class AllocationEvent(Base):
         ForeignKey("product_variants.id", ondelete="SET NULL"), nullable=True
     )
     event_type: Mapped[AllocationEventType] = mapped_column(
-        PgEnum(AllocationEventType, name="allocation_event_type", create_type=False), nullable=False
+        portable_enum(AllocationEventType, name="allocation_event_type"), nullable=False
     )
     qty: Mapped[int] = mapped_column(Integer, nullable=False)
     source: Mapped[str | None] = mapped_column(String, nullable=True)

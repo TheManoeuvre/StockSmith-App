@@ -2,10 +2,9 @@ import enum
 from datetime import datetime
 
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import ENUM as PgEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from app.models.base import Base
+from app.models.base import Base, portable_enum
 
 
 class PricingMode(str, enum.Enum):
@@ -67,7 +66,7 @@ class Product(Base):
     )
     platform_fee_percent: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     pricing_mode: Mapped[PricingMode] = mapped_column(
-        PgEnum(PricingMode, name="pricing_mode", create_type=False), nullable=False, default=PricingMode.product
+        portable_enum(PricingMode, name="pricing_mode"), nullable=False, default=PricingMode.product
     )
     pricing_variable_attribute: Mapped[int | None] = mapped_column(nullable=True)
     # Manual cap on what quantity to advertise on a marketplace, applied uniformly to
