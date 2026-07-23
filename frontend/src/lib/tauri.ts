@@ -44,12 +44,13 @@ export async function saveSettings(settings: AppSettings): Promise<void> {
 // endpoint has already been consumed (every later launch, or a dev backend that never
 // had bootstrap.py run at all).
 //
-// Retries rather than trying once: the window stays hidden (see tauri.conf.json) while
-// Rust's own setup() hook waits for the backend to become healthy, but the webview's JS
-// starts running immediately regardless of window visibility — so on a cold first
-// launch, this typically runs several seconds before the backend is actually up. Polls
-// on the same cadence/timeout as Rust's own wait_for_backend_ready (lib.rs) so both give
-// up around the same time rather than this failing silently well before Rust would.
+// Retries rather than trying once: on a cold first launch this typically runs several
+// seconds before the backend is actually up. Any response at all — including the 404 an
+// already-consumed endpoint returns — still proves the backend is live and answering, so
+// main.tsx uses this same call to gate rendering the router behind backend readiness
+// (showing a splash screen for the gap). Polls on the same cadence/timeout as Rust's own
+// wait_for_backend_ready (lib.rs) so both give up around the same time rather than this
+// failing silently well before Rust would.
 const AUTO_PROVISION_TIMEOUT_MS = 20_000;
 const AUTO_PROVISION_POLL_INTERVAL_MS = 500;
 

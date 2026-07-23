@@ -65,9 +65,6 @@ fn show_startup_error(app: &tauri::AppHandle, message: &str) {
         .title("StockSmith — Backend Error")
         .kind(tauri_plugin_dialog::MessageDialogKind::Error)
         .blocking_show();
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.show();
-    }
 }
 
 async fn spawn_sidecar_if_needed(app: &tauri::AppHandle) -> Result<(), String> {
@@ -136,7 +133,11 @@ async fn check_for_update_and_maybe_install(app: &tauri::AppHandle) {
     app.restart();
 }
 
-async fn start_backend_and_show_window(app: tauri::AppHandle) {
+/// The window itself is visible from the moment the app launches — the webview renders its
+/// own splash screen (see frontend `SplashScreen.tsx`) while it waits for the backend to
+/// answer. This just spawns the backend and, if it never comes up, surfaces an error dialog;
+/// it no longer needs to toggle window visibility.
+async fn start_backend(app: tauri::AppHandle) {
     check_for_update_and_maybe_install(&app).await;
 
     if let Err(message) = spawn_sidecar_if_needed(&app).await {
@@ -144,11 +145,7 @@ async fn start_backend_and_show_window(app: tauri::AppHandle) {
         return;
     }
 
-    if wait_for_backend_ready(READY_TIMEOUT_SECS).await {
-        if let Some(window) = app.get_webview_window("main") {
-            let _ = window.show();
-        }
-    } else {
+    if !wait_for_backend_ready(READY_TIMEOUT_SECS).await {
         show_startup_error(
             &app,
             "The backend did not become ready in time. Check backend.log under %LOCALAPPDATA%\\StockSmith\\.",
@@ -172,7 +169,7 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
-                start_backend_and_show_window(handle).await;
+                start_backend(handle).await;
             });
             Ok(())
         })
