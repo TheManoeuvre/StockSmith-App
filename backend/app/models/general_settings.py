@@ -2,10 +2,9 @@ import enum
 from datetime import datetime
 
 from sqlalchemy import DateTime, func
-from sqlalchemy.dialects.postgresql import ENUM as PgEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import Base, portable_enum
 
 
 class CurrencyCode(str, enum.Enum):
@@ -23,7 +22,7 @@ class GeneralSettings(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     default_currency: Mapped[CurrencyCode] = mapped_column(
-        PgEnum(CurrencyCode, name="currency_code", create_type=False),
+        portable_enum(CurrencyCode, name="currency_code"),
         nullable=False,
         default=CurrencyCode.GBP,
     )

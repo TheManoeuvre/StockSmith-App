@@ -1,6 +1,8 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
+  Only needed for the optional "develop against real Postgres" path — the packaged
+  desktop app is fully self-contained (SQLite, no Docker) and doesn't use this at all.
   Brings up StockSmith's backend from a cold start: Docker Desktop, then Postgres container, then API server.
   Run this by double-clicking start-backend.bat, or directly with powershell -File start-backend.ps1
 #>
@@ -8,7 +10,7 @@
 $ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectRoot = Split-Path -Parent $ScriptDir
+$ProjectRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)
 $BackendDir = Join-Path $ProjectRoot "backend"
 
 function Test-DockerRunning {

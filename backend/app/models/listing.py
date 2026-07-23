@@ -2,10 +2,9 @@ import enum
 from datetime import datetime
 
 from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, column, func
-from sqlalchemy.dialects.postgresql import ENUM as PgEnum
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import Base, portable_enum
 
 
 class ListingPlatform(str, enum.Enum):
@@ -43,7 +42,7 @@ class Listing(Base):
         ForeignKey("product_variants.id", ondelete="CASCADE"), nullable=True
     )
     platform: Mapped[ListingPlatform] = mapped_column(
-        PgEnum(ListingPlatform, name="listing_platform", create_type=False), nullable=False
+        portable_enum(ListingPlatform, name="listing_platform"), nullable=False
     )
     external_listing_id: Mapped[str | None] = mapped_column(String, nullable=True)
     ceiling_qty: Mapped[int | None] = mapped_column(Integer, nullable=True)

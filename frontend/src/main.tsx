@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { routeTree } from "./routeTree.gen";
+import { tryAutoProvisionSettings } from "./lib/tauri";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -32,10 +33,19 @@ declare module "@tanstack/react-router" {
   }
 }
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <React.StrictMode>
-    <QueryClientProvider client={queryClient}>
-      <RouterProvider router={router} />
-    </QueryClientProvider>
-  </React.StrictMode>
-);
+function renderApp() {
+  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+    <React.StrictMode>
+      <QueryClientProvider client={queryClient}>
+        <RouterProvider router={router} />
+      </QueryClientProvider>
+    </React.StrictMode>
+  );
+}
+
+// Populates backendUrl/sharedPassword from the bundled backend's one-time bootstrap-info
+// endpoint before any route (or its data-fetching) ever mounts — otherwise the first
+// render could fire off requests with no backendUrl configured yet. Falls through to
+// renderApp on rejection too — an unexpected failure here should never be the reason the
+// whole app fails to render; Settings' manual-entry fields are still the fallback.
+tryAutoProvisionSettings().then(renderApp, renderApp);

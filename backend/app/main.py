@@ -1,6 +1,7 @@
+import json
 import logging
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -83,3 +84,31 @@ app.include_router(stock_adjustments.router, prefix="/api/v1")
 @app.get("/healthz")
 async def healthz() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/bootstrap-info")
+async def bootstrap_info() -> dict[str, str]:
+    """One-time, unauthenticated handoff of the auto-generated connection details to the
+    Tauri app's first-run flow — deliberately not behind require_auth, since the whole
+    point is handing over the password before the frontend has one to authenticate with.
+
+    Only reachable in the packaged desktop app (app/bootstrap.py writes config.json under
+    %LOCALAPPDATA%\\StockSmith\\ before this process starts serving) — plain `uv run
+    uvicorn` dev instances have no such file and always 404 here. Consumed exactly once:
+    after the first successful read, the config is flagged so this permanently 404s,
+    rather than leaving a standing unauthenticated credential-read endpoint live.
+    """
+    from app.bootstrap import config_path
+
+    path = config_path()
+    if not path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    config = json.loads(path.read_text(encoding="utf-8"))
+    if config.get("bootstrap_info_consumed"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+
+    config["bootstrap_info_consumed"] = True
+    path.write_text(json.dumps(config, indent=2), encoding="utf-8")
+
+    return {"backendUrl": "http://127.0.0.1:8000", "sharedPassword": config["shared_password"]}

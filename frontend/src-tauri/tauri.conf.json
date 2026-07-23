@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "frontend",
+  "productName": "StockSmith",
   "version": "0.1.0",
   "identifier": "com.stocksmith.app",
   "build": {
@@ -12,9 +12,10 @@
   "app": {
     "windows": [
       {
-        "title": "frontend",
+        "title": "StockSmith",
         "width": 800,
-        "height": 600
+        "height": 600,
+        "visible": false
       }
     ],
     "security": {
@@ -23,13 +24,24 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "externalBin": ["binaries/stocksmith-backend"],
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDk4QTUwODMyNkQ1NDM5RkQKUldUOU9WUnRNZ2lsbUpOTGN0Smh2YXJDN0ZlOEdud1Z6djFNazZBUitINEFJemFsbUJGOCtiOTAK",
+      "endpoints": ["https://github.com/TheManoeuvre/StockSmith-App/releases/latest/download/latest.json"],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

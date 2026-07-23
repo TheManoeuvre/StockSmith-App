@@ -60,10 +60,13 @@ router = APIRouter(prefix="/products", tags=["products"], dependencies=[Depends(
 
 _MAIN_IMAGE_ASSET_ID_BY_PRODUCT_SQL = text(
     """
-    SELECT DISTINCT ON (product_id) id, product_id
-    FROM product_assets
-    WHERE asset_type = 'main_image'
-    ORDER BY product_id, display_order
+    SELECT id, product_id FROM (
+        SELECT id, product_id,
+               ROW_NUMBER() OVER (PARTITION BY product_id ORDER BY display_order) AS rn
+        FROM product_assets
+        WHERE asset_type = 'main_image'
+    ) ranked
+    WHERE rn = 1
     """
 )
 

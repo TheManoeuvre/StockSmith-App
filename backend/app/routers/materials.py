@@ -26,10 +26,10 @@ router = APIRouter(prefix="/materials", tags=["materials"], dependencies=[Depend
 
 _STOCK_HISTORY_SQL = text(
     """
-    SELECT 'purchase' AS kind, mp.id, p.order_date::timestamptz AS at, mp.qty AS qty,
+    SELECT 'purchase' AS kind, mp.id AS id, CAST(p.order_date AS TIMESTAMP) AS at, mp.qty AS qty,
            mp.total_cost AS total_cost, p.status AS status, s.name AS supplier_name, NULL AS reason,
-           NULL AS mode, NULL AS target_qty, NULL::int AS product_id, NULL::text AS product_name,
-           NULL::int AS variant_id, NULL::int AS order_id
+           NULL AS mode, NULL AS target_qty, CAST(NULL AS INTEGER) AS product_id, CAST(NULL AS TEXT) AS product_name,
+           CAST(NULL AS INTEGER) AS variant_id, CAST(NULL AS INTEGER) AS order_id
     FROM material_purchases mp
     JOIN purchases p ON p.id = mp.purchase_id
     LEFT JOIN suppliers s ON s.id = p.supplier_id
@@ -37,7 +37,7 @@ _STOCK_HISTORY_SQL = text(
 
     UNION ALL
 
-    SELECT 'adjustment' AS kind, ma.id, ma.created_at AS at, ma.qty_delta AS qty,
+    SELECT 'adjustment' AS kind, ma.id AS id, ma.created_at AS at, ma.qty_delta AS qty,
            NULL AS total_cost, NULL AS status, NULL AS supplier_name, ma.reason AS reason,
            ma.mode AS mode, ma.target_qty AS target_qty, ma.product_id AS product_id, pr.name AS product_name,
            ma.variant_id AS variant_id, ma.order_id AS order_id

@@ -1,6 +1,8 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
+  Only needed for the optional "develop against real Postgres" path — the packaged
+  desktop app is fully self-contained (SQLite, no Docker) and doesn't use this at all.
   One-click launcher for StockSmith: brings up Docker/Postgres, the API server, and the
   Tauri desktop app window, verifying each layer is actually working before moving to the
   next. Run this by double-clicking start-stocksmith.bat, or directly with
@@ -10,7 +12,7 @@
 $ErrorActionPreference = "Stop"
 
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$ProjectRoot = Split-Path -Parent $ScriptDir
+$ProjectRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)
 $BackendDir = Join-Path $ProjectRoot "backend"
 $FrontendDir = Join-Path $ProjectRoot "frontend"
 $BackendLog = Join-Path $ProjectRoot "backend.log"
@@ -155,8 +157,8 @@ try {
 # 6. The app window closed (or crashed) — the API server is deliberately left running in
 # the background. It's stateless/cheap to leave up, it serves Etsy/eBay OAuth callbacks
 # and sync independent of whether the desktop app is open, and a future launch will just
-# reuse it (see step 3) rather than fighting over port 8000. Run stop-backend-service.ps1
-# if you actually want to stop it (e.g. before a reboot).
+# reuse it (see step 3) rather than fighting over port 8000. Run
+# scripts\dev\stop-backend-service.ps1 if you actually want to stop it (e.g. before a reboot).
 Write-Host "StockSmith window closed. The API server is still running in the background at http://127.0.0.1:8000." -ForegroundColor Cyan
-Write-Host "To stop it, run scripts\stop-backend-service.ps1 (or stop-backend-service.bat)." -ForegroundColor Cyan
+Write-Host "To stop it, run scripts\dev\stop-backend-service.ps1 (or stop-backend-service.bat)." -ForegroundColor Cyan
 Write-Host "Done." -ForegroundColor Green

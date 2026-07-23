@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from fastapi import HTTPException, status
-from sqlalchemy import select, text
+from sqlalchemy import bindparam, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.kitting import OrderKittingAllocation, OrderKittingOverride, ProductKittingMaterial
@@ -50,7 +50,7 @@ _EXPECTED_KITTING_CAPACITY_BY_PRODUCT_SQL = text(
 _RESOLVED_VARIANT_KITTING_BOM_SQL = text(
     """
     SELECT pkm.material_id, COALESCE(pvkm.qty_required, pkm.qty_required) AS effective_qty_required,
-           NULL::int AS replaces_material_id
+           CAST(NULL AS INTEGER) AS replaces_material_id
     FROM product_kitting_materials pkm
     LEFT JOIN product_variant_kitting_materials pvkm
         ON pvkm.variant_id = :variant_id AND pvkm.material_id = pkm.material_id AND pvkm.replaces_material_id IS NULL
@@ -77,7 +77,7 @@ _RESOLVED_PRODUCT_VARIANTS_KITTING_BOM_SQL = text(
     """
     SELECT v.id AS variant_id, pkm.material_id,
            COALESCE(qo.qty_required, pkm.qty_required) AS effective_qty_required,
-           NULL::int AS replaces_material_id
+           CAST(NULL AS INTEGER) AS replaces_material_id
     FROM product_variants v
     CROSS JOIN product_kitting_materials pkm
     LEFT JOIN product_variant_kitting_materials qo
@@ -199,9 +199,9 @@ async def compute_variant_kitting_capacity(
             SELECT m.id, m.current_qty, m.allocated_qty, COALESCE(oo.on_order_qty, 0) AS on_order_qty
             FROM materials m
             LEFT JOIN ({_ON_ORDER_BY_MATERIAL_SUBQUERY}) oo ON oo.material_id = m.id
-            WHERE m.id = ANY(:ids)
+            WHERE m.id IN :ids
             """
-        ),
+        ).bindparams(bindparam("ids", expanding=True)),
         {"ids": material_ids},
     )
     materials = {row.id: row for row in rows}
@@ -232,7 +232,10 @@ async def compute_variant_kitting_cost_per_unit(
 
     material_ids = [line.material_id for line in bom]
     rows = await session.execute(
-        text("SELECT id, avg_unit_cost FROM materials WHERE id = ANY(:ids)"), {"ids": material_ids}
+        text("SELECT id, avg_unit_cost FROM materials WHERE id IN :ids").bindparams(
+            bindparam("ids", expanding=True)
+        ),
+        {"ids": material_ids},
     )
     cost_by_id = {row.id: Decimal(row.avg_unit_cost) for row in rows}
     return sum((cost_by_id[line.material_id] * line.qty_required for line in bom), start=Decimal(0))
@@ -326,9 +329,9 @@ async def compute_variants_kitting_capacity_bulk(
                 SELECT m.id, m.current_qty, m.allocated_qty, COALESCE(oo.on_order_qty, 0) AS on_order_qty
                 FROM materials m
                 LEFT JOIN ({_ON_ORDER_BY_MATERIAL_SUBQUERY}) oo ON oo.material_id = m.id
-                WHERE m.id = ANY(:ids)
+                WHERE m.id IN :ids
                 """
-            ),
+            ).bindparams(bindparam("ids", expanding=True)),
             {"ids": list(all_material_ids)},
         )
         materials = {row.id: row for row in rows}
