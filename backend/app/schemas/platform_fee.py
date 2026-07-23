@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict
 
+from app.models.general_settings import CurrencyCode
 from app.models.platform_fee import FeeBasis, MarginFeeSource
 
 
@@ -45,3 +46,11 @@ class MarginFeeConfigRead(BaseModel):
 
 class MarginFeeConfigUpdate(BaseModel):
     fee_source: MarginFeeSource
+
+
+class DefaultCurrencyRead(BaseModel):
+    default_currency: CurrencyCode
+
+
+class DefaultCurrencyUpdate(BaseModel):
+    default_currency: CurrencyCode

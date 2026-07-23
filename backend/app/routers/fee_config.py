@@ -5,15 +5,31 @@ from app.deps import get_db, require_auth
 from app.models.listing import ListingPlatform
 from app.models.platform_fee import PlatformFeeComponent
 from app.schemas.platform_fee import (
+    DefaultCurrencyRead,
+    DefaultCurrencyUpdate,
     MarginFeeConfigRead,
     MarginFeeConfigUpdate,
     PlatformFeeComponentCreate,
     PlatformFeeComponentRead,
     PlatformFeeComponentUpdate,
 )
-from app.services import platform_fees
+from app.services import general_settings, platform_fees
 
 router = APIRouter(prefix="/settings", tags=["settings"], dependencies=[Depends(require_auth)])
+
+
+@router.get("/default-currency", response_model=DefaultCurrencyRead)
+async def get_default_currency(session: AsyncSession = Depends(get_db)) -> DefaultCurrencyRead:
+    settings = await general_settings.get_general_settings(session)
+    return DefaultCurrencyRead(default_currency=settings.default_currency)
+
+
+@router.put("/default-currency", response_model=DefaultCurrencyRead)
+async def update_default_currency(
+    payload: DefaultCurrencyUpdate, session: AsyncSession = Depends(get_db)
+) -> DefaultCurrencyRead:
+    settings = await general_settings.set_default_currency(session, payload.default_currency)
+    return DefaultCurrencyRead(default_currency=settings.default_currency)
 
 
 @router.get("/margin-fee-config", response_model=MarginFeeConfigRead)

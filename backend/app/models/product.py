@@ -17,7 +17,7 @@ class PricingMode(str, enum.Enum):
     - line: every variant is priced independently.
 
     Both variable and line modes are backed by the same per-variant sale_price/
-    shipping_cost/platform_fee_percent columns on ProductVariant — "variable" is just a
+    shipping_profile_id/platform_fee_percent columns on ProductVariant — "variable" is just a
     UI convenience that writes the same value to every variant sharing an attribute
     value. This is why switching from variable to line retains the per-variant values
     already set: nothing is migrated, only how they're grouped for editing changes.
@@ -36,7 +36,6 @@ class Product(Base):
             "allocated_qty >= 0 AND allocated_qty <= current_stock", name="ck_products_allocated_qty_range"
         ),
         CheckConstraint("sale_price >= 0", name="ck_products_sale_price_nonneg"),
-        CheckConstraint("shipping_cost >= 0", name="ck_products_shipping_cost_nonneg"),
         CheckConstraint(
             "platform_fee_percent >= 0 AND platform_fee_percent <= 100", name="ck_products_platform_fee_percent_range"
         ),
@@ -63,7 +62,9 @@ class Product(Base):
     variant_attribute2_name: Mapped[str | None] = mapped_column(String, nullable=True)
     variant_attribute3_name: Mapped[str | None] = mapped_column(String, nullable=True)
     sale_price: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
-    shipping_cost: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    shipping_profile_id: Mapped[int | None] = mapped_column(
+        ForeignKey("shipping_profiles.id", ondelete="SET NULL"), nullable=True
+    )
     platform_fee_percent: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     pricing_mode: Mapped[PricingMode] = mapped_column(
         PgEnum(PricingMode, name="pricing_mode", create_type=False), nullable=False, default=PricingMode.product

@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { feeConfigApi } from "../../api/feeConfig";
+import { feeConfigApi, type MarginFeeSource } from "../../api/feeConfig";
 import { productsApi } from "../../api/products";
+import { shippingProfilesApi } from "../../api/shippingProfiles";
 import { variantsApi } from "../../api/variants";
-import type { PricingMode, Product, Variant } from "../../api/types";
+import type { PricingMode, Product, ShippingProfile, Variant } from "../../api/types";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { SaveIndicator } from "../common/SaveIndicator";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
@@ -18,26 +19,99 @@ const MODE_LABELS: Record<PricingMode, string> = {
 
 interface MarginInputs {
   sale_price: string | null;
-  shipping_cost: string | null;
+  shipping_profile_id: number | null;
   effective_platform_fee_percent: string | null;
   cost_per_unit: string | null;
 }
 
-function computeMargin(inputs: MarginInputs): { profit: number; marginPercent: number } | null {
+// Mirrors backend services/shipping_profiles.py::resolve_shipping_cost_for_fee_source —
+// the shop-wide "Margin fee source" switch (Settings -> Pricing) stands in for "which
+// channel am I estimating margin for," since there's no real order to key off yet.
+function shippingCostForFeeSource(profile: ShippingProfile, feeSource: MarginFeeSource | undefined): number {
+  if (feeSource === "etsy") return Number(profile.cost_etsy);
+  if (feeSource === "ebay") return Number(profile.cost_ebay);
+  return Number(profile.cost_manual);
+}
+
+function computeMargin(
+  inputs: MarginInputs,
+  profiles: ShippingProfile[],
+  feeSource: MarginFeeSource | undefined
+): { profit: number; marginPercent: number } | null {
   if (!inputs.sale_price) return null;
   const salePrice = Number(inputs.sale_price);
   const cost = inputs.cost_per_unit ? Number(inputs.cost_per_unit) : 0;
-  const shipping = inputs.shipping_cost ? Number(inputs.shipping_cost) : 0;
+  const profile = profiles.find((p) => p.id === inputs.shipping_profile_id);
+  const shipping = profile ? shippingCostForFeeSource(profile, feeSource) : 0;
   const fee = (salePrice * (inputs.effective_platform_fee_percent ? Number(inputs.effective_platform_fee_percent) : 0)) / 100;
   const profit = salePrice - cost - shipping - fee;
   const marginPercent = salePrice !== 0 ? (profit / salePrice) * 100 : 0;
   return { profit, marginPercent };
 }
 
+function ShippingProfileSelect({
+  profiles,
+  value,
+  onChange,
+  inheritLabel,
+  feeSource,
+}: {
+  profiles: ShippingProfile[];
+  value: string;
+  onChange: (value: string) => void;
+  inheritLabel?: string;
+  feeSource: MarginFeeSource | undefined;
+}) {
+  return (
+    <select
+      className="w-40 rounded border border-slate-300 px-2 py-1"
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+    >
+      <option value="">{inheritLabel ?? "No shipping profile"}</option>
+      {profiles.map((p) => (
+        <option key={p.id} value={p.id}>
+          {p.name} (cost £{shippingCostForFeeSource(p, feeSource).toFixed(2)})
+        </option>
+      ))}
+    </select>
+  );
+}
+
 function attributeValue(variant: Variant, index: 1 | 2 | 3): string | null {
   if (index === 1) return variant.attribute1_value;
   if (index === 2) return variant.attribute2_value;
   return variant.attribute3_value;
+}
+
+function ProductDefaultShippingProfile({
+  product,
+  profiles,
+  feeSource,
+  onSaved,
+}: {
+  product: Product;
+  profiles: ShippingProfile[];
+  feeSource: MarginFeeSource | undefined;
+  onSaved: () => void;
+}) {
+  const saveMutation = useMutation({
+    mutationFn: (shipping_profile_id: number | null) => productsApi.update(product.id, { shipping_profile_id }),
+    onSuccess: onSaved,
+  });
+
+  return (
+    <label className="flex items-center gap-2 text-sm">
+      <span className="font-medium">Default shipping profile</span>
+      <ShippingProfileSelect
+        profiles={profiles}
+        value={product.shipping_profile_id != null ? String(product.shipping_profile_id) : ""}
+        onChange={(value) => saveMutation.mutate(value ? Number(value) : null)}
+        feeSource={feeSource}
+      />
+      <ErrorBanner error={saveMutation.error} />
+    </label>
+  );
 }
 
 export function PricingSection({ product }: { product: Product }) {
@@ -54,7 +128,12 @@ export function PricingSection({ product }: { product: Product }) {
     queryKey: ["settings", "margin-fee-config"],
     queryFn: feeConfigApi.getMarginFeeConfig,
   });
+  const { data: shippingProfiles } = useQuery({
+    queryKey: ["settings", "shipping-profiles"],
+    queryFn: shippingProfilesApi.list,
+  });
   const isCalculatedFee = feeConfig?.fee_source != null && feeConfig.fee_source !== "manual";
+  const profiles = shippingProfiles ?? [];
 
   const invalidateProduct = () => {
     queryClient.invalidateQueries({ queryKey: ["products", product.id] });
@@ -126,6 +205,14 @@ export function PricingSection({ product }: { product: Product }) {
             </select>
           </label>
         )}
+        {product.pricing_mode !== "product" && (
+          <ProductDefaultShippingProfile
+            product={product}
+            profiles={profiles}
+            feeSource={feeConfig?.fee_source}
+            onSaved={invalidateProduct}
+          />
+        )}
         {activeVariants.length === 0 && (
           <span className="text-sm text-slate-500">Variable/line pricing needs at least one active variant.</span>
         )}
@@ -139,7 +226,13 @@ export function PricingSection({ product }: { product: Product }) {
       )}
 
       {product.pricing_mode === "product" && (
-        <ProductPriceForm product={product} isCalculatedFee={isCalculatedFee} onSaved={invalidateProduct} />
+        <ProductPriceForm
+          product={product}
+          isCalculatedFee={isCalculatedFee}
+          profiles={profiles}
+          feeSource={feeConfig?.fee_source}
+          onSaved={invalidateProduct}
+        />
       )}
       {product.pricing_mode === "variable" && product.pricing_variable_attribute && (
         <VariablePriceGroups
@@ -147,6 +240,8 @@ export function PricingSection({ product }: { product: Product }) {
           variants={activeVariants}
           attributeIndex={product.pricing_variable_attribute as 1 | 2 | 3}
           isCalculatedFee={isCalculatedFee}
+          profiles={profiles}
+          feeSource={feeConfig?.fee_source}
           onSaved={invalidateProduct}
         />
       )}
@@ -155,6 +250,8 @@ export function PricingSection({ product }: { product: Product }) {
           product={product}
           variants={activeVariants}
           isCalculatedFee={isCalculatedFee}
+          profiles={profiles}
+          feeSource={feeConfig?.fee_source}
           onSaved={invalidateProduct}
         />
       )}
@@ -188,38 +285,46 @@ export function PricingSection({ product }: { product: Product }) {
 function ProductPriceForm({
   product,
   isCalculatedFee,
+  profiles,
+  feeSource,
   onSaved,
 }: {
   product: Product;
   isCalculatedFee: boolean;
+  profiles: ShippingProfile[];
+  feeSource: MarginFeeSource | undefined;
   onSaved: () => void;
 }) {
   const [salePrice, setSalePrice] = useState("");
-  const [shippingCost, setShippingCost] = useState("");
+  const [shippingProfileId, setShippingProfileId] = useState("");
   const [platformFeePercent, setPlatformFeePercent] = useState("");
 
   useEffect(() => {
     setSalePrice(product.sale_price ?? "");
-    setShippingCost(product.shipping_cost ?? "");
+    setShippingProfileId(product.shipping_profile_id != null ? String(product.shipping_profile_id) : "");
     setPlatformFeePercent(product.platform_fee_percent ?? "");
-  }, [product.id, product.sale_price, product.shipping_cost, product.platform_fee_percent]);
+  }, [product.id, product.sale_price, product.shipping_profile_id, product.platform_fee_percent]);
 
   const saveMutation = useMutation({
     mutationFn: () =>
       productsApi.update(product.id, {
         sale_price: salePrice || null,
-        shipping_cost: shippingCost || null,
+        shipping_profile_id: shippingProfileId ? Number(shippingProfileId) : null,
         platform_fee_percent: platformFeePercent || null,
       }),
     onSuccess: onSaved,
   });
 
-  const margin = computeMargin({
-    sale_price: product.sale_price,
-    shipping_cost: product.shipping_cost,
-    effective_platform_fee_percent: product.effective_platform_fee_percent,
-    cost_per_unit: product.cost_per_unit,
-  });
+  const margin = computeMargin(
+    {
+      sale_price: product.sale_price,
+      shipping_profile_id: product.shipping_profile_id,
+      effective_platform_fee_percent: product.effective_platform_fee_percent,
+      cost_per_unit: product.cost_per_unit,
+    },
+    profiles,
+    feeSource
+  );
   const saveStatus = useSaveStatus(saveMutation.status);
 
   return (
@@ -240,11 +345,12 @@ function ProductPriceForm({
           />
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-sm">Shipping cost (£)</span>
-          <input
-            className="w-28 rounded border border-slate-300 px-2 py-1"
-            value={shippingCost}
-            onChange={(e) => setShippingCost(e.target.value)}
+          <span className="text-sm">Shipping profile</span>
+          <ShippingProfileSelect
+            profiles={profiles}
+            value={shippingProfileId}
+            onChange={setShippingProfileId}
+            feeSource={feeSource}
           />
         </label>
         <label className="flex flex-col gap-1">
@@ -281,12 +387,16 @@ function VariablePriceGroups({
   variants,
   attributeIndex,
   isCalculatedFee,
+  profiles,
+  feeSource,
   onSaved,
 }: {
   product: Product;
   variants: Variant[];
   attributeIndex: 1 | 2 | 3;
   isCalculatedFee: boolean;
+  profiles: ShippingProfile[];
+  feeSource: MarginFeeSource | undefined;
   onSaved: () => void;
 }) {
   const groups = new Map<string, Variant[]>();
@@ -306,6 +416,8 @@ function VariablePriceGroups({
           variants={groupVariants}
           product={product}
           isCalculatedFee={isCalculatedFee}
+          profiles={profiles}
+          feeSource={feeSource}
           onSaved={onSaved}
         />
       ))}
@@ -318,24 +430,28 @@ function VariableGroupRow({
   variants,
   product,
   isCalculatedFee,
+  profiles,
+  feeSource,
   onSaved,
 }: {
   label: string;
   variants: Variant[];
   product: Product;
   isCalculatedFee: boolean;
+  profiles: ShippingProfile[];
+  feeSource: MarginFeeSource | undefined;
   onSaved: () => void;
 }) {
   const first = variants[0];
   const [salePrice, setSalePrice] = useState("");
-  const [shippingCost, setShippingCost] = useState("");
+  const [shippingProfileId, setShippingProfileId] = useState("");
   const [platformFeePercent, setPlatformFeePercent] = useState("");
 
   useEffect(() => {
     setSalePrice(first.sale_price ?? "");
-    setShippingCost(first.shipping_cost ?? "");
+    setShippingProfileId(first.shipping_profile_id != null ? String(first.shipping_profile_id) : "");
     setPlatformFeePercent(first.platform_fee_percent ?? "");
-  }, [first.id, first.sale_price, first.shipping_cost, first.platform_fee_percent]);
+  }, [first.id, first.sale_price, first.shipping_profile_id, first.platform_fee_percent]);
 
   const saveMutation = useMutation({
     mutationFn: () =>
@@ -343,7 +459,7 @@ function VariableGroupRow({
         variants.map((v) =>
           variantsApi.update(v.id, {
             sale_price: salePrice || null,
-            shipping_cost: shippingCost || null,
+            shipping_profile_id: shippingProfileId ? Number(shippingProfileId) : null,
             platform_fee_percent: platformFeePercent || null,
           })
         )
@@ -352,6 +468,7 @@ function VariableGroupRow({
   });
 
   const saveStatus = useSaveStatus(saveMutation.status);
+  const productProfileName = profiles.find((p) => p.id === product.shipping_profile_id)?.name;
 
   return (
     <form
@@ -377,12 +494,13 @@ function VariableGroupRow({
         />
       </label>
       <label className="flex flex-col gap-1">
-        <span className="text-sm">Shipping cost (£)</span>
-        <input
-          className="w-28 rounded border border-slate-300 px-2 py-1"
-          placeholder={product.shipping_cost ?? ""}
-          value={shippingCost}
-          onChange={(e) => setShippingCost(e.target.value)}
+        <span className="text-sm">Shipping profile</span>
+        <ShippingProfileSelect
+          profiles={profiles}
+          value={shippingProfileId}
+          onChange={setShippingProfileId}
+          inheritLabel={productProfileName ? `Inherit (${productProfileName})` : "Inherit from product"}
+          feeSource={feeSource}
         />
       </label>
       <label className="flex flex-col gap-1">
@@ -411,11 +529,15 @@ function LinePriceTable({
   product,
   variants,
   isCalculatedFee,
+  profiles,
+  feeSource,
   onSaved,
 }: {
   product: Product;
   variants: Variant[];
   isCalculatedFee: boolean;
+  profiles: ShippingProfile[];
+  feeSource: MarginFeeSource | undefined;
   onSaved: () => void;
 }) {
   const [showAll, setShowAll] = useState(false);
@@ -427,7 +549,15 @@ function LinePriceTable({
   return (
     <div className="flex flex-col gap-2">
       {visible.map((v) => (
-        <LineRow key={v.id} variant={v} product={product} isCalculatedFee={isCalculatedFee} onSaved={onSaved} />
+        <LineRow
+          key={v.id}
+          variant={v}
+          product={product}
+          isCalculatedFee={isCalculatedFee}
+          profiles={profiles}
+          feeSource={feeSource}
+          onSaved={onSaved}
+        />
       ))}
       {variants.length > INITIAL_LINE_LIMIT && (
         <button onClick={() => setShowAll((s) => !s)} className="self-start text-sm text-slate-600 underline">
@@ -442,40 +572,49 @@ function LineRow({
   variant,
   product,
   isCalculatedFee,
+  profiles,
+  feeSource,
   onSaved,
 }: {
   variant: Variant;
   product: Product;
   isCalculatedFee: boolean;
+  profiles: ShippingProfile[];
+  feeSource: MarginFeeSource | undefined;
   onSaved: () => void;
 }) {
   const [salePrice, setSalePrice] = useState("");
-  const [shippingCost, setShippingCost] = useState("");
+  const [shippingProfileId, setShippingProfileId] = useState("");
   const [platformFeePercent, setPlatformFeePercent] = useState("");
 
   useEffect(() => {
     setSalePrice(variant.sale_price ?? "");
-    setShippingCost(variant.shipping_cost ?? "");
+    setShippingProfileId(variant.shipping_profile_id != null ? String(variant.shipping_profile_id) : "");
     setPlatformFeePercent(variant.platform_fee_percent ?? "");
-  }, [variant.id, variant.sale_price, variant.shipping_cost, variant.platform_fee_percent]);
+  }, [variant.id, variant.sale_price, variant.shipping_profile_id, variant.platform_fee_percent]);
 
   const saveMutation = useMutation({
     mutationFn: () =>
       variantsApi.update(variant.id, {
         sale_price: salePrice || null,
-        shipping_cost: shippingCost || null,
+        shipping_profile_id: shippingProfileId ? Number(shippingProfileId) : null,
         platform_fee_percent: platformFeePercent || null,
       }),
     onSuccess: onSaved,
   });
 
   const saveStatus = useSaveStatus(saveMutation.status);
-  const margin = computeMargin({
-    sale_price: variant.sale_price ?? product.sale_price,
-    shipping_cost: variant.shipping_cost ?? product.shipping_cost,
-    effective_platform_fee_percent: variant.effective_platform_fee_percent ?? product.effective_platform_fee_percent,
-    cost_per_unit: variant.cost_per_unit,
-  });
+  const margin = computeMargin(
+    {
+      sale_price: variant.sale_price ?? product.sale_price,
+      shipping_profile_id: variant.effective_shipping_profile_id,
+      effective_platform_fee_percent: variant.effective_platform_fee_percent ?? product.effective_platform_fee_percent,
+      cost_per_unit: variant.cost_per_unit,
+    },
+    profiles,
+    feeSource
+  );
+  const productProfileName = profiles.find((p) => p.id === product.shipping_profile_id)?.name;
 
   return (
     <form
@@ -496,12 +635,13 @@ function LineRow({
         />
       </label>
       <label className="flex flex-col gap-1">
-        <span className="text-sm">Shipping cost (£)</span>
-        <input
-          className="w-28 rounded border border-slate-300 px-2 py-1"
-          placeholder={product.shipping_cost ?? ""}
-          value={shippingCost}
-          onChange={(e) => setShippingCost(e.target.value)}
+        <span className="text-sm">Shipping profile</span>
+        <ShippingProfileSelect
+          profiles={profiles}
+          value={shippingProfileId}
+          onChange={setShippingProfileId}
+          inheritLabel={productProfileName ? `Inherit (${productProfileName})` : "Inherit from product"}
+          feeSource={feeSource}
         />
       </label>
       <label className="flex flex-col gap-1">

@@ -13,7 +13,7 @@ from app.models.product import Product
 from app.models.variant import ProductVariant
 from app.schemas.platform import SyncCommitResult, SyncPreviewLine, SyncPreviewOrder, SyncPreviewResult
 from app.services import allocation
-from app.services.order_costs import compute_line_cost_snapshot
+from app.services.order_costs import compute_line_cost_snapshot, resolve_order_shipping_profile
 from app.services.platforms import get_adapter
 from app.services.platforms.base import ExternalOrder
 from app.services.variants import find_by_sku
@@ -301,6 +301,18 @@ def _parse_price(raw: str | None) -> Decimal | None:
         return None
 
 
+async def _default_shipping_profile_if_unset(session: AsyncSession, order: Order) -> None:
+    """Auto-defaults a synced order's shipping profile from its lines' resolved product/
+    variant default, the first time it has any resolvable lines — never overwrites an
+    already-set value, so a user's manual reassignment survives future re-syncs."""
+    if order.shipping_profile_id is not None:
+        return
+    await session.flush()
+    result = await session.execute(select(OrderLine.product_id, OrderLine.variant_id).where(OrderLine.order_id == order.id))
+    pairs = [(product_id, variant_id) for product_id, variant_id in result]
+    order.shipping_profile_id = await resolve_order_shipping_profile(session, pairs)
+
+
 async def _upsert_lines(session: AsyncSession, order: Order, ext_order: ExternalOrder) -> int:
     """Returns how many lines on this order needed mapping. Lines are matched by
     external_line_id and only ever created, never mutated — Etsy line items don't
@@ -336,6 +348,7 @@ async def _upsert_lines(session: AsyncSession, order: Order, ext_order: External
                 kitting_cost_per_unit_snapshot=kitting_cost_per_unit,
             )
         )
+    await _default_shipping_profile_if_unset(session, order)
     return needs_mapping_count
 
 

@@ -25,6 +25,9 @@ class OrderCreate(BaseModel):
     buyer_name: str | None = None
     buyer_note: str | None = None
     notes: str | None = None
+    currency: str | None = None
+    shipping_profile_id: int | None = None
+    shipping_charged: Decimal | None = None
     lines: list[OrderLineInput]
 
 
@@ -32,6 +35,8 @@ class OrderUpdate(BaseModel):
     buyer_name: str | None = None
     buyer_note: str | None = None
     notes: str | None = None
+    shipping_profile_id: int | None = None
+    shipping_charged: Decimal | None = None
 
 
 class OrderLineQtyUpdate(BaseModel):
@@ -97,6 +102,9 @@ class OrderRead(BaseModel):
     grand_total: Decimal | None = None
     subtotal: Decimal | None = None
     shipping_charged: Decimal | None = None
+    shipping_profile_id: int | None = None
+    shipping_profile_name: str | None = None
+    shipping_cost_snapshot: Decimal | None = None
     tax_charged: Decimal | None = None
     vat_charged: Decimal | None = None
     discount_amount: Decimal | None = None

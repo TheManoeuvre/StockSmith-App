@@ -13,7 +13,7 @@ class ProductBase(BaseModel):
     barcode: str | None = None
     is_bundle: bool = False
     sale_price: Decimal | None = None
-    shipping_cost: Decimal | None = None
+    shipping_profile_id: int | None = None
     platform_fee_percent: Decimal | None = None
     platform_ceiling_qty: int | None = None
 
@@ -30,7 +30,7 @@ class ProductUpdate(BaseModel):
     is_active: bool | None = None
     is_bundle: bool | None = None
     sale_price: Decimal | None = None
-    shipping_cost: Decimal | None = None
+    shipping_profile_id: int | None = None
     platform_fee_percent: Decimal | None = None
     platform_ceiling_qty: int | None = None
     pricing_mode: PricingMode | None = None

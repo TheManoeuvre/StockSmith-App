@@ -12,6 +12,7 @@ from app.schemas.variant import VariantBomLine, VariantRead, VariantUpdate
 from app.services import platform_fees
 from app.services.buildability import compute_variant_buildability
 from app.services.kitting import compute_max_sellable, sync_listing_ceiling_qty
+from app.services.shipping_profiles import get_shipping_profiles_by_id, resolve_variant_shipping_profile
 from app.services.validation import validate_lines_against_units
 from app.services.variants import compute_full_sku
 
@@ -66,6 +67,8 @@ async def _to_variant_read(session: AsyncSession, variant: ProductVariant) -> Va
     )
     full_sku = compute_full_sku(product.sku if product else None, variant.sku_suffix)
     fee_source, fee_components = await platform_fees.get_resolver_context(session)
+    shipping_profiles_by_id = await get_shipping_profiles_by_id(session)
+    effective_shipping_profile = resolve_variant_shipping_profile(shipping_profiles_by_id, variant, product)
     return VariantRead.model_validate(variant).model_copy(
         update={
             "max_buildable": max_buildable,
@@ -79,8 +82,9 @@ async def _to_variant_read(session: AsyncSession, variant: ProductVariant) -> Va
             "effective_kitting_bom": effective_kitting_bom,
             "full_sku": full_sku,
             "effective_platform_fee_percent": platform_fees.resolve_variant_fee_percent(
-                fee_source, fee_components, variant, product
+                fee_source, fee_components, variant, product, shipping_profiles_by_id
             ),
+            "effective_shipping_profile_id": effective_shipping_profile.id if effective_shipping_profile else None,
         }
     )
 

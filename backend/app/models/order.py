@@ -70,7 +70,22 @@ class Order(Base):
     # once that reconciliation succeeds on a later sync. See order_sync._reconcile_status.
     sync_issue: Mapped[str | None] = mapped_column(String, nullable=True)
 
+    # The shipping method used for this order (one profile per order — a single parcel,
+    # not per line). For synced orders this defaults from the first resolvable line's
+    # product/variant shipping_profile_id at import time (order_sync); for manual orders
+    # it's picked by the user. Editable right up until ship_order freezes the cost below.
+    shipping_profile_id: Mapped[int | None] = mapped_column(
+        ForeignKey("shipping_profiles.id", ondelete="SET NULL"), nullable=True
+    )
+    # The shipping profile's cost, snapshotted once — on whichever ship_order call first
+    # ships anything on this order (see services/allocation.ship_order) — so a shipped
+    # order's cost/profit doesn't drift if the profile's cost changes later. Deliberately
+    # frozen at ship time (not at order/line creation, unlike the build/kitting cost
+    # snapshots on OrderLine) per an explicit product requirement.
+    shipping_cost_snapshot: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+
     lines: Mapped[list["OrderLine"]] = relationship(back_populates="order", cascade="all, delete-orphan")
+    shipping_profile: Mapped["ShippingProfile | None"] = relationship()
 
 
 class OrderLine(Base):

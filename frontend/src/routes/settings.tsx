@@ -9,6 +9,8 @@ import { PLATFORM_LABELS } from "../lib/platforms";
 import { ErrorBanner } from "../components/common/ErrorBanner";
 import { PlatformSyncPanel } from "../components/settings/PlatformSyncPanel";
 import { MarginFeeSettings } from "../components/settings/MarginFeeSettings";
+import { ShippingProfileSettings } from "../components/settings/ShippingProfileSettings";
+import { CurrencySettings } from "../components/settings/CurrencySettings";
 import { Tabs, type TabDef } from "../components/common/Tabs";
 import { useShopIconUrl } from "../hooks/useShopIconUrl";
 
@@ -24,6 +26,7 @@ const SETTINGS_TABS: TabDef[] = [
   { id: "connection", label: "Connection" },
   { id: "integrations", label: "Integrations" },
   { id: "pricing", label: "Pricing" },
+  { id: "general", label: "General" },
   { id: "reference", label: "Reference data" },
 ];
 
@@ -130,6 +133,13 @@ function Settings() {
       {activeTab === "pricing" && (
         <div className="flex flex-col gap-2">
           <MarginFeeSettings />
+          <ShippingProfileSettings />
+        </div>
+      )}
+
+      {activeTab === "general" && (
+        <div className="max-w-md flex flex-col gap-2">
+          <CurrencySettings />
         </div>
       )}
 

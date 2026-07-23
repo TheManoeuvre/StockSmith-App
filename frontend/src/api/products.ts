@@ -22,7 +22,7 @@ export interface ProductInput {
   barcode?: string | null;
   is_bundle?: boolean;
   sale_price?: string | null;
-  shipping_cost?: string | null;
+  shipping_profile_id?: number | null;
   platform_fee_percent?: string | null;
   platform_ceiling_qty?: number | null;
   pricing_mode?: PricingMode;

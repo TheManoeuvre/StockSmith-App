@@ -2,6 +2,7 @@ from app.models.allocation_event import AllocationEvent, AllocationEventType
 from app.models.asset import AssetType, ProductAsset
 from app.models.base import Base
 from app.models.build import Build
+from app.models.general_settings import CurrencyCode, GeneralSettings
 from app.models.kitting import (
     OrderKittingAllocation,
     OrderKittingOverride,
@@ -19,6 +20,7 @@ from app.models.platform_fee import FeeBasis, MarginFeeConfig, MarginFeeSource, 
 from app.models.pricing import ProductPriceSnapshot
 from app.models.product import Product, ProductBundleItem, ProductMaterial
 from app.models.purchase import MaterialPurchase, Purchase, PurchaseStatus
+from app.models.shipping_profile import ShippingProfile
 from app.models.sku_alias import SkuAlias
 from app.models.stock_adjustment import StockAdjustment, StockAdjustmentMode
 from app.models.supplier import Supplier
@@ -68,4 +70,7 @@ __all__ = [
     "FeeBasis",
     "MarginFeeConfig",
     "MarginFeeSource",
+    "ShippingProfile",
+    "GeneralSettings",
+    "CurrencyCode",
 ]

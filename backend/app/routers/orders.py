@@ -10,6 +10,7 @@ from app.models.kitting import OrderKittingOverride
 from app.models.listing import ListingPlatform
 from app.models.order import Order, OrderLine, OrderStatus
 from app.models.product import Product
+from app.models.shipping_profile import ShippingProfile
 from app.models.sku_alias import SkuAlias
 from app.models.variant import ProductVariant
 from app.schemas.kitting import OrderKittingOverrideLine, OrderKittingSummary
@@ -41,6 +42,7 @@ async def _get_order_with_lines(session: AsyncSession, order_id: int) -> Order:
         .options(
             selectinload(Order.lines).selectinload(OrderLine.product),
             selectinload(Order.lines).selectinload(OrderLine.variant),
+            selectinload(Order.shipping_profile),
         )
         .execution_options(populate_existing=True)
     )
@@ -90,29 +92,55 @@ async def _remember_sku(
 
 
 def _compute_net_profit(order: Order) -> Decimal | None:
-    """revenue - COGS. Revenue prefers Etsy's own fee-adjusted payment_net; if the
-    payment hasn't settled yet (or this is a manual order), falls back to grand_total
-    minus any refund — a coarser, not-fee-adjusted number. COGS sums each line's
-    snapshotted build+kitting cost per unit across its ordered_qty (the full committed
-    sale, not just what's shipped so far). Returns None rather than a misleading 0 when
-    there isn't enough data yet to say anything."""
-    if order.payment_net is not None:
-        revenue = Decimal(order.payment_net)
-    elif order.grand_total is not None:
-        revenue = Decimal(order.grand_total) - Decimal(order.refunded_amount or 0)
-    else:
-        revenue = None
+    """Order Value Paid + Postage Paid - Platform Fees - Postage cost - Cost of Goods.
 
-    cogs: Decimal | None = None
+    Order Value Paid (subtotal) and Postage Paid (shipping_charged) are what the buyer
+    paid, straight off the marketplace receipt (or, for a manual order, derived from its
+    own lines — see create_order/_recompute_manual_order_totals). Platform Fees
+    (payment_fees) is the full marketplace deduction — for Etsy, aggregated from the
+    payment-account ledger once the order has shipped (see platforms/etsy.py
+    _fetch_platform_fees_total), since the per-receipt Payments endpoint only reports
+    the card-processing portion of it. Postage cost (shipping_cost_snapshot) is the
+    seller's own cost for that shipping method, frozen at ship time — Etsy doesn't
+    expose actual per-order postage cost anywhere reliably attributable, so this always
+    comes from the assigned Shipping Profile, never from synced marketplace data. Cost
+    of Goods sums each line's snapshotted build+kitting cost per unit across its
+    ordered_qty (the full committed sale, not just what's shipped so far).
+
+    Returns None rather than a misleading number when Order Value Paid isn't known yet
+    (a marketplace order whose financials haven't synced, or a manual order created
+    before this field was tracked)."""
+    if order.subtotal is None:
+        return None
+
+    revenue = Decimal(order.subtotal) + Decimal(order.shipping_charged or 0) - Decimal(order.refunded_amount or 0)
+    platform_fees = Decimal(order.payment_fees or 0)
+    postage_cost = Decimal(order.shipping_cost_snapshot or 0)
+
+    cogs = Decimal(0)
     for line in order.lines:
         if line.cost_per_unit_snapshot is None and line.kitting_cost_per_unit_snapshot is None:
             continue
         line_cost = Decimal(line.cost_per_unit_snapshot or 0) + Decimal(line.kitting_cost_per_unit_snapshot or 0)
-        cogs = (cogs or Decimal(0)) + line_cost * line.ordered_qty
+        cogs += line_cost * line.ordered_qty
 
-    if revenue is None or cogs is None:
-        return None
-    return revenue - cogs
+    return revenue - platform_fees - postage_cost - cogs
+
+
+async def _recompute_manual_order_totals(session: AsyncSession, order: Order) -> None:
+    """Manual orders have no marketplace receipt to source subtotal/grand_total from —
+    this derives them from the order's own lines whenever ordered_qty or
+    shipping_charged changes, so "Order Value Paid" stays accurate for the net-profit
+    breakdown above. A no-op for synced orders (subtotal always comes from the receipt)."""
+    if order.platform is not None:
+        return
+    result = await session.execute(select(OrderLine).where(OrderLine.order_id == order.id))
+    lines = list(result.scalars())
+    if not any(l.unit_price is not None for l in lines):
+        return
+    subtotal = sum((Decimal(l.unit_price or 0) * l.ordered_qty for l in lines), Decimal(0))
+    order.subtotal = subtotal
+    order.grand_total = subtotal + Decimal(order.shipping_charged or 0)
 
 
 def _serialize_order(order: Order) -> OrderRead:
@@ -153,6 +181,9 @@ def _serialize_order(order: Order) -> OrderRead:
         grand_total=order.grand_total,
         subtotal=order.subtotal,
         shipping_charged=order.shipping_charged,
+        shipping_profile_id=order.shipping_profile_id,
+        shipping_profile_name=order.shipping_profile.name if order.shipping_profile else None,
+        shipping_cost_snapshot=order.shipping_cost_snapshot,
         tax_charged=order.tax_charged,
         vat_charged=order.vat_charged,
         discount_amount=order.discount_amount,
@@ -177,6 +208,7 @@ async def list_orders(
         .options(
             selectinload(Order.lines).selectinload(OrderLine.product),
             selectinload(Order.lines).selectinload(OrderLine.variant),
+            selectinload(Order.shipping_profile),
         )
         .order_by(Order.order_placed_at.desc(), Order.id.desc())
     )
@@ -205,7 +237,33 @@ async def create_order(payload: OrderCreate, session: AsyncSession = Depends(get
                     status_code=status.HTTP_404_NOT_FOUND, detail=f"Product {line.product_id} not found"
                 )
 
-    order = Order(buyer_name=payload.buyer_name, buyer_note=payload.buyer_note, notes=payload.notes)
+    if payload.shipping_profile_id is not None:
+        profile = await session.get(ShippingProfile, payload.shipping_profile_id)
+        if profile is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Shipping profile {payload.shipping_profile_id} not found"
+            )
+        shipping_charged = payload.shipping_charged if payload.shipping_charged is not None else profile.price
+    else:
+        profile = None
+        shipping_charged = payload.shipping_charged
+
+    has_any_price = any(l.unit_price is not None for l in payload.lines)
+    subtotal = (
+        sum((Decimal(l.unit_price or 0) * l.ordered_qty for l in payload.lines), Decimal(0)) if has_any_price else None
+    )
+    grand_total = subtotal + Decimal(shipping_charged or 0) if subtotal is not None else None
+
+    order = Order(
+        buyer_name=payload.buyer_name,
+        buyer_note=payload.buyer_note,
+        notes=payload.notes,
+        currency=payload.currency,
+        shipping_profile_id=profile.id if profile else None,
+        shipping_charged=shipping_charged,
+        subtotal=subtotal,
+        grand_total=grand_total,
+    )
     order.lines = []
     for l in payload.lines:
         # A variant-only line needs its product_id derived from the variant so the cost
@@ -245,8 +303,27 @@ async def get_order(order_id: int, session: AsyncSession = Depends(get_db)) -> O
 @router.patch("/{order_id}", response_model=OrderRead)
 async def update_order(order_id: int, payload: OrderUpdate, session: AsyncSession = Depends(get_db)) -> OrderRead:
     order = await _get_order_with_lines(session, order_id)
+    changed_fields = set(payload.model_dump(exclude_unset=True).keys())
+
+    if order.status == OrderStatus.shipped and changed_fields & {"shipping_profile_id", "shipping_charged"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot change shipping once the order has shipped — its cost is already frozen",
+        )
+
+    if "shipping_profile_id" in changed_fields and payload.shipping_profile_id is not None:
+        profile = await session.get(ShippingProfile, payload.shipping_profile_id)
+        if profile is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Shipping profile {payload.shipping_profile_id} not found"
+            )
+
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(order, field, value)
+
+    if "shipping_charged" in changed_fields:
+        await _recompute_manual_order_totals(session, order)
+
     await session.commit()
     return _serialize_order(await _get_order_with_lines(session, order_id))
 
@@ -303,6 +380,9 @@ async def update_line_qty(
 ) -> OrderRead:
     line = await _get_line(session, line_id)
     await allocation.apply_ordered_qty_change(session, line, payload.ordered_qty)
+    order = await session.get(Order, line.order_id)
+    if order is not None:
+        await _recompute_manual_order_totals(session, order)
     await session.commit()
     return _serialize_order(await _get_order_with_lines(session, line.order_id))
 

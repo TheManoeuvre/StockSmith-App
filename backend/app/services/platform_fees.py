@@ -6,7 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.listing import ListingPlatform
 from app.models.platform_fee import FeeBasis, MarginFeeConfig, MarginFeeSource, PlatformFeeComponent
 from app.models.product import Product
+from app.models.shipping_profile import ShippingProfile
 from app.models.variant import ProductVariant
+from app.services.shipping_profiles import resolve_variant_shipping_profile
 
 
 async def get_margin_fee_config(session: AsyncSession) -> MarginFeeConfig:
@@ -37,14 +39,18 @@ async def get_fee_components(session: AsyncSession, platform: ListingPlatform) -
 
 
 def compute_effective_fee_amount(
-    components: list[PlatformFeeComponent], sale_price: Decimal, shipping_cost: Decimal | None
+    components: list[PlatformFeeComponent], sale_price: Decimal, shipping_price: Decimal | None
 ) -> Decimal:
     """Walks enabled components in display_order, accumulating a running fee subtotal.
     Percentage components multiply their basis (sale price, or sale price + shipping);
     fees_subtotal-basis components (how "VAT on fees" is modeled) multiply the running
     subtotal itself rather than the sale price. Fixed components just add a flat amount.
-    Returns the total fee amount, in the same currency unit as sale_price."""
-    shipping = shipping_cost or Decimal(0)
+    Returns the total fee amount, in the same currency unit as sale_price.
+
+    shipping_price is what's charged to the customer for postage (a marketplace's
+    percentage fee is calculated on what the buyer pays, not on the seller's own
+    shipping cost) — see ShippingProfile.price vs .cost."""
+    shipping = shipping_price or Decimal(0)
     subtotal = Decimal(0)
     for component in sorted((c for c in components if c.enabled), key=lambda c: c.display_order):
         if component.basis == FeeBasis.fees_subtotal:
@@ -60,7 +66,7 @@ def compute_effective_fee_amount(
 
 
 async def compute_effective_fee_percent(
-    session: AsyncSession, platform: ListingPlatform, sale_price: Decimal | None, shipping_cost: Decimal | None
+    session: AsyncSession, platform: ListingPlatform, sale_price: Decimal | None, shipping_price: Decimal | None
 ) -> Decimal | None:
     """Resolves a calculated platform's fee components down to a single effective
     percent-of-sale-price, so callers that already work in terms of a flat fee % (the
@@ -68,7 +74,7 @@ async def compute_effective_fee_percent(
     if sale_price is None or sale_price == 0:
         return None
     components = await get_fee_components(session, platform)
-    fee_amount = compute_effective_fee_amount(components, sale_price, shipping_cost)
+    fee_amount = compute_effective_fee_amount(components, sale_price, shipping_price)
     return fee_amount / sale_price * Decimal(100)
 
 
@@ -88,7 +94,7 @@ def resolve_fee_percent(
     components: list[PlatformFeeComponent],
     manual_fee_percent: Decimal | None,
     sale_price: Decimal | None,
-    shipping_cost: Decimal | None,
+    shipping_price: Decimal | None,
 ) -> Decimal | None:
     """Synchronous resolution given a context already fetched via get_resolver_context —
     safe to call in a per-row loop without additional DB round trips."""
@@ -96,7 +102,7 @@ def resolve_fee_percent(
         return manual_fee_percent
     if sale_price is None or sale_price == 0:
         return None
-    fee_amount = compute_effective_fee_amount(components, sale_price, shipping_cost)
+    fee_amount = compute_effective_fee_amount(components, sale_price, shipping_price)
     return fee_amount / sale_price * Decimal(100)
 
 
@@ -105,15 +111,15 @@ def resolve_variant_fee_percent(
     components: list[PlatformFeeComponent],
     variant: ProductVariant,
     product: Product | None,
+    shipping_profiles_by_id: dict[int, ShippingProfile],
 ) -> Decimal | None:
     """Same as resolve_fee_percent, but applies the variant-falls-back-to-product pattern
-    already used for sale_price/shipping_cost/platform_fee_percent in pricing modes —
-    a variant with no price/fee of its own inherits the product's."""
+    already used for sale_price/platform_fee_percent/shipping_profile_id in pricing modes —
+    a variant with no price/fee/profile of its own inherits the product's."""
     manual_fee_percent = variant.platform_fee_percent if variant.platform_fee_percent is not None else (
         product.platform_fee_percent if product else None
     )
     sale_price = variant.sale_price if variant.sale_price is not None else (product.sale_price if product else None)
-    shipping_cost = variant.shipping_cost if variant.shipping_cost is not None else (
-        product.shipping_cost if product else None
-    )
-    return resolve_fee_percent(fee_source, components, manual_fee_percent, sale_price, shipping_cost)
+    profile = resolve_variant_shipping_profile(shipping_profiles_by_id, variant, product)
+    shipping_price = profile.price if profile else None
+    return resolve_fee_percent(fee_source, components, manual_fee_percent, sale_price, shipping_price)

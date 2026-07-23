@@ -20,7 +20,7 @@ class VariantUpdate(BaseModel):
     sku_suffix: str | None = None
     is_active: bool | None = None
     sale_price: Decimal | None = None
-    shipping_cost: Decimal | None = None
+    shipping_profile_id: int | None = None
     platform_fee_percent: Decimal | None = None
 
 
@@ -42,9 +42,10 @@ class VariantRead(VariantBase):
     attribute2_value: str | None = None
     attribute3_value: str | None = None
     sale_price: Decimal | None = None
-    shipping_cost: Decimal | None = None
+    shipping_profile_id: int | None = None
     platform_fee_percent: Decimal | None = None
     effective_platform_fee_percent: Decimal | None = None
+    effective_shipping_profile_id: int | None = None
     max_buildable: int | None = None
     expected_max_buildable: int | None = None
     max_sellable: int | None = None

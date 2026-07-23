@@ -7,8 +7,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.allocation_event import AllocationEvent, AllocationEventType
 from app.models.order import Order, OrderLine, OrderStatus
 from app.models.product import Product
+from app.models.shipping_profile import ShippingProfile
 from app.models.variant import ProductVariant
 from app.services.kitting import reconcile_order_kitting
+from app.services.shipping_profiles import resolve_shipping_cost_for_platform
 
 """Core allocation engine: every stock-reservation state change for an order flows
 through here. Functions always re-query related rows via explicit select() rather than
@@ -238,6 +240,15 @@ async def ship_order(session: AsyncSession, order: Order) -> None:
         # but nothing's allocated") no longer applies once we've genuinely shipped it.
         order.sync_issue = None
     await reconcile_order_kitting(session, order)
+
+    # Freeze the shipping profile's cost onto the order exactly once — on whichever
+    # ship_order call first ships anything — so a shipped order's cost/profit doesn't
+    # drift if the profile's cost changes later. Deliberately at ship time (unlike the
+    # build/kitting cost snapshots on OrderLine, which freeze at line-creation time).
+    if order.shipping_profile_id is not None and order.shipping_cost_snapshot is None:
+        profile = await session.get(ShippingProfile, order.shipping_profile_id)
+        if profile is not None:
+            order.shipping_cost_snapshot = resolve_shipping_cost_for_platform(profile, order.platform)
 
 
 async def apply_ordered_qty_change(session: AsyncSession, line: OrderLine, new_ordered_qty: int) -> None:

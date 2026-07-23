@@ -2,8 +2,11 @@ from decimal import Decimal
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.product import Product
+from app.models.variant import ProductVariant
 from app.services.buildability import compute_variant_buildability, get_cost_per_unit_by_product
 from app.services.kitting import compute_variant_kitting_cost_per_unit
+from app.services.shipping_profiles import get_shipping_profiles_by_id, resolve_variant_shipping_profile
 
 
 async def compute_line_cost_snapshot(
@@ -27,3 +30,26 @@ async def compute_line_cost_snapshot(
     kitting_cost_per_unit = await compute_variant_kitting_cost_per_unit(session, product_id, variant_id)
 
     return cost_per_unit, kitting_cost_per_unit
+
+
+async def resolve_order_shipping_profile(
+    session: AsyncSession, lines: list[tuple[int | None, int | None]]
+) -> int | None:
+    """Picks a default shipping profile for a newly-created order from its lines' resolved
+    product/variant default (variant falls back to product) — the first line that resolves
+    to one wins. Used only to *default* Order.shipping_profile_id at creation/sync time;
+    it's editable afterward and callers must not overwrite an already-set value with this.
+
+    lines is a list of (product_id, variant_id) tuples — product_id may be None for a
+    needs_mapping line that hasn't been matched to a product yet.
+    """
+    shipping_profiles_by_id = await get_shipping_profiles_by_id(session)
+    for product_id, variant_id in lines:
+        if product_id is None:
+            continue
+        product = await session.get(Product, product_id)
+        variant = await session.get(ProductVariant, variant_id) if variant_id is not None else None
+        profile = resolve_variant_shipping_profile(shipping_profiles_by_id, variant, product)
+        if profile is not None:
+            return profile.id
+    return None

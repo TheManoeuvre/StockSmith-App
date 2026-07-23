@@ -13,6 +13,9 @@ export interface OrderCreateInput {
   buyer_name?: string | null;
   buyer_note?: string | null;
   notes?: string | null;
+  currency?: string | null;
+  shipping_profile_id?: number | null;
+  shipping_charged?: string | null;
   lines: OrderLineInput[];
 }
 
@@ -20,6 +23,8 @@ export interface OrderUpdateInput {
   buyer_name?: string | null;
   buyer_note?: string | null;
   notes?: string | null;
+  shipping_profile_id?: number | null;
+  shipping_charged?: string | null;
 }
 
 export const ordersApi = {

@@ -116,7 +116,7 @@ export interface Product {
   variant_attribute2_name: string | null;
   variant_attribute3_name: string | null;
   sale_price: string | null;
-  shipping_cost: string | null;
+  shipping_profile_id: number | null;
   platform_fee_percent: string | null;
   effective_platform_fee_percent: string | null;
   pricing_mode: PricingMode;
@@ -232,7 +232,8 @@ export interface Variant {
   attribute2_value: string | null;
   attribute3_value: string | null;
   sale_price: string | null;
-  shipping_cost: string | null;
+  shipping_profile_id: number | null;
+  effective_shipping_profile_id: number | null;
   platform_fee_percent: string | null;
   effective_platform_fee_percent: string | null;
   max_buildable: number | null;
@@ -340,6 +341,9 @@ export interface Order {
   grand_total: string | null;
   subtotal: string | null;
   shipping_charged: string | null;
+  shipping_profile_id: number | null;
+  shipping_profile_name: string | null;
+  shipping_cost_snapshot: string | null;
   tax_charged: string | null;
   vat_charged: string | null;
   discount_amount: string | null;
@@ -372,4 +376,15 @@ export interface OrderKittingRequirementLine {
 export interface OrderKittingSummary {
   overrides: OrderKittingOverrideLine[];
   lines: OrderKittingRequirementLine[];
+}
+
+export interface ShippingProfile {
+  id: number;
+  name: string;
+  price: string;
+  cost_etsy: string;
+  cost_ebay: string;
+  cost_manual: string;
+  created_at: string;
+  updated_at: string;
 }

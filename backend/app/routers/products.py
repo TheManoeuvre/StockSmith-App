@@ -48,6 +48,11 @@ from app.services.kitting import (
     sync_listing_ceiling_qty,
 )
 from app.services.pricing import snapshot_product_pricing
+from app.services.shipping_profiles import (
+    get_shipping_profiles_by_id,
+    resolve_product_shipping_profile,
+    resolve_variant_shipping_profile,
+)
 from app.services.validation import validate_lines_against_units
 from app.services.variants import compute_full_sku, generate_variants
 
@@ -81,6 +86,7 @@ def _read_product(
     active_variant_stock_totals_by_product: dict,
     fee_source,
     fee_components,
+    shipping_profiles_by_id: dict,
 ) -> ProductRead:
     current_stock = product.current_stock
     allocated_qty = product.allocated_qty
@@ -115,8 +121,13 @@ def _read_product(
             max_sellable, max_sellable_reason, expected_max_sellable, expected_max_sellable_reason,
             product.platform_ceiling_qty,
         )
+    shipping_profile = resolve_product_shipping_profile(shipping_profiles_by_id, product)
     effective_platform_fee_percent = platform_fees.resolve_fee_percent(
-        fee_source, fee_components, product.platform_fee_percent, product.sale_price, product.shipping_cost
+        fee_source,
+        fee_components,
+        product.platform_fee_percent,
+        product.sale_price,
+        shipping_profile.price if shipping_profile else None,
     )
     return ProductRead.model_validate(product).model_copy(
         update={
@@ -150,6 +161,7 @@ async def list_products(session: AsyncSession = Depends(get_db)) -> list[Product
     expected_kitting_capacity_by_product = await get_expected_kitting_capacity_by_product(session)
     active_variant_stock_totals_by_product = await get_active_variant_stock_totals_by_product(session)
     fee_source, fee_components = await platform_fees.get_resolver_context(session)
+    shipping_profiles_by_id = await get_shipping_profiles_by_id(session)
     return [
         _read_product(
             p,
@@ -164,6 +176,7 @@ async def list_products(session: AsyncSession = Depends(get_db)) -> list[Product
             active_variant_stock_totals_by_product,
             fee_source,
             fee_components,
+            shipping_profiles_by_id,
         )
         for p in products
     ]
@@ -213,6 +226,7 @@ async def get_product(product_id: int, session: AsyncSession = Depends(get_db)) 
     expected_kitting_capacity_by_product = await get_expected_kitting_capacity_by_product(session)
     active_variant_stock_totals_by_product = await get_active_variant_stock_totals_by_product(session)
     fee_source, fee_components = await platform_fees.get_resolver_context(session)
+    shipping_profiles_by_id = await get_shipping_profiles_by_id(session)
     read = _read_product(
         product,
         max_buildable_by_product,
@@ -226,13 +240,14 @@ async def get_product(product_id: int, session: AsyncSession = Depends(get_db)) 
         active_variant_stock_totals_by_product,
         fee_source,
         fee_components,
+        shipping_profiles_by_id,
     )
     await sync_listing_ceiling_qty(session, product_id, None, read.expected_max_sellable)
     await session.commit()
     return read
 
 
-_PRICING_FIELDS = {"sale_price", "shipping_cost", "platform_fee_percent"}
+_PRICING_FIELDS = {"sale_price", "shipping_profile_id", "platform_fee_percent"}
 
 
 @router.patch("/{product_id}", response_model=ProductRead)
@@ -393,7 +408,8 @@ async def list_variants(product_id: int, session: AsyncSession = Depends(get_db)
         return []
 
     fee_source, fee_components = await platform_fees.get_resolver_context(session)
-    return await _variants_to_reads_bulk(session, product, variants, fee_source, fee_components)
+    shipping_profiles_by_id = await get_shipping_profiles_by_id(session)
+    return await _variants_to_reads_bulk(session, product, variants, fee_source, fee_components, shipping_profiles_by_id)
 
 
 async def _variants_to_reads_bulk(
@@ -402,6 +418,7 @@ async def _variants_to_reads_bulk(
     variants: list[ProductVariant],
     fee_source,
     fee_components,
+    shipping_profiles_by_id: dict,
 ) -> list[VariantRead]:
     """Computes buildability/sellable numbers for every given variant (all belonging to
     the same product) in O(1) queries instead of one round-trip per variant — see
@@ -427,6 +444,7 @@ async def _variants_to_reads_bulk(
             sellable_by_variant[variant.id]
         )
         full_sku = compute_full_sku(product.sku if product else None, variant.sku_suffix)
+        effective_shipping_profile = resolve_variant_shipping_profile(shipping_profiles_by_id, variant, product)
         reads.append(
             VariantRead.model_validate(variant).model_copy(
                 update={
@@ -441,8 +459,9 @@ async def _variants_to_reads_bulk(
                     "effective_kitting_bom": effective_kitting_bom,
                     "full_sku": full_sku,
                     "effective_platform_fee_percent": platform_fees.resolve_variant_fee_percent(
-                        fee_source, fee_components, variant, product
+                        fee_source, fee_components, variant, product, shipping_profiles_by_id
                     ),
+                    "effective_shipping_profile_id": effective_shipping_profile.id if effective_shipping_profile else None,
                 }
             )
         )
@@ -476,7 +495,8 @@ async def generate_product_variants(
         return []
     product = await session.get(Product, product_id)
     fee_source, fee_components = await platform_fees.get_resolver_context(session)
-    return await _variants_to_reads_bulk(session, product, created, fee_source, fee_components)
+    shipping_profiles_by_id = await get_shipping_profiles_by_id(session)
+    return await _variants_to_reads_bulk(session, product, created, fee_source, fee_components, shipping_profiles_by_id)
 
 
 async def _to_variant_read_with_buildability(session: AsyncSession, variant: ProductVariant) -> VariantRead:
@@ -497,6 +517,8 @@ async def _to_variant_read_with_buildability(session: AsyncSession, variant: Pro
     )
     full_sku = compute_full_sku(product.sku if product else None, variant.sku_suffix)
     fee_source, fee_components = await platform_fees.get_resolver_context(session)
+    shipping_profiles_by_id = await get_shipping_profiles_by_id(session)
+    effective_shipping_profile = resolve_variant_shipping_profile(shipping_profiles_by_id, variant, product)
     return VariantRead.model_validate(variant).model_copy(
         update={
             "max_buildable": max_buildable,
@@ -510,8 +532,9 @@ async def _to_variant_read_with_buildability(session: AsyncSession, variant: Pro
             "effective_kitting_bom": effective_kitting_bom,
             "full_sku": full_sku,
             "effective_platform_fee_percent": platform_fees.resolve_variant_fee_percent(
-                fee_source, fee_components, variant, product
+                fee_source, fee_components, variant, product, shipping_profiles_by_id
             ),
+            "effective_shipping_profile_id": effective_shipping_profile.id if effective_shipping_profile else None,
         }
     )
 

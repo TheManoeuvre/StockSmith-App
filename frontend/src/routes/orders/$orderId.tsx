@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { ordersApi } from "../../api/orders";
 import { productsApi } from "../../api/products";
+import { shippingProfilesApi } from "../../api/shippingProfiles";
 import type { Order, OrderLine, OrderStatus } from "../../api/types";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { OrderKittingSection } from "../../components/orders/OrderKittingSection";
@@ -95,6 +96,10 @@ function OrderDetail() {
 
       <OrderFinancialsPanel order={order} />
 
+      {order.platform === null && order.status !== "shipped" && (
+        <ManualShippingEditor order={order} onSaved={invalidate} />
+      )}
+
       <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">
         <thead>
           <tr className="border-b border-slate-200">
@@ -153,12 +158,12 @@ function OrderDetail() {
 
 function OrderFinancialsPanel({ order }: { order: Order }) {
   const currency = order.currency;
-  const cogsTotal = order.lines.reduce((sum, line) => {
+  const materialsCogsTotal = order.lines.reduce((sum, line) => {
     if (line.cost_per_unit_snapshot == null && line.kitting_cost_per_unit_snapshot == null) return sum;
     const perUnit = Number(line.cost_per_unit_snapshot ?? 0) + Number(line.kitting_cost_per_unit_snapshot ?? 0);
     return sum + perUnit * line.ordered_qty;
   }, 0);
-  const hasCogs = order.lines.some(
+  const hasMaterialsCogs = order.lines.some(
     (l) => l.cost_per_unit_snapshot != null || l.kitting_cost_per_unit_snapshot != null
   );
 
@@ -167,15 +172,13 @@ function OrderFinancialsPanel({ order }: { order: Order }) {
       <h2 className="mb-3 text-sm font-medium text-slate-600">Order value &amp; costs</h2>
       <div className="flex flex-wrap gap-6">
         <div>
-          <p className="text-slate-500">Order value</p>
-          <p>{formatMoney(order.grand_total, currency)}</p>
+          <p className="text-slate-500">Order value paid</p>
+          <p>{formatMoney(order.subtotal, currency)}</p>
         </div>
-        {order.shipping_charged != null && (
-          <div>
-            <p className="text-slate-500">Shipping charged</p>
-            <p>{formatMoney(order.shipping_charged, currency)}</p>
-          </div>
-        )}
+        <div>
+          <p className="text-slate-500">Postage paid</p>
+          <p>{formatMoney(order.shipping_charged, currency)}</p>
+        </div>
         {order.discount_amount != null && (
           <div>
             <p className="text-slate-500">Discount</p>
@@ -189,16 +192,22 @@ function OrderFinancialsPanel({ order }: { order: Order }) {
           </div>
         )}
         <div>
-          <p className="text-slate-500">Etsy fees</p>
-          <p>{order.payment_status ? formatMoney(order.payment_fees, currency) : "Not yet settled"}</p>
+          <p className="text-slate-500">Platform fees</p>
+          <p>
+            {order.platform == null
+              ? "—"
+              : order.payment_fees != null
+                ? `-${formatMoney(order.payment_fees, currency)}`
+                : "Not yet settled"}
+          </p>
         </div>
         <div>
-          <p className="text-slate-500">Payment net</p>
-          <p>{order.payment_status ? formatMoney(order.payment_net, currency) : "Not yet settled"}</p>
+          <p className="text-slate-500">Postage cost{order.shipping_profile_name ? ` (${order.shipping_profile_name})` : ""}</p>
+          <p>{order.shipping_cost_snapshot != null ? `-${formatMoney(order.shipping_cost_snapshot, currency)}` : "—"}</p>
         </div>
         <div>
-          <p className="text-slate-500">Cost of goods</p>
-          <p>{hasCogs ? formatMoney(cogsTotal.toFixed(2), currency) : "—"}</p>
+          <p className="text-slate-500">Cost of goods (materials + kitting)</p>
+          <p>{hasMaterialsCogs ? `-${formatMoney(materialsCogsTotal.toFixed(2), currency)}` : "—"}</p>
         </div>
         <div>
           <p className="text-slate-500">Net profit</p>
@@ -207,6 +216,73 @@ function OrderFinancialsPanel({ order }: { order: Order }) {
           </p>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ManualShippingEditor({ order, onSaved }: { order: Order; onSaved: () => void }) {
+  const { data: shippingProfiles } = useQuery({
+    queryKey: ["settings", "shipping-profiles"],
+    queryFn: shippingProfilesApi.list,
+  });
+  const profiles = shippingProfiles ?? [];
+
+  const [shippingProfileId, setShippingProfileId] = useState(
+    order.shipping_profile_id != null ? String(order.shipping_profile_id) : ""
+  );
+  const [shippingCharged, setShippingCharged] = useState(order.shipping_charged ?? "");
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      ordersApi.update(order.id, {
+        shipping_profile_id: shippingProfileId ? Number(shippingProfileId) : null,
+        shipping_charged: shippingCharged || null,
+      }),
+    onSuccess: onSaved,
+  });
+
+  return (
+    <div className="rounded bg-white p-4 text-sm shadow-sm">
+      <h2 className="mb-3 text-sm font-medium text-slate-600">Shipping</h2>
+      <div className="flex flex-wrap items-end gap-4">
+        <label className="flex flex-col gap-1">
+          <span className="text-slate-500">Shipping profile</span>
+          <select
+            className="w-48 rounded border border-slate-300 px-2 py-1"
+            value={shippingProfileId}
+            onChange={(e) => {
+              const id = e.target.value;
+              setShippingProfileId(id);
+              const profile = profiles.find((p) => String(p.id) === id);
+              if (profile) setShippingCharged(profile.price);
+            }}
+          >
+            <option value="">No profile</option>
+            {profiles.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-slate-500">Shipping charged</span>
+          <input
+            className="w-28 rounded border border-slate-300 px-2 py-1"
+            placeholder="0.00"
+            value={shippingCharged}
+            onChange={(e) => setShippingCharged(e.target.value)}
+          />
+        </label>
+        <button
+          onClick={() => saveMutation.mutate()}
+          disabled={saveMutation.isPending}
+          className="rounded bg-slate-900 px-3 py-1.5 text-white disabled:opacity-50"
+        >
+          Save
+        </button>
+      </div>
+      <ErrorBanner error={saveMutation.error} />
     </div>
   );
 }

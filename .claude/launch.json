@@ -10,7 +10,7 @@
     {
       "name": "backend",
       "runtimeExecutable": "cmd.exe",
-      "runtimeArgs": ["/c", "cd /d D:\\Projects\\StockSmith\\backend && C:\\Users\\Benja\\AppData\\Local\\Microsoft\\WinGet\\Packages\\astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe\\uv.exe run uvicorn app.main:app --host 127.0.0.1 --port 8000"],
+      "runtimeArgs": ["/c", "cd /d D:\\Projects\\StockSmith\\backend && C:\\Users\\Benja\\AppData\\Local\\Microsoft\\WinGet\\Packages\\astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe\\uv.exe run uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload"],
       "port": 8000
     }
   ]

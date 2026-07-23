@@ -6,6 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.pricing import ProductPriceSnapshot
 from app.models.product import Product, ProductMaterial
 from app.services import platform_fees
+from app.services.shipping_profiles import (
+    get_shipping_profiles_by_id,
+    resolve_product_shipping_profile,
+    resolve_shipping_cost_for_fee_source,
+)
 
 # A material cost recompute only triggers a fresh snapshot if the product's cost_per_unit
 # has drifted by more than this fraction since its last snapshot — otherwise every tiny
@@ -35,11 +40,15 @@ def compute_profit_margin(
 
 async def snapshot_product_pricing(session: AsyncSession, product: Product, cost_per_unit: Decimal) -> None:
     fee_source, fee_components = await platform_fees.get_resolver_context(session)
+    shipping_profiles_by_id = await get_shipping_profiles_by_id(session)
+    shipping_profile = resolve_product_shipping_profile(shipping_profiles_by_id, product)
+    shipping_price = shipping_profile.price if shipping_profile else None
+    shipping_cost = resolve_shipping_cost_for_fee_source(shipping_profile, fee_source) if shipping_profile else None
     effective_fee_percent = platform_fees.resolve_fee_percent(
-        fee_source, fee_components, product.platform_fee_percent, product.sale_price, product.shipping_cost
+        fee_source, fee_components, product.platform_fee_percent, product.sale_price, shipping_price
     )
     _, margin_percent = compute_profit_margin(
-        product.sale_price, cost_per_unit, product.shipping_cost, effective_fee_percent
+        product.sale_price, cost_per_unit, shipping_cost, effective_fee_percent
     )
     session.add(
         ProductPriceSnapshot(

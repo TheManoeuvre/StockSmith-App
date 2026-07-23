@@ -22,7 +22,6 @@ class ProductVariant(Base):
             "allocated_qty >= 0 AND allocated_qty <= current_stock", name="ck_product_variants_allocated_qty_range"
         ),
         CheckConstraint("sale_price >= 0", name="ck_product_variants_sale_price_nonneg"),
-        CheckConstraint("shipping_cost >= 0", name="ck_product_variants_shipping_cost_nonneg"),
         CheckConstraint(
             "platform_fee_percent >= 0 AND platform_fee_percent <= 100",
             name="ck_product_variants_platform_fee_percent_range",
@@ -42,7 +41,9 @@ class ProductVariant(Base):
     # NULL means "falls back to the product's own price" — only meaningful when the
     # product's pricing_mode is "variable" or "line" (see models/product.py:PricingMode).
     sale_price: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
-    shipping_cost: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    shipping_profile_id: Mapped[int | None] = mapped_column(
+        ForeignKey("shipping_profiles.id", ondelete="SET NULL"), nullable=True
+    )
     platform_fee_percent: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

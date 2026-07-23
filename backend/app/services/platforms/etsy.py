@@ -322,9 +322,24 @@ class EtsyAdapter:
         grand_total = self._parse_money(receipt.get("grandtotal"))
         currency = (receipt.get("grandtotal") or {}).get("currency_code")
 
-        payment_fees, payment_net, payment_status = await self._fetch_payment(
+        payment_fees, payment_net, payment_status, payment_id = await self._fetch_payment(
             session, connection, receipt.get("receipt_id")
         )
+
+        # The Payments endpoint's own amount_fees is documented by Etsy as "the original
+        # card processing fee" only — it excludes the marketplace transaction fee,
+        # regulatory operating fee, and VAT on all of those, so it understates what the
+        # seller actually sees as "You earned" on the order page. The full total is only
+        # obtainable from the payment-account ledger, and only once the order has
+        # actually shipped (that's when the fee/VAT/shipping-label entries post) — see
+        # _fetch_platform_fees_total. Falls back to the narrow amount_fees if the ledger
+        # fetch comes back empty (e.g. fees haven't posted yet).
+        if is_shipped:
+            ledger_fees_total = await self._fetch_platform_fees_total(
+                session, connection, receipt, transactions, payment_id
+            )
+            if ledger_fees_total is not None:
+                payment_fees = ledger_fees_total
 
         return ExternalOrder(
             external_order_id=str(receipt.get("receipt_id")),
@@ -386,26 +401,140 @@ class EtsyAdapter:
 
     async def _fetch_payment(
         self, session, connection: PlatformConnection, receipt_id
-    ) -> tuple[str | None, str | None, str | None]:
+    ) -> tuple[str | None, str | None, str | None, int | None]:
         """getShopPaymentByReceiptId — a separate call per receipt for Etsy's own
         gross/fees/net breakdown. An order whose payment hasn't settled yet (or any
-        non-200 response) just means these stay None; it doesn't fail the sync."""
+        non-200 response) just means these stay None; it doesn't fail the sync.
+        payment_id is returned alongside so _fetch_platform_fees_total can match this
+        payment's own processing-fee ledger entries back to it."""
         if receipt_id is None:
-            return None, None, None
+            return None, None, None, None
         response = await self._authed_request(
             session, connection, "GET", f"/shops/{connection.external_account_id}/receipts/{receipt_id}/payments"
         )
         if response.status_code != 200:
-            return None, None, None
+            return None, None, None, None
         results = response.json().get("results", [])
         if not results:
-            return None, None, None
+            return None, None, None, None
         payment = results[0]
         return (
             self._parse_money(payment.get("amount_fees")),
             self._parse_money(payment.get("amount_net")),
             payment.get("status"),
+            payment.get("payment_id"),
         )
+
+    async def _fetch_ledger_entries(
+        self, session, connection: PlatformConnection, min_created: int, max_created: int
+    ) -> list[dict]:
+        """getShopPaymentAccountLedgerEntries — paginated fetch of every ledger entry in
+        a date window. There's no per-receipt filter on this endpoint, so callers narrow
+        the window as tightly as they reasonably can and match entries back to a receipt
+        themselves (see _fetch_platform_fees_total)."""
+        params: dict[str, int] = {"min_created": min_created, "max_created": max_created, "limit": 100, "offset": 0}
+        entries: list[dict] = []
+        for _ in range(_MAX_PAGES):
+            response = await self._authed_request(
+                session,
+                connection,
+                "GET",
+                f"/shops/{connection.external_account_id}/payment-account/ledger-entries",
+                params=params,
+            )
+            if response.status_code != 200:
+                break
+            body = response.json()
+            results = body.get("results", [])
+            entries.extend(results)
+            total = body.get("count", len(results))
+            params["offset"] = int(params["offset"]) + len(results)
+            if not results or int(params["offset"]) >= total:
+                break
+        return entries
+
+    # Ledger entries whose amount is itself a fee/VAT charge attributable to a specific
+    # receipt/transaction/payment — used to recognise the "parent" entries in
+    # _fetch_platform_fees_total before pulling in their vat_seller_services children.
+    _FEE_LEDGER_TYPES = {
+        "transaction",
+        "shipping_transaction",
+        "regulatory_operating_fee",
+        "vat_on_processing_fees",
+        "PAYMENT_PROCESSING_FEE",
+    }
+
+    async def _fetch_platform_fees_total(
+        self, session, connection: PlatformConnection, receipt: dict, transactions: list[dict], payment_id: int | None
+    ) -> str | None:
+        """Aggregates every ledger entry attributable to this receipt's platform fees —
+        the marketplace transaction fee (charged separately on the item and on shipping
+        portions), regulatory operating fee, card processing fee, and VAT on all of the
+        above — into a single total. This is what Etsy shows the seller as "Fees &
+        credits" on the order's own Earnings tab; the receipt-scoped Payments endpoint's
+        amount_fees does NOT include all of this (see _parse_receipt).
+
+        Ledger entries aren't filterable by receipt — this fetches every entry in a
+        window from the receipt's creation to now (capped) and matches by:
+          - reference_type == "receipt" and reference_id == this receipt_id (direct fee
+            entries: regulatory_operating_fee, vat_on_processing_fees,
+            shipping_transaction)
+          - reference_type == "transaction" and reference_id in this receipt's own
+            transaction ids (the item-price portion of the transaction fee)
+          - reference_type in ("processing_fee", "shop_payment") and reference_id ==
+            payment_id, excluding the PAYMENT_GROSS entry itself (the card processing
+            fee)
+          - any entry whose parent_entry_id points at one of the entries matched above
+            (the vat_seller_services children — VAT charged on top of each fee)
+
+        Returns None (leave the caller's existing value alone) if the window couldn't be
+        fetched or nothing matched — fees may simply not have posted to the ledger yet.
+        """
+        receipt_id = receipt.get("receipt_id")
+        create_ts = receipt.get("create_timestamp") or receipt.get("created_timestamp")
+        if receipt_id is None or create_ts is None:
+            return None
+
+        min_created = int(create_ts)
+        # Fee/VAT/shipping-label entries were observed posting within hours of shipment
+        # in practice, but this caps the window at 30 days out so a very old re-synced
+        # order never triggers an unbounded, expensive fetch.
+        max_created = min(int(datetime.now(timezone.utc).timestamp()), min_created + 30 * 24 * 3600)
+        if max_created <= min_created:
+            return None
+
+        entries = await self._fetch_ledger_entries(session, connection, min_created, max_created)
+        if not entries:
+            return None
+
+        transaction_ids = {
+            str(tx.get("transaction_id")) for tx in transactions if tx.get("transaction_id") is not None
+        }
+
+        fee_entries = [
+            e
+            for e in entries
+            if e.get("ledger_type") in self._FEE_LEDGER_TYPES
+            and (
+                (e.get("reference_type") == "receipt" and e.get("reference_id") == receipt_id)
+                or (e.get("reference_type") == "transaction" and str(e.get("reference_id")) in transaction_ids)
+                or (
+                    payment_id is not None
+                    and e.get("reference_type") in ("processing_fee", "shop_payment")
+                    and e.get("reference_id") == payment_id
+                )
+            )
+        ]
+        if not fee_entries:
+            return None
+
+        fee_entry_ids = {e["entry_id"] for e in fee_entries if e.get("entry_id") is not None}
+        vat_children = [
+            e for e in entries if e.get("description") == "vat_seller_services" and e.get("parent_entry_id") in fee_entry_ids
+        ]
+
+        total_pennies = sum(e.get("amount", 0) for e in fee_entries) + sum(e.get("amount", 0) for e in vat_children)
+        return f"{abs(total_pennies) / 100:.2f}"
 
     async def push_listing_quantity(self, session, connection: PlatformConnection, listing_ref, sku, qty) -> None:
         raise NotImplementedError("Quantity push-back to Etsy is deliberately deferred — see rollout Stage 3")

@@ -10,7 +10,7 @@ export const variantsApi = {
       sku_suffix?: string | null;
       is_active?: boolean;
       sale_price?: string | null;
-      shipping_cost?: string | null;
+      shipping_profile_id?: number | null;
       platform_fee_percent?: string | null;
     }
   ) => api.patch<Variant>(`/variants/${id}`, input),
