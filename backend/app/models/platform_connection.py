@@ -5,6 +5,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, portable_enum
 from app.models.listing import ListingPlatform
+from app.models.platform_credential import PlatformEnvironment
 from app.services.crypto import EncryptedString
 
 
@@ -17,7 +18,9 @@ class PlatformConnection(Base):
 
     Tokens live here rather than in .env because refresh tokens rotate at runtime and
     need to be written back on every use — .env isn't runtime-writable. Static app
-    credentials (client id/secret) stay in config.py/.env since those never change.
+    credentials (client id/secret) live in PlatformAppCredential instead (see
+    services/platform_credentials.py) — a separate table because those are shared across
+    every shop that ever connects, not tied to one OAuth grant.
 
     access_token/refresh_token are encrypted at rest (see app/services/crypto.py) — the
     underlying column is still a plain string column, so no migration is needed to
@@ -30,6 +33,16 @@ class PlatformConnection(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     platform: Mapped[ListingPlatform] = mapped_column(
         portable_enum(ListingPlatform, name="listing_platform"), nullable=False, unique=True
+    )
+    # Which keyset/host this connection's tokens belong to — only meaningful for eBay
+    # (Etsy has no sandbox). One PlatformConnection row per platform still means only one
+    # environment can be connected at a time; switching requires disconnecting first, by
+    # design — this app tests against Sandbox, then cuts over to Production, rather than
+    # tracking both simultaneously (see docs/plan-marketplace-integrations.md Section 2).
+    environment: Mapped[PlatformEnvironment] = mapped_column(
+        portable_enum(PlatformEnvironment, name="platform_environment"),
+        nullable=False,
+        default=PlatformEnvironment.production,
     )
     access_token: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
     refresh_token: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
@@ -50,6 +63,17 @@ class PlatformConnection(Base):
     last_orders_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     connected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_refreshed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Background sync scheduler settings (services/sync_scheduler.py) — off by default so
+    # a freshly-connected shop doesn't start unattended commits before the user has run at
+    # least one manual preview/sync to sanity-check the adapter's parsing against this
+    # real shop's data (see EtsyAdapter's own docstrings on why that matters).
+    auto_sync_enabled: Mapped[bool] = mapped_column(default=False, nullable=False)
+    sync_interval_minutes: Mapped[int] = mapped_column(default=15, nullable=False)
+    # Consecutive PlatformAuthError count from the background scheduler only (manual
+    # syncs don't touch this) — reset to 0 on any success, and once it crosses
+    # sync_scheduler._MAX_CONSECUTIVE_AUTH_FAILURES the scheduler flips auto_sync_enabled
+    # back off itself rather than retrying a dead connection forever.
+    consecutive_auth_failures: Mapped[int] = mapped_column(default=0, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

@@ -25,6 +25,7 @@ export interface ProductInput {
   shipping_profile_id?: number | null;
   platform_fee_percent?: string | null;
   platform_ceiling_qty?: number | null;
+  push_buildable_capacity?: boolean;
   pricing_mode?: PricingMode;
   pricing_variable_attribute?: number | null;
 }

@@ -3,11 +3,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { getSettings, openExternalUrl, saveSettings } from "../lib/tauri";
 import { healthCheck } from "../api/client";
-import { platformsApi } from "../api/platforms";
+import { platformsApi, type PlatformEnvironment } from "../api/platforms";
 import type { ListingPlatform } from "../api/types";
 import { PLATFORM_LABELS } from "../lib/platforms";
 import { ErrorBanner } from "../components/common/ErrorBanner";
 import { PlatformSyncPanel } from "../components/settings/PlatformSyncPanel";
+import { PlatformCredentialsForm } from "../components/settings/PlatformCredentialsForm";
 import { MarginFeeSettings } from "../components/settings/MarginFeeSettings";
 import { ShippingProfileSettings } from "../components/settings/ShippingProfileSettings";
 import { CurrencySettings } from "../components/settings/CurrencySettings";
@@ -186,6 +187,11 @@ function Settings() {
 function PlatformIntegrationCard({ platform }: { platform: ListingPlatform }) {
   const label = PLATFORM_LABELS[platform];
   const queryClient = useQueryClient();
+  // Which environment to connect/edit credentials against — only meaningful for eBay
+  // (the toggle only renders there); Etsy always uses "production". Local UI state, not
+  // server state: it picks which environment's credentials this card is showing/editing
+  // and which one "Connect" targets, independent of whatever's actually connected.
+  const [environment, setEnvironment] = useState<PlatformEnvironment>("production");
 
   const { data: platformStatus } = useQuery({
     queryKey: ["platforms", platform, "status"],
@@ -200,7 +206,7 @@ function PlatformIntegrationCard({ platform }: { platform: ListingPlatform }) {
 
   const connectMutation = useMutation({
     mutationFn: async () => {
-      const { authorize_url } = await platformsApi.connect(platform);
+      const { authorize_url } = await platformsApi.connect(platform, environment);
       await openExternalUrl(authorize_url);
     },
   });
@@ -225,6 +231,11 @@ function PlatformIntegrationCard({ platform }: { platform: ListingPlatform }) {
               {platformStatus?.connected ? (
                 <p className="text-sm text-green-700">
                   {platformStatus.shop_name ?? `Connected — account ${platformStatus.account_id}`}
+                  {platformStatus.environment === "sandbox" && (
+                    <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">
+                      Sandbox
+                    </span>
+                  )}
                 </p>
               ) : (
                 <p className="text-sm text-slate-500">Not connected</p>
@@ -253,6 +264,7 @@ function PlatformIntegrationCard({ platform }: { platform: ListingPlatform }) {
           </div>
         </div>
         <ErrorBanner error={connectMutation.error ?? disconnectMutation.error} />
+        <PlatformCredentialsForm platform={platform} environment={environment} onEnvironmentChange={setEnvironment} />
       </div>
       {platformStatus?.connected && <PlatformSyncPanel platform={platform} />}
     </div>

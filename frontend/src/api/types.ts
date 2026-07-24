@@ -108,7 +108,10 @@ export interface Product {
   max_sellable_reason: string | null;
   expected_max_sellable: number | null;
   expected_max_sellable_reason: string | null;
+  theoretical_max_sellable: number | null;
+  theoretical_max_sellable_reason: string | null;
   platform_ceiling_qty: number | null;
+  push_buildable_capacity: boolean;
   cost_per_unit: string | null;
   main_image_asset_id: number | null;
   ready_to_ship: number | null;
@@ -242,6 +245,8 @@ export interface Variant {
   max_sellable_reason: string | null;
   expected_max_sellable: number | null;
   expected_max_sellable_reason: string | null;
+  theoretical_max_sellable: number | null;
+  theoretical_max_sellable_reason: string | null;
   cost_per_unit: string | null;
   effective_bom: VariantBomLine[];
   effective_kitting_bom: VariantKittingBomLine[];
@@ -355,6 +360,7 @@ export interface Order {
   financials_synced_at: string | null;
   net_profit: string | null;
   sync_issue: string | null;
+  pending_marketplace_cancellation: boolean;
   lines: OrderLine[];
 }
 

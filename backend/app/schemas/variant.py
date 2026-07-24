@@ -52,6 +52,8 @@ class VariantRead(VariantBase):
     max_sellable_reason: str | None = None
     expected_max_sellable: int | None = None
     expected_max_sellable_reason: str | None = None
+    theoretical_max_sellable: int | None = None
+    theoretical_max_sellable_reason: str | None = None
     cost_per_unit: Decimal | None = None
     effective_bom: list[VariantBomLine] = []
     effective_kitting_bom: list[VariantKittingBomLine] = []

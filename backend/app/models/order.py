@@ -68,6 +68,14 @@ class Order(Base):
     # (e.g. Etsy shows it shipped but nothing is allocated locally) — cleared automatically
     # once that reconciliation succeeds on a later sync. See order_sync._reconcile_status.
     sync_issue: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Set when a sync sees the marketplace report this order as cancelled — deliberately
+    # NOT auto-applied (unlike sync_issue's self-healing), since a marketplace-reported
+    # cancellation needs the user to actually choose a scrap/return-to-stock disposition
+    # per line (see services/returns.py), not have it silently happen for them. Cleared
+    # once the user runs the cancel flow themselves. Etsy's API has no seller-initiated
+    # cancel/refund write endpoint, so this can only ever flow marketplace -> StockSmith,
+    # never the other way.
+    pending_marketplace_cancellation: Mapped[bool] = mapped_column(default=False, nullable=False)
 
     # The shipping method used for this order (one profile per order — a single parcel,
     # not per line). For synced orders this defaults from the first resolvable line's

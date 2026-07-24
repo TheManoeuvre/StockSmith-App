@@ -1,16 +1,47 @@
 import { api } from "./client";
 import type { ListingPlatform } from "./types";
 
+export type PlatformEnvironment = "production" | "sandbox";
+
 export interface PlatformStatus {
   connected: boolean;
   account_id: string | null;
   shop_name: string | null;
   has_shop_icon: boolean;
   scopes: string | null;
+  environment: PlatformEnvironment;
   connected_at: string | null;
   sync_start_date: string | null;
   last_orders_synced_at: string | null;
   last_refreshed_at: string | null;
+  auto_sync_enabled: boolean;
+  sync_interval_minutes: number;
+  last_sync_attempt_at: string | null;
+  last_sync_success_at: string | null;
+  last_sync_error: string | null;
+}
+
+export interface SyncSettingsUpdate {
+  auto_sync_enabled?: boolean;
+  sync_interval_minutes?: number;
+}
+
+export interface ListingPushRead {
+  id: number;
+  product_id: number | null;
+  product_name: string | null;
+  variant_id: number | null;
+  variant_name: string | null;
+  platform: ListingPlatform;
+  attempted_qty: number;
+  status: "success" | "error";
+  error_message: string | null;
+  attempted_at: string;
+}
+
+export interface ListingPushPage {
+  items: ListingPushRead[];
+  total: number;
 }
 
 export interface SyncPreviewLine {
@@ -98,9 +129,26 @@ export interface BulkListingSyncResult {
   not_found_count: number;
 }
 
+export interface PlatformCredential {
+  platform: ListingPlatform;
+  environment: PlatformEnvironment;
+  client_id: string | null;
+  client_secret_set: boolean;
+  public_base_url: string | null;
+  ru_name: string | null;
+}
+
+export interface PlatformCredentialWrite {
+  client_id?: string;
+  client_secret?: string;
+  public_base_url?: string;
+  ru_name?: string;
+}
+
 export const platformsApi = {
   status: (platform: ListingPlatform) => api.get<PlatformStatus>(`/platforms/${platform}/status`),
-  connect: (platform: ListingPlatform) => api.post<{ authorize_url: string }>(`/platforms/${platform}/connect`),
+  connect: (platform: ListingPlatform, environment: PlatformEnvironment = "production") =>
+    api.post<{ authorize_url: string }>(`/platforms/${platform}/connect?environment=${environment}`),
   disconnect: (platform: ListingPlatform) => api.post<void>(`/platforms/${platform}/disconnect`),
   previewSync: (platform: ListingPlatform) => api.post<SyncPreviewResult>(`/platforms/${platform}/preview-sync`),
   syncOrders: (platform: ListingPlatform) => api.post<SyncCommitResult>(`/platforms/${platform}/sync-orders`),
@@ -116,4 +164,15 @@ export const platformsApi = {
     api.get<Record<number, ProductSyncStatus>>(`/platforms/${platform}/all-sync-status`),
   updateSyncStartDate: (platform: ListingPlatform, syncStartDate: string) =>
     api.patch<PlatformStatus>(`/platforms/${platform}/sync-start-date`, { sync_start_date: syncStartDate }),
+  updateSyncSettings: (platform: ListingPlatform, payload: SyncSettingsUpdate) =>
+    api.patch<PlatformStatus>(`/platforms/${platform}/sync-settings`, payload),
+  listingPushLog: (platform: ListingPlatform, limit: number, offset: number) =>
+    api.get<ListingPushPage>(`/platforms/${platform}/listing-push-log?limit=${limit}&offset=${offset}`),
+  getCredentials: (platform: ListingPlatform, environment: PlatformEnvironment = "production") =>
+    api.get<PlatformCredential>(`/platforms/${platform}/credentials?environment=${environment}`),
+  updateCredentials: (
+    platform: ListingPlatform,
+    payload: PlatformCredentialWrite,
+    environment: PlatformEnvironment = "production"
+  ) => api.patch<PlatformCredential>(`/platforms/${platform}/credentials?environment=${environment}`, payload),
 };

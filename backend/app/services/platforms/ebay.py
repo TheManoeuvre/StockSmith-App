@@ -6,15 +6,31 @@ from datetime import datetime, timedelta, timezone
 import httpx
 
 from app.models.platform_connection import PlatformConnection
-from app.services.platforms.base import ExternalListingRef, ExternalOrder, ExternalOrderLine, TokenSet
+from app.models.platform_credential import PlatformEnvironment
+from app.services.platforms.base import ExternalListingRef, ExternalOrder, ExternalOrderLine, TokenSet, ensure_utc
 from app.services.platforms.errors import PlatformAuthError, PlatformRateLimitError, PlatformSyncError
 
 logger = logging.getLogger("stocksmith.ebay")
 
-AUTHORIZE_URL = "https://auth.ebay.com/oauth2/authorize"
-TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
-API_BASE = "https://api.ebay.com"
-IDENTITY_BASE = "https://apiz.ebay.com"
+# Sandbox and Production are entirely separate keysets AND separate API hosts — see
+# docs/plan-marketplace-integrations.md Section 2. auth./api. sandbox hosts are
+# well-documented by eBay; apiz.sandbox.ebay.com follows the same apiz<->api naming
+# eBay uses for its production identity host but, like everything else in this file
+# per the class docstring below, hasn't been verified against a live Sandbox call.
+_HOSTS: dict[PlatformEnvironment, dict[str, str]] = {
+    PlatformEnvironment.production: {
+        "authorize": "https://auth.ebay.com/oauth2/authorize",
+        "token": "https://api.ebay.com/identity/v1/oauth2/token",
+        "api": "https://api.ebay.com",
+        "identity": "https://apiz.ebay.com",
+    },
+    PlatformEnvironment.sandbox: {
+        "authorize": "https://auth.sandbox.ebay.com/oauth2/authorize",
+        "token": "https://api.sandbox.ebay.com/identity/v1/oauth2/token",
+        "api": "https://api.sandbox.ebay.com",
+        "identity": "https://apiz.sandbox.ebay.com",
+    },
+}
 
 _REFRESH_SKEW = timedelta(minutes=5)
 
@@ -22,6 +38,11 @@ _REFRESH_SKEW = timedelta(minutes=5)
 # reasonable slice of the daily API budget rather than an unbounded crawl.
 _MAX_PAGES = 20
 _PAGE_LIMIT = 200  # eBay's documented max page size for getOrders
+# getInventoryItems' documented limit range is 1-100 (default 100) — distinct from
+# getOrders' 200 above; conflating the two was a latent bug (never caught because it
+# would 400 loudly rather than silently drop items, and no live account with >100
+# inventory items had exercised this path until now).
+_INVENTORY_PAGE_LIMIT = 100
 _MAX_RATE_LIMIT_RETRIES = 3
 
 
@@ -32,19 +53,26 @@ class EbayAdapter:
     Unlike Etsy, eBay's refresh token does not rotate on use and is long-lived
     (~18 months) — refresh() only ever returns a new access token.
 
-    Exact request/response shapes below are sourced from eBay's published API docs
-    (no live-connected eBay shop was available to verify against while building this,
-    unlike the Etsy adapter) — treat field parsing as best-effort and verify against a
-    real connected account before trusting it unattended, same caveat EtsyAdapter's own
-    docstrings carry for its own uncertain spots.
-
-    push_listing_quantity is intentionally unimplemented — quantity push-back is
-    deliberately deferred, matching EtsyAdapter's own current stage.
+    fetch_orders_since and build_listing_sku_index have been verified against a live
+    Sandbox connection (empty-result parsing only — the test account had no orders or
+    listings yet); push_listing_quantity has not, since no listing existed to push
+    against. Treat any request/response shape not exercised that way as best-effort,
+    same caveat every uncertain spot in this file already carries. Requires the
+    commerce.identity.readonly scope alongside the Sell-API ones (see
+    routers/platforms._SCOPES) — fetch_account_id 403s without it, confirmed live.
     """
 
-    def __init__(self, client_id: str, client_secret: str):
+    def __init__(
+        self, client_id: str, client_secret: str, environment: PlatformEnvironment = PlatformEnvironment.production
+    ):
         self.client_id = client_id
         self.client_secret = client_secret
+        self.environment = environment
+        hosts = _HOSTS[environment]
+        self.authorize_url = hosts["authorize"]
+        self.token_url = hosts["token"]
+        self.api_base = hosts["api"]
+        self.identity_base = hosts["identity"]
 
     @property
     def _basic_auth_header(self) -> str:
@@ -64,12 +92,12 @@ class EbayAdapter:
             "state": state,
         }
         query = httpx.QueryParams(params)
-        return f"{AUTHORIZE_URL}?{query}"
+        return f"{self.authorize_url}?{query}"
 
     async def exchange_code(self, code: str, code_verifier: str, redirect_uri: str) -> TokenSet:
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.post(
-                TOKEN_URL,
+                self.token_url,
                 headers={
                     "Content-Type": "application/x-www-form-urlencoded",
                     "Authorization": self._basic_auth_header,
@@ -81,7 +109,7 @@ class EbayAdapter:
     async def refresh(self, refresh_token: str) -> TokenSet:
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.post(
-                TOKEN_URL,
+                self.token_url,
                 headers={
                     "Content-Type": "application/x-www-form-urlencoded",
                     "Authorization": self._basic_auth_header,
@@ -107,7 +135,7 @@ class EbayAdapter:
     async def fetch_account_id(self, access_token: str) -> str:
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.get(
-                f"{IDENTITY_BASE}/commerce/identity/v1/user/",
+                f"{self.identity_base}/commerce/identity/v1/user/",
                 headers={"Authorization": f"Bearer {access_token}"},
             )
         if response.status_code != 200:
@@ -159,9 +187,10 @@ class EbayAdapter:
             return await client.request(method, url, headers=headers, **kwargs)
 
     async def _ensure_fresh(self, session, connection: PlatformConnection) -> None:
-        if connection.access_token_expires_at is None or connection.refresh_token is None:
+        expires_at = ensure_utc(connection.access_token_expires_at)
+        if expires_at is None or connection.refresh_token is None:
             raise PlatformAuthError("eBay connection has no stored tokens — reconnect required")
-        if datetime.now(timezone.utc) + _REFRESH_SKEW >= connection.access_token_expires_at:
+        if datetime.now(timezone.utc) + _REFRESH_SKEW >= expires_at:
             await self._do_refresh(session, connection)
 
     async def _do_refresh(self, session, connection: PlatformConnection) -> None:
@@ -188,7 +217,7 @@ class EbayAdapter:
         orders: list[ExternalOrder] = []
         for _ in range(_MAX_PAGES):
             response = await self._authed_request(
-                session, connection, "GET", f"{API_BASE}/sell/fulfillment/v1/order", params=params
+                session, connection, "GET", f"{self.api_base}/sell/fulfillment/v1/order", params=params
             )
             if response.status_code != 200:
                 raise PlatformSyncError(f"Failed to fetch eBay orders: {response.status_code} {response.text}")
@@ -240,7 +269,11 @@ class EbayAdapter:
             currency=currency,
             grand_total=self._parse_money(pricing.get("total")),
             subtotal=self._parse_money(pricing.get("priceSubtotal")),
-            shipping_charged=self._parse_money(pricing.get("deliveryCost")),
+            # deliveryCost is documented as "before any shipping/delivery discount is
+            # applied" — confirmed live: showed the pre-discount amount as what the buyer
+            # paid, overstating it by exactly the deliveryDiscount on an order that had
+            # one. What the buyer actually paid is deliveryCost minus deliveryDiscount.
+            shipping_charged=self._net_money(pricing.get("deliveryCost"), pricing.get("deliveryDiscount")),
             tax_charged=self._parse_money(pricing.get("tax")),
             discount_amount=self._parse_money(pricing.get("priceDiscountSubtotal")),
             payment_fees=payment_fees,
@@ -249,13 +282,19 @@ class EbayAdapter:
         )
 
     def _parse_line_item(self, line_item: dict) -> ExternalOrderLine:
-        price = (line_item.get("lineItemCost") or {})
+        # lineItemCost is the TOTAL for the line, not a per-unit price — confirmed
+        # live: showed exactly double the correct value on a qty-1 line where the
+        # buyer had actually been charged for 2 units bundled into one line item.
+        cost = (line_item.get("lineItemCost") or {})
+        qty = int(line_item.get("quantity", 1))
+        total_value = cost.get("value")
+        unit_price = f"{float(total_value) / qty:.2f}" if total_value is not None and qty > 0 else None
         return ExternalOrderLine(
             external_line_id=str(line_item.get("lineItemId")),
             sku=line_item.get("sku") or None,
-            qty=int(line_item.get("quantity", 1)),
-            unit_price=self._parse_money(price),
-            currency=price.get("currency"),
+            qty=qty,
+            unit_price=unit_price,
+            currency=cost.get("currency"),
         )
 
     @staticmethod
@@ -274,6 +313,22 @@ class EbayAdapter:
         value = money.get("value")
         return f"{float(value):.2f}" if value is not None else None
 
+    @staticmethod
+    def _net_money(gross: dict | None, discount: dict | None) -> str | None:
+        # eBay reports deliveryDiscount as an already-negative delta (e.g. "-3.4" against
+        # a deliveryCost of "7.2") — confirmed live via the raw pricingSummary payload, so
+        # this must ADD the two, not subtract. Subtracting a negative discount here
+        # previously overstated shipping (7.2 - (-3.4) = 10.6 instead of the buyer's
+        # actual 3.8).
+        if not gross:
+            return None
+        gross_value = gross.get("value")
+        if gross_value is None:
+            return None
+        discount_value = (discount or {}).get("value")
+        net = float(gross_value) + float(discount_value or 0)
+        return f"{net:.2f}"
+
     async def _fetch_transactions(
         self, session, connection: PlatformConnection, order_id
     ) -> tuple[str | None, str | None, str | None]:
@@ -287,7 +342,7 @@ class EbayAdapter:
             session,
             connection,
             "GET",
-            f"{API_BASE}/sell/finances/v1/transaction",
+            f"{self.api_base}/sell/finances/v1/transaction",
             params={"filter": f"orderId:{{{order_id}}}"},
         )
         if response.status_code != 200:
@@ -314,8 +369,68 @@ class EbayAdapter:
             sale.get("transactionStatus"),
         )
 
-    async def push_listing_quantity(self, session, connection: PlatformConnection, listing_ref, sku, qty) -> None:
-        raise NotImplementedError("Quantity push-back to eBay is deliberately deferred")
+    async def push_listing_quantity(
+        self, session, connection: PlatformConnection, listing_ref: ExternalListingRef, sku: str | None, qty: int
+    ) -> None:
+        """Sell Inventory API bulkUpdatePriceQuantity, updating both this SKU's
+        shipToLocationAvailability.quantity (inventory-item level) and, when a live
+        offer exists for it, that offer's availableQuantity — unlike Etsy's
+        updateListingInventory, this is a targeted partial update, not a full replace, so
+        there's no GET-then-PUT round trip needed for the item level.
+
+        eBay's own docs state the live listing quantity is min(item-level qty,
+        offer-level availableQuantity) — item-level alone is sufficient to correctly
+        drive a quantity DOWN to (and including) 0, but a later increase could be
+        silently capped if the offer-level number was ever set independently at
+        offer-creation time and never touched since. Updating both keeps them in sync in
+        both directions. A literal 0 is natively accepted by eBay's Inventory API as the
+        standard "out of stock" signal (confirmed via eBay's docs) — unlike Etsy, no
+        special-casing is needed here for the zero value itself.
+
+        Confirmed live: a SKU with no live offer (e.g. its listing was never migrated to
+        an Inventory API object — see build_listing_sku_index's docstring) 404s on
+        GET .../offer?sku=... with "This Offer is not available"; that's treated as "no
+        offer to also update", not an error, since the item-level update alone is still
+        valid and matches this method's pre-existing behavior for such SKUs.
+        """
+        if sku is None:
+            raise PlatformSyncError("Cannot push a quantity update to eBay without a SKU")
+
+        offer_ids = await self._resolve_offer_ids(session, connection, sku)
+
+        request: dict = {"sku": sku, "shipToLocationAvailability": {"quantity": qty}}
+        if offer_ids:
+            request["offers"] = [{"offerId": offer_id, "availableQuantity": qty} for offer_id in offer_ids]
+
+        body = {"requests": [request]}
+        response = await self._authed_request(
+            session, connection, "POST", f"{self.api_base}/sell/inventory/v1/bulk_update_price_quantity", json=body
+        )
+        if response.status_code != 200:
+            raise PlatformSyncError(f"Failed to update eBay inventory quantity: {response.status_code} {response.text}")
+
+        result = response.json()
+        matched = next((r for r in result.get("responses", []) if r.get("sku") == sku), None)
+        if matched is None:
+            raise PlatformSyncError(f"eBay bulk_update_price_quantity response did not include SKU '{sku}'")
+        status_code = matched.get("statusCode")
+        if status_code is not None and not (200 <= status_code < 300):
+            raise PlatformSyncError(
+                f"eBay rejected the quantity update for SKU '{sku}': {status_code} {matched.get('errors')}"
+            )
+
+    async def _resolve_offer_ids(self, session, connection: PlatformConnection, sku: str) -> list[str]:
+        """GET .../offer?sku=... — a 404 here means no live offer exists for this SKU
+        (see push_listing_quantity's docstring), not an error; any other non-200 is a
+        real failure since it would silently leave the offer-level quantity stale."""
+        response = await self._authed_request(
+            session, connection, "GET", f"{self.api_base}/sell/inventory/v1/offer", params={"sku": sku}
+        )
+        if response.status_code == 404:
+            return []
+        if response.status_code != 200:
+            raise PlatformSyncError(f"Failed to look up eBay offers for SKU '{sku}': {response.status_code} {response.text}")
+        return [o["offerId"] for o in response.json().get("offers", []) if o.get("offerId")]
 
     async def build_listing_sku_index(
         self, session, connection: PlatformConnection
@@ -324,13 +439,22 @@ class EbayAdapter:
         Inventory API is SKU-keyed natively (a per-SKU getOffers/{sku} lookup exists
         too), but this builds the same bulk dict-of-SKU shape as EtsyAdapter's version
         so the shared listing_sync service and its UI need no special-casing. A
-        per-SKU lookup path is a possible future optimization, not required today."""
-        params: dict[str, str | int] = {"limit": _PAGE_LIMIT, "offset": 0}
+        per-SKU lookup path is a possible future optimization, not required today.
+
+        A SKU absent from this index most often means the listing it belongs to was
+        created via eBay's Seller Hub UI (or the legacy Trading API) and was never
+        migrated to an Inventory API object (eBay's `bulkMigrateListing`) — confirmed
+        live via a direct GET on a specific missing SKU returning 404 on both
+        getInventoryItem and getOffers, i.e. eBay genuinely has no Inventory API record
+        for it, not a bug in this pagination/indexing. See _index_inventory_item's
+        caller in listing_sync.py for where that shows up as "not found" without this
+        context."""
+        params: dict[str, str | int] = {"limit": _INVENTORY_PAGE_LIMIT, "offset": 0}
         index: dict[str, ExternalListingRef] = {}
 
         for _ in range(_MAX_PAGES):
             response = await self._authed_request(
-                session, connection, "GET", f"{API_BASE}/sell/inventory/v1/inventory_item", params=params
+                session, connection, "GET", f"{self.api_base}/sell/inventory/v1/inventory_item", params=params
             )
             if response.status_code != 200:
                 raise PlatformSyncError(f"Failed to fetch eBay inventory items: {response.status_code} {response.text}")

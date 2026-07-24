@@ -179,6 +179,28 @@ def combine_expected_max_sellable(
     return expected_kitting_capacity, "packaging"
 
 
+def combine_theoretical_max_sellable(
+    free_stock: int, max_buildable: int | None, kitting_capacity: int | None
+) -> tuple[int, str | None]:
+    """What could be sold right now if StockSmith builds to backfill an order rather than
+    only selling already-assembled stock: free_stock (already built, unreserved) PLUS
+    max_buildable (more buildable from raw materials already on hand — NOT counting
+    on-order materials, unlike expected_max_buildable/combine_expected_max_sellable,
+    since the premise here is "build from what's actually in the building right now",
+    not "eventually, once a purchase order lands"). Still capped by on-hand packaging
+    capacity (kitting_capacity, not expected_kitting_capacity, for the same reason) —
+    reason is "stock"/"materials" vs "packaging", mirroring combine_max_sellable's/
+    combine_expected_max_sellable's vocabulary. Only used when a product's
+    push_buildable_capacity flag is on (see listing_push._resolve_max_sellable); when
+    it's off, combine_max_sellable's real, already-built-only figure is used instead."""
+    capacity = free_stock + (max_buildable or 0)
+    if kitting_capacity is None:
+        return capacity, None
+    if capacity <= kitting_capacity:
+        return capacity, "materials"
+    return kitting_capacity, "packaging"
+
+
 async def compute_variant_kitting_capacity(
     session: AsyncSession, product_id: int, variant_id: int | None
 ) -> tuple[int | None, int | None, list[VariantKittingBomLine]]:
@@ -241,6 +263,14 @@ async def compute_variant_kitting_cost_per_unit(
     return sum((cost_by_id[line.material_id] * line.qty_required for line in bom), start=Decimal(0))
 
 
+def _clamp_value_to_ceiling(
+    value: int | None, reason: str | None, platform_ceiling_qty: int | None
+) -> tuple[int | None, str | None]:
+    if value is not None and platform_ceiling_qty is not None and platform_ceiling_qty < value:
+        return platform_ceiling_qty, "ceiling"
+    return value, reason
+
+
 def apply_platform_ceiling(
     max_sellable: int,
     max_sellable_reason: str | None,
@@ -254,11 +284,10 @@ def apply_platform_ceiling(
     (a variant already below the cap is untouched). Shared by compute_max_sellable (the
     per-variant path) and _read_product's bulk dict-based path, which combines the same
     way but without a kitting BOM to resolve."""
-    if platform_ceiling_qty is not None:
-        if platform_ceiling_qty < max_sellable:
-            max_sellable, max_sellable_reason = platform_ceiling_qty, "ceiling"
-        if expected_max_sellable is not None and platform_ceiling_qty < expected_max_sellable:
-            expected_max_sellable, expected_max_sellable_reason = platform_ceiling_qty, "ceiling"
+    max_sellable, max_sellable_reason = _clamp_value_to_ceiling(max_sellable, max_sellable_reason, platform_ceiling_qty)
+    expected_max_sellable, expected_max_sellable_reason = _clamp_value_to_ceiling(
+        expected_max_sellable, expected_max_sellable_reason, platform_ceiling_qty
+    )
     return max_sellable, max_sellable_reason, expected_max_sellable, expected_max_sellable_reason
 
 
@@ -270,14 +299,17 @@ async def compute_max_sellable(
     allocated_qty: int,
     expected_max_buildable: int | None,
     platform_ceiling_qty: int | None = None,
-) -> tuple[int, str | None, int | None, str | None, list[VariantKittingBomLine]]:
+    max_buildable: int | None = None,
+) -> tuple[int, str | None, int | None, str | None, int, str | None, list[VariantKittingBomLine]]:
     """Combines free finished-goods stock (current_stock - allocated_qty) with free
-    packaging capacity to answer "how many could ship right now" (max_sellable) and
+    packaging capacity to answer "how many could ship right now" (max_sellable),
     "...eventually, counting on-order supply of both raw materials and packaging"
-    (expected_max_sellable) — plus each's binding reason, so callers can explain a low
-    number as either "nothing built" or "out of packaging". Also returns the resolved
-    kitting BOM, each line carrying its own bottleneck, for display alongside the build
-    BOM's equivalent. See apply_platform_ceiling for the manual-cap clamp applied here."""
+    (expected_max_sellable), and "...right now, if StockSmith builds to backfill an
+    order using only materials already on hand" (theoretical_max_sellable) — plus each's
+    binding reason, so callers can explain a low number as "nothing built", "out of
+    packaging", or "out of raw materials too". Also returns the resolved kitting BOM,
+    each line carrying its own bottleneck, for display alongside the build BOM's
+    equivalent. See apply_platform_ceiling for the manual-cap clamp applied here."""
     kitting_capacity, expected_kitting_capacity, kitting_bom = await compute_variant_kitting_capacity(
         session, product_id, variant_id
     )
@@ -286,10 +318,24 @@ async def compute_max_sellable(
     expected_max_sellable, expected_max_sellable_reason = combine_expected_max_sellable(
         expected_max_buildable, expected_kitting_capacity
     )
+    theoretical_max_sellable, theoretical_max_sellable_reason = combine_theoretical_max_sellable(
+        free_stock, max_buildable, kitting_capacity
+    )
     max_sellable, max_sellable_reason, expected_max_sellable, expected_max_sellable_reason = apply_platform_ceiling(
         max_sellable, max_sellable_reason, expected_max_sellable, expected_max_sellable_reason, platform_ceiling_qty
     )
-    return max_sellable, max_sellable_reason, expected_max_sellable, expected_max_sellable_reason, kitting_bom
+    theoretical_max_sellable, theoretical_max_sellable_reason = _clamp_value_to_ceiling(
+        theoretical_max_sellable, theoretical_max_sellable_reason, platform_ceiling_qty
+    )
+    return (
+        max_sellable,
+        max_sellable_reason,
+        expected_max_sellable,
+        expected_max_sellable_reason,
+        theoretical_max_sellable,
+        theoretical_max_sellable_reason,
+        kitting_bom,
+    )
 
 
 async def get_resolved_kitting_boms_by_variant(
@@ -360,13 +406,16 @@ async def compute_max_sellable_bulk(
     variants: list[ProductVariant],
     expected_max_buildable_by_variant: dict[int, int | None],
     platform_ceiling_qty: int | None,
-) -> dict[int, tuple[int, str | None, int | None, str | None, list[VariantKittingBomLine]]]:
+    max_buildable_by_variant: dict[int, int | None] | None = None,
+) -> dict[int, tuple[int, str | None, int | None, str | None, int, str | None, list[VariantKittingBomLine]]]:
     """Bulk analog of compute_max_sellable for every variant in `variants` (ProductVariant
     ORM rows, all belonging to product_id). Reuses the existing pure helpers
-    (combine_max_sellable, combine_expected_max_sellable, apply_platform_ceiling)
-    unchanged — only the DB-backed kitting-capacity lookup needed batching."""
+    (combine_max_sellable, combine_expected_max_sellable, combine_theoretical_max_sellable,
+    apply_platform_ceiling) unchanged — only the DB-backed kitting-capacity lookup needed
+    batching."""
+    max_buildable_by_variant = max_buildable_by_variant or {}
     kitting = await compute_variants_kitting_capacity_bulk(session, product_id, [v.id for v in variants])
-    results: dict[int, tuple[int, str | None, int | None, str | None, list[VariantKittingBomLine]]] = {}
+    results: dict[int, tuple[int, str | None, int | None, str | None, int, str | None, list[VariantKittingBomLine]]] = {}
     for v in variants:
         kitting_capacity, expected_kitting_capacity, kitting_bom = kitting.get(v.id, (None, None, []))
         free_stock = v.current_stock - v.allocated_qty
@@ -374,10 +423,24 @@ async def compute_max_sellable_bulk(
         expected_max_sellable, expected_max_sellable_reason = combine_expected_max_sellable(
             expected_max_buildable_by_variant.get(v.id), expected_kitting_capacity
         )
+        theoretical_max_sellable, theoretical_max_sellable_reason = combine_theoretical_max_sellable(
+            free_stock, max_buildable_by_variant.get(v.id), kitting_capacity
+        )
         max_sellable, max_sellable_reason, expected_max_sellable, expected_max_sellable_reason = apply_platform_ceiling(
             max_sellable, max_sellable_reason, expected_max_sellable, expected_max_sellable_reason, platform_ceiling_qty
         )
-        results[v.id] = (max_sellable, max_sellable_reason, expected_max_sellable, expected_max_sellable_reason, kitting_bom)
+        theoretical_max_sellable, theoretical_max_sellable_reason = _clamp_value_to_ceiling(
+            theoretical_max_sellable, theoretical_max_sellable_reason, platform_ceiling_qty
+        )
+        results[v.id] = (
+            max_sellable,
+            max_sellable_reason,
+            expected_max_sellable,
+            expected_max_sellable_reason,
+            theoretical_max_sellable,
+            theoretical_max_sellable_reason,
+            kitting_bom,
+        )
     return results
 
 
@@ -530,6 +593,16 @@ async def reconcile_order_kitting(session: AsyncSession, order: Order) -> None:
             release = min(-reserve_delta, current_reserved)
             material.allocated_qty = Decimal(material.allocated_qty) - release
             current_reserved -= release
+
+        if consume_delta != 0 or reserve_delta != 0:
+            # Packaging capacity for every OTHER product/variant sharing this material
+            # depends on current_qty - allocated_qty (see compute_variant_kitting_
+            # capacity) — a reservation change alone (not just consumption) can shift
+            # that. Deferred import: avoids a module-load-time cycle (listing_push pulls
+            # in kitting.py itself for compute_max_sellable).
+            from app.services import listing_push
+
+            await listing_push.enqueue_for_material(session, material_id)
 
         if ledger is None:
             session.add(

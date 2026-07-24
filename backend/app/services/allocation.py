@@ -9,6 +9,7 @@ from app.models.order import Order, OrderLine, OrderStatus
 from app.models.product import Product
 from app.models.shipping_profile import ShippingProfile
 from app.models.variant import ProductVariant
+from app.services import listing_push
 from app.services.kitting import reconcile_order_kitting
 from app.services.shipping_profiles import resolve_shipping_cost_for_platform
 
@@ -64,6 +65,7 @@ async def _allocate_line(session: AsyncSession, line: OrderLine, source: str) ->
         return 0
     line.allocated_qty += take
     owner.allocated_qty += take
+    listing_push.enqueue_for_owner(owner)  # now allocated ⇒ less of it is sellable elsewhere
     event_type = AllocationEventType.auto_allocate if source.startswith("build#") else AllocationEventType.allocate
     session.add(
         AllocationEvent(
@@ -122,45 +124,6 @@ async def auto_allocate_after_build(
             await reconcile_order_kitting(session, order)
 
 
-async def cancel_order(session: AsyncSession, order: Order) -> None:
-    if order.status == OrderStatus.cancelled:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Order is already cancelled")
-
-    lines = await _get_lines(session, order.id)
-    for line in lines:
-        if line.shipped_qty > 0:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Cannot cancel an order with shipped units — process a return instead",
-            )
-
-    for line in lines:
-        if line.allocated_qty <= 0:
-            continue
-        owner = await _get_stock_owner(session, line)
-        qty = line.allocated_qty
-        if owner is not None:
-            owner.allocated_qty -= qty
-        line.allocated_qty = 0
-        session.add(
-            AllocationEvent(
-                order_line_id=line.id,
-                product_id=line.product_id,
-                variant_id=line.variant_id,
-                event_type=AllocationEventType.deallocate,
-                qty=qty,
-                source="order-cancel",
-            )
-        )
-
-    order.status = OrderStatus.cancelled
-    order.cancelled_at = datetime.now(timezone.utc)
-    # Whatever the sync_issue flag was warning about (see order_sync._reconcile_status —
-    # e.g. "Etsy shows this shipped but nothing's allocated") is moot once the order is
-    # cancelled locally; nothing left to allocate/ship against it.
-    order.sync_issue = None
-    await reconcile_order_kitting(session, order)
-
 
 async def deallocate_line(session: AsyncSession, line: OrderLine, qty: int) -> None:
     """Manual unassign — releases up to `qty` allocated-but-not-yet-shipped units from a
@@ -175,6 +138,7 @@ async def deallocate_line(session: AsyncSession, line: OrderLine, qty: int) -> N
     line.allocated_qty -= qty
     if owner is not None:
         owner.allocated_qty -= qty
+        listing_push.enqueue_for_owner(owner)  # deallocated ⇒ sellable again
     session.add(
         AllocationEvent(
             order_line_id=line.id,
@@ -205,6 +169,11 @@ async def ship_line(session: AsyncSession, line: OrderLine, qty: int) -> None:
     if owner is not None:
         owner.current_stock -= qty
         owner.allocated_qty -= qty
+        # No listing_push trigger here, deliberately — current_stock and allocated_qty
+        # both drop by the same qty, so free_stock (and therefore max_sellable) is
+        # numerically unchanged by shipping itself. Any real max_sellable change from a
+        # ship event comes from packaging material consumption, which reconcile_order_
+        # kitting below triggers via recompute_material's own listing_push hook.
     session.add(
         AllocationEvent(
             order_line_id=line.id,

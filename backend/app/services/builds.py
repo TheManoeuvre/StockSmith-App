@@ -10,6 +10,7 @@ from app.models.material import MaterialAdjustment
 from app.models.product import Product, ProductMaterial
 from app.models.variant import ProductVariant
 from app.schemas.product import BomLine
+from app.services import listing_push
 from app.services.allocation import auto_allocate_after_build
 from app.services.buildability import get_resolved_variant_bom
 from app.services.costing import recompute_materials
@@ -87,8 +88,10 @@ async def create_build(
 
     if variant is not None:
         variant.current_stock += qty_built
+        listing_push.enqueue_for_owner(variant)
     else:
         product.current_stock += qty_built
+        listing_push.enqueue_for_owner(product)
 
     await auto_allocate_after_build(session, product_id, variant_id, source=f"build#{build.id}")
 

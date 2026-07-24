@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.product import Product
 from app.models.stock_adjustment import StockAdjustment, StockAdjustmentMode
 from app.models.variant import ProductVariant
+from app.services import listing_push
 
 
 async def _get_owner(session: AsyncSession, product_id: int, variant_id: int | None) -> Product | ProductVariant:
@@ -45,6 +46,7 @@ async def create_stock_adjustment(
         )
 
     owner.current_stock = new_stock
+    listing_push.enqueue_for_owner(owner)
     adjustment = StockAdjustment(
         product_id=product_id,
         variant_id=variant_id,

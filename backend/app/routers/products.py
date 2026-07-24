@@ -35,12 +35,14 @@ from app.services.buildability import (
     get_max_buildable_by_product,
     get_ready_to_ship_by_bundle,
 )
-from app.services import platform_fees
+from app.services import listing_push, platform_fees
 from app.services.csv_io import export_products_csv, import_products_csv
 from app.services.kitting import (
+    _clamp_value_to_ceiling,
     apply_platform_ceiling,
     combine_expected_max_sellable,
     combine_max_sellable,
+    combine_theoretical_max_sellable,
     compute_max_sellable,
     compute_max_sellable_bulk,
     get_expected_kitting_capacity_by_product,
@@ -102,6 +104,8 @@ def _read_product(
         max_sellable_reason = None
         expected_max_sellable = None
         expected_max_sellable_reason = None
+        theoretical_max_sellable = None
+        theoretical_max_sellable_reason = None
     else:
         # A product with active variants never accumulates its own current_stock/
         # allocated_qty (builds always target the variant row) — use the summed variant
@@ -114,15 +118,21 @@ def _read_product(
         expected_max_buildable = expected_max_buildable_by_product.get(product.id)
         cost_per_unit = cost_per_unit_by_product.get(product.id)
         ready_to_ship = None
-        max_sellable, max_sellable_reason = combine_max_sellable(
-            current_stock - allocated_qty, kitting_capacity_by_product.get(product.id)
-        )
+        free_stock = current_stock - allocated_qty
+        kitting_capacity = kitting_capacity_by_product.get(product.id)
+        max_sellable, max_sellable_reason = combine_max_sellable(free_stock, kitting_capacity)
         expected_max_sellable, expected_max_sellable_reason = combine_expected_max_sellable(
             expected_max_buildable, expected_kitting_capacity_by_product.get(product.id)
+        )
+        theoretical_max_sellable, theoretical_max_sellable_reason = combine_theoretical_max_sellable(
+            free_stock, max_buildable, kitting_capacity
         )
         max_sellable, max_sellable_reason, expected_max_sellable, expected_max_sellable_reason = apply_platform_ceiling(
             max_sellable, max_sellable_reason, expected_max_sellable, expected_max_sellable_reason,
             product.platform_ceiling_qty,
+        )
+        theoretical_max_sellable, theoretical_max_sellable_reason = _clamp_value_to_ceiling(
+            theoretical_max_sellable, theoretical_max_sellable_reason, product.platform_ceiling_qty
         )
     shipping_profile = resolve_product_shipping_profile(shipping_profiles_by_id, product)
     effective_platform_fee_percent = platform_fees.resolve_fee_percent(
@@ -142,6 +152,8 @@ def _read_product(
             "max_sellable_reason": max_sellable_reason,
             "expected_max_sellable": expected_max_sellable,
             "expected_max_sellable_reason": expected_max_sellable_reason,
+            "theoretical_max_sellable": theoretical_max_sellable,
+            "theoretical_max_sellable_reason": theoretical_max_sellable_reason,
             "cost_per_unit": cost_per_unit,
             "main_image_asset_id": main_image_asset_id_by_product.get(product.id),
             "ready_to_ship": ready_to_ship,
@@ -261,6 +273,23 @@ async def update_product(product_id: int, payload: ProductUpdate, session: Async
     changed_fields = set(payload.model_dump(exclude_unset=True).keys())
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(product, field, value)
+
+    if {"platform_ceiling_qty", "push_buildable_capacity"} & changed_fields:
+        # Both apply uniformly to the base product and every active variant's own
+        # sellable figure (see kitting.apply_platform_ceiling and
+        # listing_push._resolve_max_sellable) — push all of them, not just the bare
+        # product row, so a toggle takes effect on the marketplace immediately rather
+        # than waiting for the next unrelated stock change.
+        listing_push.enqueue_for_owner(product)
+        variant_ids = (
+            await session.execute(
+                select(ProductVariant.id).where(
+                    ProductVariant.product_id == product_id, ProductVariant.is_active.is_(True)
+                )
+            )
+        ).scalars()
+        for variant_id in variant_ids:
+            listing_push.enqueue_for_product(product_id, variant_id)
 
     if changed_fields & _PRICING_FIELDS:
         cost_per_unit_by_product = await get_cost_per_unit_by_product(session)
@@ -431,6 +460,7 @@ async def _variants_to_reads_bulk(
     product_id = product.id if product else variants[0].product_id
     variant_ids = [v.id for v in variants]
     buildability_by_variant = await compute_variants_buildability_bulk(session, product_id, variant_ids)
+    max_buildable_by_variant = {vid: buildability_by_variant[vid][0] for vid in variant_ids}
     expected_max_buildable_by_variant = {vid: buildability_by_variant[vid][1] for vid in variant_ids}
     sellable_by_variant = await compute_max_sellable_bulk(
         session,
@@ -438,14 +468,21 @@ async def _variants_to_reads_bulk(
         variants,
         expected_max_buildable_by_variant,
         product.platform_ceiling_qty if product else None,
+        max_buildable_by_variant,
     )
 
     reads = []
     for variant in variants:
         max_buildable, expected_max_buildable, cost_per_unit, effective_bom = buildability_by_variant[variant.id]
-        max_sellable, max_sellable_reason, expected_max_sellable, expected_max_sellable_reason, effective_kitting_bom = (
-            sellable_by_variant[variant.id]
-        )
+        (
+            max_sellable,
+            max_sellable_reason,
+            expected_max_sellable,
+            expected_max_sellable_reason,
+            theoretical_max_sellable,
+            theoretical_max_sellable_reason,
+            effective_kitting_bom,
+        ) = sellable_by_variant[variant.id]
         full_sku = compute_full_sku(product.sku if product else None, variant.sku_suffix)
         effective_shipping_profile = resolve_variant_shipping_profile(shipping_profiles_by_id, variant, product)
         reads.append(
@@ -457,6 +494,8 @@ async def _variants_to_reads_bulk(
                     "max_sellable_reason": max_sellable_reason,
                     "expected_max_sellable": expected_max_sellable,
                     "expected_max_sellable_reason": expected_max_sellable_reason,
+                    "theoretical_max_sellable": theoretical_max_sellable,
+                    "theoretical_max_sellable_reason": theoretical_max_sellable_reason,
                     "cost_per_unit": cost_per_unit,
                     "effective_bom": effective_bom,
                     "effective_kitting_bom": effective_kitting_bom,
@@ -507,16 +546,23 @@ async def _to_variant_read_with_buildability(session: AsyncSession, variant: Pro
     max_buildable, expected_max_buildable, cost_per_unit, effective_bom = await compute_variant_buildability(
         session, variant.product_id, variant.id
     )
-    max_sellable, max_sellable_reason, expected_max_sellable, expected_max_sellable_reason, effective_kitting_bom = (
-        await compute_max_sellable(
-            session,
-            variant.product_id,
-            variant.id,
-            variant.current_stock,
-            variant.allocated_qty,
-            expected_max_buildable,
-            product.platform_ceiling_qty if product else None,
-        )
+    (
+        max_sellable,
+        max_sellable_reason,
+        expected_max_sellable,
+        expected_max_sellable_reason,
+        theoretical_max_sellable,
+        theoretical_max_sellable_reason,
+        effective_kitting_bom,
+    ) = await compute_max_sellable(
+        session,
+        variant.product_id,
+        variant.id,
+        variant.current_stock,
+        variant.allocated_qty,
+        expected_max_buildable,
+        product.platform_ceiling_qty if product else None,
+        max_buildable,
     )
     full_sku = compute_full_sku(product.sku if product else None, variant.sku_suffix)
     fee_source, fee_components = await platform_fees.get_resolver_context(session)
@@ -530,6 +576,8 @@ async def _to_variant_read_with_buildability(session: AsyncSession, variant: Pro
             "max_sellable_reason": max_sellable_reason,
             "expected_max_sellable": expected_max_sellable,
             "expected_max_sellable_reason": expected_max_sellable_reason,
+            "theoretical_max_sellable": theoretical_max_sellable,
+            "theoretical_max_sellable_reason": theoretical_max_sellable_reason,
             "cost_per_unit": cost_per_unit,
             "effective_bom": effective_bom,
             "effective_kitting_bom": effective_kitting_bom,

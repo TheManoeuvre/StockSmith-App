@@ -73,6 +73,18 @@ async def recompute_material(session: AsyncSession, material_id: int) -> Materia
     material.current_qty = qty
     material.avg_unit_cost = avg_cost
     await session.flush()
+
+    # Deferred import: avoids a module-load-time cycle (listing_push pulls in kitting.py,
+    # which is otherwise unrelated to costing.py). Fans this material's changed qty out
+    # to every product/variant whose build or kitting BOM references it — the material-
+    # consumption half of the allocated/consumed-means-unavailable rule (see
+    # docs/plan-marketplace-integrations.md Section 1d). Every current caller of
+    # recompute_material (purchases, adjustments, CSV import, kitting ship-consumption)
+    # gets this for free rather than needing its own trigger.
+    from app.services import listing_push
+
+    await listing_push.enqueue_for_material(session, material_id)
+
     return material
 
 

@@ -35,3 +35,18 @@ button.text-red-600:hover {
 button.border-amber-300:hover {
   background-color: #fde68a;
 }
+
+/* Indeterminate progress bar on the startup splash screen (SplashScreen.tsx) */
+@keyframes splash-progress {
+  0% {
+    margin-left: -33%;
+  }
+  100% {
+    margin-left: 100%;
+  }
+}
+
+.splash-progress-bar {
+  width: 33%;
+  animation: splash-progress 1.2s ease-in-out infinite;
+}

@@ -1,9 +1,10 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { routeTree } from "./routeTree.gen";
 import { tryAutoProvisionSettings } from "./lib/tauri";
+import { SplashScreen } from "./components/common/SplashScreen";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -33,19 +34,32 @@ declare module "@tanstack/react-router" {
   }
 }
 
-function renderApp() {
-  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-    <React.StrictMode>
-      <QueryClientProvider client={queryClient}>
-        <RouterProvider router={router} />
-      </QueryClientProvider>
-    </React.StrictMode>
+function App() {
+  // Gates the router (and its data-fetching) behind the bundled backend actually answering
+  // requests — tryAutoProvisionSettings polls it until it responds at all (even a 404 counts,
+  // see that function's comment), so by the time this resolves the dashboard's first fetch
+  // is guaranteed to land on a live backend instead of racing it. Shows the splash screen
+  // for that gap instead of leaving the window looking frozen. Falls through on rejection
+  // too — an unexpected failure here should never be the reason the whole app fails to
+  // render; Settings' manual-entry fields are still the fallback.
+  const [ready, setReady] = useState(false);
+  useEffect(() => {
+    tryAutoProvisionSettings().then(
+      () => setReady(true),
+      () => setReady(true)
+    );
+  }, []);
+
+  if (!ready) return <SplashScreen />;
+  return (
+    <QueryClientProvider client={queryClient}>
+      <RouterProvider router={router} />
+    </QueryClientProvider>
   );
 }
 
-// Populates backendUrl/sharedPassword from the bundled backend's one-time bootstrap-info
-// endpoint before any route (or its data-fetching) ever mounts — otherwise the first
-// render could fire off requests with no backendUrl configured yet. Falls through to
-// renderApp on rejection too — an unexpected failure here should never be the reason the
-// whole app fails to render; Settings' manual-entry fields are still the fallback.
-tryAutoProvisionSettings().then(renderApp, renderApp);
+ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);

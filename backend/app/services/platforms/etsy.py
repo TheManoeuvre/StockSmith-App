@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 
 from app.models.platform_connection import PlatformConnection
-from app.services.platforms.base import ExternalListingRef, ExternalOrder, ExternalOrderLine, TokenSet
+from app.services.platforms.base import ExternalListingRef, ExternalOrder, ExternalOrderLine, TokenSet, ensure_utc
 from app.services.platforms.errors import PlatformAuthError, PlatformRateLimitError, PlatformSyncError
 
 logger = logging.getLogger("stocksmith.etsy")
@@ -32,14 +32,22 @@ _MAX_LISTING_PAGES = 20
 # clear a transient limit hit without turning a single sync click into a long stall.
 _MAX_RATE_LIMIT_RETRIES = 3
 
+# Retries for push_listing_quantity's 409 ("being edited by another process") — see that
+# method's docstring. A flat short delay rather than exponential backoff since this is a
+# lock, not a rate limit: it clears as soon as whatever's holding it finishes, typically
+# within a couple of seconds, not progressively longer.
+_MAX_LISTING_CONFLICT_RETRIES = 3
+_LISTING_CONFLICT_RETRY_DELAY = 2.0
+
 
 class EtsyAdapter:
     """Etsy Open API v3 adapter — OAuth 2.0 + PKCE, refresh-token rotation (Etsy always
     rotates the refresh token on use, so every refresh() result must be persisted).
 
-    push_listing_quantity is intentionally unimplemented here — quantity push-back to
-    Etsy is a deliberately deferred phase (see Stage 3 of the Etsy rollout plan: sync
-    stays manual/pull-only for now). build_listing_sku_index is implemented (Stage 1).
+    push_listing_quantity requires the listings_w scope (see routers/platforms._SCOPES) —
+    a connection made before that scope was added needs to reconnect before pushes will
+    succeed. build_listing_sku_index (Stage 1) and push_listing_quantity (Stage 3) are
+    both implemented; see docs/plan-marketplace-integrations.md for the rollout.
     """
 
     def __init__(self, client_id: str, client_secret: str):
@@ -220,18 +228,17 @@ class EtsyAdapter:
             return await client.request(method, f"{API_BASE}{path}", headers=headers, **kwargs)
 
     async def _ensure_fresh(self, session, connection: PlatformConnection) -> None:
-        if connection.access_token_expires_at is None or connection.refresh_token is None:
+        expires_at = ensure_utc(connection.access_token_expires_at)
+        if expires_at is None or connection.refresh_token is None:
             raise PlatformAuthError("Etsy connection has no stored tokens — reconnect required")
-        if datetime.now(timezone.utc) + _REFRESH_SKEW >= connection.access_token_expires_at:
+        if datetime.now(timezone.utc) + _REFRESH_SKEW >= expires_at:
             await self._do_refresh(session, connection)
 
     async def _do_refresh(self, session, connection: PlatformConnection) -> None:
         async with self._refresh_lock:
             # Another task may have already refreshed while we waited for the lock.
-            if (
-                connection.access_token_expires_at is not None
-                and datetime.now(timezone.utc) + _REFRESH_SKEW < connection.access_token_expires_at
-            ):
+            expires_at = ensure_utc(connection.access_token_expires_at)
+            if expires_at is not None and datetime.now(timezone.utc) + _REFRESH_SKEW < expires_at:
                 return
             if connection.refresh_token is None:
                 raise PlatformAuthError("Etsy connection has no refresh token — reconnect required")
@@ -536,8 +543,159 @@ class EtsyAdapter:
         total_pennies = sum(e.get("amount", 0) for e in fee_entries) + sum(e.get("amount", 0) for e in vat_children)
         return f"{abs(total_pennies) / 100:.2f}"
 
-    async def push_listing_quantity(self, session, connection: PlatformConnection, listing_ref, sku, qty) -> None:
-        raise NotImplementedError("Quantity push-back to Etsy is deliberately deferred — see rollout Stage 3")
+    async def push_listing_quantity(
+        self, session, connection: PlatformConnection, listing_ref: ExternalListingRef, sku: str | None, qty: int
+    ) -> None:
+        """Etsy has no "set quantity for this SKU" endpoint — updateListingInventory
+        replaces a listing's *entire* inventory record in one PUT, so this fetches the
+        current one first, patches only the offering(s) under the matching SKU, and PUTs
+        everything else back exactly as read (price, property_values, per-property
+        config, other SKUs' offerings) so nothing else on the listing is disturbed.
+
+        Verified against a live listing across several rebuild-and-retry rounds — Etsy's
+        write endpoint does NOT accept everything its own read endpoint (getListingInventory)
+        returns for the same object, and unhelpfully reports at most one invalid key at a
+        time, so this was found one 400 at a time rather than all at once:
+        - `products[].product_id` — rejected ("Array contains invalid keys"); read-only/
+          server-assigned, dropped entirely.
+        - `products[].property_values[].scale_name` — rejected; dropped. But
+          `property_values[].property_name` is the opposite: REQUIRED (400s with
+          "Expected string value... got NULL" if omitted) despite being the same kind of
+          human-readable "_name" field as scale_name. Not symmetric; both directions
+          confirmed, not inferred from a pattern.
+        - `products[].offerings[].offering_id` and `.is_deleted` — both rejected;
+          dropped (see _strip_property_value's sibling logic in the offerings loop for
+          how a deleted offering is handled without that flag).
+        - `qty <= 0` — Etsy rejects a literal 0 quantity outright (confirmed live: "One
+          offering must have quantity greater than 0"). Etsy's enforced minimum is 1, so
+          an out-of-stock offering is represented as quantity=1 with is_enabled=False
+          instead — takes it off-sale without deleting it or erroring the push. This
+          matches Etsy's own documented pattern for third-party inventory tools. qty > 0
+          restores is_enabled=True in case a prior 0-stock push had disabled it.
+        The PUT body's `price` being a plain float (amount/divisor), unlike the nested
+        Money object GET returns it as, is implemented per Etsy's docs and DID succeed in
+        the same live testing that surfaced everything above — treated as confirmed, not
+        just docs-inferred, though a subtle rounding drift on an unusual divisor still
+        can't be fully ruled out by one seller's price data.
+
+        Retries on a 409 ("The Listing ... is being edited by another process. Please
+        try again in a few moments.") by redoing the whole GET-then-PUT round trip, not
+        just the PUT — confirmed live this fires in real bursts when many variants of one
+        multi-offering listing get pushed close together (e.g. a shared-material stock
+        change fanning out to every variant via listing_push.enqueue_for_material, or a
+        product-level toggle re-enqueuing every active variant). listing_push._push_one
+        also now serializes concurrent pushes to the same listing_id, which should
+        prevent StockSmith's own pushes from racing each other — this retry is the
+        remaining safety net for a conflict from outside that (Etsy's own transient lock,
+        or the seller editing the listing by hand at the same time).
+        """
+        listing_id = listing_ref.external_listing_id
+        attempt = 0
+        while True:
+            response = await self._authed_request(session, connection, "GET", f"/listings/{listing_id}/inventory")
+            if response.status_code != 200:
+                raise PlatformSyncError(
+                    f"Failed to fetch Etsy listing inventory: {response.status_code} {response.text}"
+                )
+            inventory = response.json()
+
+            matched = False
+            products_payload = []
+            for product in inventory.get("products", []):
+                is_target_sku = product.get("sku") == sku and not product.get("is_deleted")
+                offerings_payload = []
+                for offering in product.get("offerings", []):
+                    if offering.get("is_deleted"):
+                        # is_deleted isn't an accepted write key (confirmed live, same
+                        # failure mode as offering_id below) — there's no way to preserve
+                        # "this offering is deleted" on write, so it's omitted entirely
+                        # rather than risk sending its data back without that marker and
+                        # having Etsy interpret it as reviving a deleted offering.
+                        continue
+                    offering_payload = {
+                        "quantity": offering.get("quantity", 0),
+                        "is_enabled": offering.get("is_enabled", True),
+                        "price": self._offering_price_float(offering.get("price")),
+                        # Required — confirmed live ("All offerings need readiness state"),
+                        # the mirror image of offering_id/is_deleted just above (rejected if
+                        # present). Passed straight through from the GET response.
+                        "readiness_state_id": offering.get("readiness_state_id"),
+                    }
+                    if is_target_sku:
+                        if qty <= 0:
+                            offering_payload["quantity"] = 1
+                            offering_payload["is_enabled"] = False
+                        else:
+                            offering_payload["quantity"] = qty
+                            offering_payload["is_enabled"] = True
+                        matched = True
+                    offerings_payload.append(offering_payload)
+                products_payload.append(
+                    {
+                        "sku": product.get("sku"),
+                        "property_values": [
+                            self._strip_property_value(pv) for pv in product.get("property_values", [])
+                        ],
+                        "offerings": offerings_payload,
+                    }
+                )
+
+            if not matched:
+                raise PlatformSyncError(f"No matching SKU '{sku}' found in Etsy listing {listing_id}'s inventory")
+
+            put_body = {
+                "products": products_payload,
+                "price_on_property": inventory.get("price_on_property", []),
+                "quantity_on_property": inventory.get("quantity_on_property", []),
+                "sku_on_property": inventory.get("sku_on_property", []),
+            }
+            put_response = await self._authed_request(
+                session, connection, "PUT", f"/listings/{listing_id}/inventory", json=put_body
+            )
+            if put_response.status_code == 200:
+                return
+            if put_response.status_code == 409 and attempt < _MAX_LISTING_CONFLICT_RETRIES:
+                attempt += 1
+                logger.warning(
+                    "Etsy listing %s locked by another process (attempt %d/%d), retrying in %.1fs",
+                    listing_id,
+                    attempt,
+                    _MAX_LISTING_CONFLICT_RETRIES,
+                    _LISTING_CONFLICT_RETRY_DELAY,
+                )
+                await asyncio.sleep(_LISTING_CONFLICT_RETRY_DELAY)
+                continue
+            raise PlatformSyncError(
+                f"Failed to update Etsy listing inventory: {put_response.status_code} {put_response.text}"
+            )
+
+    @staticmethod
+    def _offering_price_float(price: dict | None) -> float:
+        if not price:
+            return 0.0
+        amount = price.get("amount")
+        divisor = price.get("divisor") or 1
+        return round(amount / divisor, 2) if amount is not None else 0.0
+
+    @staticmethod
+    def _strip_property_value(pv: dict) -> dict:
+        """The GET response's property_values entries (ListingPropertyValue: property_id,
+        property_name, scale_id, scale_name, value_ids, values) don't round-trip
+        symmetrically on write — confirmed live, the hard way, across two rejected
+        payload shapes: `scale_name` 400s with "Array contains invalid keys" if present
+        (same failure mode `product_id` hit at the product level — see this method's
+        caller), while `property_name` 400s with "Expected string value... got NULL" if
+        *omitted* — i.e. it's required, not rejected, the opposite of scale_name despite
+        being the same kind of "_name" field. Not an inference either way anymore; both
+        directions were confirmed against a real listing.
+        """
+        return {
+            "property_id": pv.get("property_id"),
+            "property_name": pv.get("property_name"),
+            "scale_id": pv.get("scale_id"),
+            "value_ids": pv.get("value_ids", []),
+            "values": pv.get("values", []),
+        }
 
     async def build_listing_sku_index(
         self, session, connection: PlatformConnection

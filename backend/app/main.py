@@ -1,5 +1,7 @@
 import json
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -23,10 +25,21 @@ from app.routers import (
     suppliers,
     variants,
 )
+from app.services import sync_scheduler
 
 logger = logging.getLogger("stocksmith")
 
-app = FastAPI(title="StockSmith API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    sync_scheduler.start()
+    try:
+        yield
+    finally:
+        sync_scheduler.stop()
+
+
+app = FastAPI(title="StockSmith API", lifespan=lifespan)
 
 
 class CatchUnhandledExceptionsMiddleware(BaseHTTPMiddleware):
