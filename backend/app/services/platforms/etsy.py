@@ -545,14 +545,25 @@ class EtsyAdapter:
         everything else back exactly as read (price, property_values, per-property
         config, other SKUs' offerings) so nothing else on the listing is disturbed.
 
-        Unverified against a live listing (no connected shop with listings_w granted was
-        available while building this, same caveat every uncertain spot in this file
-        already carries) — in particular, the PUT body's `price` is documented as a
-        plain float (amount/divisor), unlike the nested Money object GET returns it as;
-        double-check that conversion against a real shop before trusting this
-        unattended. offering_id/product_id are passed straight through from the GET
-        response on the theory that omitting them would create new offerings rather than
-        update the existing ones, but that's an inference, not a confirmed behavior.
+        Verified against a live listing across several rebuild-and-retry rounds — Etsy's
+        write endpoint does NOT accept everything its own read endpoint (getListingInventory)
+        returns for the same object, and unhelpfully reports at most one invalid key at a
+        time, so this was found one 400 at a time rather than all at once:
+        - `products[].product_id` — rejected ("Array contains invalid keys"); read-only/
+          server-assigned, dropped entirely.
+        - `products[].property_values[].scale_name` — rejected; dropped. But
+          `property_values[].property_name` is the opposite: REQUIRED (400s with
+          "Expected string value... got NULL" if omitted) despite being the same kind of
+          human-readable "_name" field as scale_name. Not symmetric; both directions
+          confirmed, not inferred from a pattern.
+        - `products[].offerings[].offering_id` and `.is_deleted` — both rejected;
+          dropped (see _strip_property_value's sibling logic in the offerings loop for
+          how a deleted offering is handled without that flag).
+        The PUT body's `price` being a plain float (amount/divisor), unlike the nested
+        Money object GET returns it as, is implemented per Etsy's docs and DID succeed in
+        the same live testing that surfaced everything above — treated as confirmed, not
+        just docs-inferred, though a subtle rounding drift on an unusual divisor still
+        can't be fully ruled out by one seller's price data.
         """
         listing_id = listing_ref.external_listing_id
         response = await self._authed_request(session, connection, "GET", f"/listings/{listing_id}/inventory")
@@ -566,22 +577,30 @@ class EtsyAdapter:
             is_target_sku = product.get("sku") == sku and not product.get("is_deleted")
             offerings_payload = []
             for offering in product.get("offerings", []):
+                if offering.get("is_deleted"):
+                    # is_deleted isn't an accepted write key (confirmed live, same
+                    # failure mode as offering_id below) — there's no way to preserve
+                    # "this offering is deleted" on write, so it's omitted entirely
+                    # rather than risk sending its data back without that marker and
+                    # having Etsy interpret it as reviving a deleted offering.
+                    continue
                 offering_payload = {
-                    "offering_id": offering.get("offering_id"),
                     "quantity": offering.get("quantity", 0),
                     "is_enabled": offering.get("is_enabled", True),
-                    "is_deleted": offering.get("is_deleted", False),
                     "price": self._offering_price_float(offering.get("price")),
+                    # Required — confirmed live ("All offerings need readiness state"),
+                    # the mirror image of offering_id/is_deleted just above (rejected if
+                    # present). Passed straight through from the GET response.
+                    "readiness_state_id": offering.get("readiness_state_id"),
                 }
-                if is_target_sku and not offering.get("is_deleted"):
+                if is_target_sku:
                     offering_payload["quantity"] = qty
                     matched = True
                 offerings_payload.append(offering_payload)
             products_payload.append(
                 {
-                    "product_id": product.get("product_id"),
                     "sku": product.get("sku"),
-                    "property_values": product.get("property_values", []),
+                    "property_values": [self._strip_property_value(pv) for pv in product.get("property_values", [])],
                     "offerings": offerings_payload,
                 }
             )
@@ -610,6 +629,26 @@ class EtsyAdapter:
         amount = price.get("amount")
         divisor = price.get("divisor") or 1
         return round(amount / divisor, 2) if amount is not None else 0.0
+
+    @staticmethod
+    def _strip_property_value(pv: dict) -> dict:
+        """The GET response's property_values entries (ListingPropertyValue: property_id,
+        property_name, scale_id, scale_name, value_ids, values) don't round-trip
+        symmetrically on write — confirmed live, the hard way, across two rejected
+        payload shapes: `scale_name` 400s with "Array contains invalid keys" if present
+        (same failure mode `product_id` hit at the product level — see this method's
+        caller), while `property_name` 400s with "Expected string value... got NULL" if
+        *omitted* — i.e. it's required, not rejected, the opposite of scale_name despite
+        being the same kind of "_name" field. Not an inference either way anymore; both
+        directions were confirmed against a real listing.
+        """
+        return {
+            "property_id": pv.get("property_id"),
+            "property_name": pv.get("property_name"),
+            "scale_id": pv.get("scale_id"),
+            "value_ids": pv.get("value_ids", []),
+            "values": pv.get("values", []),
+        }
 
     async def build_listing_sku_index(
         self, session, connection: PlatformConnection
