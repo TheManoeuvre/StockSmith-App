@@ -40,6 +40,26 @@ _PUSH_ENABLED_PLATFORMS = (ListingPlatform.etsy, ListingPlatform.ebay)
 
 _pending: dict[tuple[int, int | None], asyncio.Task] = {}
 
+# Keyed on (platform, external_listing_id), not (product_id, variant_id) — a single Etsy
+# listing with variations holds many SKUs/offerings under one listing_id, and each
+# variant gets its own independently-debounced push task above. Without this, a change
+# that fans out to many variants at once (enqueue_for_material, or a platform_ceiling_qty/
+# push_buildable_capacity edit looping over every active variant) fires that many
+# concurrent GET-then-PUT round trips against the SAME Etsy listing — confirmed live:
+# this produced a burst of "409 The Listing ... is being edited by another process" and
+# "429 rate limit exceeded" failures. Serializing per-listing turns that burst into a
+# queue instead, eliminating the self-inflicted race entirely.
+_listing_locks: dict[tuple[ListingPlatform, str], asyncio.Lock] = {}
+
+
+def _get_listing_lock(platform: ListingPlatform, external_listing_id: str) -> asyncio.Lock:
+    key = (platform, external_listing_id)
+    lock = _listing_locks.get(key)
+    if lock is None:
+        lock = asyncio.Lock()
+        _listing_locks[key] = lock
+    return lock
+
 _PRODUCTS_USING_MATERIAL_SQL = text(
     """
     SELECT product_id, NULL AS variant_id FROM product_materials WHERE material_id = :material_id
@@ -214,7 +234,8 @@ async def _push_one(session: AsyncSession, listing: Listing, qty: int) -> None:
 
     try:
         adapter = await get_adapter(session, listing.platform)
-        await adapter.push_listing_quantity(session, connection, listing_ref, sku, qty)
+        async with _get_listing_lock(listing.platform, listing.external_listing_id):
+            await adapter.push_listing_quantity(session, connection, listing_ref, sku, qty)
     except Exception as e:
         logger.warning(
             "Listing push failed for product_id=%s variant_id=%s platform=%s: %s",

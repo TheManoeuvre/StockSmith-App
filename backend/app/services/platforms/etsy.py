@@ -32,6 +32,13 @@ _MAX_LISTING_PAGES = 20
 # clear a transient limit hit without turning a single sync click into a long stall.
 _MAX_RATE_LIMIT_RETRIES = 3
 
+# Retries for push_listing_quantity's 409 ("being edited by another process") — see that
+# method's docstring. A flat short delay rather than exponential backoff since this is a
+# lock, not a rate limit: it clears as soon as whatever's holding it finishes, typically
+# within a couple of seconds, not progressively longer.
+_MAX_LISTING_CONFLICT_RETRIES = 3
+_LISTING_CONFLICT_RETRY_DELAY = 2.0
+
 
 class EtsyAdapter:
     """Etsy Open API v3 adapter — OAuth 2.0 + PKCE, refresh-token rotation (Etsy always
@@ -570,65 +577,94 @@ class EtsyAdapter:
         the same live testing that surfaced everything above — treated as confirmed, not
         just docs-inferred, though a subtle rounding drift on an unusual divisor still
         can't be fully ruled out by one seller's price data.
+
+        Retries on a 409 ("The Listing ... is being edited by another process. Please
+        try again in a few moments.") by redoing the whole GET-then-PUT round trip, not
+        just the PUT — confirmed live this fires in real bursts when many variants of one
+        multi-offering listing get pushed close together (e.g. a shared-material stock
+        change fanning out to every variant via listing_push.enqueue_for_material, or a
+        product-level toggle re-enqueuing every active variant). listing_push._push_one
+        also now serializes concurrent pushes to the same listing_id, which should
+        prevent StockSmith's own pushes from racing each other — this retry is the
+        remaining safety net for a conflict from outside that (Etsy's own transient lock,
+        or the seller editing the listing by hand at the same time).
         """
         listing_id = listing_ref.external_listing_id
-        response = await self._authed_request(session, connection, "GET", f"/listings/{listing_id}/inventory")
-        if response.status_code != 200:
-            raise PlatformSyncError(f"Failed to fetch Etsy listing inventory: {response.status_code} {response.text}")
-        inventory = response.json()
+        attempt = 0
+        while True:
+            response = await self._authed_request(session, connection, "GET", f"/listings/{listing_id}/inventory")
+            if response.status_code != 200:
+                raise PlatformSyncError(
+                    f"Failed to fetch Etsy listing inventory: {response.status_code} {response.text}"
+                )
+            inventory = response.json()
 
-        matched = False
-        products_payload = []
-        for product in inventory.get("products", []):
-            is_target_sku = product.get("sku") == sku and not product.get("is_deleted")
-            offerings_payload = []
-            for offering in product.get("offerings", []):
-                if offering.get("is_deleted"):
-                    # is_deleted isn't an accepted write key (confirmed live, same
-                    # failure mode as offering_id below) — there's no way to preserve
-                    # "this offering is deleted" on write, so it's omitted entirely
-                    # rather than risk sending its data back without that marker and
-                    # having Etsy interpret it as reviving a deleted offering.
-                    continue
-                offering_payload = {
-                    "quantity": offering.get("quantity", 0),
-                    "is_enabled": offering.get("is_enabled", True),
-                    "price": self._offering_price_float(offering.get("price")),
-                    # Required — confirmed live ("All offerings need readiness state"),
-                    # the mirror image of offering_id/is_deleted just above (rejected if
-                    # present). Passed straight through from the GET response.
-                    "readiness_state_id": offering.get("readiness_state_id"),
-                }
-                if is_target_sku:
-                    if qty <= 0:
-                        offering_payload["quantity"] = 1
-                        offering_payload["is_enabled"] = False
-                    else:
-                        offering_payload["quantity"] = qty
-                        offering_payload["is_enabled"] = True
-                    matched = True
-                offerings_payload.append(offering_payload)
-            products_payload.append(
-                {
-                    "sku": product.get("sku"),
-                    "property_values": [self._strip_property_value(pv) for pv in product.get("property_values", [])],
-                    "offerings": offerings_payload,
-                }
+            matched = False
+            products_payload = []
+            for product in inventory.get("products", []):
+                is_target_sku = product.get("sku") == sku and not product.get("is_deleted")
+                offerings_payload = []
+                for offering in product.get("offerings", []):
+                    if offering.get("is_deleted"):
+                        # is_deleted isn't an accepted write key (confirmed live, same
+                        # failure mode as offering_id below) — there's no way to preserve
+                        # "this offering is deleted" on write, so it's omitted entirely
+                        # rather than risk sending its data back without that marker and
+                        # having Etsy interpret it as reviving a deleted offering.
+                        continue
+                    offering_payload = {
+                        "quantity": offering.get("quantity", 0),
+                        "is_enabled": offering.get("is_enabled", True),
+                        "price": self._offering_price_float(offering.get("price")),
+                        # Required — confirmed live ("All offerings need readiness state"),
+                        # the mirror image of offering_id/is_deleted just above (rejected if
+                        # present). Passed straight through from the GET response.
+                        "readiness_state_id": offering.get("readiness_state_id"),
+                    }
+                    if is_target_sku:
+                        if qty <= 0:
+                            offering_payload["quantity"] = 1
+                            offering_payload["is_enabled"] = False
+                        else:
+                            offering_payload["quantity"] = qty
+                            offering_payload["is_enabled"] = True
+                        matched = True
+                    offerings_payload.append(offering_payload)
+                products_payload.append(
+                    {
+                        "sku": product.get("sku"),
+                        "property_values": [
+                            self._strip_property_value(pv) for pv in product.get("property_values", [])
+                        ],
+                        "offerings": offerings_payload,
+                    }
+                )
+
+            if not matched:
+                raise PlatformSyncError(f"No matching SKU '{sku}' found in Etsy listing {listing_id}'s inventory")
+
+            put_body = {
+                "products": products_payload,
+                "price_on_property": inventory.get("price_on_property", []),
+                "quantity_on_property": inventory.get("quantity_on_property", []),
+                "sku_on_property": inventory.get("sku_on_property", []),
+            }
+            put_response = await self._authed_request(
+                session, connection, "PUT", f"/listings/{listing_id}/inventory", json=put_body
             )
-
-        if not matched:
-            raise PlatformSyncError(f"No matching SKU '{sku}' found in Etsy listing {listing_id}'s inventory")
-
-        put_body = {
-            "products": products_payload,
-            "price_on_property": inventory.get("price_on_property", []),
-            "quantity_on_property": inventory.get("quantity_on_property", []),
-            "sku_on_property": inventory.get("sku_on_property", []),
-        }
-        put_response = await self._authed_request(
-            session, connection, "PUT", f"/listings/{listing_id}/inventory", json=put_body
-        )
-        if put_response.status_code != 200:
+            if put_response.status_code == 200:
+                return
+            if put_response.status_code == 409 and attempt < _MAX_LISTING_CONFLICT_RETRIES:
+                attempt += 1
+                logger.warning(
+                    "Etsy listing %s locked by another process (attempt %d/%d), retrying in %.1fs",
+                    listing_id,
+                    attempt,
+                    _MAX_LISTING_CONFLICT_RETRIES,
+                    _LISTING_CONFLICT_RETRY_DELAY,
+                )
+                await asyncio.sleep(_LISTING_CONFLICT_RETRY_DELAY)
+                continue
             raise PlatformSyncError(
                 f"Failed to update Etsy listing inventory: {put_response.status_code} {put_response.text}"
             )
