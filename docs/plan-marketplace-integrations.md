@@ -421,6 +421,54 @@ inventory?**
 
 ---
 
+## 5. Zero-stock push handling, theoretical (buildable-inclusive) sellable quantity, eBay listing migration gap
+
+Raised via a real eBay order where the pushed quantity looked wrong at a glance. Three
+related findings/decisions, none anticipated by Sections 1d/2/3 above:
+
+- **Etsy genuinely rejects a literal `0` quantity** on `updateListingInventory`
+  (confirmed live: "One offering must have quantity greater than 0") — Section 1d's push
+  design didn't anticipate this failure mode at all (only auth/network/rate-limit
+  failures). Fix: an out-of-stock offering is pushed as `quantity: 1` (Etsy's enforced
+  minimum) with `is_enabled: false` instead — takes it off-sale without erroring, same
+  pattern used by other third-party Etsy inventory tools. `qty > 0` restores
+  `is_enabled: true`. eBay's Inventory API, by contrast, natively accepts a literal `0`
+  as "out of stock" — no equivalent special-casing needed there.
+- **eBay quantity pushes now also update the offer level, not just the inventory-item
+  level.** eBay's own docs state the live listing quantity is
+  `min(item-level qty, offer-level availableQuantity)` — the original Section 1d/2
+  design only ever touched the item level. Not an overselling risk (going to 0 still
+  works either way), but a restock could have been silently capped by a stale
+  offer-level number. `push_listing_quantity` now looks up the live offer(s) for a SKU
+  and updates both in the same `bulkUpdatePriceQuantity` call.
+- **New: `Product.push_buildable_capacity` (default on), per product.** Section 1d
+  originally specified pushing only `max_sellable` (already-built, on-hand stock),
+  explicitly *never* anything "expected" ("would let a marketplace sell something not
+  physically in hand"). Revised: when this flag is on, the push instead uses a new
+  `theoretical_max_sellable` — on-hand stock **plus** what's buildable right now from
+  raw materials already in stock (not on-order/forecasted, unlike
+  `expected_max_sellable`) — on the reasoning that StockSmith can build to backfill an
+  incoming order before it needs to ship. Still capped by on-hand packaging capacity and
+  `platform_ceiling_qty` exactly like the other two figures (see
+  `kitting.combine_theoretical_max_sellable`). Per-product, not global, since backfill
+  risk depends on a given product's build lead time. The real `max_sellable` (and the
+  Etsy/eBay zero-stock handling above) is still what's used as the floor whenever the
+  buildable-inclusive figure is also 0.
+- **eBay "SKU not found" is very often not a StockSmith bug**: confirmed live (direct
+  `GET /sell/inventory/v1/inventory_item/{sku}` → 404, same for `.../offer?sku=`) that a
+  listing created through eBay's own Seller Hub UI — the normal way of listing on eBay —
+  is never registered as an Inventory API object until the seller runs eBay's own
+  listing migration. `build_listing_sku_index` only ever queries the Inventory API, so
+  such a listing's SKUs are invisible to it even though they're live and visible in
+  eBay's seller UI. `PlatformSyncBadge` now carries an explanatory tooltip on eBay
+  not-found/partial statuses rather than presenting it as an unqualified "not found".
+  StockSmith does not call eBay's `bulkMigrateListing` on the user's behalf (real write
+  against the user's live account, decided against for now) — migrating a listing is a
+  manual, user-driven step on eBay's side. Also fixed in the same pass: `_PAGE_LIMIT`
+  (200) was being reused for `getInventoryItems`, whose documented range is 1–100.
+
+---
+
 ## Data model changes (consolidated)
 
 - **New** `order_line_returns` — `order_line_id` FK, `qty`, `disposition`
@@ -606,3 +654,11 @@ inventory?**
     on inspection, some real seeded/migrated orders in this dataset had) — removed as
     both redundant (`allocation.deallocate_line` already reconciles when there's actually
     something to reconcile) and unsafe.
+11. ✅ **Zero-stock push handling + theoretical sellable quantity + eBay listing
+    migration gap** (Section 5) — Etsy `is_enabled`-based off-sale instead of a rejected
+    `0`; eBay offer-level `availableQuantity` kept in sync alongside item-level quantity;
+    new per-product `push_buildable_capacity` toggle (default on) driving a new
+    `theoretical_max_sellable` figure (on-hand + buildable-from-on-hand-materials,
+    capped by on-hand packaging and the platform ceiling); confirmed live that eBay
+    "not found" SKUs are usually un-migrated Seller Hub listings, not a StockSmith bug,
+    and surfaced that in the UI instead of building a `bulkMigrateListing` write path.

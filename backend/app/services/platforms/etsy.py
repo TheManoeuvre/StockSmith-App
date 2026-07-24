@@ -559,6 +559,12 @@ class EtsyAdapter:
         - `products[].offerings[].offering_id` and `.is_deleted` — both rejected;
           dropped (see _strip_property_value's sibling logic in the offerings loop for
           how a deleted offering is handled without that flag).
+        - `qty <= 0` — Etsy rejects a literal 0 quantity outright (confirmed live: "One
+          offering must have quantity greater than 0"). Etsy's enforced minimum is 1, so
+          an out-of-stock offering is represented as quantity=1 with is_enabled=False
+          instead — takes it off-sale without deleting it or erroring the push. This
+          matches Etsy's own documented pattern for third-party inventory tools. qty > 0
+          restores is_enabled=True in case a prior 0-stock push had disabled it.
         The PUT body's `price` being a plain float (amount/divisor), unlike the nested
         Money object GET returns it as, is implemented per Etsy's docs and DID succeed in
         the same live testing that surfaced everything above — treated as confirmed, not
@@ -594,7 +600,12 @@ class EtsyAdapter:
                     "readiness_state_id": offering.get("readiness_state_id"),
                 }
                 if is_target_sku:
-                    offering_payload["quantity"] = qty
+                    if qty <= 0:
+                        offering_payload["quantity"] = 1
+                        offering_payload["is_enabled"] = False
+                    else:
+                        offering_payload["quantity"] = qty
+                        offering_payload["is_enabled"] = True
                     matched = True
                 offerings_payload.append(offering_payload)
             products_payload.append(

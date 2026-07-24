@@ -33,5 +33,18 @@ export function PlatformSyncBadge({
   // saturation, so a platform stays visually identifiable by colour at a glance while
   // status is still conveyed by weight + the label text itself.
   const colorClass = status === "synced" ? PLATFORM_COLORS[platform].solid : PLATFORM_COLORS[platform].muted;
-  return <span className={`rounded px-2 py-0.5 text-xs ${colorClass}`}>{text}</span>;
+  // eBay-specific: "not found" here almost always means the listing was created via
+  // eBay's Seller Hub UI and was never migrated to an Inventory API object, not that
+  // the SKU is genuinely missing — confirmed live via a direct GET on a known-live SKU
+  // returning 404 on both getInventoryItem and getOffers. eBay's Inventory API (which
+  // this app's sync is built on) simply has no record of an un-migrated listing at all.
+  const title =
+    platform === "ebay" && (status === "not_found" || status === "partial")
+      ? "eBay reports this SKU as not found via its Inventory API. This usually means the listing was created through eBay's Seller Hub UI and hasn't been migrated to an Inventory API object yet — migrate it from eBay's own listing tools, then re-check sync."
+      : undefined;
+  return (
+    <span className={`rounded px-2 py-0.5 text-xs ${colorClass}`} title={title}>
+      {text}
+    </span>
+  );
 }

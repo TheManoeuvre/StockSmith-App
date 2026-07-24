@@ -73,6 +73,15 @@ class Product(Base):
     # every variant's own max_sellable/expected_max_sellable (services/kitting.py::
     # compute_max_sellable) — independent of and on top of stock/packaging capacity.
     platform_ceiling_qty: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # When True (default), marketplace pushes advertise on-hand stock PLUS what could be
+    # built right now from raw materials already in stock (services/kitting.py::
+    # compute_theoretical_max_sellable) instead of only already-built, ready-to-ship
+    # stock — on the reasoning that an incoming order can be backfilled by building
+    # before it needs to ship. Still capped by platform_ceiling_qty and on-hand
+    # packaging capacity either way; only whether raw-material buildability counts
+    # toward the pushed number is what this toggles. Per-product because build lead
+    # time (and therefore backfill risk) varies by product.
+    push_buildable_capacity: Mapped[bool] = mapped_column(default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

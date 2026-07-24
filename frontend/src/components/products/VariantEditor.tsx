@@ -16,6 +16,13 @@ const INITIAL_VARIANT_LIMIT = 5;
 
 export function VariantEditor({ productId }: { productId: number }) {
   const queryClient = useQueryClient();
+  // Shares its query key/cache with the product detail page's own product query, so
+  // mounting this tab alongside it (both under the same $productId route) doesn't
+  // trigger a second network round trip — same dedup pattern as etsySync below.
+  const { data: product } = useQuery({
+    queryKey: ["products", productId],
+    queryFn: () => productsApi.get(productId),
+  });
   const { data: variants } = useQuery({
     queryKey: ["products", productId, "variants"],
     queryFn: () => productsApi.listVariants(productId),
@@ -76,6 +83,7 @@ export function VariantEditor({ productId }: { productId: number }) {
           expanded={expandedId === variant.id}
           onToggle={() => setExpandedId((id) => (id === variant.id ? null : variant.id))}
           syncUnit={syncUnitByVariant.get(variant.id)}
+          pushBuildableCapacity={product?.push_buildable_capacity ?? true}
         />
       ))}
 
@@ -127,6 +135,7 @@ function VariantRow({
   expanded,
   onToggle,
   syncUnit,
+  pushBuildableCapacity,
 }: {
   variant: Variant;
   baseBom: BomLineRead[];
@@ -135,6 +144,7 @@ function VariantRow({
   expanded: boolean;
   onToggle: () => void;
   syncUnit: UnitSyncResult | undefined;
+  pushBuildableCapacity: boolean;
 }) {
   const queryClient = useQueryClient();
   const { data: materials } = useQuery({ queryKey: ["materials"], queryFn: materialsApi.list });
@@ -189,9 +199,14 @@ function VariantRow({
           On hand: {variant.current_stock} · Allocated: {variant.allocated_qty} · Free:{" "}
           {variant.current_stock - variant.allocated_qty} · Max buildable: {variant.max_buildable ?? "No BOM set"} ·
           Expected max buildable: {variant.expected_max_buildable ?? "No BOM set"} · Max sellable:{" "}
-          {variant.max_sellable ?? "—"}
+          <span className={variant.max_sellable === 0 ? "font-semibold text-red-600" : undefined}>
+            {variant.max_sellable ?? "—"}
+          </span>
           {sellableReasonTag(variant.max_sellable, variant.max_buildable, variant.max_sellable_reason) && (
-            <> {sellableReasonTag(variant.max_sellable, variant.max_buildable, variant.max_sellable_reason)}</>
+            <span className={variant.max_sellable === 0 ? "text-red-500" : undefined}>
+              {" "}
+              {sellableReasonTag(variant.max_sellable, variant.max_buildable, variant.max_sellable_reason)}
+            </span>
           )}{" "}
           · Expected max sellable: {variant.expected_max_sellable ?? "—"}
           {sellableReasonTag(
@@ -209,6 +224,18 @@ function VariantRow({
             </>
           )}{" "}
           · Cost/unit: {variant.cost_per_unit ? `£${Number(variant.cost_per_unit).toFixed(2)}` : "—"}
+          <br />
+          Pushing to marketplaces:{" "}
+          <strong
+            className={
+              (pushBuildableCapacity ? variant.theoretical_max_sellable : variant.max_sellable) === 0
+                ? "text-red-600"
+                : undefined
+            }
+          >
+            {(pushBuildableCapacity ? variant.theoretical_max_sellable : variant.max_sellable) ?? "—"}
+          </strong>{" "}
+          ({pushBuildableCapacity ? "buildable included" : "on-hand only"})
         </span>
       </div>
       {expanded && (

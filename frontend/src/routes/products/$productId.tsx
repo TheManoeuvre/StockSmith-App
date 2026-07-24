@@ -76,6 +76,14 @@ function ProductDetail() {
     },
   });
 
+  const togglePushBuildableCapacityMutation = useMutation({
+    mutationFn: (push_buildable_capacity: boolean) => productsApi.update(id, { push_buildable_capacity }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["products", id] });
+      queryClient.invalidateQueries({ queryKey: ["products"] });
+    },
+  });
+
   const saveDetailsStatus = useSaveStatus(saveDetailsMutation.status);
 
   const invalidateImage = () => {
@@ -125,6 +133,8 @@ function ProductDetail() {
   }, [variants, product]);
 
   if (!product) return <p>Loading…</p>;
+
+  const pushedQty = product.push_buildable_capacity ? product.theoretical_max_sellable : product.max_sellable;
 
   const tabs: TabDef[] = [
     { id: "details", label: "Details" },
@@ -208,10 +218,10 @@ function ProductDetail() {
                     </tr>
                     <tr>
                       <td className="p-1.5 font-medium text-slate-600">Ship</td>
-                      <td className="p-1.5">
+                      <td className={`p-1.5 ${product.max_sellable === 0 ? "font-semibold text-red-600" : ""}`}>
                         {product.max_sellable ?? "—"}
                         {sellableReasonTag(product.max_sellable, product.max_buildable, product.max_sellable_reason) && (
-                          <span className="ml-1 text-slate-400">
+                          <span className={`ml-1 ${product.max_sellable === 0 ? "text-red-500" : "text-slate-400"}`}>
                             {sellableReasonTag(product.max_sellable, product.max_buildable, product.max_sellable_reason)}
                           </span>
                         )}
@@ -235,6 +245,13 @@ function ProductDetail() {
                     </tr>
                   </tbody>
                 </table>
+                <span>
+                  Pushing to marketplaces:{" "}
+                  <strong className={pushedQty === 0 ? "text-red-600" : ""}>{pushedQty ?? "—"}</strong>{" "}
+                  <span className="text-slate-400">
+                    ({product.push_buildable_capacity ? "buildable included" : "on-hand only"})
+                  </span>
+                </span>
               </>
             )}
             <span>Cost per unit: <strong>{product.cost_per_unit ? `£${Number(product.cost_per_unit).toFixed(2)}` : "—"}</strong></span>
@@ -315,6 +332,26 @@ function ProductDetail() {
             what gets synced toward each variant's Etsy listing) at this value, even if stock and packaging could
             support more. Applies per variant — a variant already below the cap is unaffected. Leave blank for no cap.
           </p>
+          {!product.is_bundle && (
+            <>
+              <label className="mt-2 flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={product.push_buildable_capacity}
+                  onChange={(e) => togglePushBuildableCapacityMutation.mutate(e.target.checked)}
+                />
+                Include buildable stock when pushing to marketplaces
+              </label>
+              <p className="mt-1 text-sm text-slate-500">
+                When on (default), marketplace pushes advertise on-hand stock plus what could be built right now
+                from raw materials already in stock — not already-built, ready-to-ship stock only — on the
+                reasoning that an incoming order can be backfilled by building before it ships. Still capped by
+                on-hand packaging and the platform ceiling either way. Turn off for products where build lead time
+                makes that backfill risky.
+              </p>
+              <ErrorBanner error={togglePushBuildableCapacityMutation.error} />
+            </>
+          )}
           <ErrorBanner error={saveDetailsMutation.error} />
         </section>
       )}

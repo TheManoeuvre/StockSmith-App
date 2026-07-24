@@ -18,6 +18,12 @@ from app.services.platforms import get_adapter
 from app.services.platforms.base import ExternalOrder, ensure_utc
 from app.services.variants import find_by_sku
 
+_PLATFORM_LABELS: dict[ListingPlatform, str] = {
+    ListingPlatform.etsy: "Etsy",
+    ListingPlatform.ebay: "eBay",
+    ListingPlatform.shopify: "Shopify",
+}
+
 
 async def _get_connection(session: AsyncSession, platform: ListingPlatform) -> PlatformConnection:
     result = await session.execute(select(PlatformConnection).where(PlatformConnection.platform == platform))
@@ -366,6 +372,12 @@ async def _reconcile_status(session: AsyncSession, order: Order, ext_order: Exte
     """Returns True if this call just marked the order shipped — lets commit_sync report
     a shipped_count so it's visible that already-imported orders are actually being kept
     in sync, not just newly-placed ones."""
+    # This function is shared across every platform (order_sync itself is
+    # platform-agnostic) — order.platform is always set correctly by _upsert_order by the
+    # time this runs, so it's the source of truth for any platform-specific wording below,
+    # not a hardcoded name. (Previously hardcoded "Etsy" — confirmed live on a real eBay
+    # order surfacing a sync_issue that named the wrong marketplace.)
+    platform = order.platform
     # allocation.py's ship_order (and services/returns.process_cancellation, on the
     # cancel side) already clear sync_issue themselves the moment status actually reaches
     # shipped/cancelled — covers both this sync path and a manual cancel/ship action
@@ -388,25 +400,25 @@ async def _reconcile_status(session: AsyncSession, order: Order, ext_order: Exte
         return False
 
     if is_new:
-        # A brand-new order can arrive already shipped on Etsy's side (seller fulfilled it
-        # before this sync ever ran) — allocate first so the is_shipped check right below
-        # has something to ship, instead of returning early and losing that signal forever
-        # (fetch_orders_since's min_last_modified watermark means a later sync may never
-        # see this receipt again if nothing about it changes further).
-        await allocation.allocate_order(session, order, source="etsy-sync")
+        # A brand-new order can arrive already shipped on the marketplace's side (seller
+        # fulfilled it before this sync ever ran) — allocate first so the is_shipped
+        # check right below has something to ship, instead of returning early and losing
+        # that signal forever (fetch_orders_since's min_last_modified watermark means a
+        # later sync may never see this receipt again if nothing about it changes further).
+        await allocation.allocate_order(session, order, source=f"{platform.value}-sync")
 
     if ext_order.is_shipped and order.status not in (OrderStatus.shipped, OrderStatus.cancelled):
         lines = list((await session.execute(select(OrderLine).where(OrderLine.order_id == order.id))).scalars())
         has_allocated = any(line.allocated_qty > line.shipped_qty for line in lines)
         if not has_allocated:
-            # Etsy's is_shipped can't be reconciled locally — allocation.ship_order would
-            # raise "No allocated units to ship" and, since commit_sync is one transaction,
-            # take the whole sync batch down with it. Flag it instead so the rest of the
-            # batch still commits; self-heals once the order gets allocated (manually, or
-            # by a later sync) and actually ships.
+            # This platform's is_shipped can't be reconciled locally — allocation.
+            # ship_order would raise "No allocated units to ship" and, since commit_sync
+            # is one transaction, take the whole sync batch down with it. Flag it instead
+            # so the rest of the batch still commits; self-heals once the order gets
+            # allocated (manually, or by a later sync) and actually ships.
             order.sync_issue = (
-                "Etsy shows this order as shipped, but no units are allocated locally — "
-                "check stock and allocate manually."
+                f"{_PLATFORM_LABELS[platform]} shows this order as shipped, but no units are allocated "
+                "locally — check stock and allocate manually."
             )
             return False
         await allocation.ship_order(session, order)

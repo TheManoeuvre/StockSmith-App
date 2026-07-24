@@ -54,16 +54,23 @@ async def _to_variant_read(session: AsyncSession, variant: ProductVariant) -> Va
     max_buildable, expected_max_buildable, cost_per_unit, effective_bom = await compute_variant_buildability(
         session, variant.product_id, variant.id
     )
-    max_sellable, max_sellable_reason, expected_max_sellable, expected_max_sellable_reason, effective_kitting_bom = (
-        await compute_max_sellable(
-            session,
-            variant.product_id,
-            variant.id,
-            variant.current_stock,
-            variant.allocated_qty,
-            expected_max_buildable,
-            product.platform_ceiling_qty if product else None,
-        )
+    (
+        max_sellable,
+        max_sellable_reason,
+        expected_max_sellable,
+        expected_max_sellable_reason,
+        theoretical_max_sellable,
+        theoretical_max_sellable_reason,
+        effective_kitting_bom,
+    ) = await compute_max_sellable(
+        session,
+        variant.product_id,
+        variant.id,
+        variant.current_stock,
+        variant.allocated_qty,
+        expected_max_buildable,
+        product.platform_ceiling_qty if product else None,
+        max_buildable,
     )
     full_sku = compute_full_sku(product.sku if product else None, variant.sku_suffix)
     fee_source, fee_components = await platform_fees.get_resolver_context(session)
@@ -77,6 +84,8 @@ async def _to_variant_read(session: AsyncSession, variant: ProductVariant) -> Va
             "max_sellable_reason": max_sellable_reason,
             "expected_max_sellable": expected_max_sellable,
             "expected_max_sellable_reason": expected_max_sellable_reason,
+            "theoretical_max_sellable": theoretical_max_sellable,
+            "theoretical_max_sellable_reason": theoretical_max_sellable_reason,
             "cost_per_unit": cost_per_unit,
             "effective_bom": effective_bom,
             "effective_kitting_bom": effective_kitting_bom,

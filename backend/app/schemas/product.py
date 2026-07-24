@@ -16,6 +16,7 @@ class ProductBase(BaseModel):
     shipping_profile_id: int | None = None
     platform_fee_percent: Decimal | None = None
     platform_ceiling_qty: int | None = None
+    push_buildable_capacity: bool = True
 
 
 class ProductCreate(ProductBase):
@@ -33,6 +34,7 @@ class ProductUpdate(BaseModel):
     shipping_profile_id: int | None = None
     platform_fee_percent: Decimal | None = None
     platform_ceiling_qty: int | None = None
+    push_buildable_capacity: bool | None = None
     pricing_mode: PricingMode | None = None
     pricing_variable_attribute: int | None = None
 
@@ -57,6 +59,8 @@ class ProductRead(ProductBase):
     max_sellable_reason: str | None = None
     expected_max_sellable: int | None = None
     expected_max_sellable_reason: str | None = None
+    theoretical_max_sellable: int | None = None
+    theoretical_max_sellable_reason: str | None = None
     cost_per_unit: Decimal | None = None
     main_image_asset_id: int | None = None
     ready_to_ship: int | None = None

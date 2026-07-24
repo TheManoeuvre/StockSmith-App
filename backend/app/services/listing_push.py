@@ -126,7 +126,15 @@ async def _resolve_max_sellable(session: AsyncSession, product_id: int, variant_
     to serialize a single product/variant, run here for just the one item rather than
     the bulk list views those routers build for. Deliberately never expected_max_sellable
     (which counts on-order/not-yet-received stock) — pushing "expected" would let a
-    marketplace sell something not physically in hand yet."""
+    marketplace sell something not physically in hand yet.
+
+    When the product's push_buildable_capacity flag is on (the default), pushes
+    theoretical_max_sellable instead — on-hand stock plus what's buildable right now
+    from raw materials already on hand (not on-order), capped by on-hand packaging and
+    the platform ceiling same as always. That's intentionally not "expected": it never
+    counts on-order supply, only what's physically in the building already, on the
+    premise that an incoming order can be backfilled by building before it ships. See
+    kitting.combine_theoretical_max_sellable and Product.push_buildable_capacity."""
     product = await session.get(Product, product_id)
     if product is None:
         return None
@@ -135,16 +143,18 @@ async def _resolve_max_sellable(session: AsyncSession, product_id: int, variant_
         variant = await session.get(ProductVariant, variant_id)
         if variant is None:
             return None
-        _, expected_max_buildable, _, _ = await buildability.compute_variant_buildability(
+        max_buildable, expected_max_buildable, _, _ = await buildability.compute_variant_buildability(
             session, product_id, variant_id
         )
         current_stock, allocated_qty = variant.current_stock, variant.allocated_qty
     else:
+        max_buildable_by_product = await buildability.get_max_buildable_by_product(session)
+        max_buildable = max_buildable_by_product.get(product_id)
         expected_max_buildable_by_product = await buildability.get_expected_max_buildable_by_product(session)
         expected_max_buildable = expected_max_buildable_by_product.get(product_id)
         current_stock, allocated_qty = product.current_stock, product.allocated_qty
 
-    max_sellable, _, _, _, _ = await kitting.compute_max_sellable(
+    max_sellable, _, _, _, theoretical_max_sellable, _, _ = await kitting.compute_max_sellable(
         session,
         product_id,
         variant_id,
@@ -152,8 +162,9 @@ async def _resolve_max_sellable(session: AsyncSession, product_id: int, variant_
         allocated_qty,
         expected_max_buildable,
         product.platform_ceiling_qty,
+        max_buildable,
     )
-    return max_sellable
+    return theoretical_max_sellable if product.push_buildable_capacity else max_sellable
 
 
 async def _resolve_sku(session: AsyncSession, listing: Listing) -> str | None:
