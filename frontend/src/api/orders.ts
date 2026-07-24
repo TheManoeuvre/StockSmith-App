@@ -1,6 +1,44 @@
 import { api } from "./client";
 import type { Order, OrderKittingOverrideLine, OrderKittingSummary, OrderStatus } from "./types";
 
+export type ReturnDisposition = "scrap" | "return_to_stock";
+
+export interface CancellationKittingMaterial {
+  material_id: number;
+  material_name: string;
+  qty_per_unit: string;
+}
+
+export interface CancellationLineOption {
+  order_line_id: number;
+  product_id: number | null;
+  variant_id: number | null;
+  product_name: string | null;
+  variant_name: string | null;
+  pending_qty: number;
+  shipped_qty: number;
+  default_product_disposition: ReturnDisposition;
+  kitting_materials: CancellationKittingMaterial[];
+  default_kitting_disposition: ReturnDisposition;
+}
+
+export interface CancellationPreview {
+  order_id: number;
+  already_cancelled: boolean;
+  lines: CancellationLineOption[];
+}
+
+export interface LineCancellationDecision {
+  order_line_id: number;
+  product_disposition: ReturnDisposition;
+  kitting_disposition?: ReturnDisposition;
+}
+
+export interface OrderCancelRequest {
+  line_decisions: LineCancellationDecision[];
+  reason?: string | null;
+}
+
 export interface OrderLineInput {
   product_id?: number | null;
   variant_id?: number | null;
@@ -33,7 +71,8 @@ export const ordersApi = {
   create: (input: OrderCreateInput) => api.post<Order>("/orders", input),
   update: (id: number, input: OrderUpdateInput) => api.patch<Order>(`/orders/${id}`, input),
   remove: (id: number) => api.delete<void>(`/orders/${id}`),
-  cancel: (id: number) => api.post<Order>(`/orders/${id}/cancel`),
+  cancellationPreview: (id: number) => api.get<CancellationPreview>(`/orders/${id}/cancellation-preview`),
+  cancel: (id: number, payload: OrderCancelRequest) => api.post<Order>(`/orders/${id}/cancel`, payload),
   ship: (id: number) => api.post<Order>(`/orders/${id}/ship`),
   allocate: (id: number) => api.post<Order>(`/orders/${id}/allocate`),
   updateLineQty: (lineId: number, orderedQty: number) =>

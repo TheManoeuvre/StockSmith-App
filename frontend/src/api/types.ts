@@ -355,6 +355,7 @@ export interface Order {
   financials_synced_at: string | null;
   net_profit: string | null;
   sync_issue: string | null;
+  pending_marketplace_cancellation: boolean;
   lines: OrderLine[];
 }
 

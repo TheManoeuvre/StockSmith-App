@@ -6,6 +6,7 @@ import { PLATFORM_LABELS } from "../../lib/platforms";
 import { ErrorBanner } from "../common/ErrorBanner";
 
 const SYNC_LOG_PAGE_SIZE = 10;
+const RECENT_PUSH_CHECK_SIZE = 10;
 
 export function PlatformSyncPanel({ platform }: { platform: ListingPlatform }) {
   const label = PLATFORM_LABELS[platform];
@@ -14,6 +15,7 @@ export function PlatformSyncPanel({ platform }: { platform: ListingPlatform }) {
   const [commitResult, setCommitResult] = useState<SyncCommitResult | null>(null);
   const [bulkSyncResult, setBulkSyncResult] = useState<BulkListingSyncResult | null>(null);
   const [syncStartDate, setSyncStartDate] = useState("");
+  const [syncIntervalMinutes, setSyncIntervalMinutes] = useState("15");
   const [logPage, setLogPage] = useState(0);
 
   const { data: logData } = useQuery({
@@ -26,14 +28,37 @@ export function PlatformSyncPanel({ platform }: { platform: ListingPlatform }) {
   const { data: platformStatus } = useQuery({
     queryKey: ["platforms", platform, "status"],
     queryFn: () => platformsApi.status(platform),
+    // Auto-sync runs in the background regardless of whether this panel is open —
+    // refetch periodically so "last attempt"/"last success" stay current without the
+    // user having to manually refresh to see a background tick land.
+    refetchInterval: 30_000,
   });
+  // A stale marketplace quantity is a real overselling risk, not just cosmetic
+  // staleness — surface recent push failures rather than only logging them server-side.
+  // Pushes fire in the background (debounced after any stock change), so this polls too.
+  const { data: pushLogData } = useQuery({
+    queryKey: ["platforms", platform, "listing-push-log"],
+    queryFn: () => platformsApi.listingPushLog(platform, RECENT_PUSH_CHECK_SIZE, 0),
+    refetchInterval: 30_000,
+  });
+  const recentPushFailures = pushLogData?.items.filter((p) => p.status === "error") ?? [];
 
   useEffect(() => {
     if (platformStatus?.sync_start_date) setSyncStartDate(platformStatus.sync_start_date);
   }, [platformStatus?.sync_start_date]);
 
+  useEffect(() => {
+    if (platformStatus?.sync_interval_minutes) setSyncIntervalMinutes(String(platformStatus.sync_interval_minutes));
+  }, [platformStatus?.sync_interval_minutes]);
+
   const saveSyncStartDateMutation = useMutation({
     mutationFn: () => platformsApi.updateSyncStartDate(platform, syncStartDate),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["platforms", platform, "status"] }),
+  });
+
+  const syncSettingsMutation = useMutation({
+    mutationFn: (payload: { auto_sync_enabled?: boolean; sync_interval_minutes?: number }) =>
+      platformsApi.updateSyncSettings(platform, payload),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["platforms", platform, "status"] }),
   });
 
@@ -73,7 +98,9 @@ export function PlatformSyncPanel({ platform }: { platform: ListingPlatform }) {
         <div>
           <p className="font-medium">Order sync</p>
           <p className="text-sm text-slate-500">
-            Manual only — no automatic polling is set up yet. Always preview before importing.
+            {platformStatus?.auto_sync_enabled
+              ? `Auto-syncing every ${platformStatus.sync_interval_minutes} min. Preview is still available any time.`
+              : "Manual only — turn on auto-sync below, or preview/sync by hand."}
           </p>
         </div>
         <div className="flex gap-2">
@@ -91,6 +118,65 @@ export function PlatformSyncPanel({ platform }: { platform: ListingPlatform }) {
           </button>
         </div>
       </div>
+
+      <div className="flex items-center justify-between rounded bg-slate-50 p-2">
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={platformStatus?.auto_sync_enabled ?? false}
+            onChange={(e) => syncSettingsMutation.mutate({ auto_sync_enabled: e.target.checked })}
+          />
+          <span>Auto-sync</span>
+        </label>
+        <label className="flex items-center gap-2 text-sm text-slate-500">
+          every
+          <input
+            type="number"
+            min={1}
+            className="w-16 rounded border border-slate-300 px-2 py-1"
+            value={syncIntervalMinutes}
+            onChange={(e) => setSyncIntervalMinutes(e.target.value)}
+            onBlur={() => {
+              const minutes = parseInt(syncIntervalMinutes, 10);
+              if (minutes >= 1 && minutes !== platformStatus?.sync_interval_minutes) {
+                syncSettingsMutation.mutate({ sync_interval_minutes: minutes });
+              }
+            }}
+          />
+          min
+        </label>
+      </div>
+      {platformStatus?.last_sync_attempt_at && (
+        <p className="text-xs text-slate-500">
+          Last sync attempt {new Date(platformStatus.last_sync_attempt_at).toLocaleString()}
+          {platformStatus.last_sync_success_at === platformStatus.last_sync_attempt_at ? (
+            <span className="text-green-700"> — succeeded</span>
+          ) : (
+            <span className="text-red-600"> — failed{platformStatus.last_sync_error ? `: ${platformStatus.last_sync_error}` : ""}</span>
+          )}
+          {platformStatus.last_sync_success_at && platformStatus.last_sync_success_at !== platformStatus.last_sync_attempt_at && (
+            <> (last success {new Date(platformStatus.last_sync_success_at).toLocaleString()})</>
+          )}
+        </p>
+      )}
+      <ErrorBanner error={syncSettingsMutation.error} />
+
+      {recentPushFailures.length > 0 && (
+        <div className="rounded border border-red-200 bg-red-50 p-2 text-sm text-red-800">
+          <p className="font-medium">
+            {recentPushFailures.length} recent quantity push{recentPushFailures.length === 1 ? "" : "es"} to {label}{" "}
+            failed — the listed quantity there may be stale.
+          </p>
+          <ul className="mt-1 list-disc pl-5 text-xs">
+            {recentPushFailures.slice(0, 5).map((p) => (
+              <li key={p.id}>
+                {p.product_name ?? `Product #${p.product_id}`}
+                {p.variant_name ? ` — ${p.variant_name}` : ""}: {p.error_message ?? "unknown error"}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="flex items-center justify-between">
         <label className="flex items-center gap-2 text-sm">

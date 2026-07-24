@@ -11,10 +11,13 @@ from app.models.kitting import (
 )
 from app.models.listing import Listing, ListingPlatform
 from app.models.order import Order, OrderLine, OrderStatus
+from app.models.order_return import OrderLineReturn, ReturnDisposition, ReturnScope, ReturnSource
 from app.models.manufacturer import Manufacturer
 from app.models.material import Material, MaterialAdjustment, MaterialAdjustmentMode, MaterialCategory, MaterialUnit
 from app.models.material_type import MaterialType
 from app.models.platform_connection import PlatformConnection
+from app.models.platform_credential import PlatformAppCredential, PlatformEnvironment
+from app.models.platform_listing_push import ListingPushStatus, PlatformListingPush
 from app.models.platform_sync_run import PlatformSyncRun, SyncRunMode, SyncRunStatus
 from app.models.platform_fee import FeeBasis, MarginFeeConfig, MarginFeeSource, PlatformFeeComponent
 from app.models.pricing import ProductPriceSnapshot
@@ -57,9 +60,17 @@ __all__ = [
     "Order",
     "OrderLine",
     "OrderStatus",
+    "OrderLineReturn",
+    "ReturnDisposition",
+    "ReturnScope",
+    "ReturnSource",
     "AllocationEvent",
     "AllocationEventType",
     "PlatformConnection",
+    "PlatformAppCredential",
+    "PlatformEnvironment",
+    "PlatformListingPush",
+    "ListingPushStatus",
     "PlatformSyncRun",
     "SyncRunMode",
     "SyncRunStatus",

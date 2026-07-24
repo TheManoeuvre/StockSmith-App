@@ -1,8 +1,22 @@
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Protocol
 
 from app.models.platform_connection import PlatformConnection
+
+
+def ensure_utc(value: datetime | None) -> datetime | None:
+    """SQLite doesn't have a real timezone-aware column type — SQLAlchemy's
+    DateTime(timezone=True) accepts an aware datetime on write but doesn't reliably
+    round-trip the tzinfo back on read (confirmed live: a freshly-written
+    access_token_expires_at came back naive, blowing up the `datetime.now(timezone.utc)
+    >= connection.access_token_expires_at` comparison both adapters' _ensure_fresh do
+    with `TypeError: can't compare offset-naive and offset-aware datetimes`). Every
+    datetime this app ever writes is UTC (see TokenSet.expires_at's own construction), so
+    a naive value read back is safe to assume is UTC and re-attach tzinfo to."""
+    if value is not None and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
 
 
 @dataclass

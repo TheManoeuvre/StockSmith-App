@@ -24,7 +24,8 @@ from app.schemas.order import (
     OrderRead,
     OrderUpdate,
 )
-from app.services import allocation
+from app.schemas.order_return import CancellationPreview, OrderCancelRequest
+from app.services import allocation, returns
 from app.services.kitting import get_order_kitting_summary, reconcile_order_kitting
 from app.services.order_costs import compute_line_cost_snapshot
 from app.services.variants import compute_full_sku
@@ -195,6 +196,7 @@ def _serialize_order(order: Order) -> OrderRead:
         financials_synced_at=order.financials_synced_at,
         net_profit=_compute_net_profit(order),
         sync_issue=order.sync_issue,
+        pending_marketplace_cancellation=order.pending_marketplace_cancellation,
         lines=lines,
     )
 
@@ -341,10 +343,22 @@ async def delete_order(order_id: int, session: AsyncSession = Depends(get_db)) -
     await session.commit()
 
 
-@router.post("/{order_id}/cancel", response_model=OrderRead)
-async def cancel_order_endpoint(order_id: int, session: AsyncSession = Depends(get_db)) -> OrderRead:
+@router.get("/{order_id}/cancellation-preview", response_model=CancellationPreview)
+async def cancellation_preview(order_id: int, session: AsyncSession = Depends(get_db)) -> CancellationPreview:
+    """Per-line breakdown of what a cancel/return would do — pending (allocated but
+    unshipped) qty, shipped qty, and (for shipped lines) the resolved kitting materials
+    involved — each with its default disposition, for the frontend to show a real
+    scrap/return-to-stock prompt instead of asking blind. See services/returns.py."""
     order = await _get_order_with_lines(session, order_id)
-    await allocation.cancel_order(session, order)
+    return await returns.get_cancellation_preview(session, order)
+
+
+@router.post("/{order_id}/cancel", response_model=OrderRead)
+async def cancel_order_endpoint(
+    order_id: int, payload: OrderCancelRequest, session: AsyncSession = Depends(get_db)
+) -> OrderRead:
+    order = await _get_order_with_lines(session, order_id)
+    await returns.process_cancellation(session, order, payload.line_decisions, payload.reason)
     await session.commit()
     return _serialize_order(await _get_order_with_lines(session, order_id))
 

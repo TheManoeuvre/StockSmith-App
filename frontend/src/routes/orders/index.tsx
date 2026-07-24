@@ -96,6 +96,14 @@ function OrdersList() {
                 {order.lines.some((l) => l.needs_mapping) && (
                   <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">Needs mapping</span>
                 )}
+                {order.pending_marketplace_cancellation && (
+                  <span
+                    className="ml-2 rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800"
+                    title={`${order.platform ? PLATFORM_LABELS[order.platform] : "The marketplace"} reports this cancelled — review needed`}
+                  >
+                    Cancellation reported
+                  </span>
+                )}
               </td>
             </tr>
           ))}

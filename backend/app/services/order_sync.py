@@ -15,7 +15,7 @@ from app.schemas.platform import SyncCommitResult, SyncPreviewLine, SyncPreviewO
 from app.services import allocation
 from app.services.order_costs import compute_line_cost_snapshot, resolve_order_shipping_profile
 from app.services.platforms import get_adapter
-from app.services.platforms.base import ExternalOrder
+from app.services.platforms.base import ExternalOrder, ensure_utc
 from app.services.variants import find_by_sku
 
 
@@ -41,11 +41,16 @@ def _effective_since(connection: PlatformConnection) -> datetime | None:
         if connection.sync_start_date is not None
         else None
     )
-    if connection.last_orders_synced_at is None:
+    # SQLite doesn't reliably round-trip an aware datetime through SQLAlchemy — a value
+    # this app itself wrote via the ORM can come back naive on a later read (see
+    # platforms/base.ensure_utc's own docstring); every stored datetime here is UTC
+    # regardless, so it's always safe to reattach tzinfo before comparing.
+    last_orders_synced_at = ensure_utc(connection.last_orders_synced_at)
+    if last_orders_synced_at is None:
         return floor
     if floor is None:
-        return connection.last_orders_synced_at
-    return max(floor, connection.last_orders_synced_at)
+        return last_orders_synced_at
+    return max(floor, last_orders_synced_at)
 
 
 async def _get_existing_external_ids(
@@ -105,7 +110,7 @@ async def preview_sync(session: AsyncSession, platform: ListingPlatform) -> Sync
     data — the only DB write here is the sync-run log entry itself. Safe to run
     repeatedly against a live store."""
     connection = await _get_connection(session, platform)
-    adapter = get_adapter(platform)
+    adapter = await get_adapter(session, platform)
 
     run = PlatformSyncRun(platform=platform, mode=SyncRunMode.preview, status=SyncRunStatus.success)
     session.add(run)
@@ -179,7 +184,7 @@ async def commit_sync(session: AsyncSession, platform: ListingPlatform) -> SyncC
     orders already known to us. The whole sync is one transaction — a failure partway
     through rolls back entirely rather than leaving a half-imported batch."""
     connection = await _get_connection(session, platform)
-    adapter = get_adapter(platform)
+    adapter = await get_adapter(session, platform)
 
     try:
         raw_external_orders = await adapter.fetch_orders_since(session, connection, _effective_since(connection))
@@ -279,11 +284,16 @@ async def _upsert_order(session: AsyncSession, platform: ListingPlatform, ext_or
         _apply_financials(order, ext_order)
         return order, False
 
+    # Deliberately not persisting ext_order.buyer_name/buyer_note here — see
+    # docs/plan-marketplace-integrations.md Section 1e. Nothing in inventory/BOM/
+    # allocation logic reads it, and for eBay specifically, never storing a member's
+    # name/username is what qualifies the app for eBay's Marketplace Account Deletion
+    # exemption instead of having to stand up a public notification endpoint. The
+    # buyer_name/buyer_note columns stay for manually-created orders, where the user is
+    # typing in their own note, not receiving it via a marketplace API.
     order = Order(
         platform=platform,
         external_order_id=ext_order.external_order_id,
-        buyer_name=ext_order.buyer_name,
-        buyer_note=ext_order.buyer_note,
         order_placed_at=ext_order.placed_at,
     )
     _apply_financials(order, ext_order)
@@ -356,18 +366,25 @@ async def _reconcile_status(session: AsyncSession, order: Order, ext_order: Exte
     """Returns True if this call just marked the order shipped — lets commit_sync report
     a shipped_count so it's visible that already-imported orders are actually being kept
     in sync, not just newly-placed ones."""
-    # allocation.py's cancel_order/ship_order already clear sync_issue themselves the
-    # moment status actually reaches cancelled/shipped — covers both this sync path and
-    # a manual cancel/ship action elsewhere. But an order can also already BE in that
-    # resolved state by the time a later sync revisits it (e.g. manually allocated and
-    # shipped after the flag was set, with nothing left to ship) — cancel_order/ship_order
-    # won't get called again for it, so self-heal that case here too.
+    # allocation.py's ship_order (and services/returns.process_cancellation, on the
+    # cancel side) already clear sync_issue themselves the moment status actually reaches
+    # shipped/cancelled — covers both this sync path and a manual cancel/ship action
+    # elsewhere. But an order can also already BE in that resolved state by the time a
+    # later sync revisits it (e.g. manually allocated and shipped after the flag was set,
+    # with nothing left to ship) — those functions won't get called again for it, so
+    # self-heal that case here too.
     if order.status in (OrderStatus.shipped, OrderStatus.cancelled) and order.sync_issue is not None:
         order.sync_issue = None
 
     if ext_order.is_cancelled:
+        # Deliberately NOT auto-applied — a marketplace-reported cancellation needs a
+        # human to choose a scrap/return-to-stock disposition per line (see
+        # services/returns.py), not have it happen silently. Etsy's API has no
+        # seller-initiated cancel/refund write endpoint either, so this can only ever
+        # flow marketplace -> StockSmith; there's nothing to push back even if we wanted
+        # to auto-apply it. See docs/plan-marketplace-integrations.md Section 4.
         if order.status != OrderStatus.cancelled:
-            await allocation.cancel_order(session, order)
+            order.pending_marketplace_cancellation = True
         return False
 
     if is_new:

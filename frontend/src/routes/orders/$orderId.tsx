@@ -6,6 +6,7 @@ import { productsApi } from "../../api/products";
 import { shippingProfilesApi } from "../../api/shippingProfiles";
 import type { Order, OrderLine, OrderStatus } from "../../api/types";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
+import { CancelOrderDialog } from "../../components/orders/CancelOrderDialog";
 import { OrderKittingSection } from "../../components/orders/OrderKittingSection";
 import { formatMoney } from "../../lib/money";
 import { PLATFORM_LABELS } from "../../lib/platforms";
@@ -34,6 +35,7 @@ function OrderDetail() {
   const queryClient = useQueryClient();
 
   const { data: order } = useQuery({ queryKey: ["orders", id], queryFn: () => ordersApi.get(id) });
+  const [showCancelDialog, setShowCancelDialog] = useState(false);
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["orders", id] });
@@ -42,7 +44,6 @@ function OrderDetail() {
     queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
   };
 
-  const cancelMutation = useMutation({ mutationFn: () => ordersApi.cancel(id), onSuccess: invalidate });
   const shipMutation = useMutation({ mutationFn: () => ordersApi.ship(id), onSuccess: invalidate });
   const allocateMutation = useMutation({ mutationFn: () => ordersApi.allocate(id), onSuccess: invalidate });
   const unassignMutation = useMutation({
@@ -52,7 +53,7 @@ function OrderDetail() {
 
   if (!order) return <p>Loading…</p>;
 
-  const canCancel = order.status !== "cancelled" && order.status !== "shipped";
+  const canCancel = order.status !== "cancelled";
   const canShip = order.status === "pending" || order.status === "allocated";
   const canAllocate = order.status === "pending" || order.status === "allocated";
   const anyAllocated = order.lines.some((l) => l.allocated_qty > l.shipped_qty);
@@ -60,7 +61,9 @@ function OrderDetail() {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">{order.buyer_name ?? `Order #${order.id}`}</h1>
+        <h1 className="text-xl font-semibold">
+          {order.buyer_name ?? order.external_order_id ?? `Order #${order.id}`}
+        </h1>
         <span className={`rounded px-2 py-0.5 text-xs ${STATUS_CLASSES[order.status]}`}>
           {STATUS_LABELS[order.status]}
         </span>
@@ -70,6 +73,23 @@ function OrderDetail() {
         <div className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800">
           <span className="font-medium">Sync issue: </span>
           {order.sync_issue}
+        </div>
+      )}
+
+      {order.pending_marketplace_cancellation && (
+        <div className="flex items-center justify-between rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+          <span>
+            <span className="font-medium">
+              {order.platform ? PLATFORM_LABELS[order.platform] : "The marketplace"}
+            </span>{" "}
+            reports this order as cancelled. Nothing has been changed locally — review and confirm below.
+          </span>
+          <button
+            onClick={() => setShowCancelDialog(true)}
+            className="rounded bg-amber-600 px-3 py-1.5 text-white"
+          >
+            Review cancellation
+          </button>
         </div>
       )}
 
@@ -146,12 +166,26 @@ function OrderDetail() {
           </button>
         )}
         {canCancel && (
-          <button onClick={() => cancelMutation.mutate()} className="rounded border border-red-300 px-4 py-2 text-red-600">
-            Cancel order
+          <button
+            onClick={() => setShowCancelDialog(true)}
+            className="rounded border border-red-300 px-4 py-2 text-red-600"
+          >
+            {order.lines.some((l) => l.shipped_qty > 0) ? "Cancel / process return" : "Cancel order"}
           </button>
         )}
       </div>
-      <ErrorBanner error={cancelMutation.error ?? shipMutation.error ?? allocateMutation.error ?? unassignMutation.error} />
+      <ErrorBanner error={shipMutation.error ?? allocateMutation.error ?? unassignMutation.error} />
+
+      {showCancelDialog && (
+        <CancelOrderDialog
+          orderId={id}
+          onClose={() => setShowCancelDialog(false)}
+          onCancelled={() => {
+            setShowCancelDialog(false);
+            invalidate();
+          }}
+        />
+      )}
     </div>
   );
 }

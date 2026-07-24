@@ -531,6 +531,16 @@ async def reconcile_order_kitting(session: AsyncSession, order: Order) -> None:
             material.allocated_qty = Decimal(material.allocated_qty) - release
             current_reserved -= release
 
+        if consume_delta != 0 or reserve_delta != 0:
+            # Packaging capacity for every OTHER product/variant sharing this material
+            # depends on current_qty - allocated_qty (see compute_variant_kitting_
+            # capacity) — a reservation change alone (not just consumption) can shift
+            # that. Deferred import: avoids a module-load-time cycle (listing_push pulls
+            # in kitting.py itself for compute_max_sellable).
+            from app.services import listing_push
+
+            await listing_push.enqueue_for_material(session, material_id)
+
         if ledger is None:
             session.add(
                 OrderKittingAllocation(

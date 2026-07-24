@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 import httpx
 
 from app.models.platform_connection import PlatformConnection
-from app.services.platforms.base import ExternalListingRef, ExternalOrder, ExternalOrderLine, TokenSet
+from app.services.platforms.base import ExternalListingRef, ExternalOrder, ExternalOrderLine, TokenSet, ensure_utc
 from app.services.platforms.errors import PlatformAuthError, PlatformRateLimitError, PlatformSyncError
 
 logger = logging.getLogger("stocksmith.etsy")
@@ -37,9 +37,10 @@ class EtsyAdapter:
     """Etsy Open API v3 adapter — OAuth 2.0 + PKCE, refresh-token rotation (Etsy always
     rotates the refresh token on use, so every refresh() result must be persisted).
 
-    push_listing_quantity is intentionally unimplemented here — quantity push-back to
-    Etsy is a deliberately deferred phase (see Stage 3 of the Etsy rollout plan: sync
-    stays manual/pull-only for now). build_listing_sku_index is implemented (Stage 1).
+    push_listing_quantity requires the listings_w scope (see routers/platforms._SCOPES) —
+    a connection made before that scope was added needs to reconnect before pushes will
+    succeed. build_listing_sku_index (Stage 1) and push_listing_quantity (Stage 3) are
+    both implemented; see docs/plan-marketplace-integrations.md for the rollout.
     """
 
     def __init__(self, client_id: str, client_secret: str):
@@ -220,18 +221,17 @@ class EtsyAdapter:
             return await client.request(method, f"{API_BASE}{path}", headers=headers, **kwargs)
 
     async def _ensure_fresh(self, session, connection: PlatformConnection) -> None:
-        if connection.access_token_expires_at is None or connection.refresh_token is None:
+        expires_at = ensure_utc(connection.access_token_expires_at)
+        if expires_at is None or connection.refresh_token is None:
             raise PlatformAuthError("Etsy connection has no stored tokens — reconnect required")
-        if datetime.now(timezone.utc) + _REFRESH_SKEW >= connection.access_token_expires_at:
+        if datetime.now(timezone.utc) + _REFRESH_SKEW >= expires_at:
             await self._do_refresh(session, connection)
 
     async def _do_refresh(self, session, connection: PlatformConnection) -> None:
         async with self._refresh_lock:
             # Another task may have already refreshed while we waited for the lock.
-            if (
-                connection.access_token_expires_at is not None
-                and datetime.now(timezone.utc) + _REFRESH_SKEW < connection.access_token_expires_at
-            ):
+            expires_at = ensure_utc(connection.access_token_expires_at)
+            if expires_at is not None and datetime.now(timezone.utc) + _REFRESH_SKEW < expires_at:
                 return
             if connection.refresh_token is None:
                 raise PlatformAuthError("Etsy connection has no refresh token — reconnect required")
@@ -536,8 +536,80 @@ class EtsyAdapter:
         total_pennies = sum(e.get("amount", 0) for e in fee_entries) + sum(e.get("amount", 0) for e in vat_children)
         return f"{abs(total_pennies) / 100:.2f}"
 
-    async def push_listing_quantity(self, session, connection: PlatformConnection, listing_ref, sku, qty) -> None:
-        raise NotImplementedError("Quantity push-back to Etsy is deliberately deferred — see rollout Stage 3")
+    async def push_listing_quantity(
+        self, session, connection: PlatformConnection, listing_ref: ExternalListingRef, sku: str | None, qty: int
+    ) -> None:
+        """Etsy has no "set quantity for this SKU" endpoint — updateListingInventory
+        replaces a listing's *entire* inventory record in one PUT, so this fetches the
+        current one first, patches only the offering(s) under the matching SKU, and PUTs
+        everything else back exactly as read (price, property_values, per-property
+        config, other SKUs' offerings) so nothing else on the listing is disturbed.
+
+        Unverified against a live listing (no connected shop with listings_w granted was
+        available while building this, same caveat every uncertain spot in this file
+        already carries) — in particular, the PUT body's `price` is documented as a
+        plain float (amount/divisor), unlike the nested Money object GET returns it as;
+        double-check that conversion against a real shop before trusting this
+        unattended. offering_id/product_id are passed straight through from the GET
+        response on the theory that omitting them would create new offerings rather than
+        update the existing ones, but that's an inference, not a confirmed behavior.
+        """
+        listing_id = listing_ref.external_listing_id
+        response = await self._authed_request(session, connection, "GET", f"/listings/{listing_id}/inventory")
+        if response.status_code != 200:
+            raise PlatformSyncError(f"Failed to fetch Etsy listing inventory: {response.status_code} {response.text}")
+        inventory = response.json()
+
+        matched = False
+        products_payload = []
+        for product in inventory.get("products", []):
+            is_target_sku = product.get("sku") == sku and not product.get("is_deleted")
+            offerings_payload = []
+            for offering in product.get("offerings", []):
+                offering_payload = {
+                    "offering_id": offering.get("offering_id"),
+                    "quantity": offering.get("quantity", 0),
+                    "is_enabled": offering.get("is_enabled", True),
+                    "is_deleted": offering.get("is_deleted", False),
+                    "price": self._offering_price_float(offering.get("price")),
+                }
+                if is_target_sku and not offering.get("is_deleted"):
+                    offering_payload["quantity"] = qty
+                    matched = True
+                offerings_payload.append(offering_payload)
+            products_payload.append(
+                {
+                    "product_id": product.get("product_id"),
+                    "sku": product.get("sku"),
+                    "property_values": product.get("property_values", []),
+                    "offerings": offerings_payload,
+                }
+            )
+
+        if not matched:
+            raise PlatformSyncError(f"No matching SKU '{sku}' found in Etsy listing {listing_id}'s inventory")
+
+        put_body = {
+            "products": products_payload,
+            "price_on_property": inventory.get("price_on_property", []),
+            "quantity_on_property": inventory.get("quantity_on_property", []),
+            "sku_on_property": inventory.get("sku_on_property", []),
+        }
+        put_response = await self._authed_request(
+            session, connection, "PUT", f"/listings/{listing_id}/inventory", json=put_body
+        )
+        if put_response.status_code != 200:
+            raise PlatformSyncError(
+                f"Failed to update Etsy listing inventory: {put_response.status_code} {put_response.text}"
+            )
+
+    @staticmethod
+    def _offering_price_float(price: dict | None) -> float:
+        if not price:
+            return 0.0
+        amount = price.get("amount")
+        divisor = price.get("divisor") or 1
+        return round(amount / divisor, 2) if amount is not None else 0.0
 
     async def build_listing_sku_index(
         self, session, connection: PlatformConnection

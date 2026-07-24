@@ -35,7 +35,7 @@ from app.services.buildability import (
     get_max_buildable_by_product,
     get_ready_to_ship_by_bundle,
 )
-from app.services import platform_fees
+from app.services import listing_push, platform_fees
 from app.services.csv_io import export_products_csv, import_products_csv
 from app.services.kitting import (
     apply_platform_ceiling,
@@ -261,6 +261,21 @@ async def update_product(product_id: int, payload: ProductUpdate, session: Async
     changed_fields = set(payload.model_dump(exclude_unset=True).keys())
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(product, field, value)
+
+    if "platform_ceiling_qty" in changed_fields:
+        # Applies uniformly to the base product and every active variant's own
+        # max_sellable (see kitting.apply_platform_ceiling) — push all of them, not just
+        # the bare product row.
+        listing_push.enqueue_for_owner(product)
+        variant_ids = (
+            await session.execute(
+                select(ProductVariant.id).where(
+                    ProductVariant.product_id == product_id, ProductVariant.is_active.is_(True)
+                )
+            )
+        ).scalars()
+        for variant_id in variant_ids:
+            listing_push.enqueue_for_product(product_id, variant_id)
 
     if changed_fields & _PRICING_FIELDS:
         cost_per_unit_by_product = await get_cost_per_unit_by_product(session)

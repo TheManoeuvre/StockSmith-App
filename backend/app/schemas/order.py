@@ -116,4 +116,5 @@ class OrderRead(BaseModel):
     financials_synced_at: datetime | None = None
     net_profit: Decimal | None = None
     sync_issue: str | None = None
+    pending_marketplace_cancellation: bool = False
     lines: list[OrderLineRead] = []
