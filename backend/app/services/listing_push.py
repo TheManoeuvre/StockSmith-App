@@ -40,6 +40,24 @@ _PUSH_ENABLED_PLATFORMS = (ListingPlatform.etsy, ListingPlatform.ebay)
 
 _pending: dict[tuple[int, int | None], asyncio.Task] = {}
 
+# Caps how many debounced pushes can be mid-flight (DB session open + adapter HTTP call)
+# at once. A single push can hold its session open for a while — push_listing_quantity
+# retries in-place on a 409 "listing locked" or a 429 rate limit, each retry sleeping
+# before the next attempt, all while still holding the session it was given (needed for
+# the connection's own OAuth-token refresh). A change that fans out to many variants at
+# once (enqueue_for_material, or a startup auto-sync reconciling a backlog of orders) used
+# to schedule all of those as fully-concurrent tasks with no cap, which could open enough
+# simultaneous sessions to exhaust the app's whole SQLAlchemy connection pool (default
+# size 5 + overflow 10) — confirmed in production logs as repeated
+# `QueuePool limit ... connection timed out, timeout 30.00` errors. Since the pool is
+# shared with every other request the backend serves, that starved unrelated pages (e.g.
+# Orders, Dashboard) for up to 30s at a time despite them having nothing to do with
+# marketplace pushes. Pushes are already eventually-consistent (debounced, recomputed
+# fresh at send time), so serializing most of them behind a small cap costs nothing but a
+# little latency on that queue.
+_MAX_CONCURRENT_PUSHES = 3
+_push_semaphore = asyncio.Semaphore(_MAX_CONCURRENT_PUSHES)
+
 # Keyed on (platform, external_listing_id), not (product_id, variant_id) — a single Etsy
 # listing with variations holds many SKUs/offerings under one listing_id, and each
 # variant gets its own independently-debounced push task above. Without this, a change
@@ -131,7 +149,7 @@ async def _debounced_push(key: tuple[int, int | None]) -> None:
     try:
         await asyncio.sleep(_DEBOUNCE_SECONDS)
         product_id, variant_id = key
-        async with async_session_factory() as session:
+        async with _push_semaphore, async_session_factory() as session:
             await _push_now(session, product_id, variant_id)
     except asyncio.CancelledError:
         raise
