@@ -9,6 +9,7 @@ import type {
   KittingBomLineRead,
   PricingMode,
   Product,
+  ProductPage,
   ProductPriceSnapshot,
   StockAdjustment,
   Variant,
@@ -30,8 +31,15 @@ export interface ProductInput {
   pricing_variable_attribute?: number | null;
 }
 
+// Several pickers (bundle items, manual order lines, unmapped-SKU mapping) need the
+// whole catalog as a flat dropdown, not one page of it — `list()` below requests it in
+// a single call via a generously large limit rather than a separate unpaginated
+// endpoint. Matches the `le` bound on the backend's `GET /products` limit param.
+const ALL_PRODUCTS_LIMIT = 10000;
+
 export const productsApi = {
-  list: () => api.get<Product[]>("/products"),
+  list: () => api.get<ProductPage>(`/products?limit=${ALL_PRODUCTS_LIMIT}&offset=0`).then((page) => page.items),
+  listPaged: (limit: number, offset: number) => api.get<ProductPage>(`/products?limit=${limit}&offset=${offset}`),
   get: (id: number) => api.get<Product>(`/products/${id}`),
   create: (input: ProductInput) => api.post<Product>("/products", input),
   update: (id: number, input: Partial<ProductInput> & { is_active?: boolean }) =>

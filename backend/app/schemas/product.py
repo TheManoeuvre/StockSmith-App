@@ -67,6 +67,11 @@ class ProductRead(ProductBase):
     effective_platform_fee_percent: Decimal | None = None
 
 
+class ProductPage(BaseModel):
+    items: list[ProductRead]
+    total: int
+
+
 class BomLine(BaseModel):
     material_id: int
     qty_required: Decimal

@@ -1,7 +1,7 @@
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import delete, select
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -21,6 +21,7 @@ from app.schemas.order import (
     OrderCreate,
     OrderLineQtyUpdate,
     OrderLineRead,
+    OrderPage,
     OrderRead,
     OrderUpdate,
 )
@@ -201,10 +202,14 @@ def _serialize_order(order: Order) -> OrderRead:
     )
 
 
-@router.get("", response_model=list[OrderRead])
+@router.get("", response_model=OrderPage)
 async def list_orders(
-    status_filter: OrderStatus | None = None, session: AsyncSession = Depends(get_db)
-) -> list[OrderRead]:
+    status_filter: OrderStatus | None = None,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    session: AsyncSession = Depends(get_db),
+) -> OrderPage:
+    count_query = select(func.count()).select_from(Order)
     query = (
         select(Order)
         .options(
@@ -213,11 +218,15 @@ async def list_orders(
             selectinload(Order.shipping_profile),
         )
         .order_by(Order.order_placed_at.desc(), Order.id.desc())
+        .limit(limit)
+        .offset(offset)
     )
     if status_filter is not None:
+        count_query = count_query.where(Order.status == status_filter)
         query = query.where(Order.status == status_filter)
+    total = await session.scalar(count_query)
     result = await session.execute(query)
-    return [_serialize_order(o) for o in result.scalars()]
+    return OrderPage(items=[_serialize_order(o) for o in result.scalars()], total=total or 0)
 
 
 @router.post("", response_model=OrderRead, status_code=status.HTTP_201_CREATED)

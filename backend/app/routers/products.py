@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
-from sqlalchemy import delete, select, text
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db, require_auth
@@ -20,6 +20,7 @@ from app.schemas.product import (
     BundleItemRead,
     GenerateVariantsRequest,
     ProductCreate,
+    ProductPage,
     ProductPriceSnapshotRead,
     ProductRead,
     ProductUpdate,
@@ -162,10 +163,25 @@ def _read_product(
     )
 
 
-@router.get("", response_model=list[ProductRead])
-async def list_products(session: AsyncSession = Depends(get_db)) -> list[ProductRead]:
-    result = await session.execute(select(Product).order_by(Product.name))
+@router.get("", response_model=ProductPage)
+async def list_products(
+    # le is generous rather than matching the Products list page's page size — several
+    # other pages (bundle-item picker, manual order line picker, unmapped-SKU resolver)
+    # need the *entire* catalog as a flat dropdown, not one page of it, and request it
+    # via a single large limit rather than a separate unpaginated endpoint. Matches the
+    # precedent in routers/materials.py's stock-history `limit` param.
+    limit: int = Query(50, ge=1, le=10000),
+    offset: int = Query(0, ge=0),
+    session: AsyncSession = Depends(get_db),
+) -> ProductPage:
+    total = await session.scalar(select(func.count()).select_from(Product))
+    result = await session.execute(select(Product).order_by(Product.name).limit(limit).offset(offset))
     products = list(result.scalars())
+    # The bulk lookups below (get_max_buildable_by_product etc.) each run a single
+    # aggregate query over the whole products table regardless of how many rows this page
+    # returns — deliberately left whole-table rather than scoped to just this page's
+    # product IDs. They're already cheap (one round trip each, no per-product looping),
+    # and scoping them would add real complexity for no measurable win at this scale.
     max_buildable_by_product = await get_max_buildable_by_product(session)
     expected_max_buildable_by_product = await get_expected_max_buildable_by_product(session)
     cost_per_unit_by_product = await get_cost_per_unit_by_product(session)
@@ -177,7 +193,7 @@ async def list_products(session: AsyncSession = Depends(get_db)) -> list[Product
     active_variant_stock_totals_by_product = await get_active_variant_stock_totals_by_product(session)
     fee_source, fee_components = await platform_fees.get_resolver_context(session)
     shipping_profiles_by_id = await get_shipping_profiles_by_id(session)
-    return [
+    items = [
         _read_product(
             p,
             max_buildable_by_product,
@@ -195,6 +211,7 @@ async def list_products(session: AsyncSession = Depends(get_db)) -> list[Product
         )
         for p in products
     ]
+    return ProductPage(items=items, total=total or 0)
 
 
 @router.get("/export")

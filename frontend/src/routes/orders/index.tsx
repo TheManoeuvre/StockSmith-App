@@ -1,5 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useState } from "react";
 import { ordersApi } from "../../api/orders";
 import type { Order, OrderStatus } from "../../api/types";
 import { formatMoney } from "../../lib/money";
@@ -9,6 +10,8 @@ import { PLATFORM_LABELS } from "../../lib/platforms";
 export const Route = createFileRoute("/orders/")({
   component: OrdersList,
 });
+
+const ORDERS_PAGE_SIZE = 50;
 
 const STATUS_LABELS: Record<OrderStatus, string> = {
   pending: "Pending",
@@ -37,7 +40,14 @@ function orderLabel(order: Order): string {
 }
 
 function OrdersList() {
-  const { data, isLoading, error } = useQuery({ queryKey: ["orders"], queryFn: () => ordersApi.list() });
+  const [page, setPage] = useState(0);
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["orders", page],
+    queryFn: () => ordersApi.list(ORDERS_PAGE_SIZE, page * ORDERS_PAGE_SIZE),
+    placeholderData: keepPreviousData,
+  });
+  const orders = data?.items;
+  const total = data?.total ?? 0;
 
   if (isLoading) return <p>Loading orders…</p>;
   if (error) return <p className="text-red-600">{(error as Error).message}</p>;
@@ -65,7 +75,7 @@ function OrdersList() {
           </tr>
         </thead>
         <tbody>
-          {data?.map((order) => (
+          {orders?.map((order) => (
             <tr key={order.id} className="border-b border-slate-100 hover:bg-slate-50">
               <td className="p-2">{new Date(order.order_placed_at).toLocaleDateString()}</td>
               <td className="p-2">
@@ -109,6 +119,30 @@ function OrdersList() {
           ))}
         </tbody>
       </table>
+
+      <div className="flex items-center justify-between text-sm text-slate-500">
+        <span>
+          {total === 0
+            ? "No orders"
+            : `Showing ${page * ORDERS_PAGE_SIZE + 1}–${Math.min(page * ORDERS_PAGE_SIZE + (orders?.length ?? 0), total)} of ${total}`}
+        </span>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+            disabled={page === 0}
+            className="rounded border border-slate-300 px-3 py-1.5 disabled:opacity-40"
+          >
+            Prev
+          </button>
+          <button
+            onClick={() => setPage((p) => p + 1)}
+            disabled={(page + 1) * ORDERS_PAGE_SIZE >= total}
+            className="rounded border border-slate-300 px-3 py-1.5 disabled:opacity-40"
+          >
+            Next
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
