@@ -10,6 +10,7 @@ import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { CsvImportExport } from "../../components/common/CsvImportExport";
 import { PlatformSyncBadge } from "../../components/products/PlatformSyncBadge";
 import { sellableReasonTag } from "../../lib/format";
+import { formatUnitCost } from "../../lib/money";
 
 export const Route = createFileRoute("/products/")({
   component: ProductsList,
@@ -160,7 +161,7 @@ function ProductRow({ product: p, etsyStatus }: { product: Product; etsyStatus: 
       <td className="p-2" title={p.is_bundle ? undefined : sellableReasonTag(p.max_sellable, p.max_buildable, p.max_sellable_reason) ?? undefined}>
         {p.is_bundle ? "—" : p.max_sellable ?? "—"}
       </td>
-      <td className="p-2">{p.cost_per_unit ? `£${Number(p.cost_per_unit).toFixed(2)}` : "—"}</td>
+      <td className="p-2">{p.cost_per_unit ? formatUnitCost(p.cost_per_unit) : "—"}</td>
       <td className="p-2">{etsyStatus && <PlatformSyncBadge platform="etsy" status={etsyStatus} />}</td>
     </tr>
   );

@@ -7,6 +7,7 @@ import { MaterialSelect } from "../materials/MaterialSelect";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { SaveIndicator } from "../common/SaveIndicator";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
+import { normalizeQtyForUnit, wholeNumberStepFor } from "../../lib/format";
 
 export function KittingBomEditor({ productId }: { productId: number }) {
   const queryClient = useQueryClient();
@@ -100,8 +101,17 @@ export function KittingBomEditor({ productId }: { productId: number }) {
               <td className="p-2">
                 <input
                   className="w-24 rounded border border-slate-300 px-2 py-1"
+                  step={wholeNumberStepFor(materials?.find((m) => m.id === line.material_id)?.unit)}
                   value={line.qty_required}
                   onChange={(e) => updateLine(i, { qty_required: e.target.value })}
+                  onBlur={(e) =>
+                    updateLine(i, {
+                      qty_required: normalizeQtyForUnit(
+                        e.target.value,
+                        materials?.find((m) => m.id === line.material_id)?.unit
+                      ),
+                    })
+                  }
                 />
               </td>
               <td className={`p-2 ${i === bottleneckIndex ? "font-semibold text-amber-700" : "text-slate-500"}`}>

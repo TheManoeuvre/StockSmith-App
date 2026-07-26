@@ -13,6 +13,7 @@ import { BuildSection } from "../../components/products/BuildSection";
 import { StockAdjustmentSection } from "../../components/products/StockAdjustmentSection";
 import { PricingSection } from "../../components/products/PricingSection";
 import { PlatformSyncSection } from "../../components/products/PlatformSyncSection";
+import { formatUnitCost } from "../../lib/money";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { SaveIndicator } from "../../components/common/SaveIndicator";
 import { Tabs, type TabDef } from "../../components/common/Tabs";
@@ -254,7 +255,7 @@ function ProductDetail() {
                 </span>
               </>
             )}
-            <span>Cost per unit: <strong>{product.cost_per_unit ? `£${Number(product.cost_per_unit).toFixed(2)}` : "—"}</strong></span>
+            <span>Cost per unit: <strong>{product.cost_per_unit ? formatUnitCost(product.cost_per_unit) : "—"}</strong></span>
           </div>
           <label className="mt-2 flex items-center gap-2 text-sm">
             <input
