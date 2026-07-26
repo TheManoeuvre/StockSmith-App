@@ -8,6 +8,7 @@ import type { PricingMode, Product, ShippingProfile, Variant } from "../../api/t
 import { ErrorBanner } from "../common/ErrorBanner";
 import { SaveIndicator } from "../common/SaveIndicator";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
+import { formatUnitCost } from "../../lib/money";
 
 const INITIAL_LINE_LIMIT = 5;
 
@@ -270,7 +271,7 @@ export function PricingSection({ product }: { product: Product }) {
             {history.map((h) => (
               <tr key={h.id} className="border-b border-slate-100">
                 <td className="p-2">{new Date(h.recorded_at).toLocaleString()}</td>
-                <td className="p-2">£{Number(h.cost_per_unit).toFixed(4)}</td>
+                <td className="p-2">{formatUnitCost(h.cost_per_unit)}</td>
                 <td className="p-2">{h.sale_price ? `£${Number(h.sale_price).toFixed(2)}` : "—"}</td>
                 <td className="p-2">{h.margin_percent ? `${Number(h.margin_percent).toFixed(1)}%` : "—"}</td>
               </tr>

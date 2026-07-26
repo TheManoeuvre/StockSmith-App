@@ -10,7 +10,8 @@ import { useMaterialImageUrl } from "../../hooks/useMaterialImageUrl";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { CreatableSelect } from "../../components/common/CreatableSelect";
 import type { MaterialCategory, MaterialUnit } from "../../api/types";
-import { isLowStock, roundQty } from "../../lib/format";
+import { isLowStock, normalizeQtyForUnit, roundQty, wholeNumberStepFor } from "../../lib/format";
+import { formatUnitCost } from "../../lib/money";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { SaveIndicator } from "../../components/common/SaveIndicator";
 
@@ -236,9 +237,9 @@ function MaterialDetail() {
           <Stat label="On hand" value={roundQty(material.current_qty)} />
           <Stat label="On order" value={roundQty(material.on_order_qty)} />
           {material.category === "filament" ? (
-            <Stat label="Avg cost/kg" value={`£${(Number(material.avg_unit_cost) * 1000).toFixed(2)}`} />
+            <Stat label="Avg cost/kg" value={formatUnitCost(Number(material.avg_unit_cost) * 1000)} />
           ) : (
-            <Stat label="Avg unit cost" value={`£${Number(material.avg_unit_cost).toFixed(4)}`} />
+            <Stat label="Avg unit cost" value={formatUnitCost(material.avg_unit_cost)} />
           )}
         </div>
       </div>
@@ -313,8 +314,10 @@ function MaterialDetail() {
             <span className="text-sm">Reorder threshold</span>
             <input
               className="w-28 rounded border border-slate-300 px-2 py-1"
+              step={wholeNumberStepFor(unit)}
               value={reorderThreshold}
               onChange={(e) => setReorderThreshold(e.target.value)}
+              onBlur={(e) => setReorderThreshold(normalizeQtyForUnit(e.target.value, unit))}
             />
           </label>
           <label className="flex flex-col gap-1">
@@ -353,8 +356,10 @@ function MaterialDetail() {
             <span className="text-sm">Typical reorder qty</span>
             <input
               className="w-28 rounded border border-slate-300 px-2 py-1"
+              step={wholeNumberStepFor(unit)}
               value={typicalReorderQty}
               onChange={(e) => setTypicalReorderQty(e.target.value)}
+              onBlur={(e) => setTypicalReorderQty(normalizeQtyForUnit(e.target.value, unit))}
             />
           </label>
           <button type="submit" className="rounded bg-slate-900 px-4 py-1.5 text-white">
@@ -415,9 +420,11 @@ function MaterialDetail() {
             <input
               required
               className="w-28 rounded border border-slate-300 px-2 py-1"
+              step={wholeNumberStepFor(material.unit)}
               placeholder={adjustMode === "set" ? "e.g. 53" : "e.g. -5 or 10"}
               value={adjustValue}
               onChange={(e) => setAdjustValue(e.target.value)}
+              onBlur={(e) => setAdjustValue(normalizeQtyForUnit(e.target.value, material.unit))}
             />
           </label>
           <label className="flex flex-col gap-1 flex-1">
@@ -489,7 +496,7 @@ function MaterialDetail() {
                   <td className="p-2">
                     {unitCost === null
                       ? "—"
-                      : `£${unitCost.toFixed(4)}${h.status === "ordered" ? " (quoted)" : ""}`}
+                      : `${formatUnitCost(unitCost)}${h.status === "ordered" ? " (quoted)" : ""}`}
                   </td>
                   <td className="p-2">
                     {h.kind === "adjustment" ? (
