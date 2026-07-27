@@ -1,4 +1,4 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { ordersApi } from "../../api/orders";
@@ -32,7 +32,6 @@ const STATUS_CLASSES: Record<OrderStatus, string> = {
 function OrderDetail() {
   const { orderId } = Route.useParams();
   const id = Number(orderId);
-  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const { data: order } = useQuery({ queryKey: ["orders", id], queryFn: () => ordersApi.get(id) });
@@ -51,14 +50,6 @@ function OrderDetail() {
     mutationFn: ({ lineId, qty }: { lineId: number; qty: number }) => ordersApi.unassignLine(lineId, qty),
     onSuccess: invalidate,
   });
-  const deleteMutation = useMutation({
-    mutationFn: () => ordersApi.remove(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["orders"] });
-      queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
-      navigate({ to: "/orders" });
-    },
-  });
 
   if (!order) return <p>Loading…</p>;
 
@@ -66,9 +57,6 @@ function OrderDetail() {
   const canShip = order.status === "pending" || order.status === "allocated";
   const canAllocate = order.status === "pending" || order.status === "allocated";
   const anyAllocated = order.lines.some((l) => l.allocated_qty > l.shipped_qty);
-  // Mirrors the backend's own check (routers/orders.py delete_order) — nothing allocated
-  // or shipped on any line, so deleting can't silently strand reserved/shipped stock.
-  const canDelete = order.lines.every((l) => l.allocated_qty === 0 && l.shipped_qty === 0);
 
   return (
     <div className="flex flex-col gap-6">
@@ -185,23 +173,8 @@ function OrderDetail() {
             {order.lines.some((l) => l.shipped_qty > 0) ? "Cancel / process return" : "Cancel order"}
           </button>
         )}
-        {canDelete && (
-          <button
-            onClick={() => {
-              if (window.confirm("Delete this order? This cannot be undone.")) {
-                deleteMutation.mutate();
-              }
-            }}
-            disabled={deleteMutation.isPending}
-            className="rounded border border-red-300 px-4 py-2 text-red-600 disabled:opacity-50"
-          >
-            Delete order
-          </button>
-        )}
       </div>
-      <ErrorBanner
-        error={shipMutation.error ?? allocateMutation.error ?? unassignMutation.error ?? deleteMutation.error}
-      />
+      <ErrorBanner error={shipMutation.error ?? allocateMutation.error ?? unassignMutation.error} />
 
       {showCancelDialog && (
         <CancelOrderDialog

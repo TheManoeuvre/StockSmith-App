@@ -85,14 +85,6 @@ function ProductDetail() {
     },
   });
 
-  const toggleActiveMutation = useMutation({
-    mutationFn: (is_active: boolean) => productsApi.update(id, { is_active }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["products", id] });
-      queryClient.invalidateQueries({ queryKey: ["products"] });
-    },
-  });
-
   const saveDetailsStatus = useSaveStatus(saveDetailsMutation.status);
 
   const invalidateImage = () => {
@@ -184,12 +176,7 @@ function ProductDetail() {
           )}
         </div>
         <div className="flex-1">
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold">{product.name}</h1>
-            {!product.is_active && (
-              <span className="rounded bg-slate-200 px-2 py-0.5 text-xs text-slate-600">Inactive</span>
-            )}
-          </div>
+          <h1 className="text-xl font-semibold">{product.name}</h1>
           <p className="text-slate-500">{product.sku ?? "No SKU"}</p>
           <div className="mt-2 flex gap-2">
             <button onClick={() => uploadMainImageMutation.mutate()} className="rounded border border-slate-300 px-3 py-1 text-sm">
@@ -203,35 +190,9 @@ function ProductDetail() {
                 Remove image
               </button>
             )}
-            {product.is_active ? (
-              <button
-                onClick={() => {
-                  if (window.confirm("Deactivate this product? It'll stop being sellable, but can be reactivated later.")) {
-                    toggleActiveMutation.mutate(false);
-                  }
-                }}
-                disabled={toggleActiveMutation.isPending}
-                className="rounded border border-red-300 px-3 py-1 text-sm text-red-600 disabled:opacity-50"
-              >
-                Deactivate
-              </button>
-            ) : (
-              <button
-                onClick={() => toggleActiveMutation.mutate(true)}
-                disabled={toggleActiveMutation.isPending}
-                className="rounded border border-slate-300 px-3 py-1 text-sm disabled:opacity-50"
-              >
-                Reactivate
-              </button>
-            )}
           </div>
           <ErrorBanner
-            error={
-              uploadMainImageMutation.error ??
-              importMainImageUrlMutation.error ??
-              removeMainImageMutation.error ??
-              toggleActiveMutation.error
-            }
+            error={uploadMainImageMutation.error ?? importMainImageUrlMutation.error ?? removeMainImageMutation.error}
           />
           <div className="mt-2 flex flex-col gap-2 text-sm">
             {product.is_bundle ? (
