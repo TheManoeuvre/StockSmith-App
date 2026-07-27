@@ -1,19 +1,5 @@
-import type { MaterialUnit } from "../api/types";
-
 export function roundQty(value: string | number | null | undefined): string {
   return Math.round(Number(value ?? 0)).toString();
-}
-
-// Materials measured in "each" can't have fractional quantities — you can't have half
-// a screw. Mirrors the backend's validate_qty_for_unit (app/services/validation.py).
-export function wholeNumberStepFor(unit: MaterialUnit | null | undefined): string {
-  return unit === "each" ? "1" : "any";
-}
-
-export function normalizeQtyForUnit(value: string, unit: MaterialUnit | null | undefined): string {
-  if (unit !== "each" || value.trim() === "") return value;
-  const n = Number(value);
-  return Number.isNaN(n) ? value : Math.round(n).toString();
 }
 
 // A reorder_threshold of 0 means "don't track reordering for this material" — never

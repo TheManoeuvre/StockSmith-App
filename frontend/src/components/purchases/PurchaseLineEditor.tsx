@@ -2,7 +2,6 @@ import { useState } from "react";
 import { MaterialSelect } from "../materials/MaterialSelect";
 import type { Material } from "../../api/types";
 import type { PurchaseLineInput } from "../../api/purchases";
-import { normalizeQtyForUnit, wholeNumberStepFor } from "../../lib/format";
 
 export function PurchaseLineEditor({
   materials,
@@ -61,14 +60,8 @@ export function PurchaseLineEditor({
               <td className="p-2">
                 <input
                   className="w-24 rounded border border-slate-300 px-2 py-1"
-                  step={wholeNumberStepFor(materials.find((m) => m.id === line.material_id)?.unit)}
                   value={line.qty}
                   onChange={(e) => updateLine(i, { qty: e.target.value })}
-                  onBlur={(e) =>
-                    updateLine(i, {
-                      qty: normalizeQtyForUnit(e.target.value, materials.find((m) => m.id === line.material_id)?.unit),
-                    })
-                  }
                 />
               </td>
               <td className="p-2">

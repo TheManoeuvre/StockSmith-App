@@ -2,7 +2,6 @@ import csv
 import io
 from decimal import Decimal, InvalidOperation
 
-from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,7 +11,6 @@ from app.models.material_type import MaterialType
 from app.models.product import Product
 from app.models.supplier import Supplier
 from app.services.costing import recompute_material
-from app.services.validation import validate_qty_for_unit
 
 MATERIALS_CSV_FIELDS = [
     "name",
@@ -116,12 +114,6 @@ async def import_materials_csv(session: AsyncSession, content: bytes) -> dict:
             )
             is_active = _parse_bool(row.get("is_active"), default=True)
 
-            validate_qty_for_unit(reorder_threshold, unit, "reorder_threshold")
-            if typical_reorder_qty is not None:
-                validate_qty_for_unit(typical_reorder_qty, unit, "typical_reorder_qty")
-            if target_qty is not None:
-                validate_qty_for_unit(target_qty, unit, "current_qty")
-
             manufacturer_id = None
             manufacturer_name = (row.get("manufacturer_name") or "").strip()
             if manufacturer_name:
@@ -202,12 +194,6 @@ async def import_materials_csv(session: AsyncSession, content: bytes) -> dict:
             # successful rows in the same import are unaffected.
             await session.rollback()
             failed.append({"row": i, "error": str(e)})
-        except HTTPException as e:
-            # validate_qty_for_unit raises HTTPException (it's shared with request
-            # handlers) — caught separately so a whole-number violation fails just
-            # this row instead of aborting the rest of the import.
-            await session.rollback()
-            failed.append({"row": i, "error": str(e.detail)})
 
     return {"created": created, "updated": updated, "failed": failed}
 

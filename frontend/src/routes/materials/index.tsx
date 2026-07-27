@@ -11,8 +11,7 @@ import { useLazyVisible } from "../../hooks/useLazyVisible";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { CreatableSelect } from "../../components/common/CreatableSelect";
 import { CsvImportExport } from "../../components/common/CsvImportExport";
-import { isLowStock, normalizeQtyForUnit, roundQty, wholeNumberStepFor } from "../../lib/format";
-import { formatUnitCost } from "../../lib/money";
+import { isLowStock, roundQty } from "../../lib/format";
 
 export const Route = createFileRoute("/materials/")({
   component: MaterialsList,
@@ -20,7 +19,6 @@ export const Route = createFileRoute("/materials/")({
 
 const CATEGORIES: MaterialCategory[] = ["filament", "resin", "pigment", "hardware", "packaging", "blanks", "other"];
 const UNITS: MaterialUnit[] = ["g", "ml", "each"];
-const AUTO_EACH_CATEGORIES: MaterialCategory[] = ["hardware", "packaging", "blanks"];
 
 type SortKey = "name" | "current_qty" | "on_order_qty" | "reorder_threshold" | "avg_unit_cost";
 
@@ -40,7 +38,6 @@ function MaterialsList() {
   const [name, setName] = useState("");
   const [category, setCategory] = useState<MaterialCategory>("filament");
   const [unit, setUnit] = useState<MaterialUnit>("g");
-  const [unitTouchedByUser, setUnitTouchedByUser] = useState(false);
   const [reorderThreshold, setReorderThreshold] = useState("0");
   const [colour, setColour] = useState("");
   const [materialType, setMaterialType] = useState("");
@@ -93,7 +90,6 @@ function MaterialsList() {
       queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
       setShowForm(false);
       setName("");
-      setUnitTouchedByUser(false);
       setReorderThreshold("0");
       setColour("");
       setMaterialType("");
@@ -197,13 +193,7 @@ function MaterialsList() {
             <select
               className="rounded border border-slate-300 px-2 py-1"
               value={category}
-              onChange={(e) => {
-                const nextCategory = e.target.value as MaterialCategory;
-                setCategory(nextCategory);
-                if (!unitTouchedByUser) {
-                  setUnit(AUTO_EACH_CATEGORIES.includes(nextCategory) ? "each" : "g");
-                }
-              }}
+              onChange={(e) => setCategory(e.target.value as MaterialCategory)}
             >
               {CATEGORIES.map((c) => (
                 <option key={c} value={c}>
@@ -217,10 +207,7 @@ function MaterialsList() {
             <select
               className="rounded border border-slate-300 px-2 py-1"
               value={unit}
-              onChange={(e) => {
-                setUnit(e.target.value as MaterialUnit);
-                setUnitTouchedByUser(true);
-              }}
+              onChange={(e) => setUnit(e.target.value as MaterialUnit)}
             >
               {UNITS.map((u) => (
                 <option key={u} value={u}>
@@ -233,10 +220,8 @@ function MaterialsList() {
             <span className="text-sm">Reorder threshold</span>
             <input
               className="w-28 rounded border border-slate-300 px-2 py-1"
-              step={wholeNumberStepFor(unit)}
               value={reorderThreshold}
               onChange={(e) => setReorderThreshold(e.target.value)}
-              onBlur={(e) => setReorderThreshold(normalizeQtyForUnit(e.target.value, unit))}
             />
           </label>
           {category === "filament" && (
@@ -381,8 +366,8 @@ function MaterialRow({ material: m }: { material: Material }) {
       <td className="p-2">{formatQty(m.reorder_threshold, m.unit)}</td>
       <td className="p-2">
         {m.category === "filament"
-          ? `${formatUnitCost(Number(m.avg_unit_cost) * 1000)}/kg`
-          : formatUnitCost(m.avg_unit_cost)}
+          ? `£${(Number(m.avg_unit_cost) * 1000).toFixed(2)}/kg`
+          : `£${Number(m.avg_unit_cost).toFixed(4)}`}
       </td>
     </tr>
   );

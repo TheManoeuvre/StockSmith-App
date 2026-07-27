@@ -11,7 +11,6 @@ import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { PlatformSyncBadge } from "./PlatformSyncBadge";
 import { BomOverrideEditor } from "./BomOverrideEditor";
 import { sellableReasonTag } from "../../lib/format";
-import { formatUnitCost } from "../../lib/money";
 
 const INITIAL_VARIANT_LIMIT = 5;
 
@@ -224,7 +223,7 @@ function VariantRow({
               )}
             </>
           )}{" "}
-          · Cost/unit: {variant.cost_per_unit ? formatUnitCost(variant.cost_per_unit) : "—"}
+          · Cost/unit: {variant.cost_per_unit ? `£${Number(variant.cost_per_unit).toFixed(2)}` : "—"}
           <br />
           Pushing to marketplaces:{" "}
           <strong

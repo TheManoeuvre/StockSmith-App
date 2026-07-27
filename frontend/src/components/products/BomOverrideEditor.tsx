@@ -5,7 +5,6 @@ import { MaterialSelect } from "../materials/MaterialSelect";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { SaveIndicator } from "../common/SaveIndicator";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
-import { normalizeQtyForUnit, wholeNumberStepFor } from "../../lib/format";
 
 type OverrideMode = "inherit" | "qty" | "substitute";
 interface OverrideRow {
@@ -204,11 +203,9 @@ export function BomOverrideEditor({
                   {o.mode === "qty" && (
                     <input
                       className="w-24 rounded border border-slate-300 px-2 py-1"
-                      step={wholeNumberStepFor(material?.unit)}
                       placeholder={base.qty_required}
                       value={o.qty_required}
                       onChange={(e) => updateQty(base.material_id, e.target.value)}
-                      onBlur={(e) => updateQty(base.material_id, normalizeQtyForUnit(e.target.value, material?.unit))}
                     />
                   )}
                   {o.mode === "substitute" && (
@@ -220,10 +217,8 @@ export function BomOverrideEditor({
                       />
                       <input
                         className="w-20 rounded border border-slate-300 px-2 py-1"
-                        step={wholeNumberStepFor(substituteMaterial?.unit)}
                         value={o.qty_required}
                         onChange={(e) => updateQty(base.material_id, e.target.value)}
-                        onBlur={(e) => updateQty(base.material_id, normalizeQtyForUnit(e.target.value, substituteMaterial?.unit))}
                       />
                     </div>
                   )}
