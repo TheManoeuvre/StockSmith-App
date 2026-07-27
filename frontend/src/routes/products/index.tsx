@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { platformsApi, type ProductSyncStatus } from "../../api/platforms";
 import { productsApi } from "../../api/products";
@@ -15,9 +15,18 @@ export const Route = createFileRoute("/products/")({
   component: ProductsList,
 });
 
+const PRODUCTS_PAGE_SIZE = 50;
+
 function ProductsList() {
   const queryClient = useQueryClient();
-  const { data, isLoading, error } = useQuery({ queryKey: ["products"], queryFn: productsApi.list });
+  const [page, setPage] = useState(0);
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["products", page],
+    queryFn: () => productsApi.listPaged(PRODUCTS_PAGE_SIZE, page * PRODUCTS_PAGE_SIZE),
+    placeholderData: keepPreviousData,
+  });
+  const products = data?.items;
+  const total = data?.total ?? 0;
   const { data: etsyStatusByProduct } = useQuery({
     queryKey: ["platforms", "etsy", "all-sync-status"],
     queryFn: () => platformsApi.getAllSyncStatus("etsy"),
@@ -94,11 +103,35 @@ function ProductsList() {
           </tr>
         </thead>
         <tbody>
-          {data?.map((p) => (
+          {products?.map((p) => (
             <ProductRow key={p.id} product={p} etsyStatus={etsyStatusByProduct?.[p.id]} />
           ))}
         </tbody>
       </table>
+
+      <div className="flex items-center justify-between text-sm text-slate-500">
+        <span>
+          {total === 0
+            ? "No products"
+            : `Showing ${page * PRODUCTS_PAGE_SIZE + 1}–${Math.min(page * PRODUCTS_PAGE_SIZE + (products?.length ?? 0), total)} of ${total}`}
+        </span>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+            disabled={page === 0}
+            className="rounded border border-slate-300 px-3 py-1.5 disabled:opacity-40"
+          >
+            Prev
+          </button>
+          <button
+            onClick={() => setPage((p) => p + 1)}
+            disabled={(page + 1) * PRODUCTS_PAGE_SIZE >= total}
+            className="rounded border border-slate-300 px-3 py-1.5 disabled:opacity-40"
+          >
+            Next
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

@@ -126,6 +126,11 @@ export interface Product {
   pricing_variable_attribute: number | null;
 }
 
+export interface ProductPage {
+  items: Product[];
+  total: number;
+}
+
 export type PricingMode = "product" | "variable" | "line";
 
 export interface ProductPriceSnapshot {
@@ -362,6 +367,11 @@ export interface Order {
   sync_issue: string | null;
   pending_marketplace_cancellation: boolean;
   lines: OrderLine[];
+}
+
+export interface OrderPage {
+  items: Order[];
+  total: number;
 }
 
 export interface OrderKittingOverrideLine {

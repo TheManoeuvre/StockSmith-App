@@ -118,3 +118,8 @@ class OrderRead(BaseModel):
     sync_issue: str | None = None
     pending_marketplace_cancellation: bool = False
     lines: list[OrderLineRead] = []
+
+
+class OrderPage(BaseModel):
+    items: list[OrderRead]
+    total: int

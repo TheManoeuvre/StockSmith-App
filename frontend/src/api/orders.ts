@@ -1,5 +1,5 @@
 import { api } from "./client";
-import type { Order, OrderKittingOverrideLine, OrderKittingSummary, OrderStatus } from "./types";
+import type { Order, OrderKittingOverrideLine, OrderKittingSummary, OrderPage, OrderStatus } from "./types";
 
 export type ReturnDisposition = "scrap" | "return_to_stock";
 
@@ -66,7 +66,11 @@ export interface OrderUpdateInput {
 }
 
 export const ordersApi = {
-  list: (status?: OrderStatus) => api.get<Order[]>(`/orders${status ? `?status_filter=${status}` : ""}`),
+  list: (limit: number, offset: number, status?: OrderStatus) => {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    if (status) params.set("status_filter", status);
+    return api.get<OrderPage>(`/orders?${params.toString()}`);
+  },
   get: (id: number) => api.get<Order>(`/orders/${id}`),
   create: (input: OrderCreateInput) => api.post<Order>("/orders", input),
   update: (id: number, input: OrderUpdateInput) => api.patch<Order>(`/orders/${id}`, input),

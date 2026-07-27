@@ -5,6 +5,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.db import async_session_factory
 from app.models.listing import ListingPlatform
 from app.models.order import Order, OrderLine, OrderStatus
 from app.models.platform_connection import PlatformConnection
@@ -184,79 +185,103 @@ async def preview_sync(session: AsyncSession, platform: ListingPlatform) -> Sync
         raise
 
 
-async def commit_sync(session: AsyncSession, platform: ListingPlatform) -> SyncCommitResult:
+async def commit_sync(platform: ListingPlatform) -> SyncCommitResult:
     """Idempotent upsert of fetched orders on (platform, external_order_id). New orders
     are allocated immediately; Etsy-side cancellations/shipments are reconciled for
-    orders already known to us. The whole sync is one transaction — a failure partway
-    through rolls back entirely rather than leaving a half-imported batch."""
-    connection = await _get_connection(session, platform)
-    adapter = await get_adapter(session, platform)
+    orders already known to us. The DB-write portion is one transaction — a failure
+    partway through it rolls back entirely rather than leaving a half-imported batch.
 
+    Deliberately manages its own two short-lived sessions rather than taking one from
+    the caller: fetch_orders_since can involve dozens of paginated HTTP round-trips to
+    the marketplace plus retry/backoff sleeps on 409/429 responses (see the Etsy/eBay
+    adapters), and holding a single pooled DB connection open across all of that starved
+    the app's whole connection pool — the same anti-pattern already fixed in
+    services/listing_push.py, just triggered by this running for both platforms on every
+    app boot (sync_scheduler) instead of by a stock-change fan-out. The fetch-phase
+    session is closed (and its pooled connection released) before the write phase opens
+    its own — the write phase never needs anything beyond the plain rows/IDs fetch_orders_
+    since already returned, so nothing is lost by not sharing a session across the two."""
     try:
-        raw_external_orders = await adapter.fetch_orders_since(session, connection, _effective_since(connection))
-        existing_ids = await _get_existing_external_ids(session, platform, raw_external_orders)
-        external_orders = _drop_unknown_orders_predating_cutoff(connection, raw_external_orders, existing_ids)
+        async with async_session_factory() as fetch_session:
+            connection = await _get_connection(fetch_session, platform)
+            adapter = await get_adapter(fetch_session, platform)
+            raw_external_orders = await adapter.fetch_orders_since(
+                fetch_session, connection, _effective_since(connection)
+            )
 
-        created_count = 0
-        updated_count = 0
-        needs_mapping_count = 0
-        shipped_count = 0
-        order_ids: list[int] = []
+        async with async_session_factory() as session:
+            # Reloaded fresh rather than reusing the fetch-phase `connection` — that
+            # instance is detached now that its session is closed, and this is cheap (a
+            # single PK lookup) compared to the fetch phase it's decoupled from.
+            connection = await _get_connection(session, platform)
+            existing_ids = await _get_existing_external_ids(session, platform, raw_external_orders)
+            external_orders = _drop_unknown_orders_predating_cutoff(connection, raw_external_orders, existing_ids)
 
-        for ext_order in external_orders:
-            order, is_new = await _upsert_order(session, platform, ext_order)
-            if is_new:
-                created_count += 1
-            else:
-                updated_count += 1
+            created_count = 0
+            updated_count = 0
+            needs_mapping_count = 0
+            shipped_count = 0
+            order_ids: list[int] = []
 
-            line_needs_mapping = await _upsert_lines(session, order, ext_order)
-            needs_mapping_count += line_needs_mapping
-            await session.flush()
+            for ext_order in external_orders:
+                order, is_new = await _upsert_order(session, platform, ext_order)
+                if is_new:
+                    created_count += 1
+                else:
+                    updated_count += 1
 
-            just_shipped = await _reconcile_status(session, order, ext_order, is_new)
-            if just_shipped:
-                shipped_count += 1
-            order_ids.append(order.id)
+                line_needs_mapping = await _upsert_lines(session, order, ext_order)
+                needs_mapping_count += line_needs_mapping
+                await session.flush()
 
-        if raw_external_orders:
-            # Advance the watermark to the newest last_modified actually seen — across
-            # every order the platform returned, including ones _drop_unknown_orders_
-            # predating_cutoff just excluded from this batch, since those still need to
-            # age out of future fetches too. Stamping wall-clock "now" here instead (the
-            # previous behavior) would push the watermark past any receipt whose
-            # last_modified never changes again, permanently hiding it from every later
-            # fetch_orders_since(min_last_modified=...) call — exactly the state a
-            # not-yet-reconciled order (e.g. one that arrived already shipped, see
-            # _reconcile_status) needs a future sync to revisit. The +1s past the max
-            # keeps that same boundary receipt from being re-fetched every single sync.
-            newest_modified = max(o.last_modified for o in raw_external_orders)
-            connection.last_orders_synced_at = newest_modified + timedelta(seconds=1)
+                just_shipped = await _reconcile_status(session, order, ext_order, is_new)
+                if just_shipped:
+                    shipped_count += 1
+                order_ids.append(order.id)
 
-        run = PlatformSyncRun(
-            platform=platform,
-            mode=SyncRunMode.commit,
-            status=SyncRunStatus.success,
-            fetched_count=len(external_orders),
-            new_count=created_count,
-            needs_mapping_count=needs_mapping_count,
-            shipped_count=shipped_count,
-            finished_at=datetime.now(timezone.utc),
-        )
-        session.add(run)
-        await session.commit()
+            if raw_external_orders:
+                # Advance the watermark to the newest last_modified actually seen — across
+                # every order the platform returned, including ones _drop_unknown_orders_
+                # predating_cutoff just excluded from this batch, since those still need to
+                # age out of future fetches too. Stamping wall-clock "now" here instead (the
+                # previous behavior) would push the watermark past any receipt whose
+                # last_modified never changes again, permanently hiding it from every later
+                # fetch_orders_since(min_last_modified=...) call — exactly the state a
+                # not-yet-reconciled order (e.g. one that arrived already shipped, see
+                # _reconcile_status) needs a future sync to revisit. The +1s past the max
+                # keeps that same boundary receipt from being re-fetched every single sync.
+                newest_modified = max(o.last_modified for o in raw_external_orders)
+                connection.last_orders_synced_at = newest_modified + timedelta(seconds=1)
 
-        return SyncCommitResult(
-            fetched_count=len(external_orders),
-            created_count=created_count,
-            updated_count=updated_count,
-            needs_mapping_count=needs_mapping_count,
-            shipped_count=shipped_count,
-            order_ids=order_ids,
-        )
+            run = PlatformSyncRun(
+                platform=platform,
+                mode=SyncRunMode.commit,
+                status=SyncRunStatus.success,
+                fetched_count=len(external_orders),
+                new_count=created_count,
+                needs_mapping_count=needs_mapping_count,
+                shipped_count=shipped_count,
+                finished_at=datetime.now(timezone.utc),
+            )
+            session.add(run)
+            await session.commit()
+
+            return SyncCommitResult(
+                fetched_count=len(external_orders),
+                created_count=created_count,
+                updated_count=updated_count,
+                needs_mapping_count=needs_mapping_count,
+                shipped_count=shipped_count,
+                order_ids=order_ids,
+            )
     except Exception as e:
-        await session.rollback()
-        await _record_failure(session, platform, SyncRunMode.commit, e)
+        # A fresh session, not one of the two above — either of those may already be
+        # closed (fetch phase) or mid-rollback (write phase) by the time we get here, and
+        # _record_failure is a fully self-contained write (add + commit a log row), so it
+        # doesn't need to share a session with whatever failed. Matches the pattern
+        # sync_scheduler's own failure-recording helpers already use.
+        async with async_session_factory() as failure_session:
+            await _record_failure(failure_session, platform, SyncRunMode.commit, e)
         raise
 
 

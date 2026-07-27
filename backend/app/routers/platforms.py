@@ -449,14 +449,16 @@ async def preview_sync(platform: ListingPlatform, session: AsyncSession = Depend
 
 
 @router.post("/{platform}/sync-orders", response_model=SyncCommitResult, dependencies=[Depends(require_auth)])
-async def sync_orders(platform: ListingPlatform, session: AsyncSession = Depends(get_db)) -> SyncCommitResult:
+async def sync_orders(platform: ListingPlatform) -> SyncCommitResult:
     # Shares sync_scheduler's per-platform lock so a manual click can never run
     # concurrently with a background auto-sync tick for the same platform — unlike the
     # background loop (which skips its tick if the lock is already held), a manual click
-    # waits for it, since the user explicitly asked for this to run now.
+    # waits for it, since the user explicitly asked for this to run now. No session
+    # dependency here — commit_sync manages its own short-lived sessions internally (see
+    # its docstring), so this endpoint doesn't need one of its own to hand it.
     async with sync_scheduler.get_lock(platform):
         try:
-            return await order_sync.commit_sync(session, platform)
+            return await order_sync.commit_sync(platform)
         except PlatformError as e:
             raise _map_platform_error(e)
 

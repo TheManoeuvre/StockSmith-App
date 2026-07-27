@@ -86,18 +86,21 @@ async def _tick(platform: ListingPlatform) -> None:
         return
 
     async with lock:
-        async with async_session_factory() as session:
-            try:
-                await order_sync.commit_sync(session, platform)
-            except PlatformAuthError:
-                # commit_sync has already rolled back and logged this to PlatformSyncRun
-                # (see order_sync._record_failure) — this is purely for the
-                # auto-disable counter.
-                await _record_auth_failure(platform)
-                return
-            except Exception:
-                logger.exception("Background auto-sync failed for %s", platform.value)
-                return
+        try:
+            # commit_sync manages its own short-lived sessions internally (see its
+            # docstring) rather than taking one from here — deliberately, so this loop
+            # running for both platforms right at every app boot never holds a pooled
+            # connection open across the slow marketplace fetch phase.
+            await order_sync.commit_sync(platform)
+        except PlatformAuthError:
+            # commit_sync has already rolled back and logged this to PlatformSyncRun
+            # (see order_sync._record_failure) — this is purely for the
+            # auto-disable counter.
+            await _record_auth_failure(platform)
+            return
+        except Exception:
+            logger.exception("Background auto-sync failed for %s", platform.value)
+            return
     await _reset_auth_failures(platform)
 
 
