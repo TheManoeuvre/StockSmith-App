@@ -16,6 +16,7 @@ from app.services.costing import create_adjustment, get_on_order_qty_by_material
 from app.services.csv_io import export_materials_csv, import_materials_csv
 from app.services.file_storage import delete_asset_file, resolve_asset_path, save_material_image, thumbnail_path_for
 from app.services.url_import import fetch_image_bytes
+from app.services.validation import validate_qty_for_unit
 
 
 class ImportImageUrlRequest(BaseModel):
@@ -121,6 +122,9 @@ async def import_materials(file: UploadFile, session: AsyncSession = Depends(get
 
 @router.post("", response_model=MaterialRead, status_code=status.HTTP_201_CREATED)
 async def create_material(payload: MaterialCreate, session: AsyncSession = Depends(get_db)) -> Material:
+    validate_qty_for_unit(payload.reorder_threshold, payload.unit, "reorder_threshold")
+    if payload.typical_reorder_qty is not None:
+        validate_qty_for_unit(payload.typical_reorder_qty, payload.unit, "typical_reorder_qty")
     material = Material(**payload.model_dump())
     session.add(material)
     await session.commit()
@@ -141,7 +145,13 @@ async def update_material(
     material = await session.get(Material, material_id)
     if material is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Material not found")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    updates = payload.model_dump(exclude_unset=True)
+    effective_unit = updates.get("unit", material.unit)
+    if "reorder_threshold" in updates:
+        validate_qty_for_unit(updates["reorder_threshold"], effective_unit, "reorder_threshold")
+    if "typical_reorder_qty" in updates and updates["typical_reorder_qty"] is not None:
+        validate_qty_for_unit(updates["typical_reorder_qty"], effective_unit, "typical_reorder_qty")
+    for field, value in updates.items():
         setattr(material, field, value)
     await session.commit()
     return await _get_material_with_manufacturer(session, material_id)

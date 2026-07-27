@@ -13,6 +13,7 @@ import { BuildSection } from "../../components/products/BuildSection";
 import { StockAdjustmentSection } from "../../components/products/StockAdjustmentSection";
 import { PricingSection } from "../../components/products/PricingSection";
 import { PlatformSyncSection } from "../../components/products/PlatformSyncSection";
+import { formatUnitCost } from "../../lib/money";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { SaveIndicator } from "../../components/common/SaveIndicator";
 import { Tabs, type TabDef } from "../../components/common/Tabs";
@@ -78,6 +79,14 @@ function ProductDetail() {
 
   const togglePushBuildableCapacityMutation = useMutation({
     mutationFn: (push_buildable_capacity: boolean) => productsApi.update(id, { push_buildable_capacity }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["products", id] });
+      queryClient.invalidateQueries({ queryKey: ["products"] });
+    },
+  });
+
+  const toggleActiveMutation = useMutation({
+    mutationFn: (is_active: boolean) => productsApi.update(id, { is_active }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["products", id] });
       queryClient.invalidateQueries({ queryKey: ["products"] });
@@ -175,7 +184,12 @@ function ProductDetail() {
           )}
         </div>
         <div className="flex-1">
-          <h1 className="text-xl font-semibold">{product.name}</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-semibold">{product.name}</h1>
+            {!product.is_active && (
+              <span className="rounded bg-slate-200 px-2 py-0.5 text-xs text-slate-600">Inactive</span>
+            )}
+          </div>
           <p className="text-slate-500">{product.sku ?? "No SKU"}</p>
           <div className="mt-2 flex gap-2">
             <button onClick={() => uploadMainImageMutation.mutate()} className="rounded border border-slate-300 px-3 py-1 text-sm">
@@ -189,9 +203,35 @@ function ProductDetail() {
                 Remove image
               </button>
             )}
+            {product.is_active ? (
+              <button
+                onClick={() => {
+                  if (window.confirm("Deactivate this product? It'll stop being sellable, but can be reactivated later.")) {
+                    toggleActiveMutation.mutate(false);
+                  }
+                }}
+                disabled={toggleActiveMutation.isPending}
+                className="rounded border border-red-300 px-3 py-1 text-sm text-red-600 disabled:opacity-50"
+              >
+                Deactivate
+              </button>
+            ) : (
+              <button
+                onClick={() => toggleActiveMutation.mutate(true)}
+                disabled={toggleActiveMutation.isPending}
+                className="rounded border border-slate-300 px-3 py-1 text-sm disabled:opacity-50"
+              >
+                Reactivate
+              </button>
+            )}
           </div>
           <ErrorBanner
-            error={uploadMainImageMutation.error ?? importMainImageUrlMutation.error ?? removeMainImageMutation.error}
+            error={
+              uploadMainImageMutation.error ??
+              importMainImageUrlMutation.error ??
+              removeMainImageMutation.error ??
+              toggleActiveMutation.error
+            }
           />
           <div className="mt-2 flex flex-col gap-2 text-sm">
             {product.is_bundle ? (
@@ -254,7 +294,7 @@ function ProductDetail() {
                 </span>
               </>
             )}
-            <span>Cost per unit: <strong>{product.cost_per_unit ? `£${Number(product.cost_per_unit).toFixed(2)}` : "—"}</strong></span>
+            <span>Cost per unit: <strong>{product.cost_per_unit ? formatUnitCost(product.cost_per_unit) : "—"}</strong></span>
           </div>
           <label className="mt-2 flex items-center gap-2 text-sm">
             <input
