@@ -19,6 +19,9 @@ export interface PlatformStatus {
   last_sync_attempt_at: string | null;
   last_sync_success_at: string | null;
   last_sync_error: string | null;
+  // Non-null while one or more unpaid orders are holding the sync window open so they
+  // keep being re-checked until payment settles.
+  unpaid_hold_since: string | null;
 }
 
 export interface SyncSettingsUpdate {
@@ -61,6 +64,10 @@ export interface SyncPreviewOrder {
   is_cancelled: boolean;
   is_shipped: boolean;
   already_imported: boolean;
+  // Preview shows unpaid orders rather than hiding them, so these can be checked against
+  // the marketplace's own is_paid / orderPaymentStatus field in `raw`.
+  payment_state: "settled" | "unsettled" | "reversed";
+  would_import: boolean;
   lines: SyncPreviewLine[];
   raw: unknown;
 }
@@ -69,6 +76,7 @@ export interface SyncPreviewResult {
   fetched_count: number;
   new_count: number;
   needs_mapping_count: number;
+  skipped_unpaid_count: number;
   orders: SyncPreviewOrder[];
 }
 
@@ -78,6 +86,7 @@ export interface SyncCommitResult {
   updated_count: number;
   needs_mapping_count: number;
   shipped_count: number;
+  skipped_unpaid_count: number;
   order_ids: number[];
 }
 
@@ -92,6 +101,7 @@ export interface SyncRunRead {
   new_count: number;
   needs_mapping_count: number;
   shipped_count: number;
+  skipped_unpaid_count: number;
   error_message: string | null;
 }
 

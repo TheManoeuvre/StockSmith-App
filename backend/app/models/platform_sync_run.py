@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String, func
+from sqlalchemy import DateTime, Integer, String, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, portable_enum
@@ -42,4 +42,11 @@ class PlatformSyncRun(Base):
     new_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     needs_mapping_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     shipped_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Orders the marketplace returned that were NOT imported because payment hasn't
+    # settled (order_sync._partition_new_orders). Without this the gate is invisible: a
+    # skipped order and an order that never existed produce identical log rows, so a gate
+    # that has silently started rejecting everything — the failure mode that actually
+    # matters, since fail-closed defaults mean the symptom is "no orders appear" — looks
+    # exactly like a quiet week. `fetched=12, new=0, skipped_unpaid=12` is unmistakable.
+    skipped_unpaid_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default=text("0"))
     error_message: Mapped[str | None] = mapped_column(String, nullable=True)

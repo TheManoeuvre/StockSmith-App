@@ -187,6 +187,7 @@ async def _status_from_connection(
             last_sync_attempt_at=None,
             last_sync_success_at=None,
             last_sync_error=None,
+            unpaid_hold_since=None,
         )
 
     latest_run = await _latest_commit_run(session, platform)
@@ -213,6 +214,7 @@ async def _status_from_connection(
         last_sync_attempt_at=latest_run.started_at if latest_run is not None else None,
         last_sync_success_at=last_sync_success_at,
         last_sync_error=last_sync_error,
+        unpaid_hold_since=connection.unpaid_hold_since,
     )
 
 
