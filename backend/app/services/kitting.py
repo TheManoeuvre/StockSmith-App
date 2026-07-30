@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.kitting import OrderKittingAllocation, OrderKittingOverride, ProductKittingMaterial
 from app.models.listing import Listing, ListingPlatform
-from app.models.material import Material, MaterialAdjustment
+from app.models.material import Material, MaterialAdjustment, MaterialCategory, MaterialUnit
 from app.models.order import Order, OrderLine, OrderStatus
 from app.models.variant import ProductVariant
 from app.schemas.dashboard import OrderAwaitingPackaging
@@ -98,6 +98,32 @@ _RESOLVED_PRODUCT_VARIANTS_KITTING_BOM_SQL = text(
       )
     """
 )
+
+
+DEFAULT_SHIPPING_LABEL_MATERIAL_NAME = "4x6 Direct Thermal Label"
+
+
+async def attach_default_shipping_label(session: AsyncSession, product_id: int) -> None:
+    """Every product ships in something bearing a label, so new products get 1x '4x6
+    Direct Thermal Label' seeded onto their kitting BOM by default — a plain
+    ProductKittingMaterial row, removable/editable afterward through the same kitting-BOM
+    endpoints as any other packaging material, no special-casing.
+
+    Get-or-creates the label Material itself, keyed on name, so this is idempotent
+    regardless of whether it's ever been created before in this environment (fresh
+    install, or an existing store that already has one from a prior product)."""
+    material = (
+        await session.execute(select(Material).where(Material.name == DEFAULT_SHIPPING_LABEL_MATERIAL_NAME))
+    ).scalar_one_or_none()
+    if material is None:
+        material = Material(
+            name=DEFAULT_SHIPPING_LABEL_MATERIAL_NAME,
+            category=MaterialCategory.packaging,
+            unit=MaterialUnit.each,
+        )
+        session.add(material)
+        await session.flush()
+    session.add(ProductKittingMaterial(product_id=product_id, material_id=material.id, qty_required=1))
 
 
 async def get_resolved_kitting_bom(

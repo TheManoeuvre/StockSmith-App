@@ -41,6 +41,7 @@ from app.services.csv_io import export_products_csv, import_products_csv
 from app.services.kitting import (
     _clamp_value_to_ceiling,
     apply_platform_ceiling,
+    attach_default_shipping_label,
     combine_expected_max_sellable,
     combine_max_sellable,
     combine_theoretical_max_sellable,
@@ -238,6 +239,7 @@ async def create_product(payload: ProductCreate, session: AsyncSession = Depends
     session.add(product)
     await session.flush()  # assigns product.id without a second commit round-trip
     product.sku = sku or f"SKU-{product.id:04d}"
+    await attach_default_shipping_label(session, product.id)
     await session.commit()
     await session.refresh(product)
     return product
