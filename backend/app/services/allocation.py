@@ -10,7 +10,7 @@ from app.models.product import Product
 from app.models.shipping_profile import ShippingProfile
 from app.models.variant import ProductVariant
 from app.services import listing_push
-from app.services.kitting import reconcile_order_kitting
+from app.services.kitting import auto_apply_multiunit_kitting_override, reconcile_order_kitting
 from app.services.shipping_profiles import resolve_shipping_cost_for_platform
 
 """Core allocation engine: every stock-reservation state change for an order flows
@@ -88,6 +88,7 @@ async def allocate_order(session: AsyncSession, order: Order, source: str = "ord
             continue
         await _allocate_line(session, line, source)
     await _recompute_order_status(session, order)
+    await auto_apply_multiunit_kitting_override(session, order)
     await reconcile_order_kitting(session, order)
 
 
