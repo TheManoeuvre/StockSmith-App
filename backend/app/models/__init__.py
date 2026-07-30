@@ -1,7 +1,7 @@
 from app.models.allocation_event import AllocationEvent, AllocationEventType
 from app.models.asset import AssetType, ProductAsset
 from app.models.base import Base
-from app.models.build import Build
+from app.models.build import Build, BuildFailedConsumption
 from app.models.general_settings import CurrencyCode, GeneralSettings
 from app.models.kitting import (
     OrderKittingAllocation,
@@ -22,6 +22,7 @@ from app.models.platform_sync_run import PlatformSyncRun, SyncRunMode, SyncRunSt
 from app.models.platform_fee import FeeBasis, MarginFeeConfig, MarginFeeSource, PlatformFeeComponent
 from app.models.pricing import ProductPriceSnapshot
 from app.models.product import Product, ProductBundleItem, ProductMaterial
+from app.models.product_stock_event import ProductStockEvent, ProductStockEventType
 from app.models.purchase import MaterialPurchase, Purchase, PurchaseStatus
 from app.models.shipping_profile import ShippingProfile
 from app.models.sku_alias import SkuAlias
@@ -53,6 +54,9 @@ __all__ = [
     "OrderKittingOverride",
     "OrderKittingAllocation",
     "Build",
+    "BuildFailedConsumption",
+    "ProductStockEvent",
+    "ProductStockEventType",
     "ProductAsset",
     "AssetType",
     "Listing",

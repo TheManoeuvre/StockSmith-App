@@ -164,6 +164,7 @@ export interface Build {
   product_id: number;
   variant_id: number | null;
   qty_built: number;
+  qty_failed: number;
   notes: string | null;
   built_at: string;
 }
@@ -177,6 +178,28 @@ export interface StockAdjustment {
   target_qty: number | null;
   reason: string;
   created_at: string;
+}
+
+export type ProductStockEventType = "build_success" | "build_failed" | "adjustment" | "order_fulfillment";
+
+export interface ProductStockEvent {
+  id: number;
+  product_id: number;
+  variant_id: number | null;
+  event_type: ProductStockEventType;
+  qty_delta: number;
+  running_balance: number;
+  reason: string | null;
+  created_at: string;
+  source_build_id: number | null;
+  build_qty_built: number | null;
+  build_qty_failed: number | null;
+  source_adjustment_id: number | null;
+  adjustment_mode: "adjust" | "set" | null;
+  adjustment_target_qty: number | null;
+  source_order_line_id: number | null;
+  order_id: number | null;
+  order_external_order_id: string | null;
 }
 
 export interface BomLine {

@@ -9,8 +9,7 @@ import { BundleItemsEditor } from "../../components/products/BundleItemsEditor";
 import { VariantEditor } from "../../components/products/VariantEditor";
 import { VariantAttributesEditor } from "../../components/products/VariantAttributesEditor";
 import { AssetUploader } from "../../components/products/AssetUploader";
-import { BuildSection } from "../../components/products/BuildSection";
-import { StockAdjustmentSection } from "../../components/products/StockAdjustmentSection";
+import { StockSection } from "../../components/products/StockSection";
 import { PricingSection } from "../../components/products/PricingSection";
 import { PlatformSyncSection } from "../../components/products/PlatformSyncSection";
 import { formatUnitCost } from "../../lib/money";
@@ -152,7 +151,7 @@ function ProductDetail() {
     { id: "pricing", label: "Pricing" },
     ...(!product.is_bundle ? [{ id: "variants", label: "Variants" }] : []),
     { id: "platform-sync", label: "Platform Sync" },
-    ...(!product.is_bundle ? [{ id: "build", label: "Build" }] : []),
+    ...(!product.is_bundle ? [{ id: "stock", label: "Stock" }] : []),
     { id: "assets", label: "Assets" },
   ];
 
@@ -428,10 +427,9 @@ function ProductDetail() {
         </section>
       )}
 
-      {activeTab === "build" && !product.is_bundle && (
+      {activeTab === "stock" && !product.is_bundle && (
         <section className="flex flex-col gap-6">
-          <BuildSection productId={id} />
-          <StockAdjustmentSection productId={id} />
+          <StockSection productId={id} />
         </section>
       )}
 

@@ -11,6 +11,7 @@ import type {
   Product,
   ProductPage,
   ProductPriceSnapshot,
+  ProductStockEvent,
   StockAdjustment,
   Variant,
   VariantAttributeSpec,
@@ -57,6 +58,7 @@ export const productsApi = {
     api.post<Variant[]>(`/products/${id}/variants/generate`, { attributes }),
   listBuilds: (id: number) => api.get<Build[]>(`/products/${id}/builds`),
   listStockAdjustments: (id: number) => api.get<StockAdjustment[]>(`/products/${id}/stock-adjustments`),
+  listStockHistory: (id: number) => api.get<ProductStockEvent[]>(`/products/${id}/stock-history`),
   getBundleItems: (id: number) => api.get<BundleItemRead[]>(`/products/${id}/bundle-items`),
   replaceBundleItems: (id: number, items: BundleItem[]) =>
     api.put<BundleItemRead[]>(`/products/${id}/bundle-items`, items),
@@ -67,8 +69,14 @@ export const productsApi = {
 };
 
 export const buildsApi = {
-  create: (input: { product_id: number; variant_id?: number | null; qty_built: number; notes?: string | null }) =>
-    api.post<Build>("/builds", input),
+  create: (input: {
+    product_id: number;
+    variant_id?: number | null;
+    qty_built: number;
+    qty_failed?: number;
+    failed_consumption?: Record<number, boolean> | null;
+    notes?: string | null;
+  }) => api.post<Build>("/builds", input),
 };
 
 export const stockAdjustmentsApi = {

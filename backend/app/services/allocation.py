@@ -7,12 +7,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.allocation_event import AllocationEvent, AllocationEventType
 from app.models.order import Order, OrderLine, OrderStatus
 from app.models.product import Product
+from app.models.product_stock_event import ProductStockEventType
 from app.models.shipping_profile import ShippingProfile
 from app.models.variant import ProductVariant
 from app.services import listing_push
 from app.services.kitting import auto_apply_multiunit_kitting_override, reconcile_order_kitting
 from app.services.order_costs import compute_line_cost_snapshot
 from app.services.shipping_profiles import resolve_shipping_cost_for_platform
+from app.services.stock_events import record_stock_event
 
 """Core allocation engine: every stock-reservation state change for an order flows
 through here. Functions always re-query related rows via explicit select() rather than
@@ -190,6 +192,16 @@ async def ship_line(session: AsyncSession, line: OrderLine, qty: int) -> None:
         # numerically unchanged by shipping itself. Any real max_sellable change from a
         # ship event comes from packaging material consumption, which reconcile_order_
         # kitting below triggers via recompute_material's own listing_push hook.
+        record_stock_event(
+            session,
+            product_id=line.product_id,
+            variant_id=line.variant_id,
+            event_type=ProductStockEventType.order_fulfillment,
+            qty_delta=-qty,
+            running_balance=owner.current_stock,
+            reason=f"Order #{line.order_id} shipped",
+            source_order_line_id=line.id,
+        )
     session.add(
         AllocationEvent(
             order_line_id=line.id,

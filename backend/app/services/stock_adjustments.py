@@ -2,9 +2,11 @@ from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.product import Product
+from app.models.product_stock_event import ProductStockEventType
 from app.models.stock_adjustment import StockAdjustment, StockAdjustmentMode
 from app.models.variant import ProductVariant
 from app.services import listing_push
+from app.services.stock_events import record_stock_event
 
 
 async def _get_owner(session: AsyncSession, product_id: int, variant_id: int | None) -> Product | ProductVariant:
@@ -56,6 +58,17 @@ async def create_stock_adjustment(
         reason=reason,
     )
     session.add(adjustment)
+    await session.flush()
+    record_stock_event(
+        session,
+        product_id=product_id,
+        variant_id=variant_id,
+        event_type=ProductStockEventType.adjustment,
+        qty_delta=qty_delta,
+        running_balance=new_stock,
+        reason=reason,
+        source_adjustment_id=adjustment.id,
+    )
     await session.commit()
     await session.refresh(adjustment)
     return adjustment

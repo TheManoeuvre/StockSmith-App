@@ -11,4 +11,12 @@ router = APIRouter(prefix="/builds", tags=["builds"], dependencies=[Depends(requ
 
 @router.post("", response_model=BuildRead, status_code=status.HTTP_201_CREATED)
 async def record_build(payload: BuildCreate, session: AsyncSession = Depends(get_db)) -> Build:
-    return await create_build(session, payload.product_id, payload.variant_id, payload.qty_built, payload.notes)
+    return await create_build(
+        session,
+        payload.product_id,
+        payload.variant_id,
+        payload.qty_built,
+        payload.notes,
+        qty_failed=payload.qty_failed,
+        failed_consumption=payload.failed_consumption,
+    )
