@@ -220,9 +220,10 @@ function OrderDetail() {
 function OrderFinancialsPanel({ order }: { order: Order }) {
   const currency = order.currency;
   const materialsCogsTotal = order.lines.reduce((sum, line) => {
+    if (line.shipped_qty <= 0) return sum;
     if (line.cost_per_unit_snapshot == null && line.kitting_cost_per_unit_snapshot == null) return sum;
     const perUnit = Number(line.cost_per_unit_snapshot ?? 0) + Number(line.kitting_cost_per_unit_snapshot ?? 0);
-    return sum + perUnit * line.ordered_qty;
+    return sum + perUnit * line.shipped_qty;
   }, 0);
   const hasMaterialsCogs = order.lines.some(
     (l) => l.cost_per_unit_snapshot != null || l.kitting_cost_per_unit_snapshot != null
@@ -275,6 +276,11 @@ function OrderFinancialsPanel({ order }: { order: Order }) {
           <p className={`font-semibold ${order.net_profit != null && Number(order.net_profit) < 0 ? "text-red-600" : ""}`}>
             {order.net_profit != null ? formatMoney(order.net_profit, currency) : "—"}
           </p>
+          {order.cogs_pending && (
+            <p className="text-xs text-amber-700">
+              COGS pending — one or more lines haven't been allocated yet, so this figure doesn't include their cost.
+            </p>
+          )}
         </div>
       </div>
     </div>
@@ -360,8 +366,8 @@ function OrderLineRow({
   const unassignable = line.allocated_qty - line.shipped_qty;
   const lineValue = line.unit_price != null ? Number(line.unit_price) * line.ordered_qty : null;
   const lineCost =
-    line.cost_per_unit_snapshot != null || line.kitting_cost_per_unit_snapshot != null
-      ? (Number(line.cost_per_unit_snapshot ?? 0) + Number(line.kitting_cost_per_unit_snapshot ?? 0)) * line.ordered_qty
+    line.shipped_qty > 0 && (line.cost_per_unit_snapshot != null || line.kitting_cost_per_unit_snapshot != null)
+      ? (Number(line.cost_per_unit_snapshot ?? 0) + Number(line.kitting_cost_per_unit_snapshot ?? 0)) * line.shipped_qty
       : null;
   return (
     <tr className="border-b border-slate-100">

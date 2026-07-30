@@ -28,7 +28,6 @@ from app.schemas.order import (
 from app.schemas.order_return import CancellationPreview, OrderCancelRequest
 from app.services import allocation, returns
 from app.services.kitting import get_order_kitting_summary, reconcile_order_kitting
-from app.services.order_costs import compute_line_cost_snapshot
 from app.services.variants import compute_full_sku
 
 router = APIRouter(prefix="/orders", tags=["orders"], dependencies=[Depends(require_auth)])
@@ -107,7 +106,9 @@ def _compute_net_profit(order: Order) -> Decimal | None:
     expose actual per-order postage cost anywhere reliably attributable, so this always
     comes from the assigned Shipping Profile, never from synced marketplace data. Cost
     of Goods sums each line's snapshotted build+kitting cost per unit across its
-    ordered_qty (the full committed sale, not just what's shipped so far).
+    shipped_qty — cost isn't real until units have actually left the building, and
+    snapshotting happens at first allocation (see allocation._allocate_line), not
+    creation, so an unallocated line has nothing to sum yet anyway.
 
     Returns None rather than a misleading number when Order Value Paid isn't known yet
     (a marketplace order whose financials haven't synced, or a manual order created
@@ -121,12 +122,28 @@ def _compute_net_profit(order: Order) -> Decimal | None:
 
     cogs = Decimal(0)
     for line in order.lines:
+        if line.shipped_qty <= 0:
+            continue
         if line.cost_per_unit_snapshot is None and line.kitting_cost_per_unit_snapshot is None:
             continue
         line_cost = Decimal(line.cost_per_unit_snapshot or 0) + Decimal(line.kitting_cost_per_unit_snapshot or 0)
-        cogs += line_cost * line.ordered_qty
+        cogs += line_cost * line.shipped_qty
 
     return revenue - platform_fees - postage_cost - cogs
+
+
+def _cogs_pending(order: Order) -> bool:
+    """True when at least one line that should have a cost by now (it's been allocated,
+    or shipped, or is simply awaiting its first allocation) still has no snapshot — the
+    signal a UI should show as "COGS pending" rather than silently reading net_profit as
+    though that line cost nothing."""
+    return any(
+        not line.needs_mapping
+        and line.product_id is not None
+        and line.cost_per_unit_snapshot is None
+        and line.kitting_cost_per_unit_snapshot is None
+        for line in order.lines
+    )
 
 
 async def _recompute_manual_order_totals(session: AsyncSession, order: Order) -> None:
@@ -196,6 +213,7 @@ def _serialize_order(order: Order) -> OrderRead:
         payment_status=order.payment_status,
         financials_synced_at=order.financials_synced_at,
         net_profit=_compute_net_profit(order),
+        cogs_pending=_cogs_pending(order),
         sync_issue=order.sync_issue,
         pending_marketplace_cancellation=order.pending_marketplace_cancellation,
         lines=lines,
@@ -277,14 +295,15 @@ async def create_order(payload: OrderCreate, session: AsyncSession = Depends(get
     )
     order.lines = []
     for l in payload.lines:
-        # A variant-only line needs its product_id derived from the variant so the cost
-        # snapshot (and product-based lookups elsewhere) has something to resolve against.
+        # A variant-only line needs its product_id derived from the variant so
+        # product-based lookups elsewhere have something to resolve against. Cost
+        # snapshots are deliberately left unset here — captured at first allocation
+        # instead (allocation._allocate_line), not at creation.
         product_id = l.product_id
         if l.variant_id is not None:
             variant = await session.get(ProductVariant, l.variant_id)
             product_id = variant.product_id
 
-        cost_per_unit, kitting_cost_per_unit = await compute_line_cost_snapshot(session, product_id, l.variant_id)
         order.lines.append(
             OrderLine(
                 product_id=product_id,
@@ -292,8 +311,6 @@ async def create_order(payload: OrderCreate, session: AsyncSession = Depends(get
                 ordered_qty=l.ordered_qty,
                 unit_price=l.unit_price,
                 currency=l.currency,
-                cost_per_unit_snapshot=cost_per_unit,
-                kitting_cost_per_unit_snapshot=kitting_cost_per_unit,
             )
         )
     session.add(order)

@@ -138,10 +138,12 @@ class OrderLine(Base):
     sku: Mapped[str | None] = mapped_column(String, nullable=True)
     needs_mapping: Mapped[bool] = mapped_column(default=False, nullable=False)
 
-    # Build-BOM and kitting-BOM cost per unit, snapshotted once when the line is created
-    # (see order_costs.compute_line_cost_snapshot) — deliberately frozen at that point,
-    # not recomputed later, so a historical order's cost-of-goods doesn't drift as
-    # material costs change.
+    # Build-BOM and kitting-BOM cost per unit, snapshotted once at the line's first
+    # allocation (see order_costs.compute_line_cost_snapshot, called from
+    # allocation._allocate_line) — deliberately frozen at that point, not recomputed
+    # later, so a historical order's cost-of-goods doesn't drift as material costs change.
+    # NULL until the line has ever been allocated, meaning COGS for it isn't known yet —
+    # see OrderRead.cogs_pending.
     cost_per_unit_snapshot: Mapped[float | None] = mapped_column(Numeric(14, 6), nullable=True)
     kitting_cost_per_unit_snapshot: Mapped[float | None] = mapped_column(Numeric(14, 6), nullable=True)
 
