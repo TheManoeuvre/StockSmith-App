@@ -501,6 +501,47 @@ def _apply_kitting_overrides(
     return {material_id: qty for material_id, qty in result.items() if qty > 0}
 
 
+async def auto_apply_multiunit_kitting_override(session: AsyncSession, order: Order) -> None:
+    """One-box-either-way default: once an order's units add up to more than one — whether
+    that's several lines or a single line with qty>1 — packaging-category kitting
+    materials (box, label, tape) are assumed to ship once for the whole order rather than
+    scaling per unit. Auto-inserts an OrderKittingOverride(qty=1) for each such material
+    the first time it appears on the order with no override row yet.
+
+    Deliberately insert-only, keyed on "no existing override for this material" rather
+    than re-asserting qty=1 every call: a user who's manually raised it (a genuinely
+    multi-box order) must never have that overwritten by a later re-allocation or a
+    second sync adding more lines to the same order. Non-packaging kitting materials
+    (if any ever exist) are left alone entirely, still scaling with qty as normal."""
+    lines = list((await session.execute(select(OrderLine).where(OrderLine.order_id == order.id))).scalars())
+    total_qty = sum(l.ordered_qty for l in lines if not l.needs_mapping and l.product_id is not None)
+    if total_qty <= 1:
+        return
+
+    auto = await _compute_auto_kitting_totals(session, lines, lambda l: l.ordered_qty)
+    if not auto:
+        return
+
+    materials = {
+        m.id: m
+        for m in (await session.execute(select(Material).where(Material.id.in_(auto)))).scalars()
+    }
+    existing_material_ids = set(
+        (
+            await session.execute(
+                select(OrderKittingOverride.material_id).where(OrderKittingOverride.order_id == order.id)
+            )
+        ).scalars()
+    )
+    for material_id in auto:
+        material = materials.get(material_id)
+        if material is None or material.category != MaterialCategory.packaging:
+            continue
+        if material_id in existing_material_ids:
+            continue
+        session.add(OrderKittingOverride(order_id=order.id, material_id=material_id, qty_required=1))
+
+
 async def _compute_kitting_requirement(
     session: AsyncSession, order_id: int, lines: list[OrderLine], line_qty: Callable[[OrderLine], int]
 ) -> dict[int, Decimal]:
