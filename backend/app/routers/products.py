@@ -6,12 +6,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.deps import get_db, require_auth
 from app.models.build import Build
 from app.models.kitting import ProductKittingMaterial
+from app.models.order import Order, OrderLine
 from app.models.product import Product, ProductBundleItem, ProductMaterial
+from app.models.product_stock_event import ProductStockEvent
 from app.models.stock_adjustment import StockAdjustment
 from app.models.variant import ProductVariant
 from app.schemas.build import BuildRead
 from app.schemas.kitting import KittingBomLine, KittingBomLineRead
 from app.schemas.stock_adjustment import StockAdjustmentRead
+from app.schemas.stock_event import ProductStockEventRead
 from app.models.pricing import ProductPriceSnapshot
 from app.schemas.product import (
     BomLine,
@@ -543,6 +546,37 @@ async def list_stock_adjustments(product_id: int, session: AsyncSession = Depend
         .order_by(StockAdjustment.created_at.desc(), StockAdjustment.id.desc())
     )
     return list(result.scalars())
+
+
+@router.get("/{product_id}/stock-history", response_model=list[ProductStockEventRead])
+async def list_stock_history(product_id: int, session: AsyncSession = Depends(get_db)) -> list[ProductStockEventRead]:
+    """Unified "Stock" history: every build (success or failed), stock adjustment, and
+    order fulfillment affecting this product/any of its variants, newest first, each
+    carrying a running balance — replaces the old separate builds/stock-adjustments views."""
+    result = await session.execute(
+        select(ProductStockEvent, Build, StockAdjustment, OrderLine, Order)
+        .outerjoin(Build, ProductStockEvent.source_build_id == Build.id)
+        .outerjoin(StockAdjustment, ProductStockEvent.source_adjustment_id == StockAdjustment.id)
+        .outerjoin(OrderLine, ProductStockEvent.source_order_line_id == OrderLine.id)
+        .outerjoin(Order, OrderLine.order_id == Order.id)
+        .where(ProductStockEvent.product_id == product_id)
+        .order_by(ProductStockEvent.created_at.desc(), ProductStockEvent.id.desc())
+    )
+    reads = []
+    for event, build, adjustment, order_line, order in result.all():
+        reads.append(
+            ProductStockEventRead.model_validate(event).model_copy(
+                update={
+                    "build_qty_built": build.qty_built if build else None,
+                    "build_qty_failed": build.qty_failed if build else None,
+                    "adjustment_mode": adjustment.mode if adjustment else None,
+                    "adjustment_target_qty": adjustment.target_qty if adjustment else None,
+                    "order_id": order_line.order_id if order_line else None,
+                    "order_external_order_id": order.external_order_id if order else None,
+                }
+            )
+        )
+    return reads
 
 
 @router.post("/{product_id}/variants/generate", response_model=list[VariantRead], status_code=status.HTTP_201_CREATED)
