@@ -106,6 +106,12 @@ async def auto_allocate_after_build(
             OrderLine.allocated_qty < OrderLine.ordered_qty,
             OrderLine.needs_mapping.is_(False),
             Order.status.in_([OrderStatus.pending, OrderStatus.allocated]),
+            # An order the marketplace has reported as cancelled — or whose payment has
+            # been reversed (see order_sync._reconcile_status) — is awaiting a human
+            # decision and must not quietly acquire stock in the meantime. Without this,
+            # such an order still reads as `pending`, so the next build of any product on
+            # it would allocate to it from this path, bypassing the sync gate entirely.
+            Order.pending_marketplace_cancellation.is_(False),
         )
         .order_by(Order.order_placed_at, Order.id)
     )

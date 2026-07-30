@@ -6,10 +6,60 @@ from datetime import datetime, timedelta, timezone
 import httpx
 
 from app.models.platform_connection import PlatformConnection
-from app.services.platforms.base import ExternalListingRef, ExternalOrder, ExternalOrderLine, TokenSet, ensure_utc
+from app.services.platforms.base import (
+    ExternalListingRef,
+    ExternalOrder,
+    ExternalOrderLine,
+    PaymentState,
+    TokenSet,
+    ensure_utc,
+)
 from app.services.platforms.errors import PlatformAuthError, PlatformRateLimitError, PlatformSyncError
 
 logger = logging.getLogger("stocksmith.etsy")
+
+# Receipt `status` values that mean the buyer's money has landed. Etsy documents this
+# field as a closed enum: paid, completed, open, payment processing, canceled,
+# fully refunded, partially refunded. "partially refunded" belongs here — it was paid,
+# and only part of it came back.
+_PAID_RECEIPT_STATUSES = frozenset({"paid", "completed", "partially refunded"})
+
+
+def _receipt_payment_state(receipt: dict) -> PaymentState:
+    """Whether Etsy has actually taken this buyer's money.
+
+    Deliberately reads ONLY the receipt's own `is_paid` boolean and `status` enum, both
+    of which Etsy documents and bounds. It must never consult the Payments endpoint's
+    `status` string (see _fetch_payment): that field is undocumented free-form — Etsy's
+    own schema describes it only as "most commonly 'settled' or 'authed'" — and three
+    different values have already been observed on one small shop's data: SETTLED,
+    POSTED, and INSTALL_IN_PROGRESS (a Klarna-style instalment plan mid-flight).
+
+    Two of those mean paid and one doesn't, and there is no way to know which is which
+    without asking a human. That was confirmed the hard way: a gate built on that string
+    would have deleted receipt 4128127298, which reads POSTED and is sitting in the Etsy
+    UI awaiting shipment — a real, paid order. Meanwhile 4128199713 reads
+    INSTALL_IN_PROGRESS and does not appear in the seller's Etsy UI at all.
+
+    Module-level and pure on purpose: no session, no network, no adapter instance, so the
+    whole truth table is unit-testable directly.
+    """
+    status = str(receipt.get("status", "")).lower()
+
+    # A fully-refunded receipt was paid and then entirely reversed. Checked before
+    # is_paid because Etsy keeps is_paid true on a refunded receipt — the money did
+    # arrive, it just didn't stay.
+    if status == "fully refunded":
+        return PaymentState.reversed
+
+    is_paid = receipt.get("is_paid")
+    if is_paid is not None:
+        # An explicit False always wins. This single line is the actual fix.
+        return PaymentState.settled if bool(is_paid) else PaymentState.unsettled
+
+    # is_paid absent from the response shape — fall back to the status enum rather than
+    # assuming paid. Consistent with this module's defensive-parsing stance elsewhere.
+    return PaymentState.settled if status in _PAID_RECEIPT_STATUSES else PaymentState.unsettled
 
 AUTHORIZE_URL = "https://www.etsy.com/oauth/connect"
 TOKEN_URL = "https://api.etsy.com/v3/public/oauth/token"
@@ -268,6 +318,14 @@ class EtsyAdapter:
 
         Capped at _MAX_PAGES pages per call (a few thousand receipts) as a safety limit
         on how much of the daily rate-limit budget one sync attempt can spend.
+
+        Deliberately does NOT pass getShopReceipts' `was_paid=true` filter, even though
+        unpaid receipts must never be imported (see _receipt_payment_state). Filtering
+        server-side would make them invisible, and StockSmith needs to see them to: count
+        them for the sync log's skipped_unpaid_count, compute the unpaid hold that
+        guarantees a later-settling order is recoverable, and notice when an
+        already-imported order's payment gets reversed. Fetch everything; gate locally in
+        order_sync._partition_new_orders.
         """
         if connection.external_account_id is None:
             raise PlatformSyncError("Etsy connection has no shop id — reconnect required")
@@ -329,24 +387,45 @@ class EtsyAdapter:
         grand_total = self._parse_money(receipt.get("grandtotal"))
         currency = (receipt.get("grandtotal") or {}).get("currency_code")
 
-        payment_fees, payment_net, payment_status, payment_id = await self._fetch_payment(
-            session, connection, receipt.get("receipt_id")
-        )
+        payment_state = _receipt_payment_state(receipt)
 
-        # The Payments endpoint's own amount_fees is documented by Etsy as "the original
-        # card processing fee" only — it excludes the marketplace transaction fee,
-        # regulatory operating fee, and VAT on all of those, so it understates what the
-        # seller actually sees as "You earned" on the order page. The full total is only
-        # obtainable from the payment-account ledger, and only once the order has
-        # actually shipped (that's when the fee/VAT/shipping-label entries post) — see
-        # _fetch_platform_fees_total. Falls back to the narrow amount_fees if the ledger
-        # fetch comes back empty (e.g. fees haven't posted yet).
-        if is_shipped:
-            ledger_fees_total = await self._fetch_platform_fees_total(
-                session, connection, receipt, transactions, payment_id
+        # Whether to spend the per-receipt enrichment calls below. Skipped in two cases:
+        #
+        #  - Unsettled: there is no settled payment to describe yet, and order_sync won't
+        #    import the order anyway. An unpaid receipt now costs ZERO extra API calls,
+        #    which is cheaper than before this gate existed.
+        #  - Older than the sync watermark: the only way a receipt predating
+        #    last_orders_synced_at reaches us is order_sync's unpaid hold widening the
+        #    fetch window to recover a specific unpaid order. Re-enriching every other
+        #    receipt caught in that widened window on every poll would burn the daily
+        #    quota (~4 calls per receipt) for information that hasn't changed.
+        #
+        # Note the second condition is a no-op whenever no hold is active: `since` then
+        # equals last_orders_synced_at, so everything returned is at or past the cutoff
+        # and behaviour is identical to before.
+        cutoff = ensure_utc(connection.last_orders_synced_at)
+        enrich = payment_state is not PaymentState.unsettled and (cutoff is None or last_modified >= cutoff)
+
+        payment_fees = payment_net = payment_status = None
+        if enrich:
+            payment_fees, payment_net, payment_status, payment_id = await self._fetch_payment(
+                session, connection, receipt.get("receipt_id")
             )
-            if ledger_fees_total is not None:
-                payment_fees = ledger_fees_total
+
+            # The Payments endpoint's own amount_fees is documented by Etsy as "the
+            # original card processing fee" only — it excludes the marketplace transaction
+            # fee, regulatory operating fee, and VAT on all of those, so it understates
+            # what the seller actually sees as "You earned" on the order page. The full
+            # total is only obtainable from the payment-account ledger, and only once the
+            # order has actually shipped (that's when the fee/VAT/shipping-label entries
+            # post) — see _fetch_platform_fees_total. Falls back to the narrow amount_fees
+            # if the ledger fetch comes back empty (e.g. fees haven't posted yet).
+            if is_shipped:
+                ledger_fees_total = await self._fetch_platform_fees_total(
+                    session, connection, receipt, transactions, payment_id
+                )
+                if ledger_fees_total is not None:
+                    payment_fees = ledger_fees_total
 
         return ExternalOrder(
             external_order_id=str(receipt.get("receipt_id")),
@@ -369,6 +448,8 @@ class EtsyAdapter:
             payment_fees=payment_fees,
             payment_net=payment_net,
             payment_status=payment_status,
+            payment_state=payment_state,
+            financials_enriched=enrich,
         )
 
     def _parse_transaction(self, tx: dict) -> ExternalOrderLine:
@@ -413,7 +494,12 @@ class EtsyAdapter:
         gross/fees/net breakdown. An order whose payment hasn't settled yet (or any
         non-200 response) just means these stay None; it doesn't fail the sync.
         payment_id is returned alongside so _fetch_platform_fees_total can match this
-        payment's own processing-fee ledger entries back to it."""
+        payment's own processing-fee ledger entries back to it.
+
+        The returned `status` is DISPLAY ONLY and must never drive a decision. It is
+        undocumented free-form (observed: SETTLED, POSTED, INSTALL_IN_PROGRESS) and two of
+        those three mean paid — use _receipt_payment_state instead, which reads the
+        receipt's documented is_paid/status fields."""
         if receipt_id is None:
             return None, None, None, None
         response = await self._authed_request(

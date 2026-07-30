@@ -7,10 +7,48 @@ import httpx
 
 from app.models.platform_connection import PlatformConnection
 from app.models.platform_credential import PlatformEnvironment
-from app.services.platforms.base import ExternalListingRef, ExternalOrder, ExternalOrderLine, TokenSet, ensure_utc
+from app.services.platforms.base import (
+    ExternalListingRef,
+    ExternalOrder,
+    ExternalOrderLine,
+    PaymentState,
+    TokenSet,
+    ensure_utc,
+)
 from app.services.platforms.errors import PlatformAuthError, PlatformRateLimitError, PlatformSyncError
 
 logger = logging.getLogger("stocksmith.ebay")
+
+# eBay's OrderPaymentStatusEnum, mapped onto StockSmith's payment states. The full enum
+# is FAILED, FULLY_REFUNDED, PAID, PARTIALLY_REFUNDED, PENDING — all five are covered
+# here so an unrecognised value is genuinely unrecognised rather than merely unhandled.
+#
+# PARTIALLY_REFUNDED counts as settled: it was paid, and only part came back. eBay's own
+# docs say of PAID that "it is safe for the seller to ship the order to the buyer", which
+# is exactly the property this gate needs.
+_EBAY_PAYMENT_STATES: dict[str, PaymentState] = {
+    "PAID": PaymentState.settled,
+    "PARTIALLY_REFUNDED": PaymentState.settled,
+    "FULLY_REFUNDED": PaymentState.reversed,
+    "PENDING": PaymentState.unsettled,
+    "FAILED": PaymentState.unsettled,
+}
+
+
+def _order_payment_state(order: dict) -> PaymentState:
+    """Whether eBay has actually taken this buyer's money.
+
+    eBay's checkout flow means most orders reaching getOrders are already PAID, but that
+    is not guaranteed — some payment methods (COD among them) can surface a non-PAID
+    status — so this checks the field explicitly rather than trusting the API to have
+    pre-filtered. An unknown or missing value falls through to `unsettled`, so a future
+    enum addition fails closed.
+
+    Module-level and pure, matching etsy._receipt_payment_state, so the truth table is
+    unit-testable without a session or network.
+    """
+    raw = str(order.get("orderPaymentStatus", "")).upper()
+    return _EBAY_PAYMENT_STATES.get(raw, PaymentState.unsettled)
 
 # Sandbox and Production are entirely separate keysets AND separate API hosts — see
 # docs/plan-marketplace-integrations.md Section 2. auth./api. sandbox hosts are
@@ -241,8 +279,13 @@ class EbayAdapter:
         placed_at = self._parse_timestamp(placed_at_raw) or datetime.now(timezone.utc)
         last_modified = self._parse_timestamp(order.get("lastModifiedDate")) or placed_at
 
-        status = str(order.get("orderPaymentStatus", "")).upper()
-        is_cancelled = status == "FAILED" or str(order.get("cancelStatus", {}).get("cancelState", "")).upper() == "CANCELED"
+        # A cancellation is now read ONLY from cancelStatus. This previously also treated
+        # orderPaymentStatus == FAILED as a cancellation, conflating two genuinely
+        # different things: eBay had not been paid, versus the order was called off. A
+        # failed payment now routes to PaymentState.unsettled instead, which is both more
+        # accurate and strictly safer — an unpaid order is never imported at all, rather
+        # than being imported and then flagged.
+        is_cancelled = str(order.get("cancelStatus", {}).get("cancelState", "")).upper() == "CANCELED"
         fulfillment_status = str(order.get("orderFulfillmentStatus", "")).upper()
         is_shipped = fulfillment_status == "FULFILLED"
 
@@ -252,9 +295,20 @@ class EbayAdapter:
         pricing = order.get("pricingSummary") or {}
         currency = (pricing.get("total") or {}).get("currency")
 
-        payment_fees, payment_net, payment_status = await self._fetch_transactions(
-            session, connection, order.get("orderId")
-        )
+        payment_state = _order_payment_state(order)
+
+        # See the equivalent block in the Etsy adapter's _parse_receipt for why
+        # enrichment is skipped for unsettled orders and for orders older than the sync
+        # watermark. Same reasoning, same no-op-when-no-hold-is-active property; here it
+        # saves one Sell Finances API call per order, which is the N+1 in this adapter.
+        cutoff = ensure_utc(connection.last_orders_synced_at)
+        enrich = payment_state is not PaymentState.unsettled and (cutoff is None or last_modified >= cutoff)
+
+        payment_fees = payment_net = payment_status = None
+        if enrich:
+            payment_fees, payment_net, payment_status = await self._fetch_transactions(
+                session, connection, order.get("orderId")
+            )
 
         return ExternalOrder(
             external_order_id=str(order.get("orderId")),
@@ -279,6 +333,8 @@ class EbayAdapter:
             payment_fees=payment_fees,
             payment_net=payment_net,
             payment_status=payment_status,
+            payment_state=payment_state,
+            financials_enriched=enrich,
         )
 
     def _parse_line_item(self, line_item: dict) -> ExternalOrderLine:

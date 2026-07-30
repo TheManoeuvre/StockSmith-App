@@ -33,6 +33,10 @@ class PlatformStatus(BaseModel):
     last_sync_attempt_at: datetime | None
     last_sync_success_at: datetime | None
     last_sync_error: str | None
+    # Non-null while at least one unpaid order is holding the sync window open. Surfaced
+    # so the hold isn't invisible state that silently widens every fetch — and so a hold
+    # that gets stuck on an order that will never settle has a visible symptom.
+    unpaid_hold_since: datetime | None
 
 
 class SyncStartDateUpdate(BaseModel):
@@ -83,6 +87,12 @@ class SyncPreviewOrder(BaseModel):
     is_cancelled: bool
     is_shipped: bool
     already_imported: bool
+    # StockSmith's reading of whether the money has landed ("settled" / "unsettled" /
+    # "reversed"), and whether a real sync would import this order. Preview shows unpaid
+    # orders rather than hiding them, so these two can be checked against the untouched
+    # `raw` payload's own is_paid / orderPaymentStatus field below.
+    payment_state: str
+    would_import: bool
     lines: list[SyncPreviewLine]
     raw: dict
 
@@ -91,6 +101,7 @@ class SyncPreviewResult(BaseModel):
     fetched_count: int
     new_count: int
     needs_mapping_count: int
+    skipped_unpaid_count: int
     orders: list[SyncPreviewOrder]
 
 
@@ -100,6 +111,7 @@ class SyncCommitResult(BaseModel):
     updated_count: int
     needs_mapping_count: int
     shipped_count: int
+    skipped_unpaid_count: int
     order_ids: list[int]
 
 
@@ -116,6 +128,7 @@ class SyncRunRead(BaseModel):
     new_count: int
     needs_mapping_count: int
     shipped_count: int
+    skipped_unpaid_count: int
     error_message: str | None
 
 

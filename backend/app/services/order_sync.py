@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 
@@ -16,14 +17,25 @@ from app.schemas.platform import SyncCommitResult, SyncPreviewLine, SyncPreviewO
 from app.services import allocation
 from app.services.order_costs import compute_line_cost_snapshot, resolve_order_shipping_profile
 from app.services.platforms import get_adapter
-from app.services.platforms.base import ExternalOrder, ensure_utc
+from app.services.platforms.base import ExternalOrder, PaymentState, ensure_utc
 from app.services.variants import find_by_sku
+
+logger = logging.getLogger("stocksmith.order_sync")
 
 _PLATFORM_LABELS: dict[ListingPlatform, str] = {
     ListingPlatform.etsy: "Etsy",
     ListingPlatform.ebay: "eBay",
     ListingPlatform.shopify: "Shopify",
 }
+
+# How far back the unpaid hold is willing to keep the fetch window open for an order that
+# still hasn't been paid. Past this, an unsettled order stops holding the window and is
+# recoverable only if the platform bumps its last_modified when payment finally lands
+# (which both platforms are believed to do — the hold exists precisely because "believed
+# to" isn't good enough to risk losing a paid order over). An order left unpaid for 30
+# continuous days is abandoned in practice; falling out is logged at WARNING so it's
+# never silent.
+_MAX_UNPAID_HOLD = timedelta(days=30)
 
 
 async def _get_connection(session: AsyncSession, platform: ListingPlatform) -> PlatformConnection:
@@ -53,10 +65,25 @@ def _effective_since(connection: PlatformConnection) -> datetime | None:
     # platforms/base.ensure_utc's own docstring); every stored datetime here is UTC
     # regardless, so it's always safe to reattach tzinfo before comparing.
     last_orders_synced_at = ensure_utc(connection.last_orders_synced_at)
+
+    # The unpaid hold drags the query window back far enough to keep re-seeing an order
+    # that was skipped for being unpaid, so that whenever it does settle we notice. It is
+    # kept as its own column rather than by rewinding last_orders_synced_at, because the
+    # watermark means "everything up to here has been fully processed" — the adapters'
+    # enrichment cutoff depends on that meaning, and PlatformStatus surfaces it to the
+    # user, where a value that appears to travel backwards would just look broken.
+    unpaid_hold_since = ensure_utc(connection.unpaid_hold_since)
+    if unpaid_hold_since is not None:
+        last_orders_synced_at = (
+            unpaid_hold_since if last_orders_synced_at is None else min(last_orders_synced_at, unpaid_hold_since)
+        )
+
     if last_orders_synced_at is None:
         return floor
     if floor is None:
         return last_orders_synced_at
+    # The sync_start_date floor still wins, so the hold can never reach further back than
+    # the cutoff the user configured.
     return max(floor, last_orders_synced_at)
 
 
@@ -90,6 +117,87 @@ def _drop_unknown_orders_predating_cutoff(
         for o in external_orders
         if o.external_order_id in existing_ids or o.placed_at.date() >= connection.sync_start_date
     ]
+
+
+def _partition_new_orders(
+    platform: ListingPlatform, external_orders: list[ExternalOrder], existing_ids: set[str], *, log: bool = True
+) -> tuple[list[ExternalOrder], list[ExternalOrder]]:
+    """Splits the fetched batch into (import, skip-as-unpaid).
+
+    The rule: an order StockSmith has never seen is imported only once the marketplace
+    says the money actually arrived. An unpaid order doesn't become a pending record, a
+    staging row, or a greyed-out entry — it simply doesn't exist here yet. That matters
+    because importing one isn't cosmetic: allocate_order reserves product stock, reserves
+    packaging materials via kitting.reconcile_order_kitting, and through
+    listing_push.enqueue_for_owner pushes REDUCED QUANTITIES TO THE LIVE MARKETPLACE
+    LISTINGS seconds later. An order that may never be paid for can therefore take real
+    stock off sale.
+
+    Deliberately conditioned on existing_ids, which is why this lives here and not in the
+    adapters: an already-imported order is never skipped, no matter what its payment says.
+    It still has to flow through _reconcile_status so a later shipment, cancellation, or
+    payment reversal is picked up. Mirrors _drop_unknown_orders_predating_cutoff, which
+    makes the same fetch-it-then-conditionally-exclude-it move for the same reason.
+
+    PaymentState.reversed is NOT skipped — a refunded order is real history worth keeping,
+    it just must never reserve anything. _reconcile_status handles that by importing it
+    flagged and unallocated.
+
+    `log` is off for preview, which calls this purely to annotate what a real sync would
+    do — writing "skipped" lines for a dry run would make backend.log claim imports were
+    withheld that were never going to happen.
+    """
+    keep: list[ExternalOrder] = []
+    skipped: list[ExternalOrder] = []
+    for order in external_orders:
+        if order.external_order_id not in existing_ids and order.payment_state is PaymentState.unsettled:
+            skipped.append(order)
+            if log:
+                # Logged per-order because the alternative — a shop that looks quiet — is
+                # indistinguishable from a gate that has started wrongly rejecting
+                # everything. Both raw fields are included so a surprise response shape is
+                # diagnosable from backend.log without re-running anything.
+                logger.info(
+                    "%s order %s skipped: payment not settled (is_paid=%r, status=%r)",
+                    _PLATFORM_LABELS.get(platform, platform.value),
+                    order.external_order_id,
+                    order.raw.get("is_paid"),
+                    order.raw.get("status") or order.raw.get("orderPaymentStatus"),
+                )
+        else:
+            keep.append(order)
+    return keep, skipped
+
+
+def _compute_unpaid_hold(skipped: list[ExternalOrder]) -> datetime | None:
+    """Where the fetch window must stay open back to, so that a skipped unpaid order is
+    seen again on every later poll until it either settles or ages out.
+
+    Returns None when nothing was skipped — the hold is self-clearing, so it costs
+    nothing on the overwhelming majority of polls where every order is paid.
+
+    Guards against the one way this could go wrong: an order that stays unpaid forever
+    would otherwise pin the window open forever, and each poll re-fetches everything in
+    it. _MAX_UNPAID_HOLD bounds that.
+    """
+    now = datetime.now(timezone.utc)
+    fresh: list[datetime] = []
+    for order in skipped:
+        last_modified = ensure_utc(order.last_modified)
+        if now - last_modified <= _MAX_UNPAID_HOLD:
+            fresh.append(last_modified)
+        else:
+            logger.warning(
+                "Order %s has been unpaid for over %d days — no longer holding the sync window open for it. "
+                "If it is ever paid, it will only be re-imported if the marketplace updates its last-modified time.",
+                order.external_order_id,
+                _MAX_UNPAID_HOLD.days,
+            )
+    if not fresh:
+        return None
+    # One second before, so the >= comparison the platforms apply to min_last_modified
+    # can't exclude the very order being held for.
+    return min(fresh) - timedelta(seconds=1)
 
 
 async def _resolve_line_match(
@@ -127,6 +235,15 @@ async def preview_sync(session: AsyncSession, platform: ListingPlatform) -> Sync
         existing_ids = await _get_existing_external_ids(session, platform, external_orders)
         external_orders = _drop_unknown_orders_predating_cutoff(connection, external_orders, existing_ids)
 
+        # Preview deliberately does NOT drop unpaid orders the way commit_sync does — it
+        # annotates them instead. The whole point of preview is to see ground truth before
+        # trusting the sync, and "what is the gate holding back, and does the marketplace's
+        # own is_paid field agree with our reading of it" is exactly the question a human
+        # needs to answer here. Each order carries its untouched `raw` payload alongside
+        # would_import for precisely that comparison.
+        _, skipped_unpaid = _partition_new_orders(platform, external_orders, existing_ids, log=False)
+        skipped_ids = {o.external_order_id for o in skipped_unpaid}
+
         preview_orders: list[SyncPreviewOrder] = []
         needs_mapping_count = 0
         new_count = 0
@@ -162,6 +279,8 @@ async def preview_sync(session: AsyncSession, platform: ListingPlatform) -> Sync
                     is_cancelled=ext_order.is_cancelled,
                     is_shipped=ext_order.is_shipped,
                     already_imported=already_imported,
+                    payment_state=ext_order.payment_state.value,
+                    would_import=ext_order.external_order_id not in skipped_ids,
                     lines=preview_lines,
                     raw=ext_order.raw,
                 )
@@ -170,6 +289,7 @@ async def preview_sync(session: AsyncSession, platform: ListingPlatform) -> Sync
         run.fetched_count = len(external_orders)
         run.new_count = new_count
         run.needs_mapping_count = needs_mapping_count
+        run.skipped_unpaid_count = len(skipped_unpaid)
         run.finished_at = datetime.now(timezone.utc)
         await session.commit()
 
@@ -177,6 +297,7 @@ async def preview_sync(session: AsyncSession, platform: ListingPlatform) -> Sync
             fetched_count=len(external_orders),
             new_count=new_count,
             needs_mapping_count=needs_mapping_count,
+            skipped_unpaid_count=len(skipped_unpaid),
             orders=preview_orders,
         )
     except Exception as e:
@@ -216,6 +337,7 @@ async def commit_sync(platform: ListingPlatform) -> SyncCommitResult:
             connection = await _get_connection(session, platform)
             existing_ids = await _get_existing_external_ids(session, platform, raw_external_orders)
             external_orders = _drop_unknown_orders_predating_cutoff(connection, raw_external_orders, existing_ids)
+            external_orders, skipped_unpaid = _partition_new_orders(platform, external_orders, existing_ids)
 
             created_count = 0
             updated_count = 0
@@ -253,6 +375,11 @@ async def commit_sync(platform: ListingPlatform) -> SyncCommitResult:
                 newest_modified = max(o.last_modified for o in raw_external_orders)
                 connection.last_orders_synced_at = newest_modified + timedelta(seconds=1)
 
+            # Recomputed from scratch every run, not accumulated — an order that has since
+            # been paid (or has vanished from the window) simply stops appearing in
+            # `skipped_unpaid`, and the hold releases itself with no cleanup pass.
+            connection.unpaid_hold_since = _compute_unpaid_hold(skipped_unpaid)
+
             run = PlatformSyncRun(
                 platform=platform,
                 mode=SyncRunMode.commit,
@@ -261,6 +388,7 @@ async def commit_sync(platform: ListingPlatform) -> SyncCommitResult:
                 new_count=created_count,
                 needs_mapping_count=needs_mapping_count,
                 shipped_count=shipped_count,
+                skipped_unpaid_count=len(skipped_unpaid),
                 finished_at=datetime.now(timezone.utc),
             )
             session.add(run)
@@ -272,6 +400,7 @@ async def commit_sync(platform: ListingPlatform) -> SyncCommitResult:
                 updated_count=updated_count,
                 needs_mapping_count=needs_mapping_count,
                 shipped_count=shipped_count,
+                skipped_unpaid_count=len(skipped_unpaid),
                 order_ids=order_ids,
             )
     except Exception as e:
@@ -300,9 +429,17 @@ def _apply_financials(order: Order, ext_order: ExternalOrder) -> None:
     order.vat_charged = _parse_price(ext_order.vat_charged)
     order.discount_amount = _parse_price(ext_order.discount_amount)
     order.refunded_amount = _parse_price(ext_order.refunded_amount)
-    order.payment_fees = _parse_price(ext_order.payment_fees)
-    order.payment_net = _parse_price(ext_order.payment_net)
-    order.payment_status = ext_order.payment_status
+
+    # Everything above comes straight off the order-list response and is always accurate.
+    # The three fields below come from a separate per-order call the adapter may have
+    # deliberately skipped (see ExternalOrder.financials_enriched) — writing them anyway
+    # would blank out a payment breakdown an earlier sync stored correctly, which is
+    # exactly what would happen every time the unpaid hold widened the fetch window.
+    if ext_order.financials_enriched:
+        order.payment_fees = _parse_price(ext_order.payment_fees)
+        order.payment_net = _parse_price(ext_order.payment_net)
+        order.payment_status = ext_order.payment_status
+
     order.financials_synced_at = datetime.now(timezone.utc)
 
 
@@ -423,6 +560,47 @@ async def _reconcile_status(session: AsyncSession, order: Order, ext_order: Exte
         if order.status != OrderStatus.cancelled:
             order.pending_marketplace_cancellation = True
         return False
+
+    if ext_order.payment_state is not PaymentState.settled:
+        # Two distinct situations land here, both wanting the same outcome — the order
+        # exists but reserves nothing, and a human decides what to do with it:
+        #
+        #  - is_new: first sighting is already refunded (PaymentState.reversed). Unsettled
+        #    new orders never get this far; _partition_new_orders drops them entirely.
+        #    Importing a reversed one keeps the sales history, and returning before
+        #    allocate_order below is what stops it taking stock.
+        #  - not is_new: an order that WAS paid has had its payment reversed since import
+        #    (chargeback, refund). Its units may be allocated or already shipped.
+        #
+        # Routed through the existing pending_marketplace_cancellation flag rather than a
+        # parallel mechanism, because the stock consequences are identical to a
+        # marketplace cancellation: release the reservation, or decide scrap vs
+        # return-to-stock on goods already gone. returns.process_cancellation already does
+        # exactly that, already clears both fields, and already has a UI. The distinction
+        # lives in sync_issue's wording so the user reads "payment reversed" rather than a
+        # misleading "cancelled on Etsy".
+        if order.status != OrderStatus.cancelled:
+            order.pending_marketplace_cancellation = True
+            order.sync_issue = (
+                f"{_PLATFORM_LABELS[platform]} reports this order's payment as "
+                f"{ext_order.payment_state.value} — review and cancel/return it."
+            )
+        return False
+
+    # Reaching here means the marketplace is currently reporting neither a cancellation
+    # nor a payment problem, so any flag raised by an earlier sync no longer reflects
+    # reality — clear it. Mirrors the sync_issue self-heal at the top of this function.
+    #
+    # Not merely tidiness. Both flag-setting branches above are deliberately fail-closed:
+    # a missing or unrecognised payment status reads as unsettled, so a partial response
+    # or a new enum value can raise this flag on a perfectly good order. Without a way
+    # back down that order would stay flagged forever AND — since allocation.
+    # auto_allocate_after_build now skips flagged orders — would silently stop receiving
+    # stock from builds. A human-cleared-only flag would turn a transient API hiccup into
+    # permanent damage.
+    if order.pending_marketplace_cancellation:
+        order.pending_marketplace_cancellation = False
+        order.sync_issue = None
 
     if is_new:
         # A brand-new order can arrive already shipped on the marketplace's side (seller

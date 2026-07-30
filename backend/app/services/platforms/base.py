@@ -1,8 +1,26 @@
+import enum
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Protocol
 
 from app.models.platform_connection import PlatformConnection
+
+
+class PaymentState(str, enum.Enum):
+    """Whether the marketplace has actually taken the buyer's money yet — the single
+    signal order_sync gates imports on. Deliberately NOT a mirror of any one platform's
+    status field: Etsy and eBay express this completely differently, and Etsy's own
+    Payments `status` string is undocumented free-form (see etsy._receipt_payment_state).
+    Adapters normalise into these three states; order_sync owns what they mean."""
+
+    # Money has actually been received by the seller.
+    settled = "settled"
+    # Not received: pending, processing, failed, or simply unknown. This is the
+    # fail-closed default — an adapter that forgets to set payment_state imports
+    # nothing rather than importing everything.
+    unsettled = "unsettled"
+    # Was received, then fully returned (refund or chargeback).
+    reversed = "reversed"
 
 
 def ensure_utc(value: datetime | None) -> datetime | None:
@@ -71,6 +89,28 @@ class ExternalOrder:
     payment_fees: str | None = None
     payment_net: str | None = None
     payment_status: str | None = None
+
+    # Whether the buyer's money has actually landed. Defaults to `unsettled` on purpose:
+    # order_sync refuses to import an unknown order in this state, so a new adapter — or
+    # a parse path that forgets to set this — fails closed (imports nothing) rather than
+    # open (imports everything, reserves stock, and pushes reduced quantities to the live
+    # marketplace listings). See order_sync._partition_new_orders.
+    payment_state: PaymentState = PaymentState.unsettled
+
+    # False when the adapter deliberately skipped the per-order enrichment call that
+    # populates the payment_fees/payment_net/payment_status trio directly above (Etsy's
+    # Payments + ledger endpoints, eBay's Finances API). That happens for orders
+    # re-fetched only because the unpaid hold widened the query window, and for unsettled
+    # orders that have no payment record to fetch yet — re-enriching those on every poll
+    # would multiply API cost against a fixed daily quota for no new information.
+    #
+    # Scope is exactly those three fields: every other money field on this dataclass
+    # comes straight off the list response and is always accurate. Consumers MUST treat
+    # the trio as "not fetched" rather than "known to be empty" — see
+    # order_sync._apply_financials, which skips only those three when this is False.
+    # Without that, a held-open re-fetch would null out a payment breakdown an earlier
+    # sync had already stored correctly.
+    financials_enriched: bool = True
 
 
 @dataclass

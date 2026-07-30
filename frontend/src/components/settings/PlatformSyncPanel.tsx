@@ -159,6 +159,16 @@ export function PlatformSyncPanel({ platform }: { platform: ListingPlatform }) {
           )}
         </p>
       )}
+      {/* The hold widens every fetch until the unpaid order resolves, so it shouldn't be
+          invisible state — and a hold stuck on an order that will never settle needs a
+          symptom the user can actually see. */}
+      {platformStatus?.unpaid_hold_since && (
+        <p className="rounded bg-amber-50 p-2 text-xs text-amber-800">
+          Watching for payment on one or more orders — the sync window is held open back to{" "}
+          {new Date(platformStatus.unpaid_hold_since).toLocaleString()}. They'll import automatically once{" "}
+          {label} confirms payment, and reserve no stock until then.
+        </p>
+      )}
       <ErrorBanner error={syncSettingsMutation.error} />
 
       {recentPushFailures.length > 0 && (
@@ -234,6 +244,15 @@ export function PlatformSyncPanel({ platform }: { platform: ListingPlatform }) {
         <div className="rounded bg-green-50 p-2 text-sm text-green-800">
           Imported {commitResult.created_count} new order(s), updated {commitResult.updated_count} existing,{" "}
           {commitResult.shipped_count} marked shipped, {commitResult.needs_mapping_count} line(s) need SKU mapping.
+          {commitResult.skipped_unpaid_count > 0 && (
+            <>
+              {" "}
+              <strong>
+                {commitResult.skipped_unpaid_count} order(s) not imported — payment hasn't settled yet.
+              </strong>{" "}
+              They'll be imported automatically once it does.
+            </>
+          )}
         </div>
       )}
 
@@ -251,6 +270,9 @@ export function PlatformSyncPanel({ platform }: { platform: ListingPlatform }) {
                   <th className="p-1.5">New</th>
                   <th className="p-1.5">Shipped</th>
                   <th className="p-1.5">Needs mapping</th>
+                  <th className="p-1.5" title="Orders held back because payment hasn't settled yet">
+                    Unpaid (skipped)
+                  </th>
                   <th className="p-1.5">Error</th>
                 </tr>
               </thead>
@@ -268,6 +290,13 @@ export function PlatformSyncPanel({ platform }: { platform: ListingPlatform }) {
                     <td className="p-1.5">{run.new_count}</td>
                     <td className="p-1.5">{run.shipped_count}</td>
                     <td className="p-1.5">{run.needs_mapping_count}</td>
+                    {/* Highlighted when non-zero so the gate is visible in action. A run
+                        showing everything fetched but nothing new is the signature of a
+                        gate wrongly rejecting orders, which otherwise looks identical to
+                        a quiet week. */}
+                    <td className={`p-1.5 ${run.skipped_unpaid_count > 0 ? "font-medium text-amber-700" : ""}`}>
+                      {run.skipped_unpaid_count}
+                    </td>
                     <td className="p-1.5 text-red-600">{run.error_message ?? ""}</td>
                   </tr>
                 ))}
@@ -308,6 +337,13 @@ function PreviewResultView({ result, label }: { result: SyncPreviewResult; label
       <p className="mb-2">
         Fetched <strong>{result.fetched_count}</strong>, <strong>{result.new_count}</strong> new,{" "}
         <strong>{result.needs_mapping_count}</strong> line(s) would need SKU mapping. Nothing has been imported yet.
+        {result.skipped_unpaid_count > 0 && (
+          <>
+            {" "}
+            <strong>{result.skipped_unpaid_count}</strong> would be held back as unpaid — expand them below to check
+            the marketplace's own payment fields.
+          </>
+        )}
       </p>
       <div className="flex flex-col gap-2">
         {result.orders.map((order) => (
@@ -317,6 +353,22 @@ function PreviewResultView({ result, label }: { result: SyncPreviewResult; label
               {order.already_imported && <span className="ml-2 text-xs text-slate-400">(already imported)</span>}
               {order.is_cancelled && <span className="ml-2 text-xs text-red-600">cancelled</span>}
               {order.is_shipped && <span className="ml-2 text-xs text-green-700">shipped</span>}
+              {!order.would_import && (
+                <span
+                  className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800"
+                  title="Payment hasn't settled on the marketplace — a real sync would not import this order, and it would reserve no stock."
+                >
+                  would not import — {order.payment_state}
+                </span>
+              )}
+              {order.would_import && order.payment_state === "reversed" && (
+                <span
+                  className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800"
+                  title="Payment was refunded or charged back — imported for the record, but it reserves no stock and needs review."
+                >
+                  refunded
+                </span>
+              )}
             </summary>
             <table className="mt-2 w-full border-collapse text-left text-xs">
               <thead>

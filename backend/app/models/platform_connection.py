@@ -61,6 +61,17 @@ class PlatformConnection(Base):
     # afterward from the Etsy sync panel.
     sync_start_date: Mapped[date | None] = mapped_column(Date, nullable=True, default=_default_sync_start_date)
     last_orders_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # How far back the order fetch window is being held open to keep re-checking orders
+    # that were skipped for being unpaid (see order_sync._compute_unpaid_hold). NULL —
+    # the normal state — means nothing is being held and the window is governed purely by
+    # last_orders_synced_at.
+    #
+    # This exists because skipping an unpaid order still advances last_orders_synced_at
+    # past it. Both marketplaces are believed to bump an order's last-modified time when
+    # payment settles, which would re-surface it on its own; if that ever isn't true, the
+    # order would be invisible forever, and silently losing a paid customer order is not
+    # a risk worth taking on a belief. Self-clears the moment nothing unpaid remains.
+    unpaid_hold_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     connected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_refreshed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Background sync scheduler settings (services/sync_scheduler.py) — off by default so
