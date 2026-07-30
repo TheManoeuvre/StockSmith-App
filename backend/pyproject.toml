@@ -21,6 +21,12 @@ dependencies = [
     "uvicorn[standard]>=0.50.2",
 ]
 
+[tool.pytest.ini_options]
+testpaths = ["app/tests"]
+# Every test here is async (the whole service layer is), so opting in per-test with a
+# marker would be pure noise.
+asyncio_mode = "auto"
+
 [dependency-groups]
 dev = [
     "pytest>=9.1.1",
