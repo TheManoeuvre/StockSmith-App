@@ -95,6 +95,14 @@ function OrdersList() {
               <td className="p-2">{formatMoney(order.grand_total, order.currency)}</td>
               <td className={`p-2 ${order.net_profit != null && Number(order.net_profit) < 0 ? "text-red-600" : ""}`}>
                 {formatMoney(order.net_profit, order.currency)}
+                {order.cogs_pending && (
+                  <span
+                    className="ml-2 rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800"
+                    title="One or more lines haven't been allocated yet, so their cost of goods isn't captured — this figure doesn't include it."
+                  >
+                    COGS pending
+                  </span>
+                )}
               </td>
               <td className="p-2">{order.platform ? PLATFORM_LABELS[order.platform] : "Manual"}</td>
               <td className="p-2">

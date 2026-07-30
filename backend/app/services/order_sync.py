@@ -15,7 +15,7 @@ from app.models.product import Product
 from app.models.variant import ProductVariant
 from app.schemas.platform import SyncCommitResult, SyncPreviewLine, SyncPreviewOrder, SyncPreviewResult
 from app.services import allocation
-from app.services.order_costs import compute_line_cost_snapshot, resolve_order_shipping_profile
+from app.services.order_costs import resolve_order_shipping_profile
 from app.services.platforms import get_adapter
 from app.services.platforms.base import ExternalOrder, PaymentState, ensure_utc
 from app.services.variants import find_by_sku
@@ -509,8 +509,11 @@ async def _upsert_lines(session: AsyncSession, order: Order, ext_order: External
         if needs_mapping:
             needs_mapping_count += 1
 
-        cost_per_unit, kitting_cost_per_unit = await compute_line_cost_snapshot(session, product_id, variant_id)
-
+        # cost_per_unit_snapshot/kitting_cost_per_unit_snapshot are deliberately left NULL
+        # here — they're captured at first allocation instead (allocation._allocate_line),
+        # once the line is actually going to be fulfilled from real stock at a real cost,
+        # rather than off whatever a brand-new/not-yet-costed material's avg_unit_cost
+        # happens to be at the instant this line is imported.
         session.add(
             OrderLine(
                 order_id=order.id,
@@ -522,8 +525,6 @@ async def _upsert_lines(session: AsyncSession, order: Order, ext_order: External
                 external_line_id=ext_line.external_line_id,
                 sku=ext_line.sku,
                 needs_mapping=needs_mapping,
-                cost_per_unit_snapshot=cost_per_unit,
-                kitting_cost_per_unit_snapshot=kitting_cost_per_unit,
             )
         )
     await _default_shipping_profile_if_unset(session, order)

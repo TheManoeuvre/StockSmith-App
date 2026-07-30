@@ -11,6 +11,7 @@ from app.models.shipping_profile import ShippingProfile
 from app.models.variant import ProductVariant
 from app.services import listing_push
 from app.services.kitting import auto_apply_multiunit_kitting_override, reconcile_order_kitting
+from app.services.order_costs import compute_line_cost_snapshot
 from app.services.shipping_profiles import resolve_shipping_cost_for_platform
 
 """Core allocation engine: every stock-reservation state change for an order flows
@@ -65,6 +66,14 @@ async def _allocate_line(session: AsyncSession, line: OrderLine, source: str) ->
         return 0
     line.allocated_qty += take
     owner.allocated_qty += take
+    if line.cost_per_unit_snapshot is None and line.kitting_cost_per_unit_snapshot is None:
+        # First allocation is when COGS actually gets captured — see OrderLine's own
+        # docstring for why this moved off line-creation time (a synced order could
+        # otherwise freeze a stale/zero material cost from before its first real
+        # purchase or BOM entry landed).
+        line.cost_per_unit_snapshot, line.kitting_cost_per_unit_snapshot = await compute_line_cost_snapshot(
+            session, line.product_id, line.variant_id
+        )
     listing_push.enqueue_for_owner(owner)  # now allocated ⇒ less of it is sellable elsewhere
     event_type = AllocationEventType.auto_allocate if source.startswith("build#") else AllocationEventType.allocate
     session.add(

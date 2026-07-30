@@ -115,6 +115,7 @@ class OrderRead(BaseModel):
     payment_status: str | None = None
     financials_synced_at: datetime | None = None
     net_profit: Decimal | None = None
+    cogs_pending: bool = False
     sync_issue: str | None = None
     pending_marketplace_cancellation: bool = False
     lines: list[OrderLineRead] = []
