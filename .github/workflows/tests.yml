@@ -54,6 +54,21 @@ jobs:
         run: uv sync --frozen --group dev
         working-directory: backend
 
+      # conftest.py's `connection` fixture stores a PlatformConnection access token, and
+      # those columns are EncryptedString — so the tests need a *valid* Fernet key, not a
+      # placeholder. token_encryption_key is nullable in Settings, so its absence doesn't
+      # fail at import; it raises from services/crypto.py only when a token is actually
+      # written, which is why the failure hit 15 tests and not collection.
+      #
+      # Generated per run rather than committed or stored as a secret: it encrypts nothing
+      # that outlives the job, and a real-looking key sitting in this file invites someone
+      # reusing it where it would matter. Must come after `uv sync` — it needs cryptography.
+      - name: Generate an ephemeral token-encryption key
+        run: |
+          $key = uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+          "TOKEN_ENCRYPTION_KEY=$key" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+        working-directory: backend
+
       - name: Run tests
         run: uv run pytest
         working-directory: backend
