@@ -29,10 +29,16 @@ jobs:
       #
       # The tests never open a connection on the engine app/db.py builds — they construct
       # their own in-memory engines — so this URL is a placeholder that is never reached
-      # and no file is created. The password hash is deliberately not a valid bcrypt hash:
-      # nothing here authenticates, and a real-looking one would invite reuse.
+      # and no file is created. ASSET_ROOT is likewise never written to; Settings only
+      # requires it to be present. The password hash is deliberately not a valid bcrypt
+      # hash: nothing here authenticates, and a real-looking one would invite reuse.
+      #
+      # All three are plain literals on purpose. Job-level env resolves only the github,
+      # needs, strategy, matrix, vars, secrets and inputs contexts — a ${{ runner.temp }}
+      # here is an unrecognized named-value that fails workflow validation before any job
+      # starts, which surfaces as a 0-second "workflow file issue" failure.
       DATABASE_URL: sqlite+aiosqlite:///./ci-unused.db
-      ASSET_ROOT: ${{ runner.temp }}/stocksmith-assets
+      ASSET_ROOT: ci-assets
       SHARED_PASSWORD_HASH: not-a-real-hash-ci-does-not-authenticate
     steps:
       - uses: actions/checkout@v4
