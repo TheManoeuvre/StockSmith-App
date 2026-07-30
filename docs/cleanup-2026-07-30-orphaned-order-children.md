@@ -1,8 +1,7 @@
 # Order-deletion cascade fixed, orphaned children removed — 30 July 2026
 
 Closes the item docs/cleanup-2026-07-28-unpaid-orders.md left open under "Pre-existing
-orphans found (not caused by this cleanup, not fixed by it)". That document arrives with the
-paid-only-import branch, which is not yet merged, so the link resolves only once it is.
+orphans found (not caused by this cleanup, not fixed by it)".
 
 ## The bug
 
