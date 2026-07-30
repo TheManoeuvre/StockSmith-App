@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401 — registers every model on Base.metadata
+from app.db import enforce_sqlite_foreign_keys
 from app.models.base import Base
 from app.models.listing import ListingPlatform
 from app.models.platform_connection import PlatformConnection
@@ -36,6 +37,13 @@ async def engine():
         connect_args={"check_same_thread": False},
         poolclass=StaticPool,
     )
+    # Match production: app/db.py turns foreign-key enforcement on for every SQLite
+    # connection, and SQLite's default is off. Without this the suite would silently
+    # tolerate dangling references and unfired cascades that the real app rejects — the
+    # exact gap that let order deletion orphan its audit rows for weeks.
+    # test_foreign_key_enforcement.py deliberately builds its own engines instead of using
+    # this fixture, since it needs to compare enforced against unenforced behaviour.
+    enforce_sqlite_foreign_keys(engine)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield engine
