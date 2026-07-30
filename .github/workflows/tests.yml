@@ -1,0 +1,59 @@
+name: Tests
+
+# Runs the backend test suite on every pull request and every push to main.
+#
+# Windows, not Linux, despite Linux runners being cheaper: this app only ever ships as a
+# Windows desktop build (see release.yml), the data directory is resolved from
+# %LOCALAPPDATA%, and SQLite file locking is one of the genuinely OS-dependent things the
+# suite touches. Testing on the one platform that ships is worth more than the saved
+# minutes on a suite this small.
+#
+# No path filter on purpose. Filtering to backend/** would skip frontend-only PRs, but it
+# also makes the job never report on them, which quietly breaks the check if it is ever
+# made required in branch protection. Checkout plus `uv sync` dominates the runtime anyway.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  backend:
+    runs-on: windows-latest
+    env:
+      # app/config.py builds its Settings as a module-level singleton read once at import
+      # time, so anything importing app.db (which the tests do, for
+      # enforce_sqlite_foreign_keys) fails at import without these three. There is no .env
+      # in CI, hence setting them here.
+      #
+      # The tests never open a connection on the engine app/db.py builds — they construct
+      # their own in-memory engines — so this URL is a placeholder that is never reached
+      # and no file is created. ASSET_ROOT is likewise never written to; Settings only
+      # requires it to be present. The password hash is deliberately not a valid bcrypt
+      # hash: nothing here authenticates, and a real-looking one would invite reuse.
+      #
+      # All three are plain literals on purpose. Job-level env resolves only the github,
+      # needs, strategy, matrix, vars, secrets and inputs contexts — a ${{ runner.temp }}
+      # here is an unrecognized named-value that fails workflow validation before any job
+      # starts, which surfaces as a 0-second "workflow file issue" failure.
+      DATABASE_URL: sqlite+aiosqlite:///./ci-unused.db
+      ASSET_ROOT: ci-assets
+      SHARED_PASSWORD_HASH: not-a-real-hash-ci-does-not-authenticate
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      # --frozen fails the build if uv.lock has drifted from pyproject.toml, rather than
+      # silently re-resolving and testing against dependencies nobody committed.
+      - name: Install backend dependencies
+        run: uv sync --frozen --group dev
+        working-directory: backend
+
+      - name: Run tests
+        run: uv run pytest
+        working-directory: backend
