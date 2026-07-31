@@ -10,6 +10,19 @@ class LowStockMaterial(BaseModel):
     current_qty: Decimal
     reorder_threshold: Decimal
     on_order_qty: Decimal = Decimal(0)
+    allocated_qty: Decimal = Decimal(0)
+    supplier_id: int | None = None
+    supplier_name: str | None = None
+    # None on both when there isn't enough sales history to forecast yet — status is then
+    # "insufficient_data" and the material is only listed because it's at/below its
+    # (static) reorder_threshold, same as pre-forecast behavior.
+    consumption_rate_per_week: Decimal | None = None
+    weeks_of_supply: Decimal | None = None
+    # How much of weeks_of_supply comes from finished-goods stock delaying the material
+    # draw, rather than the material itself — see forecasting.py. Always 0 when
+    # weeks_of_supply is None.
+    fg_buffer_weeks: Decimal | None = None
+    status: str = "insufficient_data"  # "critical" | "warning" | "insufficient_data"
 
 
 class BuildableProduct(BaseModel):

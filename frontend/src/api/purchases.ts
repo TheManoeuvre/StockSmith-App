@@ -11,6 +11,7 @@ export interface PurchaseLineInput {
 export interface PurchaseCreateInput {
   supplier_id?: number | null;
   order_date?: string | null;
+  expected_arrival_date?: string | null;
   notes?: string | null;
   lines: PurchaseLineInput[];
 }
@@ -18,6 +19,7 @@ export interface PurchaseCreateInput {
 export interface PurchaseUpdateInput {
   supplier_id?: number | null;
   order_date?: string | null;
+  expected_arrival_date?: string | null;
   notes?: string | null;
 }
 

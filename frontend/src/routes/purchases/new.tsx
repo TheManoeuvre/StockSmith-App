@@ -21,6 +21,7 @@ function NewPurchase() {
   const [supplier, setSupplier] = useState("");
   const [supplierId, setSupplierId] = useState<number | null>(null);
   const [orderDate, setOrderDate] = useState("");
+  const [expectedArrivalDate, setExpectedArrivalDate] = useState("");
   const [notes, setNotes] = useState("");
   const [lines, setLines] = useState<PurchaseLineInput[]>([]);
 
@@ -33,6 +34,7 @@ function NewPurchase() {
       return purchasesApi.create({
         supplier_id: resolvedSupplierId,
         order_date: orderDate || null,
+        expected_arrival_date: expectedArrivalDate || null,
         notes: notes || null,
         lines,
       });
@@ -66,6 +68,15 @@ function NewPurchase() {
             className="rounded border border-slate-300 px-2 py-1"
             value={orderDate}
             onChange={(e) => setOrderDate(e.target.value)}
+          />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-sm">Expected arrival</span>
+          <input
+            type="date"
+            className="rounded border border-slate-300 px-2 py-1"
+            value={expectedArrivalDate}
+            onChange={(e) => setExpectedArrivalDate(e.target.value)}
           />
         </label>
         <label className="flex flex-col gap-1 flex-1">

@@ -12,6 +12,7 @@ import { PlatformCredentialsForm } from "../components/settings/PlatformCredenti
 import { MarginFeeSettings } from "../components/settings/MarginFeeSettings";
 import { ShippingProfileSettings } from "../components/settings/ShippingProfileSettings";
 import { CurrencySettings } from "../components/settings/CurrencySettings";
+import { ForecastSettings } from "../components/settings/ForecastSettings";
 import { DefaultKittingBomSettings } from "../components/settings/DefaultKittingBomSettings";
 import { Tabs, type TabDef } from "../components/common/Tabs";
 import { useShopIconUrl } from "../hooks/useShopIconUrl";
@@ -165,6 +166,7 @@ function Settings() {
       {activeTab === "general" && (
         <div className="max-w-2xl flex flex-col gap-4">
           <CurrencySettings />
+          <ForecastSettings />
           <DefaultKittingBomSettings />
         </div>
       )}

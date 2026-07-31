@@ -9,6 +9,8 @@ from app.schemas.kitting import DefaultKittingBomLineRead, KittingBomLine
 from app.schemas.platform_fee import (
     DefaultCurrencyRead,
     DefaultCurrencyUpdate,
+    ForecastSettingsRead,
+    ForecastSettingsUpdate,
     MarginFeeConfigRead,
     MarginFeeConfigUpdate,
     PlatformFeeComponentCreate,
@@ -34,6 +36,41 @@ async def update_default_currency(
 ) -> DefaultCurrencyRead:
     settings = await general_settings.set_default_currency(session, payload.default_currency)
     return DefaultCurrencyRead(default_currency=settings.default_currency)
+
+
+@router.get("/forecast-settings", response_model=ForecastSettingsRead)
+async def get_forecast_settings(session: AsyncSession = Depends(get_db)) -> ForecastSettingsRead:
+    settings = await general_settings.get_general_settings(session)
+    return ForecastSettingsRead(
+        forecast_warning_weeks=settings.forecast_warning_weeks,
+        forecast_critical_weeks=settings.forecast_critical_weeks,
+        forecast_lookback_weeks=settings.forecast_lookback_weeks,
+        default_lead_time_weeks=settings.default_lead_time_weeks,
+    )
+
+
+@router.put("/forecast-settings", response_model=ForecastSettingsRead)
+async def update_forecast_settings(
+    payload: ForecastSettingsUpdate, session: AsyncSession = Depends(get_db)
+) -> ForecastSettingsRead:
+    if payload.forecast_critical_weeks > payload.forecast_warning_weeks:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Critical threshold must be at or below the warning threshold",
+        )
+    settings = await general_settings.set_forecast_settings(
+        session,
+        payload.forecast_warning_weeks,
+        payload.forecast_critical_weeks,
+        payload.forecast_lookback_weeks,
+        payload.default_lead_time_weeks,
+    )
+    return ForecastSettingsRead(
+        forecast_warning_weeks=settings.forecast_warning_weeks,
+        forecast_critical_weeks=settings.forecast_critical_weeks,
+        forecast_lookback_weeks=settings.forecast_lookback_weeks,
+        default_lead_time_weeks=settings.default_lead_time_weeks,
+    )
 
 
 @router.get("/default-kitting-bom", response_model=list[DefaultKittingBomLineRead])

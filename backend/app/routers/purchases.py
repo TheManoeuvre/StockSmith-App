@@ -56,6 +56,7 @@ async def create_purchase(payload: PurchaseCreate, session: AsyncSession = Depen
     purchase = Purchase(
         supplier_id=payload.supplier_id,
         notes=payload.notes,
+        expected_arrival_date=payload.expected_arrival_date,
         **({"order_date": payload.order_date} if payload.order_date else {}),
     )
     purchase.lines = [

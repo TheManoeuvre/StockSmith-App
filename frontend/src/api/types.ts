@@ -65,6 +65,7 @@ export interface Purchase {
   supplier_id: number | null;
   supplier_name: string | null;
   order_date: string;
+  expected_arrival_date: string | null;
   status: PurchaseStatus;
   received_at: string | null;
   notes: string | null;
@@ -298,6 +299,13 @@ export interface LowStockMaterial {
   current_qty: string;
   reorder_threshold: string;
   on_order_qty: string;
+  allocated_qty: string;
+  supplier_id: number | null;
+  supplier_name: string | null;
+  consumption_rate_per_week: string | null;
+  weeks_of_supply: string | null;
+  fg_buffer_weeks: string | null;
+  status: "critical" | "warning" | "insufficient_data";
 }
 
 export interface BuildableProduct {
