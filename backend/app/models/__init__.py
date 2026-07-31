@@ -4,6 +4,7 @@ from app.models.base import Base
 from app.models.build import Build, BuildFailedConsumption
 from app.models.general_settings import CurrencyCode, GeneralSettings
 from app.models.kitting import (
+    DefaultKittingMaterial,
     OrderKittingAllocation,
     OrderKittingOverride,
     ProductKittingMaterial,
@@ -51,6 +52,7 @@ __all__ = [
     "ProductVariantMaterial",
     "ProductKittingMaterial",
     "ProductVariantKittingMaterial",
+    "DefaultKittingMaterial",
     "OrderKittingOverride",
     "OrderKittingAllocation",
     "Build",

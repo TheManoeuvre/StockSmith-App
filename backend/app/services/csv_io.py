@@ -12,7 +12,7 @@ from app.models.material_type import MaterialType
 from app.models.product import Product
 from app.models.supplier import Supplier
 from app.services.costing import recompute_material
-from app.services.kitting import attach_default_shipping_label
+from app.services.kitting import apply_default_kitting_bom
 from app.services.validation import validate_qty_for_unit
 
 MATERIALS_CSV_FIELDS = [
@@ -247,7 +247,7 @@ async def import_products_csv(session: AsyncSession, content: bytes) -> dict:
                 await session.flush()
                 if not sku:
                     product.sku = f"SKU-{product.id:04d}"
-                await attach_default_shipping_label(session, product.id)
+                await apply_default_kitting_bom(session, product.id)
                 created += 1
             else:
                 existing.name = name

@@ -27,6 +27,27 @@ class ProductKittingMaterial(Base):
     product: Mapped["Product"] = relationship(back_populates="kitting_lines")
 
 
+class DefaultKittingMaterial(Base):
+    """User-configured default kitting BOM (Settings > General) — no product_id, since
+    this is a single shop-wide list, not per-product. Snapshotted onto a product's own
+    ProductKittingMaterial rows once, at product-creation time (see
+    services.kitting.apply_default_kitting_bom, called from create_product and CSV
+    import) — a plain copy, not a live reference, so editing this list later never
+    changes an already-created product's kitting BOM. Order is preserved via id so the
+    Settings UI shows lines in the order they were added.
+    """
+
+    __tablename__ = "default_kitting_materials"
+    __table_args__ = (
+        UniqueConstraint("material_id", name="uq_default_kitting_materials_material"),
+        CheckConstraint("qty_required > 0", name="ck_default_kitting_materials_qty_required_positive"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    material_id: Mapped[int] = mapped_column(ForeignKey("materials.id", ondelete="RESTRICT"), nullable=False)
+    qty_required: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False)
+
+
 class ProductVariantKittingMaterial(Base):
     """Variant override for the kitting BOM — identical qty-override/substitution/additive
     semantics as ProductVariantMaterial (see that model's docstring), just for packaging."""

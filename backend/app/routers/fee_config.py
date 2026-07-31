@@ -2,8 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db, require_auth
+from app.models.kitting import DefaultKittingMaterial
 from app.models.listing import ListingPlatform
 from app.models.platform_fee import PlatformFeeComponent
+from app.schemas.kitting import DefaultKittingBomLineRead, KittingBomLine
 from app.schemas.platform_fee import (
     DefaultCurrencyRead,
     DefaultCurrencyUpdate,
@@ -14,6 +16,8 @@ from app.schemas.platform_fee import (
     PlatformFeeComponentUpdate,
 )
 from app.services import general_settings, platform_fees
+from app.services.kitting import get_default_kitting_bom, replace_default_kitting_bom
+from app.services.validation import validate_lines_against_units
 
 router = APIRouter(prefix="/settings", tags=["settings"], dependencies=[Depends(require_auth)])
 
@@ -30,6 +34,21 @@ async def update_default_currency(
 ) -> DefaultCurrencyRead:
     settings = await general_settings.set_default_currency(session, payload.default_currency)
     return DefaultCurrencyRead(default_currency=settings.default_currency)
+
+
+@router.get("/default-kitting-bom", response_model=list[DefaultKittingBomLineRead])
+async def get_default_kitting_bom_route(session: AsyncSession = Depends(get_db)) -> list[DefaultKittingMaterial]:
+    return await get_default_kitting_bom(session)
+
+
+@router.put("/default-kitting-bom", response_model=list[DefaultKittingBomLineRead])
+async def update_default_kitting_bom(
+    payload: list[KittingBomLine], session: AsyncSession = Depends(get_db)
+) -> list[DefaultKittingMaterial]:
+    await validate_lines_against_units(
+        session, [(l.material_id, l.qty_required) for l in payload], "qty_required"
+    )
+    return await replace_default_kitting_bom(session, [(l.material_id, l.qty_required) for l in payload])
 
 
 @router.get("/margin-fee-config", response_model=MarginFeeConfigRead)

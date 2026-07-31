@@ -15,6 +15,15 @@ class KittingBomLineRead(KittingBomLine):
     product_id: int
 
 
+class DefaultKittingBomLineRead(KittingBomLine):
+    """A configured default-kitting-BOM line (Settings > General) — no product_id, since
+    this list isn't attached to any one product; see DefaultKittingMaterial."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+
+
 class VariantKittingBomLine(KittingBomLine):
     replaces_material_id: int | None = None
     line_max_buildable: int | None = None
