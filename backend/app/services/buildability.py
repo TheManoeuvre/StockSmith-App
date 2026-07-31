@@ -340,28 +340,25 @@ async def compute_dashboard_summary(session: AsyncSession) -> DashboardSummary:
         await session.execute(text("SELECT COUNT(*) AS n FROM products WHERE is_active = true"))
     ).one().n
 
-    # reorder_threshold = 0 means "don't track reordering for this material" — excluded
-    # rather than treated as "always low unless out of stock too".
-    low_stock_rows = await session.execute(
-        text(
-            f"""
-            SELECT m.id, m.name, m.current_qty, m.reorder_threshold, COALESCE(oo.on_order_qty, 0) AS on_order_qty
-            FROM materials m
-            LEFT JOIN ({_ON_ORDER_BY_MATERIAL_SUBQUERY}) oo ON oo.material_id = m.id
-            WHERE m.is_active = true AND m.reorder_threshold > 0 AND m.current_qty <= m.reorder_threshold
-            ORDER BY (m.current_qty - m.reorder_threshold) ASC
-            """
-        )
-    )
+    from app.services.forecasting import compute_material_forecasts
+
+    forecasts = await compute_material_forecasts(session)
     low_stock = [
         LowStockMaterial(
-            id=row.id,
-            name=row.name,
-            current_qty=Decimal(row.current_qty),
-            reorder_threshold=Decimal(row.reorder_threshold),
-            on_order_qty=Decimal(row.on_order_qty),
+            id=f.material_id,
+            name=f.name,
+            current_qty=f.current_qty,
+            reorder_threshold=f.reorder_threshold,
+            on_order_qty=f.on_order_qty,
+            allocated_qty=f.allocated_qty,
+            supplier_id=f.supplier_id,
+            supplier_name=f.supplier_name,
+            consumption_rate_per_week=f.consumption_rate_per_week,
+            weeks_of_supply=f.weeks_of_supply,
+            fg_buffer_weeks=f.fg_buffer_weeks,
+            status=f.status,
         )
-        for row in low_stock_rows
+        for f in forecasts
     ]
 
     max_buildable_by_product = await get_max_buildable_by_product(session)

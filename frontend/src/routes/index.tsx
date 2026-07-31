@@ -2,8 +2,45 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { dashboardApi } from "../api/dashboard";
 import { materialsApi } from "../api/materials";
+import type { LowStockMaterial } from "../api/types";
 import { ErrorBanner } from "../components/common/ErrorBanner";
 import { roundQty } from "../lib/format";
+
+function groupBySupplier(materials: LowStockMaterial[]): { supplierName: string; materials: LowStockMaterial[] }[] {
+  const groups: { supplierName: string; materials: LowStockMaterial[] }[] = [];
+  for (const m of materials) {
+    const supplierName = m.supplier_name ?? "No supplier";
+    const last = groups[groups.length - 1];
+    if (last && last.supplierName === supplierName) {
+      last.materials.push(m);
+    } else {
+      groups.push({ supplierName, materials: [m] });
+    }
+  }
+  return groups;
+}
+
+const STATUS_STYLES: Record<LowStockMaterial["status"], string> = {
+  critical: "bg-red-100 text-red-800",
+  warning: "bg-amber-100 text-amber-800",
+  insufficient_data: "bg-slate-100 text-slate-600",
+};
+
+const STATUS_LABELS: Record<LowStockMaterial["status"], string> = {
+  critical: "Critical",
+  warning: "Warning",
+  insufficient_data: "Not enough history",
+};
+
+function formatWeeksOfSupply(m: LowStockMaterial): string {
+  if (m.weeks_of_supply == null) return "—";
+  const weeks = Number(m.weeks_of_supply);
+  const fgWeeks = m.fg_buffer_weeks != null ? Number(m.fg_buffer_weeks) : 0;
+  if (fgWeeks > 0.05) {
+    return `${weeks.toFixed(1)} wks (incl. ${fgWeeks.toFixed(1)} wk from finished-goods stock)`;
+  }
+  return `${weeks.toFixed(1)} wks`;
+}
 
 export const Route = createFileRoute("/")({
   component: Dashboard,
@@ -34,7 +71,7 @@ function Dashboard() {
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
         <SummaryCard label="Total inventory value" value={`£${Number(data.total_inventory_value).toFixed(2)}`} />
         <SummaryCard label="Active products" value={String(data.active_product_count)} />
-        <SummaryCard label="Materials below reorder threshold" value={String(data.low_stock_materials.length)} />
+        <SummaryCard label="Materials needing attention" value={String(data.low_stock_materials.length)} />
       </div>
 
       {data.orders_awaiting_inventory.length > 0 && (
@@ -117,39 +154,58 @@ function Dashboard() {
       )}
 
       <section>
-        <h2 className="mb-2 text-lg font-semibold">Low stock materials</h2>
+        <h2 className="mb-2 text-lg font-semibold">Materials — time to stockout</h2>
+        <p className="mb-2 text-sm text-slate-500">
+          Weeks until you can't fulfil demand for this material — includes finished-goods stock still covering
+          sales before any new builds draw on it.
+        </p>
         {data.low_stock_materials.length === 0 ? (
-          <p className="text-slate-500">Nothing below its reorder threshold.</p>
+          <p className="text-slate-500">Nothing below its warning threshold.</p>
         ) : (
-          <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">
-            <thead>
-              <tr className="border-b border-slate-200">
-                <th className="p-2">Material</th>
-                <th className="p-2">On hand</th>
-                <th className="p-2">On order</th>
-                <th className="p-2">Reorder threshold</th>
-                <th className="p-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {data.low_stock_materials.map((m) => (
-                <tr key={m.id} className="border-b border-slate-100">
-                  <td className="p-2">{m.name}</td>
-                  <td className="p-2 text-red-600">{roundQty(m.current_qty)}</td>
-                  <td className="p-2">{Number(m.on_order_qty) > 0 ? roundQty(m.on_order_qty) : "—"}</td>
-                  <td className="p-2">{roundQty(m.reorder_threshold)}</td>
-                  <td className="p-2">
-                    <button
-                      onClick={() => draftPurchaseMutation.mutate(m.id)}
-                      className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800"
-                    >
-                      Create draft purchase
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          groupBySupplier(data.low_stock_materials).map((group) => (
+            <div key={group.supplierName} className="mb-4">
+              <h3 className="mb-1 text-sm font-semibold text-slate-600">{group.supplierName}</h3>
+              <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">
+                <thead>
+                  <tr className="border-b border-slate-200">
+                    <th className="p-2">Material</th>
+                    <th className="p-2">Status</th>
+                    <th className="p-2">Time to stockout</th>
+                    <th className="p-2">Consumption rate</th>
+                    <th className="p-2">On hand</th>
+                    <th className="p-2">On order</th>
+                    <th className="p-2" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {group.materials.map((m) => (
+                    <tr key={m.id} className="border-b border-slate-100">
+                      <td className="p-2">{m.name}</td>
+                      <td className="p-2">
+                        <span className={`rounded px-2 py-0.5 text-xs ${STATUS_STYLES[m.status]}`}>
+                          {STATUS_LABELS[m.status]}
+                        </span>
+                      </td>
+                      <td className="p-2">{formatWeeksOfSupply(m)}</td>
+                      <td className="p-2">
+                        {m.consumption_rate_per_week != null ? `${roundQty(m.consumption_rate_per_week)}/wk` : "—"}
+                      </td>
+                      <td className="p-2 text-red-600">{roundQty(m.current_qty)}</td>
+                      <td className="p-2">{Number(m.on_order_qty) > 0 ? roundQty(m.on_order_qty) : "—"}</td>
+                      <td className="p-2">
+                        <button
+                          onClick={() => draftPurchaseMutation.mutate(m.id)}
+                          className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800"
+                        >
+                          Create draft purchase
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ))
         )}
         <ErrorBanner error={draftPurchaseMutation.error} />
       </section>

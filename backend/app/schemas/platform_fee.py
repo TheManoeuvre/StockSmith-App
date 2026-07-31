@@ -54,3 +54,17 @@ class DefaultCurrencyRead(BaseModel):
 
 class DefaultCurrencyUpdate(BaseModel):
     default_currency: CurrencyCode
+
+
+class ForecastSettingsRead(BaseModel):
+    forecast_warning_weeks: Decimal
+    forecast_critical_weeks: Decimal
+    forecast_lookback_weeks: int
+    default_lead_time_weeks: Decimal
+
+
+class ForecastSettingsUpdate(BaseModel):
+    forecast_warning_weeks: Decimal
+    forecast_critical_weeks: Decimal
+    forecast_lookback_weeks: int
+    default_lead_time_weeks: Decimal

@@ -31,6 +31,11 @@ class Purchase(Base):
         default=PurchaseStatus.ordered,
     )
     received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Optional ETA, entered by the user at PO time. When absent, the materials forecast
+    # (services/forecasting.py) estimates arrival as order_date + GeneralSettings.
+    # default_lead_time_weeks instead — this column is never back-filled with that
+    # estimate, so "unknown ETA" stays distinguishable from "known ETA."
+    expected_arrival_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     notes: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
