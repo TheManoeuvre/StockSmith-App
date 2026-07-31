@@ -3,12 +3,17 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from fastapi import HTTPException, status
-from sqlalchemy import bindparam, select, text
+from sqlalchemy import bindparam, delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.kitting import OrderKittingAllocation, OrderKittingOverride, ProductKittingMaterial
+from app.models.kitting import (
+    DefaultKittingMaterial,
+    OrderKittingAllocation,
+    OrderKittingOverride,
+    ProductKittingMaterial,
+)
 from app.models.listing import Listing, ListingPlatform
-from app.models.material import Material, MaterialAdjustment, MaterialCategory, MaterialUnit
+from app.models.material import Material, MaterialAdjustment, MaterialCategory
 from app.models.order import Order, OrderLine, OrderStatus
 from app.models.variant import ProductVariant
 from app.schemas.dashboard import OrderAwaitingPackaging
@@ -100,30 +105,36 @@ _RESOLVED_PRODUCT_VARIANTS_KITTING_BOM_SQL = text(
 )
 
 
-DEFAULT_SHIPPING_LABEL_MATERIAL_NAME = "4x6 Direct Thermal Label"
+async def get_default_kitting_bom(session: AsyncSession) -> list[DefaultKittingMaterial]:
+    result = await session.execute(select(DefaultKittingMaterial))
+    return list(result.scalars())
 
 
-async def attach_default_shipping_label(session: AsyncSession, product_id: int) -> None:
-    """Every product ships in something bearing a label, so new products get 1x '4x6
-    Direct Thermal Label' seeded onto their kitting BOM by default — a plain
-    ProductKittingMaterial row, removable/editable afterward through the same kitting-BOM
-    endpoints as any other packaging material, no special-casing.
+async def replace_default_kitting_bom(
+    session: AsyncSession, lines: list[tuple[int, Decimal]]
+) -> list[DefaultKittingMaterial]:
+    await session.execute(delete(DefaultKittingMaterial))
+    rows = [DefaultKittingMaterial(material_id=material_id, qty_required=qty_required) for material_id, qty_required in lines]
+    session.add_all(rows)
+    await session.commit()
+    return await get_default_kitting_bom(session)
 
-    Get-or-creates the label Material itself, keyed on name, so this is idempotent
-    regardless of whether it's ever been created before in this environment (fresh
-    install, or an existing store that already has one from a prior product)."""
-    material = (
-        await session.execute(select(Material).where(Material.name == DEFAULT_SHIPPING_LABEL_MATERIAL_NAME))
-    ).scalar_one_or_none()
-    if material is None:
-        material = Material(
-            name=DEFAULT_SHIPPING_LABEL_MATERIAL_NAME,
-            category=MaterialCategory.packaging,
-            unit=MaterialUnit.each,
+
+async def apply_default_kitting_bom(session: AsyncSession, product_id: int) -> None:
+    """Seeds a newly-created product's kitting BOM from the user-configured default
+    (Settings > General > Default kitting BOM) — a plain copy onto ProductKittingMaterial,
+    not a live reference, so editing the default afterward never changes an
+    already-created product's kitting BOM. A no-op when no default is configured.
+
+    Deliberately never creates a Material — unlike the auto-created "4x6 Direct Thermal
+    Label" this replaced, every line here already points at a real material the user
+    picked and stocks themselves, so there's no risk of silently attaching an untracked,
+    always-zero-stock ghost material to every new product."""
+    defaults = await get_default_kitting_bom(session)
+    for line in defaults:
+        session.add(
+            ProductKittingMaterial(product_id=product_id, material_id=line.material_id, qty_required=line.qty_required)
         )
-        session.add(material)
-        await session.flush()
-    session.add(ProductKittingMaterial(product_id=product_id, material_id=material.id, qty_required=1))
 
 
 async def get_resolved_kitting_bom(

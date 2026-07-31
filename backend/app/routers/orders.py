@@ -27,7 +27,7 @@ from app.schemas.order import (
 )
 from app.schemas.order_return import CancellationPreview, OrderCancelRequest
 from app.services import allocation, returns
-from app.services.kitting import get_order_kitting_summary, reconcile_order_kitting
+from app.services.kitting import apply_default_kitting_bom, get_order_kitting_summary, reconcile_order_kitting
 from app.services.variants import compute_full_sku
 
 router = APIRouter(prefix="/orders", tags=["orders"], dependencies=[Depends(require_auth)])
@@ -489,6 +489,7 @@ async def create_product_and_map(
     session.add(product)
     await session.flush()  # assigns product.id without a second commit round-trip
     product.sku = payload.sku or line.sku or f"SKU-{product.id:04d}"
+    await apply_default_kitting_bom(session, product.id)
 
     line.product_id = product.id
     line.variant_id = None
