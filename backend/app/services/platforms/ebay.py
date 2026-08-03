@@ -60,6 +60,16 @@ def _order_payment_state(order: dict) -> PaymentState:
     return _EBAY_PAYMENT_STATES.get(raw, PaymentState.unsettled)
 
 
+class EbayTimeout(PlatformSyncError):
+    """A request to eBay that never came back.
+
+    A PlatformSyncError subclass so every existing caller keeps handling it sensibly
+    (mapped to a 502 rather than escaping as an opaque 500), but a distinct type so the
+    two calls that actually change state on eBay's side — migrate_listing and
+    revise_listing_skus — can catch it specifically and say the one thing that matters:
+    a timeout is not proof that nothing happened."""
+
+
 def _xml_escape(value: str) -> str:
     """Trading API request bodies are hand-built XML strings, so any value interpolated
     into one must be escaped. Item IDs and SKUs both reach these builders from user-
@@ -210,6 +220,20 @@ _PAGE_LIMIT = 200  # eBay's documented max page size for getOrders
 # inventory items had exercised this path until now).
 _INVENTORY_PAGE_LIMIT = 100
 _MAX_RATE_LIMIT_RETRIES = 3
+
+# Most eBay calls answer well inside this. Kept deliberately tight so a hung request
+# surfaces quickly rather than blocking a user-facing action for a minute.
+_DEFAULT_TIMEOUT = 15.0
+
+# bulkMigrateListing and ReviseFixedPriceItem are the exceptions: both do real work on
+# eBay's side proportional to the listing's variation count — migration creates an
+# inventory item AND an offer per variation before responding. Confirmed live: a
+# 4-variation listing blew straight through the 15s default and surfaced as an
+# unhandled ReadTimeout, while a smaller listing had completed comfortably. These are
+# also the two calls where a timeout is most consequential, since eBay may well have
+# carried on and completed the work after we stopped listening.
+_MIGRATION_TIMEOUT = 180.0
+_REVISE_TIMEOUT = 90.0
 
 # GetMyeBaySelling's ActiveList is a heavier call than the Sell REST APIs above, and the
 # Trading API's default budget is 5,000 calls/DAY across every Trading call combined —
@@ -377,21 +401,34 @@ class EbayAdapter:
         self, session, connection: PlatformConnection, method: str, url: str, **kwargs
     ) -> httpx.Response:
         """Mirrors EtsyAdapter._authed_request — proactive refresh near expiry, reactive
-        refresh once on a 401, then the same 429 backoff/retry loop."""
+        refresh once on a 401, then the same 429 backoff/retry loop.
+
+        Network-level failures are translated into PlatformSyncError rather than being
+        allowed to escape as raw httpx exceptions: every caller already handles
+        PlatformError and maps it to a sensible status, whereas an httpx.ReadTimeout
+        propagates all the way out as an opaque "Internal server error" (confirmed live
+        — that is exactly how a slow bulkMigrateListing surfaced). Callers that need
+        operation-specific wording catch httpx.TimeoutException themselves before this
+        can reach them."""
         await self._ensure_fresh(session, connection)
 
-        response = await self._request_once(connection, method, url, **kwargs)
-        if response.status_code == 401:
-            await self._do_refresh(session, connection)
+        try:
             response = await self._request_once(connection, method, url, **kwargs)
+            if response.status_code == 401:
+                await self._do_refresh(session, connection)
+                response = await self._request_once(connection, method, url, **kwargs)
 
-        attempt = 0
-        while response.status_code == 429 and attempt < _MAX_RATE_LIMIT_RETRIES:
-            delay = self._rate_limit_delay(response, attempt)
-            logger.warning("eBay API rate limited on %s %s (retry %d/%d in %.1fs)", method, url, attempt + 1, _MAX_RATE_LIMIT_RETRIES, delay)
-            await asyncio.sleep(delay)
-            response = await self._request_once(connection, method, url, **kwargs)
-            attempt += 1
+            attempt = 0
+            while response.status_code == 429 and attempt < _MAX_RATE_LIMIT_RETRIES:
+                delay = self._rate_limit_delay(response, attempt)
+                logger.warning("eBay API rate limited on %s %s (retry %d/%d in %.1fs)", method, url, attempt + 1, _MAX_RATE_LIMIT_RETRIES, delay)
+                await asyncio.sleep(delay)
+                response = await self._request_once(connection, method, url, **kwargs)
+                attempt += 1
+        except httpx.TimeoutException as e:
+            raise EbayTimeout(f"eBay did not respond in time for {method} {url}") from e
+        except httpx.HTTPError as e:
+            raise PlatformSyncError(f"Could not reach eBay for {method} {url}: {e}") from e
 
         if response.status_code == 429:
             raise PlatformRateLimitError("eBay API rate limit exceeded")
@@ -408,9 +445,10 @@ class EbayAdapter:
         return float(2**attempt)
 
     async def _request_once(self, connection: PlatformConnection, method: str, url: str, **kwargs) -> httpx.Response:
+        timeout = kwargs.pop("timeout", _DEFAULT_TIMEOUT)
         headers = kwargs.pop("headers", {})
         headers = {**headers, "Authorization": f"Bearer {connection.access_token}"}
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=timeout) as client:
             return await client.request(method, url, headers=headers, **kwargs)
 
     async def _ensure_fresh(self, session, connection: PlatformConnection) -> None:
@@ -866,7 +904,8 @@ class EbayAdapter:
         }
 
     async def _trading_request_once(
-        self, session, connection: PlatformConnection, call_name: str, xml_body: str, site_id: str
+        self, session, connection: PlatformConnection, call_name: str, xml_body: str, site_id: str,
+        timeout: float = _DEFAULT_TIMEOUT,
     ) -> httpx.Response:
         await self._ensure_fresh(session, connection)
 
@@ -874,7 +913,7 @@ class EbayAdapter:
             # Deliberately not routed through _request_once: that unconditionally sets
             # an Authorization: Bearer header, which is the wrong auth scheme here (see
             # _trading_headers).
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 return await client.request(
                     "POST",
                     self.trading_base,
@@ -889,7 +928,8 @@ class EbayAdapter:
         return response
 
     async def _authed_trading_request(
-        self, session, connection: PlatformConnection, call_name: str, xml_body: str
+        self, session, connection: PlatformConnection, call_name: str, xml_body: str,
+        timeout: float = _DEFAULT_TIMEOUT,
     ) -> httpx.Response:
         """Mirrors _authed_request's proactive-refresh, reactive-401-refresh and 429
         backoff behaviour for the Trading API's XML surface. The transport differs on
@@ -898,21 +938,31 @@ class EbayAdapter:
         status (see _raise_for_trading_ack), and a per-seller SITEID resolved once per
         adapter."""
         site_id = await self._resolve_site_id(session, connection)
-        response = await self._trading_request_once(session, connection, call_name, xml_body, site_id)
+        try:
+            response = await self._trading_request_once(session, connection, call_name, xml_body, site_id, timeout)
 
-        attempt = 0
-        while response.status_code == 429 and attempt < _MAX_RATE_LIMIT_RETRIES:
-            delay = self._rate_limit_delay(response, attempt)
-            logger.warning(
-                "eBay Trading API rate limited on %s (retry %d/%d in %.1fs)",
-                call_name,
-                attempt + 1,
-                _MAX_RATE_LIMIT_RETRIES,
-                delay,
-            )
-            await asyncio.sleep(delay)
-            response = await self._trading_request_once(session, connection, call_name, xml_body, site_id)
-            attempt += 1
+            attempt = 0
+            while response.status_code == 429 and attempt < _MAX_RATE_LIMIT_RETRIES:
+                delay = self._rate_limit_delay(response, attempt)
+                logger.warning(
+                    "eBay Trading API rate limited on %s (retry %d/%d in %.1fs)",
+                    call_name,
+                    attempt + 1,
+                    _MAX_RATE_LIMIT_RETRIES,
+                    delay,
+                )
+                await asyncio.sleep(delay)
+                response = await self._trading_request_once(
+                    session, connection, call_name, xml_body, site_id, timeout
+                )
+                attempt += 1
+        except httpx.TimeoutException as e:
+            # Same rationale as _authed_request's: an escaping httpx exception becomes an
+            # opaque 500 with no guidance, and revise_listing_skus needs to catch this
+            # specifically to warn that the change may have applied anyway.
+            raise EbayTimeout(f"eBay did not respond in time for {call_name}") from e
+        except httpx.HTTPError as e:
+            raise PlatformSyncError(f"Could not reach eBay for {call_name}: {e}") from e
 
         if response.status_code == 429:
             raise PlatformRateLimitError("eBay Trading API rate limit exceeded")
@@ -1070,7 +1120,19 @@ class EbayAdapter:
             )
         aligned = _align_new_skus(candidate, new_skus)
         body = self._build_revise_skus_xml(candidate, aligned)
-        response = await self._authed_trading_request(session, connection, "ReviseFixedPriceItem", body)
+        try:
+            response = await self._authed_trading_request(
+                session, connection, "ReviseFixedPriceItem", body, timeout=_REVISE_TIMEOUT
+            )
+        except EbayTimeout as e:
+            # Same reasoning as migrate_listing's timeout: the revision may well have
+            # applied. Re-running is safe because alignment is a no-op once the SKUs
+            # already match (see listing_adoption.plan_sku_alignment).
+            raise PlatformSyncError(
+                f"eBay did not respond within {int(_REVISE_TIMEOUT)}s while rewriting SKUs on listing "
+                f"{candidate.external_listing_id}. The change may still have applied — run this again to "
+                "check. Re-running is safe: it does nothing if the SKUs already match."
+            ) from e
         if response.status_code != 200:
             raise PlatformSyncError(
                 f"Failed to revise SKUs on eBay listing {candidate.external_listing_id}: "
@@ -1096,9 +1158,26 @@ class EbayAdapter:
         UNVERIFIED against a live account (no listing has been migrated through this
         code yet) — same caveat as fetch_classic_listings above."""
         body = {"requests": [{"listingId": external_listing_id}]}
-        response = await self._authed_request(
-            session, connection, "POST", f"{self.api_base}/sell/inventory/v1/bulk_migrate_listing", json=body
-        )
+        try:
+            response = await self._authed_request(
+                session,
+                connection,
+                "POST",
+                f"{self.api_base}/sell/inventory/v1/bulk_migrate_listing",
+                json=body,
+                timeout=_MIGRATION_TIMEOUT,
+            )
+        except EbayTimeout as e:
+            # eBay very likely carried on and finished after we stopped listening, so
+            # this is emphatically NOT "nothing happened" — saying so would invite the
+            # user to assume the listing is untouched. Re-running is the right move and
+            # is safe: an already-migrated listing is treated as success (see this
+            # method's docstring), which is precisely what makes a timeout recoverable.
+            raise PlatformSyncError(
+                f"eBay did not respond within {int(_MIGRATION_TIMEOUT)}s while migrating listing "
+                f"{external_listing_id}. The migration may still have completed on eBay's side — "
+                "run this again to check and finish linking. Migrating twice is safe."
+            ) from e
         if response.status_code != 200:
             raise PlatformSyncError(f"Failed to migrate eBay listing: {response.status_code} {response.text}")
 

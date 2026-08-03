@@ -18,6 +18,7 @@ import pytest
 
 from app.models.platform_credential import PlatformEnvironment
 from app.services.platforms import ebay as ebay_module
+from app.services.platforms.base import ClassicListingCandidate
 from app.services.platforms.ebay import _DEFAULT_TRADING_SITE_ID, EbayAdapter
 from app.services.platforms.errors import PlatformRateLimitError, PlatformSyncError
 
@@ -30,7 +31,9 @@ class _FakeAsyncClient:
     requests: list[dict] = []
 
     def __init__(self, *args, **kwargs):
-        pass
+        # The timeout is configured on the client, not per-request, so it has to be
+        # captured here to be assertable.
+        self._client_timeout = kwargs.get("timeout")
 
     async def __aenter__(self):
         return self
@@ -39,7 +42,9 @@ class _FakeAsyncClient:
         return False
 
     async def request(self, method, url, **kwargs):
-        _FakeAsyncClient.requests.append({"method": method, "url": url, **kwargs})
+        _FakeAsyncClient.requests.append(
+            {"method": method, "url": url, "timeout": self._client_timeout, **kwargs}
+        )
         if not _FakeAsyncClient.queue:
             raise AssertionError("no queued response for request to " + str(url))
         return _FakeAsyncClient.queue.pop(0)
@@ -335,6 +340,103 @@ async def test_trading_429_retries_then_raises(fake_http, monkeypatch):
         await _adapter().fetch_classic_listing_detail(None, _connection(), "1")
 
     assert len(fake_http.requests) == 4  # initial + 3 retries
+
+
+# --- Timeouts ------------------------------------------------------------------------
+#
+# Live failure on a 4-variation listing: bulkMigrateListing blew through the blanket 15s
+# timeout and httpx.ReadTimeout escaped as "Internal server error". Two things were
+# wrong — the budget, and the fact that a network failure wasn't translated into
+# anything a caller could act on.
+
+
+class _TimingOutClient(_FakeAsyncClient):
+    async def request(self, method, url, **kwargs):
+        _FakeAsyncClient.requests.append({"method": method, "url": url, **kwargs})
+        raise httpx.ReadTimeout("timed out")
+
+
+async def test_ordinary_reads_keep_the_tight_default(fake_http):
+    """The long budget must be scoped to the two heavy writes — a hung read should still
+    fail fast rather than block a user-facing action for three minutes."""
+    fake_http.queue = [_xml(_GET_ITEM)]
+
+    await _adapter().fetch_classic_listing_detail(None, _connection(), "1")
+
+    assert fake_http.requests[0]["timeout"] == ebay_module._DEFAULT_TIMEOUT
+
+
+async def test_migration_gets_a_longer_budget_than_the_default(fake_http):
+    """A migration creates an inventory item and an offer per variation before it
+    answers, so it cannot share the tight default used for ordinary reads."""
+    fake_http.queue = [_json({"responses": [{"listingId": "1", "statusCode": 200, "inventoryItems": []}]})]
+
+    await _adapter().migrate_listing(None, _connection(), "1")
+
+    assert fake_http.requests[0]["timeout"] == ebay_module._MIGRATION_TIMEOUT
+    assert ebay_module._MIGRATION_TIMEOUT > ebay_module._DEFAULT_TIMEOUT
+
+
+async def test_migration_timeout_says_it_may_have_happened_anyway(monkeypatch):
+    """The dangerous phrasing would be "migration failed" — eBay very likely finished
+    after we stopped listening, and telling the user nothing happened would invite them
+    to assume the listing is untouched."""
+    monkeypatch.setattr(ebay_module.httpx, "AsyncClient", _TimingOutClient)
+
+    with pytest.raises(PlatformSyncError) as exc:
+        await _adapter().migrate_listing(None, _connection(), "227269664481")
+
+    message = str(exc.value)
+    assert "may still have completed" in message
+    assert "again" in message  # tells them to re-run
+    assert "227269664481" in message
+
+
+async def test_revise_timeout_says_it_may_have_applied(monkeypatch):
+    candidate = ClassicListingCandidate(
+        external_listing_id="1",
+        title="t",
+        listing_type="FixedPriceItem",
+        skus=["OLD"],
+        variation_specifics=None,
+        quantity=1,
+        is_migrated=False,
+        detail_loaded=True,
+    )
+    monkeypatch.setattr(ebay_module.httpx, "AsyncClient", _TimingOutClient)
+    adapter = _adapter()
+
+    with pytest.raises(PlatformSyncError) as exc:
+        await adapter.revise_listing_skus(None, _connection(), candidate, ["NEW"])
+
+    assert "may still have applied" in str(exc.value)
+
+
+async def test_timeouts_never_escape_as_raw_httpx_errors(monkeypatch):
+    """The actual production symptom: an httpx exception reaching FastAPI unhandled
+    becomes a bare "Internal server error". Every eBay call must surface as a
+    PlatformError so the routers can map it to something meaningful."""
+    monkeypatch.setattr(ebay_module.httpx, "AsyncClient", _TimingOutClient)
+    adapter = _adapter()
+
+    for call in (
+        lambda: adapter.fetch_classic_listing_detail(None, _connection(), "1"),
+        lambda: adapter.build_listing_sku_index(None, _connection()),
+        lambda: adapter.migrate_listing(None, _connection(), "1"),
+    ):
+        with pytest.raises(PlatformSyncError):
+            await call()
+
+
+async def test_timeout_is_an_ebay_timeout_subclass(monkeypatch):
+    """EbayTimeout must remain a PlatformSyncError, or existing callers would stop
+    handling it and it would escape as a 500 all over again."""
+    monkeypatch.setattr(ebay_module.httpx, "AsyncClient", _TimingOutClient)
+
+    with pytest.raises(ebay_module.EbayTimeout):
+        await _adapter().build_listing_sku_index(None, _connection())
+
+    assert issubclass(ebay_module.EbayTimeout, PlatformSyncError)
 
 
 # --- bulkMigrateListing --------------------------------------------------------------

@@ -85,6 +85,23 @@ These are enforced in code and covered by tests (`test_listing_adoption_flow.py`
   Etsy: the listing id), matching what each adapter's index writes. Swapping them would
   break every subsequent sync check and push.
 
+## If a migration times out
+
+`bulkMigrateListing` does work proportional to the variation count — an inventory item
+*and* an offer per variation — before it answers. A 4-variation listing takes
+substantially longer than a single-SKU one (confirmed live: the latter completed
+comfortably inside 15s, the former did not).
+
+A timeout is **not** proof that nothing happened; eBay may well finish after StockSmith
+stops listening. **Re-run the adoption.** That is safe by design — an already-migrated
+listing is treated as success and its SKUs read back, and SKU alignment does nothing when
+the SKUs already match. Nothing is written locally on a failed attempt, so a retry starts
+from a clean slate.
+
+Timeouts are `_MIGRATION_TIMEOUT` (180s) and `_REVISE_TIMEOUT` (90s) in
+`platforms/ebay.py`; ordinary reads keep a tight 15s default so a hung read still fails
+fast.
+
 ## Trading API constraints
 
 Two findings from `docs/plan-ebay-existing-store-onboarding.md` (branch
