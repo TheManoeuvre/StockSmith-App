@@ -91,13 +91,13 @@ _SCOPES: dict[ListingPlatform, list[str]] = {
         # ReviseFixedPriceItem — see platforms/ebay.py). None of the Sell REST scopes
         # above grant Trading API access; without this every Trading call fails auth.
         # A connection made before this scope was added must reconnect — see
-        # _MISSING_TRADING_SCOPE_HINT and connection_needs_reconnect below.
+        # _MISSING_TRADING_SCOPE_HINT and _has_trading_scope below.
         "https://api.ebay.com/oauth/api_scope",
     ],
 }
 
-# Substring checked against PlatformConnection.scopes to tell "this connection predates
-# the Trading API scope" apart from a genuine API failure. Kept here (not on the adapter)
+# Compared against PlatformConnection.scopes to tell "this connection predates the
+# Trading API scope" apart from a genuine API failure. Kept here (not on the adapter)
 # for the same reason _SCOPES itself is: which scopes StockSmith asks for is a policy
 # decision, not an intrinsic property of eBay's API.
 _TRADING_SCOPE = "https://api.ebay.com/oauth/api_scope"
@@ -109,20 +109,30 @@ _MISSING_TRADING_SCOPE_HINT = (
 
 
 def _has_trading_scope(connection: PlatformConnection) -> bool:
-    """eBay returns the granted scopes as a space-separated string on the token response.
-    A connection authorised before _TRADING_SCOPE was added still has valid tokens for
-    every Sell REST call, so it looks healthy everywhere else in the app — this is the
-    only place the gap is detectable before a Trading call fails with a confusing 401."""
-    granted = connection.scopes or ""
+    """Whether this connection is KNOWN to be missing eBay's base api_scope.
+
+    Deliberately fails OPEN when the granted scopes aren't recorded at all. This is a
+    diagnostic that exists to turn a confusing downstream 401 into a clear instruction —
+    it is not a security gate, and eBay enforces the real thing regardless. Treating
+    "unknown" as "missing" made it assert a problem it couldn't actually see: eBay's
+    token endpoint doesn't return a `scope` field at all, so connection.scopes was NULL
+    for every eBay connection ever made, and the banner latched on permanently with
+    reconnecting powerless to clear it. Fixed at the source too (the callback now falls
+    back to recording the scopes we requested), but old rows keep the NULL, and a
+    connection that genuinely has the scope must not be told otherwise."""
+    granted = (connection.scopes or "").split()
+    if not granted:
+        return True  # unknown, not absent — let the API be the judge
     # Every Sell scope is a longer string that *starts with* the base scope, so a plain
-    # substring test would match even when only e.g. sell.inventory was granted. Split on
-    # whitespace and compare exactly.
-    return _TRADING_SCOPE in granted.split()
+    # substring test would match even when only e.g. sell.inventory was granted. Compare
+    # whitespace-separated tokens exactly.
+    return _TRADING_SCOPE in granted
 
 
 def _require_trading_scope(connection: PlatformConnection) -> None:
     if not _has_trading_scope(connection):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_MISSING_TRADING_SCOPE_HINT)
+
 
 # In-memory PKCE verifier/state store for the brief connect -> callback round trip. A
 # module-level dict is sufficient here: this is a single-process desktop-app backend
@@ -194,6 +204,21 @@ def _map_platform_error(e: PlatformError) -> HTTPException:
     if isinstance(e, PlatformRateLimitError):
         return HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(e))
     return HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(e))
+
+
+def _map_trading_error(e: PlatformError) -> HTTPException:
+    """As _map_platform_error, but an auth failure on a Trading API call gets the
+    reconnect instruction attached.
+
+    Now that the scope pre-check fails open on unrecorded scopes (see
+    _has_trading_scope), this is where a genuinely missing api_scope actually surfaces —
+    so the guidance has to live here too, or the user would just get eBay's own opaque
+    401 with nothing actionable in it."""
+    if isinstance(e, PlatformAuthError):
+        return HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail=f"{e}\n\n{_MISSING_TRADING_SCOPE_HINT}"
+        )
+    return _map_platform_error(e)
 
 
 def _html(title: str, message: str) -> HTMLResponse:
@@ -347,7 +372,12 @@ async def platform_callback(
     connection.access_token = tokens.access_token
     connection.refresh_token = tokens.refresh_token
     connection.access_token_expires_at = tokens.expires_at
-    connection.scopes = tokens.scopes
+    # eBay's token endpoint doesn't echo a `scope` field back at all, so trusting the
+    # response alone left connection.scopes NULL for every eBay connection. Fall back to
+    # what we asked for: the grant only completes if the user approved that consent
+    # screen, so the requested set is what was granted. Etsy does return it, and its
+    # value wins where present since a user can in principle approve a subset.
+    connection.scopes = tokens.scopes or " ".join(_SCOPES.get(platform, [])) or None
     connection.external_account_id = account_id
     connection.connected_at = datetime.now(timezone.utc)
     if platform == ListingPlatform.etsy:
@@ -753,7 +783,7 @@ async def get_unmigrated_listings(session: AsyncSession = Depends(get_db)) -> Un
     try:
         candidates = await adapter.fetch_classic_listings(session, connection)
     except PlatformError as e:
-        raise _map_platform_error(e)
+        raise _map_trading_error(e)
     return _to_report([c for c in candidates if not c.is_migrated])
 
 
@@ -777,7 +807,7 @@ async def get_product_unmigrated_listings(
     try:
         candidates = await adapter.fetch_classic_listings(session, connection)
     except PlatformError as e:
-        raise _map_platform_error(e)
+        raise _map_trading_error(e)
 
     unmigrated = [c for c in candidates if not c.is_migrated]
     # Exact SKU match first, then a title containing the product name, then the rest —
@@ -812,7 +842,7 @@ async def get_variation_mapping(
     try:
         candidate = await _load_candidate_detail(adapter, session, connection, external_listing_id)
     except PlatformError as e:
-        raise _map_platform_error(e)
+        raise _map_trading_error(e)
 
     return listing_adoption.propose_variation_mapping(product, active_variants, candidate)
 
@@ -870,7 +900,7 @@ async def adopt_ebay_listing(
 
         await adapter.migrate_listing(session, connection, body.external_listing_id)
     except PlatformError as e:
-        raise _map_platform_error(e)
+        raise _map_trading_error(e)
 
     return await listing_adoption.apply_adoption(
         session,

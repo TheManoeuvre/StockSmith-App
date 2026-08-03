@@ -38,7 +38,7 @@ from app.services.platforms.base import (
     MigrationResult,
     UnadoptedListingCandidate,
 )
-from app.services.platforms.errors import PlatformSyncError
+from app.services.platforms.errors import PlatformAuthError, PlatformRateLimitError, PlatformSyncError
 
 _TRADING_SCOPE = "https://api.ebay.com/oauth/api_scope"
 
@@ -374,6 +374,52 @@ async def test_sell_inventory_scope_alone_does_not_satisfy_the_base_scope(sessio
 
     conn.scopes = "https://api.ebay.com/oauth/api_scope/sell.inventory https://api.ebay.com/oauth/api_scope"
     assert platforms_router._has_trading_scope(conn) is True
+
+
+@pytest.mark.parametrize("scopes", [None, "", "   "])
+async def test_unrecorded_scopes_fail_open(session, scopes):
+    """Regression, found in production: eBay's token endpoint returns no `scope` field,
+    so connection.scopes was NULL for every eBay connection ever made. Reading NULL as
+    "scope missing" latched the reconnect banner on permanently — reconnecting could
+    never clear it, because the reconnect wrote NULL right back.
+
+    Unknown must therefore mean "let the API decide", not "definitely broken". This is a
+    diagnostic to improve an error message, never a security gate.
+    """
+    conn = PlatformConnection(platform=ListingPlatform.ebay, scopes=scopes)
+    assert platforms_router._has_trading_scope(conn) is True
+
+
+async def test_unrecorded_scopes_do_not_block_the_picker(session, monkeypatch):
+    """The user-visible half of the bug above: the endpoint must work on a connection
+    whose scopes were never recorded."""
+    await _connect(session, ListingPlatform.ebay, scopes=None)
+    product, _ = await _make_product(session, "SKU-0012", ["A"])
+    adapter = FakeEbayAdapter(_candidate(["SKU-0012-A"], None))
+    _use_adapter(monkeypatch, adapter, "EbayAdapter")
+
+    report = await platforms_router.get_product_unmigrated_listings(product.id, session)
+
+    assert report.total_count == 1
+
+
+async def test_trading_auth_failure_carries_the_reconnect_hint():
+    """With the pre-check failing open, a genuinely missing scope now surfaces as eBay's
+    own 401 — which says nothing actionable on its own."""
+    mapped = platforms_router._map_trading_error(PlatformAuthError("Invalid access token"))
+
+    assert mapped.status_code == 401
+    assert "Reconnect eBay" in mapped.detail
+    assert "Invalid access token" in mapped.detail
+
+
+async def test_non_auth_trading_errors_are_not_given_the_hint():
+    """A rate limit or a parse failure has nothing to do with scopes — attaching the
+    reconnect advice there would send the user chasing the wrong problem."""
+    mapped = platforms_router._map_trading_error(PlatformRateLimitError("slow down"))
+
+    assert mapped.status_code == 429
+    assert "Reconnect eBay" not in mapped.detail
 
 
 async def test_already_migrated_listing_is_not_revised(session, monkeypatch):
