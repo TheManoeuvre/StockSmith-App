@@ -22,6 +22,11 @@ export interface PlatformStatus {
   // Non-null while one or more unpaid orders are holding the sync window open so they
   // keep being re-checked until payment settles.
   unpaid_hold_since: string | null;
+  // True when the stored OAuth grant is missing a scope StockSmith now needs (eBay's
+  // Trading API base scope). Order sync and pushes keep working, so nothing else in the
+  // app reveals the gap — hence surfacing it explicitly.
+  needs_reconnect: boolean;
+  needs_reconnect_reason: string | null;
 }
 
 export interface SyncSettingsUpdate {
@@ -139,6 +144,100 @@ export interface BulkListingSyncResult {
   not_found_count: number;
 }
 
+export interface EligibilityAnnotatedCandidate {
+  external_listing_id: string;
+  title: string;
+  listing_type: string;
+  skus: string[];
+  variation_specifics: Record<string, string>[] | null;
+  quantity: number;
+  ineligibility_reasons: string[];
+  // False when this row came from eBay's bulk list view, whose SKU/variation data is
+  // incomplete — the real detail is loaded when the listing is selected.
+  detail_loaded: boolean;
+}
+
+export interface UnmigratedListingsReport {
+  total_count: number;
+  eligible_count: number;
+  listings: EligibilityAnnotatedCandidate[];
+}
+
+export type VariationMatchConfidence = "exact" | "count_only" | "unmatched";
+
+export interface VariationMappingEntry {
+  variant_id: number | null;
+  variant_name: string | null;
+  stockssmith_attributes: Record<string, string>;
+  matched_sku: string | null;
+  matched_variation_specifics: Record<string, string> | null;
+  match_confidence: VariationMatchConfidence;
+}
+
+export interface VariationMappingProposal {
+  entries: VariationMappingEntry[];
+}
+
+export interface VariationMappingChoice {
+  variant_id: number | null;
+  sku: string;
+}
+
+export interface AdoptListingRequest {
+  external_listing_id: string;
+  listing_title?: string | null;
+  variation_mapping: VariationMappingChoice[];
+  // Rewrite the eBay listing's SKUs to StockSmith's before migrating. Opt-in: it edits
+  // a live listing.
+  align_skus?: boolean;
+}
+
+export interface UnitAdoptionResult {
+  variant_id: number | null;
+  sku_conflict: boolean;
+  expected_sku: string | null;
+  actual_sku: string | null;
+}
+
+export interface AdoptListingResult {
+  summary: ProductListingSyncSummary;
+  units: UnitAdoptionResult[];
+  skus_aligned: boolean;
+}
+
+// --- Etsy: listings with no StockSmith equivalent ---------------------------------
+
+export interface UnadoptedListingProduct {
+  index: number;
+  sku: string | null;
+  variation: string | null;
+  quantity: number;
+}
+
+export interface UnadoptedListing {
+  external_listing_id: string;
+  title: string;
+  state: string;
+  products: UnadoptedListingProduct[];
+}
+
+export interface UnadoptedListingsReport {
+  total_count: number;
+  listings: UnadoptedListing[];
+}
+
+export interface EtsyLinkChoice {
+  variant_id: number | null;
+  product_index: number;
+}
+
+export interface EtsyAdoptListingRequest {
+  external_listing_id: string;
+  listing_title?: string | null;
+  links: EtsyLinkChoice[];
+  write_skus?: boolean;
+}
+
 export interface PlatformCredential {
   platform: ListingPlatform;
   environment: PlatformEnvironment;
@@ -185,4 +284,16 @@ export const platformsApi = {
     payload: PlatformCredentialWrite,
     environment: PlatformEnvironment = "production"
   ) => api.patch<PlatformCredential>(`/platforms/${platform}/credentials?environment=${environment}`, payload),
+  fetchUnmigratedListings: () => api.get<UnmigratedListingsReport>(`/platforms/ebay/unmigrated-listings`),
+  fetchProductUnmigratedListings: (productId: number) =>
+    api.get<UnmigratedListingsReport>(`/platforms/ebay/products/${productId}/unmigrated-listings`),
+  fetchEtsyUnadoptedListings: () => api.get<UnadoptedListingsReport>(`/platforms/etsy/unadopted-listings`),
+  adoptEtsyListing: (productId: number, payload: EtsyAdoptListingRequest) =>
+    api.post<AdoptListingResult>(`/platforms/etsy/products/${productId}/adopt-listing`, payload),
+  fetchVariationMapping: (productId: number, externalListingId: string) =>
+    api.get<VariationMappingProposal>(
+      `/platforms/ebay/products/${productId}/listings/${encodeURIComponent(externalListingId)}/variation-mapping`
+    ),
+  adoptEbayListing: (productId: number, payload: AdoptListingRequest) =>
+    api.post<AdoptListingResult>(`/platforms/ebay/products/${productId}/adopt-listing`, payload),
 };

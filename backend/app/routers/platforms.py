@@ -32,11 +32,26 @@ from app.schemas.platform import (
     SyncSettingsUpdate,
     SyncStartDateUpdate,
 )
-from app.services import listing_sync, order_sync, platform_credentials, sync_scheduler
+from app.schemas.listing_adoption import (
+    AdoptListingRequest,
+    AdoptListingResult,
+    EligibilityAnnotatedCandidate,
+    EtsyAdoptListingRequest,
+    UnadoptedListing,
+    UnadoptedListingProduct,
+    UnadoptedListingsReport,
+    UnmigratedListingsReport,
+    VariationMappingProposal,
+)
+from app.services import listing_adoption, listing_sync, order_sync, platform_credentials, sync_scheduler
 from app.services.file_storage import resolve_asset_path, save_platform_icon
 from app.services.platforms import get_adapter, invalidate_adapter_cache
+from app.services.platforms.base import ClassicListingCandidate
+from app.services.platforms.ebay import EbayAdapter
+from app.services.platforms.etsy import EtsyAdapter
 from app.services.platforms.errors import PlatformAuthError, PlatformError, PlatformRateLimitError, PlatformSyncError
 from app.services.url_import import fetch_image_bytes
+from app.services.variants import compute_full_sku
 
 logger = logging.getLogger("stocksmith.platforms")
 
@@ -71,8 +86,43 @@ _SCOPES: dict[ListingPlatform, list[str]] = {
         # attempt 403'd with "Insufficient permissions to fulfill the request." Every
         # Sell scope above is unrelated to the Identity API and doesn't cover this.
         "https://api.ebay.com/oauth/api_scope/commerce.identity.readonly",
+        # The base scope, required for the legacy Trading API calls the unmigrated-listing
+        # adoption feature depends on (GetMyeBaySelling, GetItem, GetUser,
+        # ReviseFixedPriceItem — see platforms/ebay.py). None of the Sell REST scopes
+        # above grant Trading API access; without this every Trading call fails auth.
+        # A connection made before this scope was added must reconnect — see
+        # _MISSING_TRADING_SCOPE_HINT and connection_needs_reconnect below.
+        "https://api.ebay.com/oauth/api_scope",
     ],
 }
+
+# Substring checked against PlatformConnection.scopes to tell "this connection predates
+# the Trading API scope" apart from a genuine API failure. Kept here (not on the adapter)
+# for the same reason _SCOPES itself is: which scopes StockSmith asks for is a policy
+# decision, not an intrinsic property of eBay's API.
+_TRADING_SCOPE = "https://api.ebay.com/oauth/api_scope"
+
+_MISSING_TRADING_SCOPE_HINT = (
+    "This eBay connection was authorised before StockSmith requested the permission needed to read "
+    "your Seller Hub listings. Reconnect eBay in Settings > Integrations, then try again."
+)
+
+
+def _has_trading_scope(connection: PlatformConnection) -> bool:
+    """eBay returns the granted scopes as a space-separated string on the token response.
+    A connection authorised before _TRADING_SCOPE was added still has valid tokens for
+    every Sell REST call, so it looks healthy everywhere else in the app — this is the
+    only place the gap is detectable before a Trading call fails with a confusing 401."""
+    granted = connection.scopes or ""
+    # Every Sell scope is a longer string that *starts with* the base scope, so a plain
+    # substring test would match even when only e.g. sell.inventory was granted. Split on
+    # whitespace and compare exactly.
+    return _TRADING_SCOPE in granted.split()
+
+
+def _require_trading_scope(connection: PlatformConnection) -> None:
+    if not _has_trading_scope(connection):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_MISSING_TRADING_SCOPE_HINT)
 
 # In-memory PKCE verifier/state store for the brief connect -> callback round trip. A
 # module-level dict is sufficient here: this is a single-process desktop-app backend
@@ -197,6 +247,9 @@ async def _status_from_connection(
     last_sync_error = (
         latest_run.error_message if latest_run is not None and latest_run.status == SyncRunStatus.error else None
     )
+    # eBay-only: Etsy asks for every scope it needs up front and has no Trading-API
+    # equivalent, so its connections can never be in this state.
+    needs_reconnect = platform == ListingPlatform.ebay and not _has_trading_scope(connection)
 
     return PlatformStatus(
         connected=True,
@@ -215,6 +268,8 @@ async def _status_from_connection(
         last_sync_success_at=last_sync_success_at,
         last_sync_error=last_sync_error,
         unpaid_hold_since=connection.unpaid_hold_since,
+        needs_reconnect=needs_reconnect,
+        needs_reconnect_reason=_MISSING_TRADING_SCOPE_HINT if needs_reconnect else None,
     )
 
 
@@ -612,3 +667,328 @@ async def check_all_listings(
         return await listing_sync.check_all_products_sku_sync(session, index, platform)
     except PlatformError as e:
         raise _map_platform_error(e)
+
+
+async def _get_ebay_adapter(session: AsyncSession) -> tuple[EbayAdapter, PlatformConnection]:
+    connection = await _require_connection(session, ListingPlatform.ebay)
+    _require_trading_scope(connection)
+    adapter = await get_adapter(session, ListingPlatform.ebay)
+    if not isinstance(adapter, EbayAdapter):
+        # Not an assert: `python -O` strips those, and this guards a genuine runtime
+        # contract (the Trading-API-only methods below don't exist on other adapters).
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="eBay adapter unavailable — the platform registry returned an unexpected adapter type",
+        )
+    return adapter, connection
+
+
+async def _require_product(session: AsyncSession, product_id: int) -> Product:
+    product = await session.get(Product, product_id)
+    if product is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Product {product_id} not found")
+    return product
+
+
+def _expected_sku(product: Product, active_variants: list[ProductVariant], variant_id: int | None) -> str | None:
+    if variant_id is None:
+        return product.sku
+    variant = next((v for v in active_variants if v.id == variant_id), None)
+    return compute_full_sku(product.sku, variant.sku_suffix) if variant is not None else None
+
+
+def _product_expected_skus(product: Product, active_variants: list[ProductVariant]) -> set[str]:
+    if not active_variants:
+        return {product.sku} if product.sku else set()
+    return {compute_full_sku(product.sku, v.sku_suffix) for v in active_variants} - {None}
+
+
+async def _load_candidate_detail(
+    adapter: EbayAdapter, session: AsyncSession, connection: PlatformConnection, external_listing_id: str
+) -> ClassicListingCandidate:
+    """Authoritative per-listing detail via GetItem, plus the is_migrated flag the list
+    view computes by cross-referencing the Inventory API.
+
+    Everything that acts on a listing's SKUs goes through here rather than reusing the
+    bulk-list payload: GetMyeBaySelling's ActiveList doesn't reliably carry variation
+    SKUs (see EbayAdapter.fetch_classic_listing_detail), and re-running the whole
+    paginated list crawl just to look one listing up would be far more expensive
+    besides."""
+    candidate = await adapter.fetch_classic_listing_detail(session, connection, external_listing_id)
+    index = await adapter.build_listing_sku_index(session, connection)
+    candidate.is_migrated = any(sku in index for sku in candidate.skus if sku)
+    return candidate
+
+
+def _to_report(candidates: list[ClassicListingCandidate]) -> UnmigratedListingsReport:
+    return UnmigratedListingsReport(
+        total_count=len(candidates),
+        eligible_count=sum(1 for c in candidates if not c.ineligibility_reasons),
+        listings=[
+            EligibilityAnnotatedCandidate(
+                external_listing_id=c.external_listing_id,
+                title=c.title,
+                listing_type=c.listing_type,
+                skus=[s for s in c.skus if s],
+                variation_specifics=c.variation_specifics,
+                quantity=c.quantity,
+                ineligibility_reasons=c.ineligibility_reasons,
+                detail_loaded=c.detail_loaded,
+            )
+            for c in candidates
+        ],
+    )
+
+
+@router.get(
+    "/ebay/unmigrated-listings",
+    response_model=UnmigratedListingsReport,
+    dependencies=[Depends(require_auth)],
+)
+async def get_unmigrated_listings(session: AsyncSession = Depends(get_db)) -> UnmigratedListingsReport:
+    """Shop-wide classic (not-yet-migrated) eBay listings — powers the settings-level
+    "X unmigrated listings" alert and its unscoped picker, where the user also has to
+    choose which StockSmith product to link to."""
+    adapter, connection = await _get_ebay_adapter(session)
+    try:
+        candidates = await adapter.fetch_classic_listings(session, connection)
+    except PlatformError as e:
+        raise _map_platform_error(e)
+    return _to_report([c for c in candidates if not c.is_migrated])
+
+
+@router.get(
+    "/ebay/products/{product_id}/unmigrated-listings",
+    response_model=UnmigratedListingsReport,
+    dependencies=[Depends(require_auth)],
+)
+async def get_product_unmigrated_listings(
+    product_id: int, session: AsyncSession = Depends(get_db)
+) -> UnmigratedListingsReport:
+    """Classic (not-yet-migrated) eBay listings, ranked by SKU match against this
+    product, for the product-page 'find unmigrated listing' picker. See
+    EbayAdapter.fetch_classic_listings for why this is a separate call from
+    build_listing_sku_index (the Inventory API can't see these at all)."""
+    product = await _require_product(session, product_id)
+    active_variants = await listing_sync._active_variants(session, product_id)
+    expected_skus = _product_expected_skus(product, active_variants)
+
+    adapter, connection = await _get_ebay_adapter(session)
+    try:
+        candidates = await adapter.fetch_classic_listings(session, connection)
+    except PlatformError as e:
+        raise _map_platform_error(e)
+
+    unmigrated = [c for c in candidates if not c.is_migrated]
+    # Exact SKU match first, then a title containing the product name, then the rest —
+    # a shop with hundreds of active listings otherwise makes the user hunt for theirs.
+    name_key = (product.name or "").strip().lower()
+
+    def rank(c: ClassicListingCandidate) -> int:
+        if expected_skus & {s for s in c.skus if s}:
+            return 0
+        if name_key and name_key in c.title.lower():
+            return 1
+        return 2
+
+    unmigrated.sort(key=rank)
+    return _to_report(unmigrated)
+
+
+@router.get(
+    "/ebay/products/{product_id}/listings/{external_listing_id}/variation-mapping",
+    response_model=VariationMappingProposal,
+    dependencies=[Depends(require_auth)],
+)
+async def get_variation_mapping(
+    product_id: int, external_listing_id: str, session: AsyncSession = Depends(get_db)
+) -> VariationMappingProposal:
+    """Proposes a StockSmith-variant -> eBay-SKU mapping for a selected classic
+    listing — shown by the picker's mapping-editor step before adopt is enabled."""
+    product = await _require_product(session, product_id)
+    active_variants = await listing_sync._active_variants(session, product_id)
+
+    adapter, connection = await _get_ebay_adapter(session)
+    try:
+        candidate = await _load_candidate_detail(adapter, session, connection, external_listing_id)
+    except PlatformError as e:
+        raise _map_platform_error(e)
+
+    return listing_adoption.propose_variation_mapping(product, active_variants, candidate)
+
+
+@router.post(
+    "/ebay/products/{product_id}/adopt-listing",
+    response_model=AdoptListingResult,
+    dependencies=[Depends(require_auth)],
+)
+async def adopt_ebay_listing(
+    product_id: int, body: AdoptListingRequest, session: AsyncSession = Depends(get_db)
+) -> AdoptListingResult:
+    """Migrates a classic eBay listing (bulkMigrateListing) and links it to this
+    product/its variants per the user-confirmed variation_mapping.
+
+    Order matters and is deliberate: when align_skus is set, the listing's SKUs are
+    revised BEFORE migration, because a classic listing's SKU is freely editable whereas
+    a migrated one's is effectively immutable (see EbayAdapter.revise_listing_skus).
+    Without alignment, StockSmith's own SKU is still what gets written as the lookup key
+    and the divergence is reported as a per-unit sku_conflict instead."""
+    product = await _require_product(session, product_id)
+    active_variants = await listing_sync._active_variants(session, product_id)
+    if not body.variation_mapping:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="variation_mapping must not be empty"
+        )
+    # Two variants claiming the same eBay SKU would produce two Listing rows pointing at
+    # one marketplace object, so their quantity pushes would fight over it.
+    mapped_skus = [choice.sku for choice in body.variation_mapping]
+    if len(set(mapped_skus)) != len(mapped_skus):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Each eBay SKU can only be linked to one StockSmith unit",
+        )
+
+    adapter, connection = await _get_ebay_adapter(session)
+    variation_mapping = [(choice.variant_id, choice.sku) for choice in body.variation_mapping]
+
+    try:
+        candidate = await _load_candidate_detail(adapter, session, connection, body.external_listing_id)
+
+        skus_aligned = False
+        if body.align_skus and not candidate.is_migrated:
+            desired = listing_adoption.plan_sku_alignment(product, active_variants, candidate, variation_mapping)
+            if desired is not None:
+                await adapter.revise_listing_skus(session, connection, candidate, desired)
+                skus_aligned = True
+                # The mapping the caller sent refers to the listing's pre-revision SKUs;
+                # after aligning, every unit's eBay SKU is StockSmith's own, so re-point
+                # the mapping at those to avoid reporting a conflict we just resolved.
+                variation_mapping = [
+                    (variant_id, _expected_sku(product, active_variants, variant_id) or actual)
+                    for variant_id, actual in variation_mapping
+                ]
+
+        await adapter.migrate_listing(session, connection, body.external_listing_id)
+    except PlatformError as e:
+        raise _map_platform_error(e)
+
+    return await listing_adoption.apply_adoption(
+        session,
+        product,
+        active_variants,
+        variation_mapping,
+        ListingPlatform.ebay,
+        body.listing_title or candidate.title,
+        skus_aligned=skus_aligned,
+    )
+
+
+async def _get_etsy_adapter(session: AsyncSession) -> tuple[EtsyAdapter, PlatformConnection]:
+    connection = await _require_connection(session, ListingPlatform.etsy)
+    adapter = await get_adapter(session, ListingPlatform.etsy)
+    if not isinstance(adapter, EtsyAdapter):
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Etsy adapter unavailable — the platform registry returned an unexpected adapter type",
+        )
+    return adapter, connection
+
+
+@router.get(
+    "/etsy/unadopted-listings",
+    response_model=UnadoptedListingsReport,
+    dependencies=[Depends(require_auth)],
+)
+async def get_etsy_unadopted_listings(session: AsyncSession = Depends(get_db)) -> UnadoptedListingsReport:
+    """Etsy listings carrying at least one SKU StockSmith doesn't recognise (or none at
+    all) — the reverse of eBay's unmigrated case: the listing is perfectly visible, it's
+    StockSmith's catalog that has the gap. See listing_adoption.find_unadopted_listings."""
+    adapter, connection = await _get_etsy_adapter(session)
+    try:
+        raw_listings = await adapter.fetch_all_listings(session, connection)
+    except PlatformError as e:
+        raise _map_platform_error(e)
+
+    candidates = [EtsyAdapter.parse_listing_products(listing) for listing in raw_listings]
+    known = await listing_adoption.known_stocksmith_skus(session)
+    unadopted = listing_adoption.find_unadopted_listings(candidates, known)
+
+    return UnadoptedListingsReport(
+        total_count=len(unadopted),
+        listings=[
+            UnadoptedListing(
+                external_listing_id=c.external_listing_id,
+                title=c.title,
+                state=c.state,
+                products=[
+                    UnadoptedListingProduct(
+                        index=p.index, sku=p.sku, variation=p.variation, quantity=p.quantity
+                    )
+                    for p in c.products
+                ],
+            )
+            for c in unadopted
+        ],
+    )
+
+
+@router.post(
+    "/etsy/products/{product_id}/adopt-listing",
+    response_model=AdoptListingResult,
+    dependencies=[Depends(require_auth)],
+)
+async def adopt_etsy_listing(
+    product_id: int, body: EtsyAdoptListingRequest, session: AsyncSession = Depends(get_db)
+) -> AdoptListingResult:
+    """Links an existing Etsy listing to this product, writing StockSmith's SKUs onto
+    the listing so future sync checks resolve it.
+
+    No migration step exists on Etsy, so unlike the eBay path this is purely a SKU write
+    plus the local Listing rows."""
+    product = await _require_product(session, product_id)
+    active_variants = await listing_sync._active_variants(session, product_id)
+    if not body.links:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="links must not be empty")
+
+    # Two StockSmith units pointing at the same Etsy variation would collapse in
+    # sku_by_index below — one SKU written, but two Listing rows created claiming it.
+    indexes = [link.product_index for link in body.links]
+    if len(set(indexes)) != len(indexes):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Each Etsy variation can only be linked to one StockSmith unit",
+        )
+
+    sku_by_index: dict[int, str] = {}
+    variation_mapping: list[tuple[int | None, str]] = []
+    for link in body.links:
+        expected = _expected_sku(product, active_variants, link.variant_id)
+        if not expected:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Cannot link an Etsy listing to a product/variant with no SKU — set a SKU in StockSmith first, "
+                    "since that's the value written to Etsy."
+                ),
+            )
+        sku_by_index[link.product_index] = expected
+        variation_mapping.append((link.variant_id, expected))
+
+    adapter, connection = await _get_etsy_adapter(session)
+    if body.write_skus:
+        try:
+            await adapter.update_listing_skus(session, connection, body.external_listing_id, sku_by_index)
+        except PlatformError as e:
+            raise _map_platform_error(e)
+
+    # Etsy's Listing rows key on the listing id (unlike eBay's, which key on SKU) —
+    # see EtsyAdapter._index_listing_skus, which sets external_listing_id to listing_id.
+    return await listing_adoption.apply_adoption(
+        session,
+        product,
+        active_variants,
+        variation_mapping,
+        ListingPlatform.etsy,
+        body.listing_title or "",
+        external_listing_id=body.external_listing_id,
+    )

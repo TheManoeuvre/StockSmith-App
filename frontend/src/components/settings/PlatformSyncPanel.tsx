@@ -4,6 +4,8 @@ import { platformsApi, type BulkListingSyncResult, type SyncCommitResult, type S
 import type { ListingPlatform } from "../../api/types";
 import { PLATFORM_LABELS } from "../../lib/platforms";
 import { ErrorBanner } from "../common/ErrorBanner";
+import { EtsyListingPickerModal } from "../products/EtsyListingPickerModal";
+import { ListingPickerModal } from "../products/ListingPickerModal";
 
 const SYNC_LOG_PAGE_SIZE = 10;
 const RECENT_PUSH_CHECK_SIZE = 10;
@@ -17,6 +19,7 @@ export function PlatformSyncPanel({ platform }: { platform: ListingPlatform }) {
   const [syncStartDate, setSyncStartDate] = useState("");
   const [syncIntervalMinutes, setSyncIntervalMinutes] = useState("15");
   const [logPage, setLogPage] = useState(0);
+  const [showPicker, setShowPicker] = useState(false);
 
   const { data: logData } = useQuery({
     queryKey: ["platforms", platform, "sync-log", logPage],
@@ -42,6 +45,25 @@ export function PlatformSyncPanel({ platform }: { platform: ListingPlatform }) {
     refetchInterval: 30_000,
   });
   const recentPushFailures = pushLogData?.items.filter((p) => p.status === "error") ?? [];
+
+  // Shop-wide gap count. Shopify shares this panel but has no listing-gap concept, so
+  // it must not fall through to either marketplace's endpoint.
+  const supportsGaps = platform === "ebay" || platform === "etsy";
+  const gapsAvailable =
+    supportsGaps && (platformStatus?.connected ?? false) && !(platformStatus?.needs_reconnect ?? false);
+
+  // Deliberately a mutation (an explicit button) rather than a query that runs on load.
+  // eBay's Trading API budget is 5,000 calls/DAY across all Trading calls combined, and
+  // one shop-wide scan costs up to _MAX_TRADING_PAGES of them — so auto-fetching this
+  // every time Settings is opened could burn a meaningful slice of the day's budget on
+  // a page the user only wanted for something else.
+  const gapScanMutation = useMutation({
+    mutationFn: () =>
+      platform === "ebay"
+        ? platformsApi.fetchUnmigratedListings().then((r) => ({ count: r.total_count, eligible: r.eligible_count }))
+        : platformsApi.fetchEtsyUnadoptedListings().then((r) => ({ count: r.total_count, eligible: r.total_count })),
+  });
+  const gapReport = gapScanMutation.data;
 
   useEffect(() => {
     if (platformStatus?.sync_start_date) setSyncStartDate(platformStatus.sync_start_date);
@@ -231,6 +253,69 @@ export function PlatformSyncPanel({ platform }: { platform: ListingPlatform }) {
         </button>
       </div>
       <ErrorBanner error={checkAllMutation.error} />
+
+      {platformStatus?.needs_reconnect && (
+        <div className="rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900">
+          {platformStatus.needs_reconnect_reason ??
+            `Reconnect ${label} to grant StockSmith the permissions it now needs.`}
+        </div>
+      )}
+
+      {gapsAvailable && (
+        <div className="flex items-center justify-between border-t border-slate-200 pt-3">
+          <div>
+            <p className="font-medium">Unlinked {label} listings</p>
+            <p className="text-sm text-slate-500">
+              {platform === "ebay"
+                ? "Finds live listings the Inventory API can't see yet, so StockSmith can adopt them."
+                : "Finds live listings carrying a SKU StockSmith doesn't know."}
+            </p>
+          </div>
+          <button
+            onClick={() => gapScanMutation.mutate()}
+            disabled={gapScanMutation.isPending}
+            className="rounded border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50"
+          >
+            {gapScanMutation.isPending ? "Scanning…" : "Scan listings"}
+          </button>
+        </div>
+      )}
+      <ErrorBanner error={gapScanMutation.error} />
+      {gapReport !== undefined && gapReport.count === 0 && (
+        <div className="rounded bg-green-50 p-2 text-sm text-green-800">
+          Every live {label} listing is linked to a StockSmith SKU.
+        </div>
+      )}
+      {gapReport !== undefined && gapReport.count > 0 && (
+        <div className="flex items-center justify-between rounded border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900">
+          <span>
+            {platform === "ebay" ? (
+              <>
+                <strong>{gapReport.count}</strong> eBay listing(s) aren't visible to the Inventory API yet (
+                {gapReport.eligible} look eligible to migrate) — StockSmith can't sync stock to them until they are.
+              </>
+            ) : (
+              <>
+                <strong>{gapReport.count}</strong> Etsy listing(s) have no matching StockSmith SKU — stock changes
+                here never reach them.
+              </>
+            )}
+          </span>
+          <button
+            onClick={() => setShowPicker(true)}
+            className="ml-3 shrink-0 rounded border border-amber-400 bg-white px-3 py-1.5"
+          >
+            Review
+          </button>
+        </div>
+      )}
+      {showPicker &&
+        (platform === "ebay" ? (
+          <ListingPickerModal onClose={() => setShowPicker(false)} />
+        ) : (
+          <EtsyListingPickerModal onClose={() => setShowPicker(false)} />
+        ))}
+
       {bulkSyncResult && (
         <div className="rounded bg-slate-50 p-2 text-sm">
           <strong>{bulkSyncResult.synced_count}</strong> synced, <strong>{bulkSyncResult.partial_count}</strong>{" "}

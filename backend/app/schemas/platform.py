@@ -37,6 +37,14 @@ class PlatformStatus(BaseModel):
     # so the hold isn't invisible state that silently widens every fetch — and so a hold
     # that gets stuck on an order that will never settle has a visible symptom.
     unpaid_hold_since: datetime | None
+    # True when the connection's granted scopes are missing something StockSmith now
+    # needs (currently: eBay's base api_scope, required for the Trading API calls the
+    # unmigrated-listing adoption feature uses). Such a connection still syncs orders and
+    # pushes quantities perfectly well, so nothing else in the app would reveal the gap —
+    # without this it only surfaces as a confusing failure the first time someone opens
+    # the listing picker.
+    needs_reconnect: bool = False
+    needs_reconnect_reason: str | None = None
 
 
 class SyncStartDateUpdate(BaseModel):

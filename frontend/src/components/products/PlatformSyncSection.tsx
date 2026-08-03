@@ -5,6 +5,8 @@ import type { ListingPlatform } from "../../api/types";
 import { ApiError } from "../../api/client";
 import { PLATFORM_LABELS } from "../../lib/platforms";
 import { ErrorBanner } from "../common/ErrorBanner";
+import { EtsyListingPickerModal } from "./EtsyListingPickerModal";
+import { ListingPickerModal } from "./ListingPickerModal";
 import { PlatformSyncBadge } from "./PlatformSyncBadge";
 
 const INITIAL_UNIT_LIMIT = 5;
@@ -13,6 +15,7 @@ export function PlatformSyncSection({ productId, platform }: { productId: number
   const label = PLATFORM_LABELS[platform];
   const queryClient = useQueryClient();
   const [showAllUnits, setShowAllUnits] = useState(false);
+  const [showPicker, setShowPicker] = useState(false);
   const { data, error } = useQuery({
     queryKey: ["platforms", platform, "products", productId, "sync-status"],
     queryFn: () => platformsApi.getProductSyncStatus(platform, productId),
@@ -26,6 +29,12 @@ export function PlatformSyncSection({ productId, platform }: { productId: number
   });
 
   const notConnected = error instanceof ApiError && error.status === 400;
+  // Both platforms offer a picker when the SKU check comes up short, but for different
+  // reasons: eBay's listing may exist and simply not be migrated yet, while Etsy's
+  // listing is visible but carries a SKU StockSmith doesn't know.
+  const unresolved = data && (data.product_status === "not_found" || data.product_status === "partial");
+  const canFindUnmigrated = platform === "ebay" && unresolved;
+  const canFindUnadopted = platform === "etsy" && unresolved;
 
   return (
     <div className="flex flex-col gap-2 rounded border border-slate-200 bg-white p-3">
@@ -34,14 +43,46 @@ export function PlatformSyncSection({ productId, platform }: { productId: number
           <p className="font-medium">{label} Sync</p>
           {data && <PlatformSyncBadge platform={platform} status={data.product_status} />}
         </div>
-        <button
-          onClick={() => checkMutation.mutate()}
-          disabled={notConnected}
-          className="rounded border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50"
-        >
-          {checkMutation.isPending ? "Testing…" : `Test ${label} Sync`}
-        </button>
+        <div className="flex items-center gap-2">
+          {(canFindUnmigrated || canFindUnadopted) && (
+            <button
+              onClick={() => setShowPicker(true)}
+              className="rounded border border-slate-300 px-3 py-1.5 text-sm"
+            >
+              {canFindUnmigrated ? "Find unmigrated listing" : "Find unlinked listing"}
+            </button>
+          )}
+          <button
+            onClick={() => checkMutation.mutate()}
+            disabled={notConnected}
+            className="rounded border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50"
+          >
+            {checkMutation.isPending ? "Testing…" : `Test ${label} Sync`}
+          </button>
+        </div>
       </div>
+      {showPicker &&
+        (platform === "ebay" ? (
+          <ListingPickerModal
+            productId={productId}
+            onClose={() => {
+              setShowPicker(false);
+              queryClient.invalidateQueries({
+                queryKey: ["platforms", platform, "products", productId, "sync-status"],
+              });
+            }}
+          />
+        ) : (
+          <EtsyListingPickerModal
+            productId={productId}
+            onClose={() => {
+              setShowPicker(false);
+              queryClient.invalidateQueries({
+                queryKey: ["platforms", platform, "products", productId, "sync-status"],
+              });
+            }}
+          />
+        ))}
       {notConnected && <p className="text-sm text-slate-500">Connect {label} in Settings to test SKU sync.</p>}
       <ErrorBanner error={checkMutation.error} />
       {data && data.units.length > 0 && (
