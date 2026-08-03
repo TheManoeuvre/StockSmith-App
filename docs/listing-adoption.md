@@ -27,9 +27,17 @@ a `not_found` there is always the second problem, never the first.
 
 1. **Reconnect eBay once.** This feature needs eBay's base OAuth scope
    (`https://api.ebay.com/oauth/api_scope`) for its Trading API calls. Connections
-   authorised before this release don't have it — they keep syncing orders and pushing
+   authorised before v0.4.0 don't have it — they keep syncing orders and pushing
    quantities perfectly well, which is why Settings surfaces an explicit
    "reconnect" banner rather than letting it fail at click time.
+
+   *Known issue in v0.4.0, fixed in v0.4.1:* the banner appeared even after a successful
+   reconnect and could not be cleared. eBay's token endpoint returns no `scope` field, so
+   the granted scopes were never recorded, and the check read "not recorded" as "not
+   granted". The scope check now fails open when scopes are unknown — it exists to turn a
+   confusing 401 into a clear instruction, not to gate access, and eBay enforces the real
+   thing regardless. A genuinely missing scope now surfaces on the API call itself, with
+   the same reconnect guidance attached.
 2. **Check Business Policies are on** (eBay Account → Site Preferences). Migration
    requires them; StockSmith can't detect this locally and will surface eBay's own
    rejection instead.

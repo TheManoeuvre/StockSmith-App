@@ -249,6 +249,42 @@ async def test_write_respects_etsy_quantity_floor_of_one():
     assert adapter.put_body["products"][0]["offerings"][0]["quantity"] == 1
 
 
+class _PagingAdapter(EtsyAdapter):
+    """fetch_all_listings duplicates build_listing_sku_index's pagination loop rather
+    than sharing it (the hot path keeps its single pass). A hand-copied loop is exactly
+    the kind of thing that silently stops after page one, so it gets its own coverage."""
+
+    def __init__(self, pages: list[dict]):
+        super().__init__("id", "secret")
+        self._pages = pages
+        self.offsets: list[int] = []
+
+    async def _authed_request(self, session, connection, method, path, **kwargs):
+        params = kwargs.get("params") or {}
+        self.offsets.append(int(params.get("offset", 0)))
+        return _FakeResponse(self._pages[len(self.offsets) - 1])
+
+
+async def test_fetch_all_listings_paginates():
+    from types import SimpleNamespace
+
+    page1 = {"count": 3, "results": [_raw_listing(1, "A", []), _raw_listing(2, "B", [])]}
+    page2 = {"count": 3, "results": [_raw_listing(3, "C", [])]}
+    adapter = _PagingAdapter([page1, page2])
+
+    listings = await adapter.fetch_all_listings(None, SimpleNamespace(external_account_id="shop"))
+
+    assert [listing["listing_id"] for listing in listings] == [1, 2, 3]
+    assert adapter.offsets == [0, 2]  # advanced by the number actually returned
+
+
+async def test_fetch_all_listings_requires_a_shop_id():
+    from types import SimpleNamespace
+
+    with pytest.raises(PlatformSyncError, match="no shop id"):
+        await EtsyAdapter("id", "s").fetch_all_listings(None, SimpleNamespace(external_account_id=None))
+
+
 async def test_write_rejects_out_of_range_index():
     """Guards against acting on a stale picker: if the listing changed since it was
     loaded, an index could now point at a different variation — or none."""
