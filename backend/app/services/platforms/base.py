@@ -127,6 +127,71 @@ class ExternalListingRef:
     variation: str | None
 
 
+@dataclass
+class ClassicListingCandidate:
+    """A classic (possibly-unmigrated) eBay listing surfaced via the Trading API's
+    GetSellerList — one per ItemID, not one per SKU, since a classic listing may carry
+    zero, one, or (multi-variation) several SKUs. eBay-only: Etsy has no equivalent
+    classic/Inventory-API split, so EtsyAdapter never produces these."""
+
+    external_listing_id: str
+    title: str
+    listing_type: str
+    skus: list[str]
+    variation_specifics: list[dict[str, str]] | None
+    quantity: int
+    is_migrated: bool
+    ineligibility_reasons: list[str] = field(default_factory=list)
+    # False when this came from a bulk list call that doesn't return per-variation
+    # detail (eBay's GetMyeBaySelling ActiveList), True when it came from a per-item
+    # detail call (GetItem). Matters because an empty `skus` means two completely
+    # different things in those two cases — "this listing genuinely has no SKU" versus
+    # "the list call simply didn't tell us" — and only the former is a real
+    # ineligibility. Eligibility evaluation must not assert a missing SKU while this is
+    # False; see ebay._evaluate_eligibility.
+    detail_loaded: bool = False
+
+
+@dataclass
+class ListingProductRef:
+    """One sellable product within a marketplace listing — an Etsy listing's per-SKU
+    "product" entry. `index` is its position in the listing's own products array, which
+    is the only stable way to address a product that has no SKU yet (precisely the case
+    the unadopted-listing flow exists to fix)."""
+
+    index: int
+    sku: str | None
+    variation: str | None
+    quantity: int
+
+
+@dataclass
+class UnadoptedListingCandidate:
+    """A live marketplace listing that StockSmith has no matching SKU for — i.e. a gap
+    in StockSmith's own catalog rather than a marketplace-visibility problem.
+
+    Distinct from ClassicListingCandidate, which is the opposite situation (StockSmith
+    knows about the product; the marketplace API can't see the listing until it's
+    migrated). Etsy only ever produces these, since every Etsy listing is visible
+    through its one listings endpoint and there is no migration step."""
+
+    external_listing_id: str
+    title: str
+    state: str
+    products: list[ListingProductRef]
+
+
+@dataclass
+class MigrationResult:
+    """The outcome of eBay's bulkMigrateListing for one classic listing — the SKU(s)
+    confirmed present in the Inventory API afterward, read back so the caller can
+    detect a SKU StockSmith didn't expect (see listing_adoption.py's conflict check)."""
+
+    external_listing_id: str
+    inventory_item_skus: list[str]
+    raw: dict = field(default_factory=dict)
+
+
 class PlatformAdapter(Protocol):
     """Everything the allocation/sync/push services need from a marketplace, kept
     Etsy-agnostic so eBay/Shopify can be added later without touching core logic —

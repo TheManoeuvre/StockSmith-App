@@ -40,7 +40,7 @@ export function PlatformSyncBadge({
   // this app's sync is built on) simply has no record of an un-migrated listing at all.
   const title =
     platform === "ebay" && (status === "not_found" || status === "partial")
-      ? "eBay reports this SKU as not found via its Inventory API. This usually means the listing was created through eBay's Seller Hub UI and hasn't been migrated to an Inventory API object yet — migrate it from eBay's own listing tools, then re-check sync."
+      ? "eBay reports this SKU as not found via its Inventory API. This usually means the listing was created through eBay's Seller Hub UI and hasn't been migrated to an Inventory API object yet — use \"Find unmigrated listing\" below to link and migrate it in-app, or migrate it from eBay's own listing tools and re-check sync."
       : undefined;
   return (
     <span className={`rounded px-2 py-0.5 text-xs ${colorClass}`} title={title}>

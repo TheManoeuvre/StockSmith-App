@@ -10,8 +10,10 @@ from app.services.platforms.base import (
     ExternalListingRef,
     ExternalOrder,
     ExternalOrderLine,
+    ListingProductRef,
     PaymentState,
     TokenSet,
+    UnadoptedListingCandidate,
     ensure_utc,
 )
 from app.services.platforms.errors import PlatformAuthError, PlatformRateLimitError, PlatformSyncError
@@ -817,6 +819,135 @@ class EtsyAdapter:
                 break
 
         return index
+
+    async def fetch_all_listings(self, session, connection: PlatformConnection) -> list[dict]:
+        """The same paginated crawl build_listing_sku_index performs, returning the raw
+        listings instead of folding them into a SKU-keyed dict.
+
+        Needed because the unadopted-listing report cares about listings that have *no*
+        matching SKU — which by definition never appear as keys in that index, so the
+        index alone cannot answer the question. Kept as a sibling rather than having
+        build_listing_sku_index call this and re-index, so the hot path (sync checking)
+        keeps its single-pass behaviour with no extra allocation."""
+        if connection.external_account_id is None:
+            raise PlatformSyncError("Etsy connection has no shop id — reconnect required")
+
+        params: dict[str, str | int] = {"limit": 100, "offset": 0, "includes": "Inventory"}
+        listings: list[dict] = []
+
+        for _ in range(_MAX_LISTING_PAGES):
+            response = await self._authed_request(
+                session, connection, "GET", f"/shops/{connection.external_account_id}/listings", params=params
+            )
+            if response.status_code != 200:
+                raise PlatformSyncError(f"Failed to fetch Etsy listings: {response.status_code} {response.text}")
+
+            body = response.json()
+            results = body.get("results", [])
+            listings.extend(results)
+
+            total = body.get("count", len(results))
+            params["offset"] = int(params["offset"]) + len(results)
+            if not results or int(params["offset"]) >= total:
+                break
+
+        return listings
+
+    @staticmethod
+    def parse_listing_products(listing: dict) -> UnadoptedListingCandidate:
+        """Flattens one raw Etsy listing into the shape the unadopted-listing report and
+        picker use. Static and pure so the parsing is unit-testable against a captured
+        payload without a session."""
+        products: list[ListingProductRef] = []
+        inventory = listing.get("inventory") or {}
+        for position, product in enumerate(inventory.get("products", [])):
+            if product.get("is_deleted"):
+                continue
+            qty = sum(
+                int(offering.get("quantity", 0))
+                for offering in product.get("offerings", [])
+                if offering.get("is_enabled") and not offering.get("is_deleted")
+            )
+            products.append(
+                ListingProductRef(
+                    index=position,
+                    sku=product.get("sku") or None,
+                    variation=EtsyAdapter._format_variation(product.get("property_values", [])),
+                    quantity=qty,
+                )
+            )
+        return UnadoptedListingCandidate(
+            external_listing_id=str(listing.get("listing_id")),
+            title=listing.get("title") or "",
+            state=listing.get("state") or "unknown",
+            products=products,
+        )
+
+    async def update_listing_skus(
+        self, session, connection: PlatformConnection, listing_id: str, sku_by_index: dict[int, str]
+    ) -> None:
+        """Writes StockSmith's SKUs onto an existing Etsy listing's products, addressed
+        by their position in the listing's own products array.
+
+        Addressed by index rather than by current SKU on purpose: the listings this is
+        used for are exactly the ones whose SKU is absent or wrong, so the current value
+        is not a usable key. Follows push_listing_quantity's GET-then-PUT contract
+        exactly — same stripped/required key rules (product_id dropped, property_name
+        required, scale_name dropped, offering_id/is_deleted dropped, quantity floor of
+        1), all of which were established the hard way against a live listing; see that
+        method's docstring. Everything not being renamed is echoed back untouched.
+
+        Deliberately does NOT retry on 409 the way push_listing_quantity does: this is a
+        one-shot, user-initiated action rather than a background push, so a conflict is
+        better surfaced immediately than silently retried under the user."""
+        response = await self._authed_request(session, connection, "GET", f"/listings/{listing_id}/inventory")
+        if response.status_code != 200:
+            raise PlatformSyncError(f"Failed to fetch Etsy listing inventory: {response.status_code} {response.text}")
+        inventory = response.json()
+
+        raw_products = inventory.get("products", [])
+        unknown = set(sku_by_index) - set(range(len(raw_products)))
+        if unknown:
+            raise PlatformSyncError(
+                f"Etsy listing {listing_id} has {len(raw_products)} product(s); no product at index "
+                f"{sorted(unknown)} — the listing may have changed since it was loaded."
+            )
+
+        products_payload = []
+        for position, product in enumerate(raw_products):
+            offerings_payload = []
+            for offering in product.get("offerings", []):
+                if offering.get("is_deleted"):
+                    continue
+                offerings_payload.append(
+                    {
+                        "quantity": max(int(offering.get("quantity", 0)), 1),
+                        "is_enabled": offering.get("is_enabled", True),
+                        "price": self._offering_price_float(offering.get("price")),
+                        "readiness_state_id": offering.get("readiness_state_id"),
+                    }
+                )
+            products_payload.append(
+                {
+                    "sku": sku_by_index.get(position, product.get("sku")),
+                    "property_values": [self._strip_property_value(pv) for pv in product.get("property_values", [])],
+                    "offerings": offerings_payload,
+                }
+            )
+
+        put_body = {
+            "products": products_payload,
+            "price_on_property": inventory.get("price_on_property", []),
+            "quantity_on_property": inventory.get("quantity_on_property", []),
+            "sku_on_property": inventory.get("sku_on_property", []),
+        }
+        put_response = await self._authed_request(
+            session, connection, "PUT", f"/listings/{listing_id}/inventory", json=put_body
+        )
+        if put_response.status_code != 200:
+            raise PlatformSyncError(
+                f"Failed to write SKUs to Etsy listing {listing_id}: {put_response.status_code} {put_response.text}"
+            )
 
     @staticmethod
     def _index_listing_skus(listing: dict, index: dict[str, ExternalListingRef]) -> None:
