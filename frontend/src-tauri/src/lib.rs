@@ -98,6 +98,22 @@ async fn spawn_sidecar_if_needed(app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Upper bound on the release notes shown in the update dialog. A native message dialog
+/// doesn't scroll, so an over-long body would push the buttons out of reach.
+const MAX_NOTES_CHARS: usize = 1200;
+
+/// Trims release notes to `limit` characters, cutting at a line boundary so the result
+/// never ends mid-sentence. Counts chars rather than bytes so a multi-byte character
+/// can't be split (which would panic on a slice).
+fn truncate_notes(notes: &str, limit: usize) -> String {
+    if notes.chars().count() <= limit {
+        return notes.to_string();
+    }
+    let clipped: String = notes.chars().take(limit).collect();
+    let cut = clipped.rfind('\n').unwrap_or(clipped.len());
+    format!("{}\n\n(…see the full release notes on GitHub)", clipped[..cut].trim_end())
+}
+
 /// Checks GitHub Releases (via the endpoint configured in tauri.conf.json) for a newer
 /// signed release. Silently does nothing if the check fails (e.g. no release published
 /// yet, no network) or the user declines — either way, normal startup continues. Never
@@ -112,12 +128,31 @@ async fn check_for_update_and_maybe_install(app: &tauri::AppHandle) {
         _ => return,
     };
 
-    let confirmed = app
-        .dialog()
-        .message(format!(
+    // Release notes come from the `notes` field in latest.json, which the release
+    // workflow fills from the matching CHANGELOG.md section. Older releases (and any
+    // build where the section was missing) have none, so the version-only wording stays
+    // as the fallback rather than leaving an empty gap in the dialog.
+    //
+    // Truncated because this is a native OS dialog with no scrollbar — an unbounded body
+    // would push the Yes/No buttons off-screen on a long changelog, leaving the user
+    // unable to answer it at all.
+    let notes = update.body.as_deref().unwrap_or("").trim();
+    let message = if notes.is_empty() {
+        format!(
             "A new version ({}) is available. Install it now? The app will restart.",
             update.version
-        ))
+        )
+    } else {
+        format!(
+            "A new version ({}) is available.\n\nWhat's new:\n{}\n\nInstall it now? The app will restart.",
+            update.version,
+            truncate_notes(notes, MAX_NOTES_CHARS)
+        )
+    };
+
+    let confirmed = app
+        .dialog()
+        .message(message)
         .title("StockSmith Update Available")
         .buttons(MessageDialogButtons::YesNo)
         .blocking_show();
@@ -188,4 +223,41 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{truncate_notes, MAX_NOTES_CHARS};
+
+    #[test]
+    fn short_notes_pass_through_unchanged() {
+        let notes = "### Fixed\n- Something small.";
+        assert_eq!(truncate_notes(notes, MAX_NOTES_CHARS), notes);
+    }
+
+    #[test]
+    fn long_notes_are_cut_at_a_line_boundary() {
+        let notes = "line one\nline two\nline three";
+        let out = truncate_notes(notes, 14); // lands inside "line two"
+        assert!(out.starts_with("line one"));
+        assert!(!out.contains("line two"));
+        assert!(out.contains("see the full release notes"));
+    }
+
+    #[test]
+    fn multibyte_characters_are_not_split() {
+        // Slicing by byte index here would panic — the em dashes are 3 bytes each.
+        let notes = "— — — — — — — — — —\nsecond line";
+        let out = truncate_notes(notes, 5);
+        assert!(out.contains("see the full release notes"));
+    }
+
+    #[test]
+    fn a_single_overlong_line_still_truncates() {
+        // No newline to cut at — must not panic or return the whole thing.
+        let notes = "a".repeat(100);
+        let out = truncate_notes(&notes, 10);
+        assert!(out.len() < notes.len());
+        assert!(out.contains("see the full release notes"));
+    }
 }

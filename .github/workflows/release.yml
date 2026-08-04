@@ -42,6 +42,32 @@ jobs:
       - name: Build backend sidecar
         run: powershell -File backend/build.ps1
 
+      # Extracts this tag's section from CHANGELOG.md so it becomes the GitHub Release
+      # body — which tauri-action also writes into latest.json's `notes` field, which is
+      # what the in-app update prompt displays. Without this the body is empty and the
+      # prompt has nothing to show but a version number.
+      #
+      # Missing section is a warning, not a failure: a release with thin notes is better
+      # than a release that didn't build. The draft is reviewed by hand before publishing
+      # anyway, so a missing section gets caught there.
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}" -replace '^v', ''
+          $content = Get-Content CHANGELOG.md -Raw
+          $pattern = "(?ms)^## \[$([regex]::Escape($version))\].*?\r?\n(.*?)(?=^## |\z)"
+          $match = [regex]::Match($content, $pattern)
+          if ($match.Success) {
+            $notes = $match.Groups[1].Value.Trim()
+          } else {
+            Write-Warning "No CHANGELOG.md section found for version $version"
+            $notes = "See the commit history for changes in this release."
+          }
+          "notes<<CHANGELOG_EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          $notes | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "CHANGELOG_EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -51,5 +77,6 @@ jobs:
           projectPath: frontend
           tagName: ${{ github.ref_name }}
           releaseName: "StockSmith v__VERSION__"
+          releaseBody: ${{ steps.notes.outputs.notes }}
           releaseDraft: true
           prerelease: false
