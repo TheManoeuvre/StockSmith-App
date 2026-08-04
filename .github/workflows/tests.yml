@@ -117,8 +117,25 @@ jobs:
         with:
           workspaces: frontend/src-tauri
 
+      # tauri-build validates that every externalBin in tauri.conf.json exists, and fails
+      # the build script if one doesn't — so `cargo test` cannot run on a clean checkout
+      # without the PyInstaller sidecar, which takes minutes to produce and is gitignored.
+      #
+      # A stub satisfies the existence check. That is honest for this job: it tests the
+      # shell's Rust logic, never launches the app, and never reads this file. Real
+      # packaging is validated by release.yml, which builds the sidecar properly.
+      #
+      # This is also why the tests passed locally but not here — a developer who has ever
+      # built the app has the real binary sitting in that directory.
+      - name: Stub the sidecar binary
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path binaries | Out-Null
+          Set-Content -Path binaries/stocksmith-backend-x86_64-pc-windows-msvc.exe -Value 'stub'
+        working-directory: frontend/src-tauri
+
       # --lib only: there is no binary to test, and building the full app would pull in the
-      # frontend bundle and the sidecar binary, neither of which this job produces.
+      # frontend bundle and a real sidecar, neither of which this job produces.
       - name: Run Rust tests
         run: cargo test --lib
         working-directory: frontend/src-tauri
