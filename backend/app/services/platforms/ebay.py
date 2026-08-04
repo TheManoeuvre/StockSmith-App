@@ -221,6 +221,20 @@ _PAGE_LIMIT = 200  # eBay's documented max page size for getOrders
 _INVENTORY_PAGE_LIMIT = 100
 _MAX_RATE_LIMIT_RETRIES = 3
 
+# eBay answers a transient fault on its own side with a 5xx and errorId 25001
+# ("A system error has occurred. Dependent service failure") — confirmed live on
+# bulkMigrateListing. It is not a rejection of the request, so failing hard on the first
+# one leaves the user to notice an alarming raw-JSON error and re-click the button
+# themselves. Retried on a smaller budget than 429: a rate limit clears on a schedule and
+# is worth waiting out, whereas a 5xx that survives two retries is more likely a real
+# outage than a hiccup, and every retry here is spent inside a user-facing click.
+#
+# Safe for every call this adapter makes: the reads are idempotent by nature, and the two
+# writes are idempotent by design — migrate_listing treats an "already migrated"
+# rejection as success (see its docstring) and bulk_update_price_quantity sets an
+# absolute quantity rather than adjusting by a delta.
+_MAX_SERVER_ERROR_RETRIES = 2
+
 # Most eBay calls answer well inside this. Kept deliberately tight so a hung request
 # surfaces quickly rather than blocking a user-facing action for a minute.
 _DEFAULT_TIMEOUT = 15.0
@@ -401,7 +415,7 @@ class EbayAdapter:
         self, session, connection: PlatformConnection, method: str, url: str, **kwargs
     ) -> httpx.Response:
         """Mirrors EtsyAdapter._authed_request — proactive refresh near expiry, reactive
-        refresh once on a 401, then the same 429 backoff/retry loop.
+        refresh once on a 401, then a backoff/retry loop covering both 429 and 5xx.
 
         Network-level failures are translated into PlatformSyncError rather than being
         allowed to escape as raw httpx exceptions: every caller already handles
@@ -409,7 +423,12 @@ class EbayAdapter:
         propagates all the way out as an opaque "Internal server error" (confirmed live
         — that is exactly how a slow bulkMigrateListing surfaced). Callers that need
         operation-specific wording catch httpx.TimeoutException themselves before this
-        can reach them."""
+        can reach them.
+
+        A 5xx that outlives its retry budget is deliberately returned, not raised: every
+        caller already fails on a non-200 with wording specific to the operation
+        ("Failed to migrate eBay listing: 500 …"), which is more use to the user than a
+        generic transport error raised from here."""
         await self._ensure_fresh(session, connection)
 
         try:
@@ -418,13 +437,30 @@ class EbayAdapter:
                 await self._do_refresh(session, connection)
                 response = await self._request_once(connection, method, url, **kwargs)
 
-            attempt = 0
-            while response.status_code == 429 and attempt < _MAX_RATE_LIMIT_RETRIES:
-                delay = self._rate_limit_delay(response, attempt)
-                logger.warning("eBay API rate limited on %s %s (retry %d/%d in %.1fs)", method, url, attempt + 1, _MAX_RATE_LIMIT_RETRIES, delay)
+            # Separate budgets, so a call that hits a rate limit and then a server error
+            # doesn't find one exhausted by the other — they're unrelated faults.
+            rate_limit_attempts = 0
+            server_error_attempts = 0
+            while True:
+                if response.status_code == 429 and rate_limit_attempts < _MAX_RATE_LIMIT_RETRIES:
+                    delay = self._retry_delay(response, rate_limit_attempts)
+                    logger.warning(
+                        "eBay API rate limited on %s %s (retry %d/%d in %.1fs)",
+                        method, url, rate_limit_attempts + 1, _MAX_RATE_LIMIT_RETRIES, delay,
+                    )
+                    rate_limit_attempts += 1
+                elif response.status_code >= 500 and server_error_attempts < _MAX_SERVER_ERROR_RETRIES:
+                    delay = self._retry_delay(response, server_error_attempts)
+                    logger.warning(
+                        "eBay API server error %d on %s %s (retry %d/%d in %.1fs)",
+                        response.status_code, method, url, server_error_attempts + 1,
+                        _MAX_SERVER_ERROR_RETRIES, delay,
+                    )
+                    server_error_attempts += 1
+                else:
+                    break
                 await asyncio.sleep(delay)
                 response = await self._request_once(connection, method, url, **kwargs)
-                attempt += 1
         except httpx.TimeoutException as e:
             raise EbayTimeout(f"eBay did not respond in time for {method} {url}") from e
         except httpx.HTTPError as e:
@@ -435,7 +471,10 @@ class EbayAdapter:
         return response
 
     @staticmethod
-    def _rate_limit_delay(response: httpx.Response, attempt: int) -> float:
+    def _retry_delay(response: httpx.Response, attempt: int) -> float:
+        """Backoff for both the 429 and 5xx retry paths. eBay sends Retry-After on rate
+        limits and generally not on server errors, so a 5xx falls through to the
+        exponential 1s/2s/… below — which is the intent either way."""
         retry_after = response.headers.get("retry-after")
         if retry_after is not None:
             try:
@@ -766,9 +805,13 @@ class EbayAdapter:
         # Without a live account to confirm whether a bulk offer-listing endpoint
         # exists, this treats "has an inventory item at all" as "active" — a coarser
         # signal than Etsy's real listing state, to revisit once verified.
+        # `title` stays None when absent rather than "" — getInventoryItems (plural) is
+        # known to omit the whole `product` container for some items that
+        # getInventoryItem (singular) returns in full, and "" would defeat the UI's
+        # `?? "—"` placeholder and render as a blank cell.
         index[sku] = ExternalListingRef(
             external_listing_id=sku,
-            title=product.get("title") or "",
+            title=product.get("title"),
             sku=sku,
             state="active",
             quantity=int(availability.get("quantity", 0)),
@@ -931,31 +974,52 @@ class EbayAdapter:
         self, session, connection: PlatformConnection, call_name: str, xml_body: str,
         timeout: float = _DEFAULT_TIMEOUT,
     ) -> httpx.Response:
-        """Mirrors _authed_request's proactive-refresh, reactive-401-refresh and 429
-        backoff behaviour for the Trading API's XML surface. The transport differs on
-        every other axis though: a different auth header (see _trading_headers), a raw
+        """Mirrors _authed_request's proactive-refresh, reactive-401-refresh and
+        429/5xx backoff behaviour for the Trading API's XML surface. The transport differs
+        on every other axis though: a different auth header (see _trading_headers), a raw
         XML string body instead of `json=`, failure reported in the body rather than the
         status (see _raise_for_trading_ack), and a per-seller SITEID resolved once per
-        adapter."""
+        adapter.
+
+        The 5xx retries do consume the Trading API's tight 5,000/day budget, unlike the
+        Inventory API's — but only on a call that already failed, and capped at
+        _MAX_SERVER_ERROR_RETRIES, so the worst case is a handful of extra calls on a day
+        eBay is already unhealthy."""
         site_id = await self._resolve_site_id(session, connection)
         try:
             response = await self._trading_request_once(session, connection, call_name, xml_body, site_id, timeout)
 
-            attempt = 0
-            while response.status_code == 429 and attempt < _MAX_RATE_LIMIT_RETRIES:
-                delay = self._rate_limit_delay(response, attempt)
-                logger.warning(
-                    "eBay Trading API rate limited on %s (retry %d/%d in %.1fs)",
-                    call_name,
-                    attempt + 1,
-                    _MAX_RATE_LIMIT_RETRIES,
-                    delay,
-                )
+            # Separate budgets — see _authed_request for why.
+            rate_limit_attempts = 0
+            server_error_attempts = 0
+            while True:
+                if response.status_code == 429 and rate_limit_attempts < _MAX_RATE_LIMIT_RETRIES:
+                    delay = self._retry_delay(response, rate_limit_attempts)
+                    logger.warning(
+                        "eBay Trading API rate limited on %s (retry %d/%d in %.1fs)",
+                        call_name,
+                        rate_limit_attempts + 1,
+                        _MAX_RATE_LIMIT_RETRIES,
+                        delay,
+                    )
+                    rate_limit_attempts += 1
+                elif response.status_code >= 500 and server_error_attempts < _MAX_SERVER_ERROR_RETRIES:
+                    delay = self._retry_delay(response, server_error_attempts)
+                    logger.warning(
+                        "eBay Trading API server error %d on %s (retry %d/%d in %.1fs)",
+                        response.status_code,
+                        call_name,
+                        server_error_attempts + 1,
+                        _MAX_SERVER_ERROR_RETRIES,
+                        delay,
+                    )
+                    server_error_attempts += 1
+                else:
+                    break
                 await asyncio.sleep(delay)
                 response = await self._trading_request_once(
                     session, connection, call_name, xml_body, site_id, timeout
                 )
-                attempt += 1
         except httpx.TimeoutException as e:
             # Same rationale as _authed_request's: an escaping httpx exception becomes an
             # opaque 500 with no guidance, and revise_listing_skus needs to catch this

@@ -342,6 +342,111 @@ async def test_trading_429_retries_then_raises(fake_http, monkeypatch):
     assert len(fake_http.requests) == 4  # initial + 3 retries
 
 
+# --- Transient 5xx -------------------------------------------------------------------
+#
+# Live failure: bulkMigrateListing answered 500 with errorId 25001 ("A system error has
+# occurred. Dependent service failure") — eBay's own label for a transient fault on their
+# side, not a rejection. It failed hard on the first one, leaving the user staring at raw
+# JSON with no indication that simply re-clicking would work.
+
+_MIGRATE_5XX_BODY = {
+    "responses": [
+        {
+            "statusCode": 500,
+            "listingId": "226089819291",
+            "marketplaceId": "EBAY_GB",
+            "errors": [
+                {
+                    "errorId": 25001,
+                    "domain": "API_INVENTORY",
+                    "category": "REQUEST",
+                    "message": "A system error has occurred. Dependent service failure",
+                }
+            ],
+        }
+    ]
+}
+
+
+@pytest.fixture
+def no_sleep(monkeypatch):
+    async def _no_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(ebay_module.asyncio, "sleep", _no_sleep)
+
+
+async def test_transient_5xx_is_retried_and_can_succeed(fake_http, no_sleep):
+    """The whole point: a 25001 that clears on retry must never reach the user."""
+    fake_http.queue = [
+        _json(_MIGRATE_5XX_BODY, status_code=500),
+        _json(
+            {"responses": [{"statusCode": 200, "listingId": "226089819291",
+                            "inventoryItems": [{"sku": "SKU-0031-45-DEGREES"}]}]}
+        ),
+    ]
+
+    result = await _adapter().migrate_listing(None, _connection(), "226089819291")
+
+    assert result.inventory_item_skus == ["SKU-0031-45-DEGREES"]
+    assert len(fake_http.requests) == 2  # initial + 1 retry
+
+
+async def test_5xx_retry_budget_is_bounded(fake_http, no_sleep):
+    """A persistent outage must not retry forever, and once the budget is spent the
+    caller's own operation-specific message is what surfaces — not a generic transport
+    error raised from _authed_request."""
+    fake_http.queue = [_json(_MIGRATE_5XX_BODY, status_code=500) for _ in range(4)]
+
+    with pytest.raises(PlatformSyncError) as exc:
+        await _adapter().migrate_listing(None, _connection(), "226089819291")
+
+    assert len(fake_http.requests) == 3  # initial + _MAX_SERVER_ERROR_RETRIES (2)
+    assert "Failed to migrate eBay listing: 500" in str(exc.value)
+
+
+async def test_4xx_is_not_retried(fake_http, no_sleep):
+    """A 400 is a rejection of the request — retrying it is pure waste and would delay
+    a real error reaching the user."""
+    fake_http.queue = [_json({"errors": [{"message": "bad request"}]}, status_code=400)]
+
+    with pytest.raises(PlatformSyncError):
+        await _adapter().migrate_listing(None, _connection(), "226089819291")
+
+    assert len(fake_http.requests) == 1
+
+
+async def test_rate_limit_and_server_error_budgets_are_independent(fake_http, no_sleep):
+    """A call unlucky enough to hit both must not find one budget consumed by the other."""
+    fake_http.queue = [
+        httpx.Response(429, text=""),
+        _json(_MIGRATE_5XX_BODY, status_code=500),
+        httpx.Response(429, text=""),
+        _json(
+            {"responses": [{"statusCode": 200, "listingId": "1", "inventoryItems": [{"sku": "S"}]}]}
+        ),
+    ]
+
+    result = await _adapter().migrate_listing(None, _connection(), "1")
+
+    assert result.inventory_item_skus == ["S"]
+    assert len(fake_http.requests) == 4
+
+
+async def test_trading_5xx_is_retried(fake_http, no_sleep):
+    """The Trading API's XML surface has the same fault mode and its own retry loop."""
+    fake_http.queue = [
+        _xml("<html>502 Bad Gateway</html>", status_code=502),
+        _xml(_active_list(_ITEM.format(item_id="1", title="One"))),
+        _json({"inventoryItems": [], "total": 0}),  # build_listing_sku_index
+    ]
+
+    candidates = await _adapter().fetch_classic_listings(None, _connection())
+
+    assert [c.external_listing_id for c in candidates] == ["1"]
+    assert len(fake_http.requests) == 3  # failed call + retry + index build
+
+
 # --- Timeouts ------------------------------------------------------------------------
 #
 # Live failure on a 4-variation listing: bulkMigrateListing blew through the blanket 15s

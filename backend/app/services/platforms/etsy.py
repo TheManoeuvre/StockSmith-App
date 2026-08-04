@@ -952,7 +952,7 @@ class EtsyAdapter:
     @staticmethod
     def _index_listing_skus(listing: dict, index: dict[str, ExternalListingRef]) -> None:
         listing_id = str(listing.get("listing_id"))
-        title = listing.get("title") or ""
+        title = listing.get("title") or None
         state = listing.get("state") or "unknown"
         inventory = listing.get("inventory") or {}
         for product in inventory.get("products", []):

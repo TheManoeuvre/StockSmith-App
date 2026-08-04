@@ -243,7 +243,7 @@ async def _push_one(session: AsyncSession, listing: Listing, qty: int) -> None:
     sku = await _resolve_sku(session, listing)
     listing_ref = ExternalListingRef(
         external_listing_id=listing.external_listing_id,
-        title=listing.external_title or "",
+        title=listing.external_title,
         sku=sku,
         state=listing.external_state or "unknown",
         quantity=listing.external_quantity or 0,

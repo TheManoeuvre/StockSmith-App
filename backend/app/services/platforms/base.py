@@ -116,7 +116,11 @@ class ExternalOrder:
 @dataclass
 class ExternalListingRef:
     external_listing_id: str
-    title: str
+    # None when the marketplace didn't return a title — deliberately NOT coerced to "".
+    # eBay's getInventoryItems (plural) is known to omit the whole `product` container for
+    # some items that getInventoryItem (singular) returns in full, and an empty string
+    # would sail past the UI's `?? "—"` placeholder and render as a blank cell.
+    title: str | None
     sku: str | None
     state: str
     quantity: int
