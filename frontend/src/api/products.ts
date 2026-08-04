@@ -3,6 +3,8 @@ import type {
   BomLine,
   BomLineRead,
   Build,
+  BulkBomAmendRequest,
+  BulkBomAmendResult,
   BundleItem,
   BundleItemRead,
   KittingBomLine,
@@ -56,6 +58,9 @@ export const productsApi = {
     api.post<Variant>(`/products/${id}/variants`, input),
   generateVariants: (id: number, attributes: VariantAttributeSpec[]) =>
     api.post<Variant[]>(`/products/${id}/variants/generate`, { attributes }),
+  // Defaults to a preview server-side — pass apply: true only after the user has seen it.
+  amendVariantBomOverrides: (id: number, payload: BulkBomAmendRequest) =>
+    api.post<BulkBomAmendResult>(`/products/${id}/variants/bom-overrides/amend`, payload),
   listBuilds: (id: number) => api.get<Build[]>(`/products/${id}/builds`),
   listStockAdjustments: (id: number) => api.get<StockAdjustment[]>(`/products/${id}/stock-adjustments`),
   listStockHistory: (id: number) => api.get<ProductStockEvent[]>(`/products/${id}/stock-history`),

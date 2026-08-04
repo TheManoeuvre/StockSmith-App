@@ -221,6 +221,45 @@ _PAGE_LIMIT = 200  # eBay's documented max page size for getOrders
 _INVENTORY_PAGE_LIMIT = 100
 _MAX_RATE_LIMIT_RETRIES = 3
 
+# eBay answers a transient fault on its own side with a 5xx and errorId 25001
+# ("A system error has occurred. Dependent service failure") — confirmed live on
+# bulkMigrateListing. It is not a rejection of the request, so failing hard on the first
+# one leaves the user to notice an alarming raw-JSON error and re-click the button
+# themselves. Retried on a smaller budget than 429: a rate limit clears on a schedule and
+# is worth waiting out, whereas a 5xx that survives two retries is more likely a real
+# outage than a hiccup, and every retry here is spent inside a user-facing click.
+#
+# Safe for every call this adapter makes: the reads are idempotent by nature, and the two
+# writes are idempotent by design — migrate_listing treats an "already migrated"
+# rejection as success (see its docstring) and bulk_update_price_quantity sets an
+# absolute quantity rather than adjusting by a delta.
+_MAX_SERVER_ERROR_RETRIES = 2
+
+# Concurrency for the getOffers fan-out in _enrich_with_offers.
+#
+# Deliberately NOT listing_push._MAX_CONCURRENT_PUSHES (3): that cap exists because each
+# push opens its OWN database session and holds it across in-place retries, which
+# exhausted the SQLAlchemy pool. These tasks share the caller's single session and do no
+# database I/O in the fan-out, so the pool isn't the constraint here. What this bounds is
+# eBay's short-window rate limit and the socket burst; the Inventory API's daily budget is
+# not a factor. What it trades against is wall-clock latency on a user-facing click.
+_MAX_CONCURRENT_OFFER_LOOKUPS = 8
+
+# eBay's ListingStatusEnum, as it appears on offer.listing.listingStatus.
+#
+# OUT_OF_STOCK maps to "active" on purpose. It's a live GTC listing sitting at quantity 0
+# — eBay's Out-of-Stock Control keeps such a listing alive (hidden from search) for up to
+# 90 days — and it's frequently 0 because StockSmith itself pushed 0. Mapping it anywhere
+# else would make listing_sync._status_from_match report listing_not_active for every
+# legitimately sold-out item, i.e. flag this app's own correct behaviour as a sync
+# failure. The quantity column already says 0.
+_EBAY_LISTING_STATES = {
+    "ACTIVE": "active",
+    "OUT_OF_STOCK": "active",
+    "INACTIVE": "inactive",
+    "ENDED": "ended",
+}
+
 # Most eBay calls answer well inside this. Kept deliberately tight so a hung request
 # surfaces quickly rather than blocking a user-facing action for a minute.
 _DEFAULT_TIMEOUT = 15.0
@@ -324,6 +363,16 @@ class EbayAdapter:
         # (services/platforms/__init__.py), so this costs one extra GetUser call per
         # process, not per request. A seller's registration site doesn't change.
         self._site_id: str | None = None
+        # Serialises token refresh. Every other eBay call in this file is sequential, but
+        # _enrich_with_offers fans out concurrently on one AsyncSession — and _do_refresh
+        # commits on that session, which is NOT concurrency-safe. Without this, a token
+        # expiring mid-fan-out means several tasks refreshing at once: redundant refresh
+        # POSTs, racing commits, and a last-writer-wins token.
+        #
+        # Safe to build here even though adapters are constructed outside a running loop
+        # (the registry caches them): since 3.10 asyncio.Lock no longer binds an event
+        # loop at construction time.
+        self._refresh_lock = asyncio.Lock()
 
     @property
     def _basic_auth_header(self) -> str:
@@ -401,7 +450,7 @@ class EbayAdapter:
         self, session, connection: PlatformConnection, method: str, url: str, **kwargs
     ) -> httpx.Response:
         """Mirrors EtsyAdapter._authed_request — proactive refresh near expiry, reactive
-        refresh once on a 401, then the same 429 backoff/retry loop.
+        refresh once on a 401, then a backoff/retry loop covering both 429 and 5xx.
 
         Network-level failures are translated into PlatformSyncError rather than being
         allowed to escape as raw httpx exceptions: every caller already handles
@@ -409,7 +458,12 @@ class EbayAdapter:
         propagates all the way out as an opaque "Internal server error" (confirmed live
         — that is exactly how a slow bulkMigrateListing surfaced). Callers that need
         operation-specific wording catch httpx.TimeoutException themselves before this
-        can reach them."""
+        can reach them.
+
+        A 5xx that outlives its retry budget is deliberately returned, not raised: every
+        caller already fails on a non-200 with wording specific to the operation
+        ("Failed to migrate eBay listing: 500 …"), which is more use to the user than a
+        generic transport error raised from here."""
         await self._ensure_fresh(session, connection)
 
         try:
@@ -418,13 +472,30 @@ class EbayAdapter:
                 await self._do_refresh(session, connection)
                 response = await self._request_once(connection, method, url, **kwargs)
 
-            attempt = 0
-            while response.status_code == 429 and attempt < _MAX_RATE_LIMIT_RETRIES:
-                delay = self._rate_limit_delay(response, attempt)
-                logger.warning("eBay API rate limited on %s %s (retry %d/%d in %.1fs)", method, url, attempt + 1, _MAX_RATE_LIMIT_RETRIES, delay)
+            # Separate budgets, so a call that hits a rate limit and then a server error
+            # doesn't find one exhausted by the other — they're unrelated faults.
+            rate_limit_attempts = 0
+            server_error_attempts = 0
+            while True:
+                if response.status_code == 429 and rate_limit_attempts < _MAX_RATE_LIMIT_RETRIES:
+                    delay = self._retry_delay(response, rate_limit_attempts)
+                    logger.warning(
+                        "eBay API rate limited on %s %s (retry %d/%d in %.1fs)",
+                        method, url, rate_limit_attempts + 1, _MAX_RATE_LIMIT_RETRIES, delay,
+                    )
+                    rate_limit_attempts += 1
+                elif response.status_code >= 500 and server_error_attempts < _MAX_SERVER_ERROR_RETRIES:
+                    delay = self._retry_delay(response, server_error_attempts)
+                    logger.warning(
+                        "eBay API server error %d on %s %s (retry %d/%d in %.1fs)",
+                        response.status_code, method, url, server_error_attempts + 1,
+                        _MAX_SERVER_ERROR_RETRIES, delay,
+                    )
+                    server_error_attempts += 1
+                else:
+                    break
                 await asyncio.sleep(delay)
                 response = await self._request_once(connection, method, url, **kwargs)
-                attempt += 1
         except httpx.TimeoutException as e:
             raise EbayTimeout(f"eBay did not respond in time for {method} {url}") from e
         except httpx.HTTPError as e:
@@ -435,7 +506,10 @@ class EbayAdapter:
         return response
 
     @staticmethod
-    def _rate_limit_delay(response: httpx.Response, attempt: int) -> float:
+    def _retry_delay(response: httpx.Response, attempt: int) -> float:
+        """Backoff for both the 429 and 5xx retry paths. eBay sends Retry-After on rate
+        limits and generally not on server errors, so a 5xx falls through to the
+        exponential 1s/2s/… below — which is the intent either way."""
         retry_after = response.headers.get("retry-after")
         if retry_after is not None:
             try:
@@ -459,6 +533,22 @@ class EbayAdapter:
             await self._do_refresh(session, connection)
 
     async def _do_refresh(self, session, connection: PlatformConnection) -> None:
+        """Refreshes the access token, at most once across concurrent callers.
+
+        Deduplicated on the token's identity rather than its expiry, because this is
+        called from two places that disagree about expiry: _ensure_fresh (the token is
+        past its clock expiry) and the 401 handler (eBay rejected a token that still
+        looks valid to us). Checking expiry under the lock would correctly skip the
+        redundant proactive refresh but would also skip the reactive one, leaving the 401
+        unrecoverable. "Did somebody else already replace the token I was unhappy with?"
+        is the right question for both."""
+        token_before = connection.access_token
+        async with self._refresh_lock:
+            if connection.access_token != token_before:
+                return  # another task refreshed while we waited — that refresh is ours too
+            await self._refresh_now(session, connection)
+
+    async def _refresh_now(self, session, connection: PlatformConnection) -> None:
         if connection.refresh_token is None:
             raise PlatformAuthError("eBay connection has no refresh token — reconnect required")
         tokens = await self.refresh(connection.refresh_token)
@@ -702,10 +792,15 @@ class EbayAdapter:
                 f"eBay rejected the quantity update for SKU '{sku}': {status_code} {matched.get('errors')}"
             )
 
-    async def _resolve_offer_ids(self, session, connection: PlatformConnection, sku: str) -> list[str]:
-        """GET .../offer?sku=... — a 404 here means no live offer exists for this SKU
-        (see push_listing_quantity's docstring), not an error; any other non-200 is a
-        real failure since it would silently leave the offer-level quantity stale."""
+    async def _fetch_offers(self, session, connection: PlatformConnection, sku: str) -> list[dict]:
+        """GET .../offer?sku=... — the raw offer objects for one SKU.
+
+        `sku` is a REQUIRED query parameter on getOffers and there is no bulk-offers
+        endpoint (verified against eBay's docs), so anything needing offer data for many
+        SKUs is unavoidably one call each — see _enrich_with_offers for how that's bounded.
+
+        A 404 means no offer exists for this SKU (see push_listing_quantity's docstring),
+        not an error; any other non-200 is a real failure."""
         response = await self._authed_request(
             session, connection, "GET", f"{self.api_base}/sell/inventory/v1/offer", params={"sku": sku}
         )
@@ -713,16 +808,37 @@ class EbayAdapter:
             return []
         if response.status_code != 200:
             raise PlatformSyncError(f"Failed to look up eBay offers for SKU '{sku}': {response.status_code} {response.text}")
-        return [o["offerId"] for o in response.json().get("offers", []) if o.get("offerId")]
+        return response.json().get("offers", [])
+
+    async def _resolve_offer_ids(self, session, connection: PlatformConnection, sku: str) -> list[str]:
+        """Offer ids for a SKU — the push path's view of _fetch_offers. A 404 yields an
+        empty list rather than raising, since the item-level quantity update alone is
+        still valid for a SKU with no live offer."""
+        return [o["offerId"] for o in await self._fetch_offers(session, connection, sku) if o.get("offerId")]
 
     async def build_listing_sku_index(
-        self, session, connection: PlatformConnection
+        self,
+        session,
+        connection: PlatformConnection,
+        *,
+        enrich: bool = True,
+        enrich_skus: set[str] | None = None,
     ) -> dict[str, ExternalListingRef]:
         """Sell Inventory API getInventoryItems, paginated — unlike Etsy, eBay's
-        Inventory API is SKU-keyed natively (a per-SKU getOffers/{sku} lookup exists
-        too), but this builds the same bulk dict-of-SKU shape as EtsyAdapter's version
-        so the shared listing_sync service and its UI need no special-casing. A
-        per-SKU lookup path is a possible future optimization, not required today.
+        Inventory API is SKU-keyed natively, but this builds the same bulk dict-of-SKU
+        shape as EtsyAdapter's version so the shared listing_sync service and its UI need
+        no special-casing.
+
+        getInventoryItems alone can't fill an ExternalListingRef: it carries no listing id
+        and no listing state (those live on the associated Offer), so `enrich` runs a
+        second pass over getOffers to populate state and variation properly. See
+        _enrich_with_offers for the cost and how it's bounded.
+
+        `enrich`/`enrich_skus` are FIDELITY HINTS, NOT FILTERS. The returned index always
+        contains every SKU eBay reports, whatever they're set to — only how much detail a
+        given entry carries varies. That's load-bearing: two callers use this purely for
+        `sku in index` membership tests and would silently start missing SKUs if these
+        narrowed the index itself.
 
         A SKU absent from this index most often means the listing it belongs to was
         created via eBay's Seller Hub UI (or the legacy Trading API) and was never
@@ -734,6 +850,7 @@ class EbayAdapter:
         context."""
         params: dict[str, str | int] = {"limit": _INVENTORY_PAGE_LIMIT, "offset": 0}
         index: dict[str, ExternalListingRef] = {}
+        aspects_by_sku: dict[str, dict[str, list[str]]] = {}
 
         for _ in range(_MAX_PAGES):
             response = await self._authed_request(
@@ -745,35 +862,211 @@ class EbayAdapter:
             body = response.json()
             results = body.get("inventoryItems", [])
             for item in results:
-                self._index_inventory_item(item, index)
+                self._index_inventory_item(item, index, aspects_by_sku)
 
             total = body.get("total", len(results))
             params["offset"] = int(params["offset"]) + len(results)
             if not results or int(params["offset"]) >= total:
                 break
 
+        if enrich:
+            targets = set(index) if enrich_skus is None else set(index) & enrich_skus
+            await self._enrich_with_offers(session, connection, index, aspects_by_sku, targets)
+
         return index
 
+    async def _enrich_with_offers(
+        self,
+        session,
+        connection: PlatformConnection,
+        index: dict[str, ExternalListingRef],
+        aspects_by_sku: dict[str, dict[str, list[str]]],
+        targets: set[str],
+    ) -> None:
+        """Fills in real listing id, listing state and variation from each SKU's Offer.
+
+        One getOffers call per SKU — eBay requires `sku` on that endpoint and offers no
+        bulk equivalent — so callers scope `targets` to the SKUs StockSmith actually
+        tracks. A seller with 2,000 eBay SKUs and 80 in StockSmith pays 80 calls, not
+        2,000.
+
+        Never raises. A failure here degrades an entry's detail; it must not fail the
+        whole index and repaint a catalogue as out-of-sync because one call timed out.
+        """
+        if not targets:
+            return
+
+        # Refresh once up front so the common case never contends on the refresh lock —
+        # correctness doesn't depend on this (see _do_refresh), only latency does.
+        await self._ensure_fresh(session, connection)
+
+        semaphore = asyncio.Semaphore(_MAX_CONCURRENT_OFFER_LOOKUPS)
+
+        async def _one(sku: str) -> tuple[str, list[dict]]:
+            async with semaphore:
+                return sku, await self._fetch_offers(session, connection, sku)
+
+        results = await asyncio.gather(*(_one(sku) for sku in sorted(targets)), return_exceptions=True)
+
+        offers_by_sku: dict[str, list[dict]] = {}
+        for result in results:
+            if isinstance(result, BaseException):
+                # Deliberately leaves the pass-1 ref untouched (state stays "active", i.e.
+                # "an inventory item exists"). Downgrading on a transport failure would let
+                # one flaky moment mark the whole catalogue as not-live; only a definitive
+                # 404 (an empty offer list, handled below) is treated as real information.
+                logger.warning("eBay offer lookup failed during index enrichment: %s", result)
+                continue
+            sku, offers = result
+            offers_by_sku[sku] = offers
+
+        # Group by listing so variation can be narrowed to the aspects that actually vary
+        # within a listing — see _varying_aspects.
+        skus_by_listing: dict[str, list[str]] = {}
+        for sku, offers in offers_by_sku.items():
+            offer = self._select_offer(offers)
+            listing_id = str((offer or {}).get("listing", {}).get("listingId") or "") or None
+            if listing_id is not None:
+                skus_by_listing.setdefault(listing_id, []).append(sku)
+
+        varying_by_sku = self._varying_aspects(skus_by_listing, aspects_by_sku)
+
+        for sku, offers in offers_by_sku.items():
+            ref = index.get(sku)
+            if ref is None:
+                continue
+            offer = self._select_offer(offers)
+            if offer is None:
+                # An inventory item with no offer is real information, not a failure: the
+                # SKU exists on eBay but nothing is listed for sale. Surfaces downstream
+                # as listing_not_active, which is strictly truer than the old hardcoded
+                # "active".
+                ref.state = "no_offer"
+                continue
+            # Deliberately NOT writing the real listingId onto ref.external_listing_id
+            # yet, though it's right here: for eBay that field holding the SKU is a
+            # documented invariant with a second writer (listing_adoption.apply_adoption
+            # mirrors it, and docs/listing-adoption.md states it as a safety property).
+            # Flipping it is a separate change so it stays revertible on its own.
+            ref.state = self._offer_state(offer)
+            ref.variation = self._format_variation(varying_by_sku.get(sku, {}))
+
     @staticmethod
-    def _index_inventory_item(item: dict, index: dict[str, ExternalListingRef]) -> None:
+    def _index_inventory_item(
+        item: dict,
+        index: dict[str, ExternalListingRef],
+        aspects_by_sku: dict[str, dict[str, list[str]]] | None = None,
+    ) -> None:
         sku = item.get("sku")
         if not sku:
             return
         product = item.get("product") or {}
         availability = (item.get("availability") or {}).get("shipToLocationAvailability") or {}
-        # eBay's inventory item alone doesn't carry a listing_id/state the way an Etsy
-        # listing does — those live on the associated Offer (a separate per-SKU call).
-        # Without a live account to confirm whether a bulk offer-listing endpoint
-        # exists, this treats "has an inventory item at all" as "active" — a coarser
-        # signal than Etsy's real listing state, to revisit once verified.
+        # An inventory item carries no listing id and no listing state — those live on the
+        # associated Offer. This pass therefore sets the coarse "an inventory item exists"
+        # placeholder of "active", which _enrich_with_offers replaces with the real state.
+        # It's also what an entry keeps when enrichment is skipped or its lookup fails.
+        #
+        # `title` stays None when absent rather than "" — getInventoryItems (plural) is
+        # known to omit the whole `product` container for some items that
+        # getInventoryItem (singular) returns in full, and "" would defeat the UI's
+        # `?? "—"` placeholder and render as a blank cell.
         index[sku] = ExternalListingRef(
             external_listing_id=sku,
-            title=product.get("title") or "",
+            title=product.get("title"),
             sku=sku,
             state="active",
             quantity=int(availability.get("quantity", 0)),
             variation=None,
         )
+        # Recorded even when empty: an item present in the response with no aspects is
+        # different from one whose lookup never happened, and _varying_aspects needs the
+        # whole listing group to tell which aspects actually vary.
+        if aspects_by_sku is not None:
+            aspects_by_sku[sku] = product.get("aspects") or {}
+
+    @staticmethod
+    def _select_offer(offers: list[dict]) -> dict | None:
+        """Which offer represents the listing, when a SKU has several (a SKU can carry an
+        auction and a fixed-price offer at once).
+
+        Prefers a published offer that actually produced a listing, then any published
+        one, then whatever exists — so a live listing is never passed over in favour of an
+        unpublished draft."""
+        if not offers:
+            return None
+        published = [o for o in offers if str(o.get("status", "")).upper() == "PUBLISHED"]
+        with_listing = [o for o in published if (o.get("listing") or {}).get("listingId")]
+        return (with_listing or published or offers)[0]
+
+    @staticmethod
+    def _offer_state(offer: dict) -> str:
+        """Maps an offer to the same vocabulary EtsyAdapter uses for `state`, which
+        listing_sync._status_from_match compares against "active"."""
+        if str(offer.get("status", "")).upper() != "PUBLISHED":
+            return "unpublished"
+        listing_status = str((offer.get("listing") or {}).get("listingStatus", "")).upper()
+        if not listing_status:
+            return "active"  # published, but no listing container — trust `status`
+        # Unknown values pass through lowercased rather than being forced to a known one:
+        # eBay can add enum members, and inventing "active" for something unrecognised
+        # would claim a listing is live on no evidence.
+        return _EBAY_LISTING_STATES.get(listing_status, listing_status.lower())
+
+    @staticmethod
+    def _format_variation(aspects: dict[str, list[str]]) -> str | None:
+        """Renders eBay aspects in the exact shape EtsyAdapter._format_variation produces
+        ("Size: Large, Colour: Caramel"). The `variation` column is cross-platform and
+        shown in one shared table, so the two must not drift.
+
+        eBay's own aspect order is preserved rather than sorted — it matches how the
+        listing itself reads, and sorting would reorder "Size, Colour" into "Colour, Size".
+        """
+        parts = [f"{name}: {', '.join(values)}" for name, values in aspects.items() if name and values]
+        return ", ".join(parts) if parts else None
+
+    @staticmethod
+    def _varying_aspects(
+        skus_by_listing: dict[str, list[str]], aspects_by_sku: dict[str, dict[str, list[str]]]
+    ) -> dict[str, dict[str, list[str]]]:
+        """Narrows each SKU's aspects to the ones that actually differ across the SKUs
+        sharing its listing.
+
+        An inventory item's aspects can carry common item specifics (Brand, Material)
+        alongside the varying ones, and rendering "Brand: Acme" in a variation column
+        would be wrong. eBay's authoritative answer lives on the inventory item group
+        (variesBy.specifications), which is unreachable here: getInventoryItemGroup needs
+        a group key that getInventoryItems doesn't return, and there's no list-groups
+        endpoint. Deriving it degrades correctly either way — if eBay already returned
+        only the varying aspects this is a no-op, and if it returned common ones too they
+        get stripped.
+
+        A single-SKU listing yields {} (hence no variation), matching Etsy, where a
+        listing with one product and no property values gives variation=None.
+
+        Caveat: when the caller scopes enrichment to a subset of SKUs, a listing group can
+        be incomplete, so an aspect that varies only against an untracked sibling looks
+        constant and is dropped. For a product whose variants are all tracked — the normal
+        case — the group is complete.
+        """
+        varying: dict[str, dict[str, list[str]]] = {}
+        for skus in skus_by_listing.values():
+            if len(skus) < 2:
+                for sku in skus:
+                    varying[sku] = {}
+                continue
+            names = {name for sku in skus for name in aspects_by_sku.get(sku, {})}
+            differing = {
+                name
+                for name in names
+                # Compared as tuples so a multi-valued aspect is handled, and a SKU missing
+                # the aspect entirely counts as a difference rather than being ignored.
+                if len({tuple(aspects_by_sku.get(sku, {}).get(name, [])) for sku in skus}) > 1
+            }
+            for sku in skus:
+                aspects = aspects_by_sku.get(sku, {})
+                varying[sku] = {name: values for name, values in aspects.items() if name in differing}
+        return varying
 
     async def fetch_classic_listings(
         self, session, connection: PlatformConnection
@@ -832,7 +1125,9 @@ class EbayAdapter:
                 break
             page += 1
 
-        migrated_index = await self.build_listing_sku_index(session, connection)
+        # enrich=False: this index is used purely for `sku in migrated_index` membership
+        # tests below, so per-SKU offer lookups would be pure waste on a user-facing picker.
+        migrated_index = await self.build_listing_sku_index(session, connection, enrich=False)
         for candidate in candidates:
             candidate.is_migrated = any(sku in migrated_index for sku in candidate.skus)
 
@@ -931,31 +1226,52 @@ class EbayAdapter:
         self, session, connection: PlatformConnection, call_name: str, xml_body: str,
         timeout: float = _DEFAULT_TIMEOUT,
     ) -> httpx.Response:
-        """Mirrors _authed_request's proactive-refresh, reactive-401-refresh and 429
-        backoff behaviour for the Trading API's XML surface. The transport differs on
-        every other axis though: a different auth header (see _trading_headers), a raw
+        """Mirrors _authed_request's proactive-refresh, reactive-401-refresh and
+        429/5xx backoff behaviour for the Trading API's XML surface. The transport differs
+        on every other axis though: a different auth header (see _trading_headers), a raw
         XML string body instead of `json=`, failure reported in the body rather than the
         status (see _raise_for_trading_ack), and a per-seller SITEID resolved once per
-        adapter."""
+        adapter.
+
+        The 5xx retries do consume the Trading API's tight 5,000/day budget, unlike the
+        Inventory API's — but only on a call that already failed, and capped at
+        _MAX_SERVER_ERROR_RETRIES, so the worst case is a handful of extra calls on a day
+        eBay is already unhealthy."""
         site_id = await self._resolve_site_id(session, connection)
         try:
             response = await self._trading_request_once(session, connection, call_name, xml_body, site_id, timeout)
 
-            attempt = 0
-            while response.status_code == 429 and attempt < _MAX_RATE_LIMIT_RETRIES:
-                delay = self._rate_limit_delay(response, attempt)
-                logger.warning(
-                    "eBay Trading API rate limited on %s (retry %d/%d in %.1fs)",
-                    call_name,
-                    attempt + 1,
-                    _MAX_RATE_LIMIT_RETRIES,
-                    delay,
-                )
+            # Separate budgets — see _authed_request for why.
+            rate_limit_attempts = 0
+            server_error_attempts = 0
+            while True:
+                if response.status_code == 429 and rate_limit_attempts < _MAX_RATE_LIMIT_RETRIES:
+                    delay = self._retry_delay(response, rate_limit_attempts)
+                    logger.warning(
+                        "eBay Trading API rate limited on %s (retry %d/%d in %.1fs)",
+                        call_name,
+                        rate_limit_attempts + 1,
+                        _MAX_RATE_LIMIT_RETRIES,
+                        delay,
+                    )
+                    rate_limit_attempts += 1
+                elif response.status_code >= 500 and server_error_attempts < _MAX_SERVER_ERROR_RETRIES:
+                    delay = self._retry_delay(response, server_error_attempts)
+                    logger.warning(
+                        "eBay Trading API server error %d on %s (retry %d/%d in %.1fs)",
+                        response.status_code,
+                        call_name,
+                        server_error_attempts + 1,
+                        _MAX_SERVER_ERROR_RETRIES,
+                        delay,
+                    )
+                    server_error_attempts += 1
+                else:
+                    break
                 await asyncio.sleep(delay)
                 response = await self._trading_request_once(
                     session, connection, call_name, xml_body, site_id, timeout
                 )
-                attempt += 1
         except httpx.TimeoutException as e:
             # Same rationale as _authed_request's: an escaping httpx exception becomes an
             # opaque 500 with no guidance, and revise_listing_skus needs to catch this

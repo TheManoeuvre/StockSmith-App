@@ -91,19 +91,27 @@ that's also where the installed app's auto-updater looks for new versions.
 
 To ship a new version:
 
-1. Bump `version` in **both** `frontend/src-tauri/tauri.conf.json` and
+1. Move the `## [Unreleased]` items in `CHANGELOG.md` under a new `## [X.Y.Z] - YYYY-MM-DD`
+   heading. **These notes are what users see** — the release workflow extracts this
+   section into the GitHub Release body and `latest.json`, and the in-app update prompt
+   displays it when asking whether to install. Write it for them, not for the commit log.
+2. Bump `version` in **both** `frontend/src-tauri/tauri.conf.json` and
    `frontend/package.json` (keep them in sync) and commit.
-2. Tag and push:
+3. Tag and push:
    ```bash
    git tag vX.Y.Z
    git push origin vX.Y.Z
    ```
-3. Wait for the [Release workflow](https://github.com/TheManoeuvre/StockSmith-App/actions)
+4. Wait for the [Release workflow](https://github.com/TheManoeuvre/StockSmith-App/actions)
    to finish — it builds the backend sidecar, builds and signs the Tauri app, and creates
    a **draft** GitHub Release with the installer, `latest.json`, and signature attached.
-4. Review the draft release (edit the notes if you like), then click **Publish release**.
-5. Any already-installed copy of StockSmith will offer this update the next time it's
-   launched.
+5. Review the draft release — the body should already hold this version's changelog
+   section — then click **Publish release**.
+6. Any already-installed copy of StockSmith will offer this update the next time it's
+   launched, showing those notes in the prompt.
+
+If the tag has no matching `CHANGELOG.md` section the build still succeeds, but the
+release body falls back to a generic line — the workflow log will carry a warning.
 
 ### One-time setup (already done for this repo)
 

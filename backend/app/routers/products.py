@@ -19,6 +19,10 @@ from app.models.pricing import ProductPriceSnapshot
 from app.schemas.product import (
     BomLine,
     BomLineRead,
+    BulkBomAmendChange,
+    BulkBomAmendRequest,
+    BulkBomAmendResult,
+    BulkBomAmendUnit,
     BundleItem,
     BundleItemRead,
     GenerateVariantsRequest,
@@ -61,7 +65,7 @@ from app.services.shipping_profiles import (
     resolve_variant_shipping_profile,
 )
 from app.services.validation import validate_lines_against_units
-from app.services.variants import compute_full_sku, generate_variants
+from app.services.variants import amend_attribute_bom_overrides, compute_full_sku, generate_variants
 
 router = APIRouter(prefix="/products", tags=["products"], dependencies=[Depends(require_auth)])
 
@@ -592,6 +596,50 @@ async def generate_product_variants(
     fee_source, fee_components = await platform_fees.get_resolver_context(session)
     shipping_profiles_by_id = await get_shipping_profiles_by_id(session)
     return await _variants_to_reads_bulk(session, product, created, fee_source, fee_components, shipping_profiles_by_id)
+
+
+@router.post("/{product_id}/variants/bom-overrides/amend", response_model=BulkBomAmendResult)
+async def amend_variant_bom_overrides(
+    product_id: int, payload: BulkBomAmendRequest, session: AsyncSession = Depends(get_db)
+) -> BulkBomAmendResult:
+    """Bulk-corrects BOM overrides across every variant sharing an attribute value.
+
+    Product-scoped rather than variant-scoped because the target is a product + attribute
+    value, not any one variant. Defaults to a preview (`apply: false`) — see
+    services/variants.amend_attribute_bom_overrides for why that is the default rather
+    than an option."""
+    units, matched_count, skipped_inactive = await amend_attribute_bom_overrides(
+        session,
+        product_id,
+        payload.attribute_name,
+        payload.attribute_value,
+        payload.lines,
+        apply=payload.apply,
+        include_inactive=payload.include_inactive,
+    )
+
+    if payload.apply:
+        # Same reasoning as the single-variant path: a BOM change moves max_buildable,
+        # which moves the quantity pushed to the marketplace. _enqueue dedupes and
+        # debounces, so amending forty variants schedules forty tasks that drain safely.
+        for variant, changes, _replaced, _new in units:
+            if changes:
+                listing_push.enqueue_for_product(product_id, variant.id)
+
+    return BulkBomAmendResult(
+        applied=payload.apply,
+        matched_variant_count=matched_count,
+        changed_variant_count=sum(1 for _v, changes, _r, _n in units if changes),
+        skipped_inactive_count=skipped_inactive,
+        units=[
+            BulkBomAmendUnit(
+                variant_id=variant.id,
+                variant_name=variant.variant_name,
+                changes=[BulkBomAmendChange(**c) for c in changes],
+            )
+            for variant, changes, _replaced, _new in units
+        ],
+    )
 
 
 async def _to_variant_read_with_buildability(session: AsyncSession, variant: ProductVariant) -> VariantRead:

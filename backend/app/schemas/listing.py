@@ -29,12 +29,31 @@ class UnitSyncResult(BaseModel):
     external_state: str | None
     external_quantity: int | None
     last_checked_at: datetime | None
+    # The quantity listing_push would send for this unit right now — i.e. what the
+    # marketplace *should* be showing. None when it can't be computed (no product/variant)
+    # or when the caller didn't ask for it: the bulk shop-wide check skips it because
+    # it's a per-unit buildability computation and would turn one click into N of them.
+    expected_quantity: int | None = None
+    # Only ever True when both quantities are known AND the listing was found. A unit
+    # that isn't on the marketplace at all is a "not found" problem, not a mismatch —
+    # conflating them would offer to "correct" a listing that doesn't exist.
+    quantity_mismatch: bool = False
 
 
 class ProductListingSyncSummary(BaseModel):
     product_id: int
     product_status: ProductSyncStatus
     units: list[UnitSyncResult]
+
+
+class PushCorrectionsResult(BaseModel):
+    """Outcome of a user-confirmed push of StockSmith's quantities to a marketplace."""
+
+    pushed_count: int
+    failed_count: int
+    # Per-unit failure text, since a partial success is the interesting case: 3 of 4
+    # corrected tells the user something a bare count doesn't.
+    errors: list[str]
 
 
 class BulkListingSyncResult(BaseModel):

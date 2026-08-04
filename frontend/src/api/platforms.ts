@@ -110,6 +110,17 @@ export interface SyncRunRead {
   error_message: string | null;
 }
 
+export interface PlatformSyncSummary {
+  platform: ListingPlatform;
+  connected: boolean;
+  last_sync_at: string | null;
+  last_sync_status: "success" | "error" | null;
+  last_sync_error: string | null;
+  // Listings whose most recent outbound quantity push failed and was never retried —
+  // separate from last_sync_error, which only covers inbound order sync.
+  failing_push_count: number;
+}
+
 export interface SyncRunPage {
   items: SyncRunRead[];
   total: number;
@@ -129,6 +140,16 @@ export interface UnitSyncResult {
   external_state: string | null;
   external_quantity: number | null;
   last_checked_at: string | null;
+  // What StockSmith would push for this unit. Null on the bulk shop-wide check, which
+  // skips the computation.
+  expected_quantity: number | null;
+  quantity_mismatch: boolean;
+}
+
+export interface PushCorrectionsResult {
+  pushed_count: number;
+  failed_count: number;
+  errors: string[];
 }
 
 export interface ProductListingSyncSummary {
@@ -261,8 +282,12 @@ export const platformsApi = {
   disconnect: (platform: ListingPlatform) => api.post<void>(`/platforms/${platform}/disconnect`),
   previewSync: (platform: ListingPlatform) => api.post<SyncPreviewResult>(`/platforms/${platform}/preview-sync`),
   syncOrders: (platform: ListingPlatform) => api.post<SyncCommitResult>(`/platforms/${platform}/sync-orders`),
+  // Cross-platform and local-reads-only, unlike status() — safe to poll on a timer.
+  syncSummary: () => api.get<PlatformSyncSummary[]>(`/platforms/sync-summary`),
   syncLog: (platform: ListingPlatform, limit: number, offset: number) =>
     api.get<SyncRunPage>(`/platforms/${platform}/sync-log?limit=${limit}&offset=${offset}`),
+  pushCorrections: (platform: ListingPlatform, productId: number) =>
+    api.post<PushCorrectionsResult>(`/platforms/${platform}/products/${productId}/push-corrections`),
   checkProductSync: (platform: ListingPlatform, productId: number) =>
     api.post<ProductListingSyncSummary>(`/platforms/${platform}/products/${productId}/check-sync`),
   getProductSyncStatus: (platform: ListingPlatform, productId: number) =>

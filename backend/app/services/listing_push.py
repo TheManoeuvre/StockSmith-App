@@ -159,6 +159,54 @@ async def _debounced_push(key: tuple[int, int | None]) -> None:
         _pending.pop(key, None)
 
 
+async def resolve_push_quantity(session: AsyncSession, product_id: int, variant_id: int | None) -> int | None:
+    """The quantity this service would send to a marketplace for this unit right now.
+
+    Public so the sync check can show what a listing *should* say next to what it does
+    say. Deliberately the same function the push itself uses rather than a reimplementation
+    — if the two ever disagreed, the UI would report a mismatch that pushing could not
+    resolve, and the user would click "Push corrections" forever."""
+    return await _resolve_max_sellable(session, product_id, variant_id)
+
+
+async def push_units_now(
+    session: AsyncSession, product_id: int, variant_ids: list[int | None]
+) -> tuple[int, list[str]]:
+    """Pushes the given units immediately and reports what happened, for the user-confirmed
+    "Push corrections" action.
+
+    Unlike enqueue_for_product this is synchronous and awaited: the user clicked a button
+    and is waiting for an answer, so the 5s debounce (which exists to coalesce bursts of
+    automatic stock changes) would only delay feedback with nothing to coalesce.
+
+    Errors are collected rather than raised — one failing listing must not abandon the
+    rest, and _push_one already records each attempt to PlatformListingPush either way."""
+    pushed = 0
+    errors: list[str] = []
+    for variant_id in variant_ids:
+        qty = await _resolve_max_sellable(session, product_id, variant_id)
+        if qty is None:
+            errors.append(f"variant {variant_id}: could not compute a quantity to push")
+            continue
+
+        variant_filter = Listing.variant_id.is_(None) if variant_id is None else Listing.variant_id == variant_id
+        result = await session.execute(
+            select(Listing).where(
+                Listing.product_id == product_id, variant_filter, Listing.platform.in_(_PUSH_ENABLED_PLATFORMS)
+            )
+        )
+        for listing in result.scalars():
+            before = listing.last_synced_at
+            await _push_one(session, listing, qty)
+            # _push_one swallows its exception (it logs to PlatformListingPush instead),
+            # so success is inferred from whether it advanced the watermark.
+            if listing.last_synced_at != before:
+                pushed += 1
+            else:
+                errors.append(f"{listing.platform.value} listing for variant {variant_id}: push failed")
+    return pushed, errors
+
+
 async def _resolve_max_sellable(session: AsyncSession, product_id: int, variant_id: int | None) -> int | None:
     """Recomputes max_sellable fresh — the same computation products.py/variants.py use
     to serialize a single product/variant, run here for just the one item rather than
@@ -243,7 +291,7 @@ async def _push_one(session: AsyncSession, listing: Listing, qty: int) -> None:
     sku = await _resolve_sku(session, listing)
     listing_ref = ExternalListingRef(
         external_listing_id=listing.external_listing_id,
-        title=listing.external_title or "",
+        title=listing.external_title,
         sku=sku,
         state=listing.external_state or "unknown",
         quantity=listing.external_quantity or 0,

@@ -123,6 +123,52 @@ class GenerateVariantsRequest(BaseModel):
     attributes: list[VariantAttributeSpec]
 
 
+class BulkBomAmendLine(BaseModel):
+    """One base BOM line to amend, in the same vocabulary as the generation-time rules —
+    "for this attribute value, this base line becomes material M at quantity Q". That's
+    exactly what the user configured originally and now wants to correct, so it's a shape
+    they already have a mental model for."""
+
+    base_material_id: int
+    material_id: int | None = None  # substitution target; None keeps the base material
+    qty_required: Decimal | None = None  # None keeps the base BOM quantity
+
+
+class BulkBomAmendRequest(BaseModel):
+    attribute_name: str  # matched against product.variant_attribute{1,2,3}_name
+    attribute_value: str  # e.g. "Large"
+    lines: list[BulkBomAmendLine]
+    # Preview by default. This touches an unbounded number of variants and can overwrite
+    # hand edits it has no way to distinguish from rule-generated ones, and the user is
+    # already correcting a mistake — so showing the change before making it is the
+    # default, not an option.
+    apply: bool = False
+    include_inactive: bool = False
+
+
+class BulkBomAmendChange(BaseModel):
+    base_material_id: int
+    base_material_name: str
+    before_material_id: int | None  # None = inherited the base BOM (no override row)
+    before_qty: Decimal | None
+    after_material_id: int | None  # None = the amend removes the override
+    after_qty: Decimal | None
+
+
+class BulkBomAmendUnit(BaseModel):
+    variant_id: int
+    variant_name: str
+    changes: list[BulkBomAmendChange]  # empty when this variant is already correct
+
+
+class BulkBomAmendResult(BaseModel):
+    applied: bool
+    matched_variant_count: int
+    changed_variant_count: int
+    skipped_inactive_count: int
+    units: list[BulkBomAmendUnit]
+
+
 class ProductPriceSnapshotRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

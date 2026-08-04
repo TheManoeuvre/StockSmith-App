@@ -42,6 +42,23 @@ jobs:
       - name: Build backend sidecar
         run: powershell -File backend/build.ps1
 
+      # Extracts this tag's section from CHANGELOG.md so it becomes the GitHub Release
+      # body — which tauri-action also writes into latest.json's `notes` field, which is
+      # what the in-app update prompt displays. Without this the body is empty and the
+      # prompt has nothing to show but a version number.
+      #
+      # The extraction itself lives in scripts/Get-ReleaseNotes.ps1 rather than inline,
+      # because this workflow only runs on v* tags: anything embedded here is unexercised
+      # until the moment it matters. The script is unit-tested by the Tests workflow.
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        shell: pwsh
+        run: |
+          $notes = ./scripts/Get-ReleaseNotes.ps1 -Version "${{ github.ref_name }}"
+          "notes<<CHANGELOG_EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          $notes | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "CHANGELOG_EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -51,5 +68,6 @@ jobs:
           projectPath: frontend
           tagName: ${{ github.ref_name }}
           releaseName: "StockSmith v__VERSION__"
+          releaseBody: ${{ steps.notes.outputs.notes }}
           releaseDraft: true
           prerelease: false

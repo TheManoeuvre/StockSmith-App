@@ -9,7 +9,7 @@ from app.models.product import Product, ProductMaterial
 from app.models.variant import ProductVariant, ProductVariantMaterial
 from app.schemas.kitting import VariantKittingBomLine
 from app.schemas.variant import VariantBomLine, VariantRead, VariantUpdate
-from app.services import platform_fees
+from app.services import listing_push, platform_fees
 from app.services.buildability import compute_variant_buildability
 from app.services.kitting import compute_max_sellable, sync_listing_ceiling_qty
 from app.services.shipping_profiles import get_shipping_profiles_by_id, resolve_variant_shipping_profile
@@ -195,6 +195,10 @@ async def replace_bom_overrides(
     ]
     session.add_all(overrides)
     await session.commit()
+    # A BOM change moves max_buildable, which moves theoretical_max_sellable, which is the
+    # quantity pushed to the marketplace. Without this the corrected number sat locally
+    # until some unrelated stock movement happened to trigger a push.
+    listing_push.enqueue_for_product(variant.product_id, variant_id)
     await session.refresh(variant)
     return await _to_variant_read(session, variant)
 
@@ -266,5 +270,7 @@ async def replace_kitting_bom_overrides(
     ]
     session.add_all(overrides)
     await session.commit()
+    # Same reasoning as replace_bom_overrides: kitting drives max_sellable too.
+    listing_push.enqueue_for_product(variant.product_id, variant_id)
     await session.refresh(variant)
     return await _to_variant_read(session, variant)

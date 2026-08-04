@@ -18,7 +18,7 @@ from app.models.platform_listing_push import PlatformListingPush
 from app.models.platform_sync_run import PlatformSyncRun, SyncRunMode, SyncRunStatus
 from app.models.product import Product
 from app.models.variant import ProductVariant
-from app.schemas.listing import BulkListingSyncResult, ProductListingSyncSummary
+from app.schemas.listing import BulkListingSyncResult, ProductListingSyncSummary, PushCorrectionsResult
 from app.schemas.platform import (
     ListingPushPage,
     ListingPushRead,
@@ -26,6 +26,7 @@ from app.schemas.platform import (
     PlatformCredentialRead,
     PlatformCredentialWrite,
     PlatformStatus,
+    PlatformSyncSummary,
     SyncCommitResult,
     SyncPreviewResult,
     SyncRunPage,
@@ -43,7 +44,15 @@ from app.schemas.listing_adoption import (
     UnmigratedListingsReport,
     VariationMappingProposal,
 )
-from app.services import listing_adoption, listing_sync, order_sync, platform_credentials, sync_scheduler
+from app.services import (
+    listing_adoption,
+    listing_push,
+    listing_sync,
+    order_sync,
+    platform_credentials,
+    sync_scheduler,
+    sync_status,
+)
 from app.services.file_storage import resolve_asset_path, save_platform_icon
 from app.services.platforms import get_adapter, invalidate_adapter_cache
 from app.services.platforms.base import ClassicListingCandidate
@@ -316,6 +325,17 @@ async def _enrich_etsy_shop_details(connection: PlatformConnection, adapter, acc
             connection.shop_icon_path = save_platform_icon(ListingPlatform.etsy.value, data, filename)
         except Exception:
             logger.exception("Failed to download Etsy shop icon")
+
+
+# Declared before the /{platform}/... routes so "sync-summary" can never be parsed as a
+# platform name, and kept as a single segment so it doesn't collide with them at all.
+@router.get("/sync-summary", response_model=list[PlatformSyncSummary], dependencies=[Depends(require_auth)])
+async def get_sync_summary(session: AsyncSession = Depends(get_db)) -> list[PlatformSyncSummary]:
+    """Sync health across every connected platform, for the menu-bar indicator.
+
+    Local reads only — unlike /{platform}/status this never touches a marketplace, which
+    is what makes it safe for the UI to poll on a timer."""
+    return await sync_status.get_sync_summary(session)
 
 
 @router.post("/{platform}/connect", response_model=PlatformConnectResponse, dependencies=[Depends(require_auth)])
@@ -643,12 +663,53 @@ async def check_product_sync(
     connection = await _require_connection(session, platform)
     adapter = await get_adapter(session, platform)
     try:
-        index = await adapter.build_listing_sku_index(session, connection)
-        return await listing_sync.check_product_sku_sync(session, product_id, index, platform)
+        # Scoped to this product's own SKUs so a single-product check doesn't pay for a
+        # per-SKU offer lookup across the whole catalogue.
+        index = await adapter.build_listing_sku_index(
+            session, connection, enrich_skus=await listing_sync.product_skus(session, product_id)
+        )
+        # Read-only: this reports a quantity drift, it does not correct it. Pushing from
+        # a "test" action would make a diagnostic silently mutate the live marketplace —
+        # correcting is the separate, explicitly-confirmed push-corrections endpoint.
+        return await listing_sync.check_product_sku_sync(
+            session, product_id, index, platform, with_expected_quantity=True
+        )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except PlatformError as e:
         raise _map_platform_error(e)
+
+
+@router.post(
+    "/{platform}/products/{product_id}/push-corrections",
+    response_model=PushCorrectionsResult,
+    dependencies=[Depends(require_auth)],
+)
+async def push_product_corrections(
+    platform: ListingPlatform, product_id: int, session: AsyncSession = Depends(get_db)
+) -> PushCorrectionsResult:
+    """Pushes StockSmith's quantities to the marketplace for units whose listing quantity
+    has drifted — the user-confirmed follow-up to a sync check that found mismatches.
+
+    Deliberately re-derives which units are mismatched from stored state rather than
+    accepting a list from the client: the check may be minutes old by the time the button
+    is clicked, and pushing a unit the client *believed* was wrong risks overwriting a
+    quantity that has since been corrected legitimately."""
+    await _require_connection(session, platform)
+    try:
+        summary = await listing_sync.get_stored_product_sync_status(session, product_id, platform)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+    mismatched = [unit.variant_id for unit in summary.units if unit.quantity_mismatch]
+    if not mismatched:
+        return PushCorrectionsResult(pushed_count=0, failed_count=0, errors=[])
+
+    try:
+        pushed, errors = await listing_push.push_units_now(session, product_id, mismatched)
+    except PlatformError as e:
+        raise _map_platform_error(e)
+    return PushCorrectionsResult(pushed_count=pushed, failed_count=len(errors), errors=errors)
 
 
 @router.get(
@@ -693,7 +754,9 @@ async def check_all_listings(
     connection = await _require_connection(session, platform)
     adapter = await get_adapter(session, platform)
     try:
-        index = await adapter.build_listing_sku_index(session, connection)
+        index = await adapter.build_listing_sku_index(
+            session, connection, enrich_skus=await listing_sync.tracked_skus(session)
+        )
         return await listing_sync.check_all_products_sku_sync(session, index, platform)
     except PlatformError as e:
         raise _map_platform_error(e)
@@ -745,7 +808,9 @@ async def _load_candidate_detail(
     paginated list crawl just to look one listing up would be far more expensive
     besides."""
     candidate = await adapter.fetch_classic_listing_detail(session, connection, external_listing_id)
-    index = await adapter.build_listing_sku_index(session, connection)
+    # Membership test only (is this candidate's SKU already migrated?) — no need to pay
+    # for per-SKU offer lookups.
+    index = await adapter.build_listing_sku_index(session, connection, enrich=False)
     candidate.is_migrated = any(sku in index for sku in candidate.skus if sku)
     return candidate
 

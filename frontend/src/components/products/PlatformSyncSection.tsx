@@ -28,7 +28,15 @@ export function PlatformSyncSection({ productId, platform }: { productId: number
     },
   });
 
+  const pushCorrectionsMutation = useMutation({
+    mutationFn: () => platformsApi.pushCorrections(platform, productId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["platforms", platform, "products", productId, "sync-status"] });
+    },
+  });
+
   const notConnected = error instanceof ApiError && error.status === 400;
+  const mismatchedUnits = data?.units.filter((u) => u.quantity_mismatch) ?? [];
   // Both platforms offer a picker when the SKU check comes up short, but for different
   // reasons: eBay's listing may exist and simply not be migrated yet, while Etsy's
   // listing is visible but carries a SKU StockSmith doesn't know.
@@ -85,9 +93,55 @@ export function PlatformSyncSection({ productId, platform }: { productId: number
         ))}
       {notConnected && <p className="text-sm text-slate-500">Connect {label} in Settings to test SKU sync.</p>}
       <ErrorBanner error={checkMutation.error} />
+      <ErrorBanner error={pushCorrectionsMutation.error} />
+      {mismatchedUnits.length > 0 && (
+        // Testing sync deliberately doesn't correct anything on its own — pushing writes
+        // to a live marketplace, so it stays behind an explicit click.
+        <div className="flex items-center justify-between gap-3 rounded border border-amber-300 bg-amber-50 p-2 text-sm">
+          <span>
+            <strong>{mismatchedUnits.length}</strong> unit(s) show a different quantity on {label} than
+            StockSmith expects. Pushing will set {label} to StockSmith's numbers.
+          </span>
+          <button
+            onClick={() => pushCorrectionsMutation.mutate()}
+            disabled={pushCorrectionsMutation.isPending}
+            className="shrink-0 rounded border border-amber-400 bg-white px-3 py-1.5 disabled:opacity-50"
+          >
+            {pushCorrectionsMutation.isPending ? "Pushing…" : "Push corrections"}
+          </button>
+        </div>
+      )}
+      {pushCorrectionsMutation.data && (
+        <div className="rounded bg-slate-50 p-2 text-sm">
+          Pushed <strong>{pushCorrectionsMutation.data.pushed_count}</strong> correction(s)
+          {pushCorrectionsMutation.data.failed_count > 0 && (
+            <>
+              , <strong className="text-red-700">{pushCorrectionsMutation.data.failed_count} failed</strong>
+              <ul className="mt-1 list-disc pl-5 text-xs text-red-700">
+                {pushCorrectionsMutation.data.errors.map((e) => (
+                  <li key={e}>{e}</li>
+                ))}
+              </ul>
+            </>
+          )}
+        </div>
+      )}
       {data && data.units.length > 0 && (
         <>
-          <table className="w-full border-collapse text-left text-sm">
+          <table className="w-full table-fixed border-collapse text-left text-sm">
+            {/* Fixed widths (shared across the Etsy and eBay instances of this component) so the
+                two tables' columns line up vertically when stacked, regardless of how long either
+                platform's listing title happens to be. */}
+            <colgroup>
+              <col className="w-[13%]" />
+              <col className="w-[15%]" />
+              <col className="w-[12%]" />
+              <col className="w-[24%]" />
+              <col className="w-[12%]" />
+              <col className="w-[8%]" />
+              <col className="w-[8%]" />
+              <col className="w-[8%]" />
+            </colgroup>
             <thead>
               <tr className="border-b border-slate-200 text-slate-500">
                 <th className="p-1">Unit</th>
@@ -97,6 +151,9 @@ export function PlatformSyncSection({ productId, platform }: { productId: number
                 <th className="p-1">{label} variation</th>
                 <th className="p-1">{label} status</th>
                 <th className="p-1">{label} qty</th>
+                <th className="p-1" title="What StockSmith would push for this unit">
+                  Expected
+                </th>
               </tr>
             </thead>
             <tbody>
@@ -120,17 +177,30 @@ export function PlatformSyncSection({ productId, platform }: { productId: number
 }
 
 function UnitSyncRow({ unit, platform }: { unit: UnitSyncResult; platform: ListingPlatform }) {
+  const mismatch = unit.quantity_mismatch;
   return (
-    <tr className="border-b border-slate-100">
-      <td className="p-1">{unit.variant_name ?? "(product)"}</td>
-      <td className="p-1 font-mono text-xs">{unit.sku ?? "—"}</td>
+    <tr className={`border-b border-slate-100 ${mismatch ? "bg-amber-50" : ""}`}>
+      <td className="truncate p-1">{unit.variant_name ?? "(product)"}</td>
+      <td className="truncate p-1 font-mono text-xs">{unit.sku ?? "—"}</td>
       <td className="p-1">
         <PlatformSyncBadge platform={platform} status={unit.status} />
       </td>
-      <td className="p-1">{unit.external_title ?? "—"}</td>
-      <td className="p-1">{unit.external_variation ?? "—"}</td>
-      <td className="p-1">{unit.external_state ?? "—"}</td>
-      <td className="p-1">{unit.external_quantity ?? "—"}</td>
+      <td className="truncate p-1" title={unit.external_title ?? undefined}>
+        {unit.external_title ?? "—"}
+      </td>
+      <td className="truncate p-1" title={unit.external_variation ?? undefined}>
+        {unit.external_variation ?? "—"}
+      </td>
+      <td className="truncate p-1">{unit.external_state ?? "—"}</td>
+      {/* Both quantities carry the emphasis on a mismatch, not just one — the point is
+          the difference between them, and colouring a single cell reads as "this number
+          is wrong" rather than "these two disagree". */}
+      <td className={`truncate p-1 ${mismatch ? "font-medium text-amber-800" : ""}`}>
+        {unit.external_quantity ?? "—"}
+      </td>
+      <td className={`truncate p-1 ${mismatch ? "font-medium text-amber-800" : "text-slate-500"}`}>
+        {unit.expected_quantity ?? "—"}
+      </td>
     </tr>
   );
 }

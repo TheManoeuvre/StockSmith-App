@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, String, func, text
+from sqlalchemy import DateTime, Index, Integer, String, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, portable_enum
@@ -25,6 +25,12 @@ class PlatformSyncRun(Base):
     for debugging."""
 
     __tablename__ = "platform_sync_runs"
+    __table_args__ = (
+        # "latest run for this platform" is now on a polled path (the menu bar's sync
+        # indicator calls it every 60s), not just the occasional settings page load, so
+        # the descending scan this table was doing needs an index behind it.
+        Index("ix_platform_sync_runs_platform_started_at", "platform", "started_at"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     platform: Mapped[ListingPlatform] = mapped_column(

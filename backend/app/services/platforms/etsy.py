@@ -786,7 +786,12 @@ class EtsyAdapter:
         }
 
     async def build_listing_sku_index(
-        self, session, connection: PlatformConnection
+        self,
+        session,
+        connection: PlatformConnection,
+        *,
+        enrich: bool = True,
+        enrich_skus: set[str] | None = None,
     ) -> dict[str, ExternalListingRef]:
         """Etsy's API has no "find listing by SKU" endpoint — the only way to resolve a
         SKU is to page through the shop's entire listing catalog (all states, via
@@ -794,6 +799,11 @@ class EtsyAdapter:
         call) and index every SKU found. Since this costs the same whether checking one
         product or the whole catalog, callers should build this once and reuse it across
         every product/variant being checked in a given "test sync" run.
+
+        enrich/enrich_skus are accepted and ignored: that single crawl already returns
+        title, state, quantity and variation for every SKU, so there is no cheaper mode to
+        offer and no extra per-SKU call to skip. Honouring them by returning less would
+        only lose information the call already paid for.
         """
         if connection.external_account_id is None:
             raise PlatformSyncError("Etsy connection has no shop id — reconnect required")
@@ -952,7 +962,7 @@ class EtsyAdapter:
     @staticmethod
     def _index_listing_skus(listing: dict, index: dict[str, ExternalListingRef]) -> None:
         listing_id = str(listing.get("listing_id"))
-        title = listing.get("title") or ""
+        title = listing.get("title") or None
         state = listing.get("state") or "unknown"
         inventory = listing.get("inventory") or {}
         for product in inventory.get("products", []):

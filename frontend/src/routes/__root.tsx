@@ -1,4 +1,5 @@
 import { createRootRoute, Link, Outlet } from "@tanstack/react-router";
+import { SyncStatusIndicator } from "../components/common/SyncStatusIndicator";
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -27,6 +28,9 @@ function RootLayout() {
         <Link to="/settings" className={linkClass}>
           Settings
         </Link>
+        {/* ml-auto lives on the indicator itself so the nav links stay a plain flex row
+            and nothing shifts when it renders nothing (no platform connected yet). */}
+        <SyncStatusIndicator />
       </nav>
       <main className="p-6">
         <Outlet />

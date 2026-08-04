@@ -252,6 +252,43 @@ export interface VariantAttributeSpec {
   quantity_rules?: AttributeQuantityRule[];
 }
 
+export interface BulkBomAmendLine {
+  base_material_id: number;
+  material_id?: number | null; // substitution target; null keeps the base material
+  qty_required?: string | null; // null keeps the base BOM quantity
+}
+
+export interface BulkBomAmendRequest {
+  attribute_name: string;
+  attribute_value: string;
+  lines: BulkBomAmendLine[];
+  apply?: boolean;
+  include_inactive?: boolean;
+}
+
+export interface BulkBomAmendChange {
+  base_material_id: number;
+  base_material_name: string;
+  before_material_id: number | null; // null = inherited the base BOM
+  before_qty: string | null;
+  after_material_id: number | null; // null = the amend removes the override
+  after_qty: string | null;
+}
+
+export interface BulkBomAmendUnit {
+  variant_id: number;
+  variant_name: string;
+  changes: BulkBomAmendChange[]; // empty when already correct
+}
+
+export interface BulkBomAmendResult {
+  applied: boolean;
+  matched_variant_count: number;
+  changed_variant_count: number;
+  skipped_inactive_count: number;
+  units: BulkBomAmendUnit[];
+}
+
 export interface Variant {
   id: number;
   product_id: number;

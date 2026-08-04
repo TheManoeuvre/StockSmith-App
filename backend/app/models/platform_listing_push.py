@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, portable_enum
@@ -21,6 +21,17 @@ class PlatformListingPush(Base):
     staleness) without blocking or being blocked by order sync."""
 
     __tablename__ = "platform_listing_pushes"
+    __table_args__ = (
+        # Supports the "latest attempt per listing" window in services/sync_status.py,
+        # which the polled menu-bar indicator runs every 60s.
+        Index(
+            "ix_platform_listing_pushes_target_attempted_at",
+            "platform",
+            "product_id",
+            "variant_id",
+            "attempted_at",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id", ondelete="SET NULL"), nullable=True)

@@ -4,6 +4,7 @@ import { materialsApi } from "../../api/materials";
 import { productsApi } from "../../api/products";
 import type { AttributeMaterialRule, AttributeQuantityRule, Material, Product, VariantAttributeSpec } from "../../api/types";
 import { ErrorBanner } from "../common/ErrorBanner";
+import { BulkBomAmendModal } from "./BulkBomAmendModal";
 
 interface MaterialRuleState {
   baseMaterialId: number;
@@ -42,6 +43,12 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
   const colourListId = useId();
 
   const [rows, setRows] = useState<AttributeRow[]>([emptyRow]);
+  const [showBulkAmend, setShowBulkAmend] = useState(false);
+  const hasAttributes = !!(
+    product.variant_attribute1_name ||
+    product.variant_attribute2_name ||
+    product.variant_attribute3_name
+  );
 
   useEffect(() => {
     const existing = [product.variant_attribute1_name, product.variant_attribute2_name, product.variant_attribute3_name]
@@ -247,8 +254,20 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
         >
           Generate variants
         </button>
+        {/* Only offered once attributes exist: amending targets an attribute value, so
+            there is nothing to pick before variants have been generated. */}
+        {hasAttributes && (
+          <button
+            onClick={() => setShowBulkAmend(true)}
+            className="rounded border border-slate-300 px-3 py-1.5 text-sm"
+            title="Correct a BOM override across every variant sharing an attribute value"
+          >
+            Bulk-edit BOM overrides
+          </button>
+        )}
       </div>
       <ErrorBanner error={generateMutation.error} />
+      {showBulkAmend && <BulkBomAmendModal product={product} onClose={() => setShowBulkAmend(false)} />}
     </div>
   );
 }
