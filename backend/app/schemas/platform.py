@@ -145,6 +145,22 @@ class SyncRunPage(BaseModel):
     total: int
 
 
+class PlatformSyncSummary(BaseModel):
+    """One platform's sync health for the menu-bar indicator — see
+    services/sync_status.py for why this is separate from PlatformStatus."""
+
+    platform: ListingPlatform
+    connected: bool
+    last_sync_at: datetime | None
+    last_sync_status: str | None
+    last_sync_error: str | None
+    # Listings whose most recent outbound quantity push failed and was never retried.
+    # Distinct from last_sync_error, which only covers inbound order sync — a shop can be
+    # importing orders perfectly while silently failing to push stock back, which is the
+    # overselling risk this surfaces.
+    failing_push_count: int
+
+
 class ListingPushRead(BaseModel):
     id: int
     product_id: int | None

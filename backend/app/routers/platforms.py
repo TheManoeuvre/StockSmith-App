@@ -26,6 +26,7 @@ from app.schemas.platform import (
     PlatformCredentialRead,
     PlatformCredentialWrite,
     PlatformStatus,
+    PlatformSyncSummary,
     SyncCommitResult,
     SyncPreviewResult,
     SyncRunPage,
@@ -43,7 +44,14 @@ from app.schemas.listing_adoption import (
     UnmigratedListingsReport,
     VariationMappingProposal,
 )
-from app.services import listing_adoption, listing_sync, order_sync, platform_credentials, sync_scheduler
+from app.services import (
+    listing_adoption,
+    listing_sync,
+    order_sync,
+    platform_credentials,
+    sync_scheduler,
+    sync_status,
+)
 from app.services.file_storage import resolve_asset_path, save_platform_icon
 from app.services.platforms import get_adapter, invalidate_adapter_cache
 from app.services.platforms.base import ClassicListingCandidate
@@ -316,6 +324,17 @@ async def _enrich_etsy_shop_details(connection: PlatformConnection, adapter, acc
             connection.shop_icon_path = save_platform_icon(ListingPlatform.etsy.value, data, filename)
         except Exception:
             logger.exception("Failed to download Etsy shop icon")
+
+
+# Declared before the /{platform}/... routes so "sync-summary" can never be parsed as a
+# platform name, and kept as a single segment so it doesn't collide with them at all.
+@router.get("/sync-summary", response_model=list[PlatformSyncSummary], dependencies=[Depends(require_auth)])
+async def get_sync_summary(session: AsyncSession = Depends(get_db)) -> list[PlatformSyncSummary]:
+    """Sync health across every connected platform, for the menu-bar indicator.
+
+    Local reads only — unlike /{platform}/status this never touches a marketplace, which
+    is what makes it safe for the UI to poll on a timer."""
+    return await sync_status.get_sync_summary(session)
 
 
 @router.post("/{platform}/connect", response_model=PlatformConnectResponse, dependencies=[Depends(require_auth)])
