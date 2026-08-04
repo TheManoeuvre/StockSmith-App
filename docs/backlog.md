@@ -14,18 +14,6 @@ Informal list of improvements not yet scheduled into a plan doc.
 
 **Ask:** Add a UI method to bulk-edit BOM overrides for variants sharing an attribute value (e.g. "update quantity for all Large variants") without regenerating/recreating the variants from scratch.
 
-## Store sync test — auto-correct stock mismatches
-
-**Problem:** When testing a store sync connection, if the store reports back as connected but its stock count doesn't match StockSmith's, there's currently no reconciliation.
-
-**Ask:** When a sync test finds a connected store with a stock count mismatch, push the StockSmith stock count to the store to correct it.
-
-## Menu bar — last sync time and error badge
-
-**Problem:** There's no at-a-glance way to tell when stores last synced or whether the last sync had errors.
-
-**Ask:** In the top menu bar, show the last sync time with stores on the right-hand side, with an alert badge if the last sync encountered errors.
-
 ## Background/tray process to keep stock sync alive
 
 **Problem:** Platform stock sync currently only runs while the StockSmith app is open, so stock levels can drift out of sync while the app is closed.

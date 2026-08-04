@@ -18,7 +18,7 @@ from app.models.platform_listing_push import PlatformListingPush
 from app.models.platform_sync_run import PlatformSyncRun, SyncRunMode, SyncRunStatus
 from app.models.product import Product
 from app.models.variant import ProductVariant
-from app.schemas.listing import BulkListingSyncResult, ProductListingSyncSummary
+from app.schemas.listing import BulkListingSyncResult, ProductListingSyncSummary, PushCorrectionsResult
 from app.schemas.platform import (
     ListingPushPage,
     ListingPushRead,
@@ -46,6 +46,7 @@ from app.schemas.listing_adoption import (
 )
 from app.services import (
     listing_adoption,
+    listing_push,
     listing_sync,
     order_sync,
     platform_credentials,
@@ -663,11 +664,48 @@ async def check_product_sync(
     adapter = await get_adapter(session, platform)
     try:
         index = await adapter.build_listing_sku_index(session, connection)
-        return await listing_sync.check_product_sku_sync(session, product_id, index, platform)
+        # Read-only: this reports a quantity drift, it does not correct it. Pushing from
+        # a "test" action would make a diagnostic silently mutate the live marketplace —
+        # correcting is the separate, explicitly-confirmed push-corrections endpoint.
+        return await listing_sync.check_product_sku_sync(
+            session, product_id, index, platform, with_expected_quantity=True
+        )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except PlatformError as e:
         raise _map_platform_error(e)
+
+
+@router.post(
+    "/{platform}/products/{product_id}/push-corrections",
+    response_model=PushCorrectionsResult,
+    dependencies=[Depends(require_auth)],
+)
+async def push_product_corrections(
+    platform: ListingPlatform, product_id: int, session: AsyncSession = Depends(get_db)
+) -> PushCorrectionsResult:
+    """Pushes StockSmith's quantities to the marketplace for units whose listing quantity
+    has drifted — the user-confirmed follow-up to a sync check that found mismatches.
+
+    Deliberately re-derives which units are mismatched from stored state rather than
+    accepting a list from the client: the check may be minutes old by the time the button
+    is clicked, and pushing a unit the client *believed* was wrong risks overwriting a
+    quantity that has since been corrected legitimately."""
+    await _require_connection(session, platform)
+    try:
+        summary = await listing_sync.get_stored_product_sync_status(session, product_id, platform)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+    mismatched = [unit.variant_id for unit in summary.units if unit.quantity_mismatch]
+    if not mismatched:
+        return PushCorrectionsResult(pushed_count=0, failed_count=0, errors=[])
+
+    try:
+        pushed, errors = await listing_push.push_units_now(session, product_id, mismatched)
+    except PlatformError as e:
+        raise _map_platform_error(e)
+    return PushCorrectionsResult(pushed_count=pushed, failed_count=len(errors), errors=errors)
 
 
 @router.get(

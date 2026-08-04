@@ -140,6 +140,16 @@ export interface UnitSyncResult {
   external_state: string | null;
   external_quantity: number | null;
   last_checked_at: string | null;
+  // What StockSmith would push for this unit. Null on the bulk shop-wide check, which
+  // skips the computation.
+  expected_quantity: number | null;
+  quantity_mismatch: boolean;
+}
+
+export interface PushCorrectionsResult {
+  pushed_count: number;
+  failed_count: number;
+  errors: string[];
 }
 
 export interface ProductListingSyncSummary {
@@ -276,6 +286,8 @@ export const platformsApi = {
   syncSummary: () => api.get<PlatformSyncSummary[]>(`/platforms/sync-summary`),
   syncLog: (platform: ListingPlatform, limit: number, offset: number) =>
     api.get<SyncRunPage>(`/platforms/${platform}/sync-log?limit=${limit}&offset=${offset}`),
+  pushCorrections: (platform: ListingPlatform, productId: number) =>
+    api.post<PushCorrectionsResult>(`/platforms/${platform}/products/${productId}/push-corrections`),
   checkProductSync: (platform: ListingPlatform, productId: number) =>
     api.post<ProductListingSyncSummary>(`/platforms/${platform}/products/${productId}/check-sync`),
   getProductSyncStatus: (platform: ListingPlatform, productId: number) =>

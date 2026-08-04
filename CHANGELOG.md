@@ -15,6 +15,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 - Products list now has a **Stores** column showing a colour-coded badge per connected
   marketplace, so it's glanceable which stores each product is listed on.
+- The menu bar now shows how long ago your stores last synced, with an alert badge when
+  a sync failed or when stock updates aren't reaching a marketplace.
+- Testing a store sync now flags any listing whose quantity has drifted from StockSmith's,
+  with a **Push corrections** button to set the marketplace back to StockSmith's numbers.
+  Testing itself stays read-only — nothing is pushed until you click.
 
 ### Fixed
 - Transient eBay server errors (`errorId 25001`, "Dependent service failure") are now

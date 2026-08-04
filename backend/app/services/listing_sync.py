@@ -13,6 +13,7 @@ from app.schemas.listing import (
     ProductSyncStatus,
     UnitSyncResult,
 )
+from app.services import listing_push
 from app.services.platforms.base import ExternalListingRef
 from app.services.variants import compute_full_sku
 
@@ -67,15 +68,32 @@ async def _active_variants(session: AsyncSession, product_id: int) -> list[Produ
     return list(result.scalars())
 
 
+def _quantity_mismatch(status: ListingSyncStatus, external_quantity: int | None, expected: int | None) -> bool:
+    """A mismatch is only meaningful for a listing that was actually found — a SKU the
+    marketplace doesn't have is a "not found" problem, and offering to "correct" its
+    quantity would be offering to push to nothing."""
+    if status != ListingSyncStatus.synced or external_quantity is None or expected is None:
+        return False
+    return external_quantity != expected
+
+
 async def check_product_sku_sync(
     session: AsyncSession,
     product_id: int,
     index: dict[str, ExternalListingRef],
     platform: ListingPlatform,
+    *,
+    with_expected_quantity: bool = False,
 ) -> ProductListingSyncSummary:
     """Tests the product's own SKU (if it has no variants) or every active variant's
     full SKU independently against an already-built listing index, persisting the
-    result of each check onto its Listing row."""
+    result of each check onto its Listing row.
+
+    with_expected_quantity additionally computes what listing_push would send for each
+    unit, so the UI can flag a listing whose quantity has drifted. Off by default because
+    it is a per-unit buildability computation: the shop-wide check (which reuses this
+    per product) would turn one click into one such computation per unit in the catalogue,
+    and it only needs statuses."""
     product = await session.get(Product, product_id)
     if product is None:
         raise ValueError(f"Product {product_id} not found")
@@ -100,18 +118,26 @@ async def check_product_sku_sync(
         listing.external_quantity = match.quantity if match else None
         listing.last_checked_at = now
 
+        status = _status_from_match(match)
+        expected_quantity = (
+            await listing_push.resolve_push_quantity(session, product_id, variant_id)
+            if with_expected_quantity
+            else None
+        )
         units.append(
             UnitSyncResult(
                 variant_id=variant_id,
                 variant_name=variant_name,
                 sku=sku,
-                status=_status_from_match(match),
+                status=status,
                 external_listing_id=listing.external_listing_id,
                 external_title=listing.external_title,
                 external_variation=listing.external_variation,
                 external_state=listing.external_state,
                 external_quantity=listing.external_quantity,
                 last_checked_at=listing.last_checked_at,
+                expected_quantity=expected_quantity,
+                quantity_mismatch=_quantity_mismatch(status, listing.external_quantity, expected_quantity),
             )
         )
 
@@ -162,18 +188,26 @@ async def get_stored_product_sync_status(
     units = []
     for variant_id, variant_name, sku in checks:
         listing = listing_by_variant.get(variant_id)
+        status = _status_from_stored(listing)
+        external_quantity = listing.external_quantity if listing else None
+        # Always computed here, unlike check_product_sku_sync: this function is only ever
+        # called for a single product (the Platform Sync tab's page load), never fanned
+        # out across the catalogue, so there's no bulk path to keep cheap.
+        expected_quantity = await listing_push.resolve_push_quantity(session, product_id, variant_id)
         units.append(
             UnitSyncResult(
                 variant_id=variant_id,
                 variant_name=variant_name,
                 sku=sku,
-                status=_status_from_stored(listing),
+                status=status,
                 external_listing_id=listing.external_listing_id if listing else None,
                 external_title=listing.external_title if listing else None,
                 external_variation=listing.external_variation if listing else None,
                 external_state=listing.external_state if listing else None,
-                external_quantity=listing.external_quantity if listing else None,
+                external_quantity=external_quantity,
                 last_checked_at=listing.last_checked_at if listing else None,
+                expected_quantity=expected_quantity,
+                quantity_mismatch=_quantity_mismatch(status, external_quantity, expected_quantity),
             )
         )
 
