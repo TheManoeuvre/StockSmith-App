@@ -80,6 +80,13 @@ def pushes(monkeypatch):
     monkeypatch.setattr(
         listing_push, "enqueue_for_material", lambda session, material_id: recorded.append(("material", material_id))
     )
+    # The product-id entry point was previously unpatched, so nothing could assert on it —
+    # which is part of why routers/variants.py never calling it went unnoticed.
+    monkeypatch.setattr(
+        listing_push,
+        "enqueue_for_product",
+        lambda product_id, variant_id=None: recorded.append(("product", product_id, variant_id)),
+    )
     return recorded
 
 
