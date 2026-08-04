@@ -2,11 +2,31 @@
 
 Informal list of improvements not yet scheduled into a plan doc.
 
+## Backend adoption has no identity check
+
+**Problem:** Found during the background-sync spike. `spawn_sidecar_if_needed` (`frontend/src-tauri/src/lib.rs:70-99`) probes `GET /healthz` and reuses *whatever* answers on port 8000, and `/healthz` returns only `{"status": "ok"}`. So the app will silently adopt a backend from a different build — a stale sidecar orphaned by an update, or a dev instance — and run a new frontend against it with no indication anything is wrong.
+
+This exists today, independently of the tray work, but the tray makes it much more likely to fire (see `docs/plan-background-sync.md` §2a).
+
+**Ask:** Include the build version in `/healthz` and have the shell refuse to adopt a mismatched backend — kill it and spawn its own. Pair with a PID file so a sidecar orphaned by a crash or an installer is reaped rather than adopted.
+
+## Periodic reconciliation for failed listing pushes
+
+**Problem:** `listing_push` is entirely event-driven with a 5-second debounce and no retry, so a push that fails permanently (network blip, expired token, marketplace 5xx) is never retried until unrelated stock movement happens to trigger one. The menu-bar badge added in Phase 2 now counts exactly these listings, which means the app points at a problem it has no way to resolve on its own.
+
+**Ask:** A periodic sweep that re-pushes listings whose latest `PlatformListingPush` errored, bounded by the existing semaphore and with a backoff so a persistently broken listing isn't retried every cycle. Deliberately kept separate from the tray work — see `docs/plan-background-sync.md` §4 for why a marketplace-write behaviour change shouldn't ride along inside a "keep the app running" feature.
+
 ## Background/tray process to keep stock sync alive
 
 **Problem:** Platform stock sync currently only runs while the StockSmith app is open, so stock levels can drift out of sync while the app is closed.
 
-**Ask:** Explore a system-tray background process that can start on PC boot and keep running when the main StockSmith window is closed, so platform stock sync stays alive continuously.
+**Ask:** Planned in `docs/plan-background-sync.md` — a tray-resident app with opt-in autostart. Not yet implemented; the plan doc carries the hazards (sidecar orphaning on update, single-instance, `sync_scheduler`'s single-process assumption) and a suggested build order.
+
+## eBay — verify Offer enrichment against a live sandbox account
+
+**Problem:** The Offer-enrichment work (`EbayAdapter._enrich_with_offers` and friends) is covered by tests, but every one of them serves canned responses through a fake HTTP client. No request has ever gone to a real eBay account, sandbox or production. The response shapes it parses — `offer.listing.listingStatus`, `offer.status`, `product.aspects` — come from eBay's documentation rather than from observed payloads, which is exactly the class of assumption that put "eBay's token response contains a `scope` field" (it doesn't) into a release.
+
+**Ask:** Connect the sandbox app (Client ID ends `-SBX-`) under Settings → Integrations, run a product sync check against it, and confirm: variation strings render in the same format as Etsy's, listing state maps correctly for an active/out-of-stock/ended listing, a SKU with no offer reports `no_offer`, and the fan-out stays within its concurrency cap. Fold any shape corrections back into `test_ebay_offer_enrichment.py` so the fixtures reflect reality.
 
 ## eBay listing index — use the real listing id as external_listing_id
 
