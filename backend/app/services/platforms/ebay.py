@@ -1,4 +1,4 @@
-﻿import asyncio
+import asyncio
 import base64
 import logging
 from datetime import datetime, timedelta, timezone
@@ -20,7 +20,7 @@ from app.services.platforms.base import (
 )
 from app.services.platforms.errors import PlatformAuthError, PlatformRateLimitError, PlatformSyncError
 
-# eBay's Trading API is XML/SOAP-era and namespaces every element under this URI â€”
+# eBay's Trading API is XML/SOAP-era and namespaces every element under this URI —
 # every ElementTree find/findall against a Trading API response must qualify tags with
 # this prefix map or they silently match nothing (ElementTree has no implicit default
 # namespace handling).
@@ -29,7 +29,7 @@ _TRADING_NS = {"e": "urn:ebay:apis:eBLBaseComponents"}
 logger = logging.getLogger("stocksmith.ebay")
 
 # eBay's OrderPaymentStatusEnum, mapped onto StockSmith's payment states. The full enum
-# is FAILED, FULLY_REFUNDED, PAID, PARTIALLY_REFUNDED, PENDING â€” all five are covered
+# is FAILED, FULLY_REFUNDED, PAID, PARTIALLY_REFUNDED, PENDING — all five are covered
 # here so an unrecognised value is genuinely unrecognised rather than merely unhandled.
 #
 # PARTIALLY_REFUNDED counts as settled: it was paid, and only part came back. eBay's own
@@ -48,8 +48,8 @@ def _order_payment_state(order: dict) -> PaymentState:
     """Whether eBay has actually taken this buyer's money.
 
     eBay's checkout flow means most orders reaching getOrders are already PAID, but that
-    is not guaranteed â€” some payment methods (COD among them) can surface a non-PAID
-    status â€” so this checks the field explicitly rather than trusting the API to have
+    is not guaranteed — some payment methods (COD among them) can surface a non-PAID
+    status — so this checks the field explicitly rather than trusting the API to have
     pre-filtered. An unknown or missing value falls through to `unsettled`, so a future
     enum addition fails closed.
 
@@ -65,8 +65,8 @@ class EbayTimeout(PlatformSyncError):
 
     A PlatformSyncError subclass so every existing caller keeps handling it sensibly
     (mapped to a 502 rather than escaping as an opaque 500), but a distinct type so the
-    two calls that actually change state on eBay's side â€” migrate_listing and
-    revise_listing_skus â€” can catch it specifically and say the one thing that matters:
+    two calls that actually change state on eBay's side — migrate_listing and
+    revise_listing_skus — can catch it specifically and say the one thing that matters:
     a timeout is not proof that nothing happened."""
 
 
@@ -85,7 +85,7 @@ def _xml_escape(value: str) -> str:
 
 
 def _raise_for_trading_ack(root: ElementTree.Element, call_name: str) -> None:
-    """The Trading API signals failure in the body, not the HTTP status â€” a call that
+    """The Trading API signals failure in the body, not the HTTP status — a call that
     fails validation still comes back 200 with Ack=Failure. Checking only
     response.status_code would silently treat those as empty successes."""
     ack = root.findtext("e:Ack", namespaces=_TRADING_NS)
@@ -102,7 +102,7 @@ def _raise_for_trading_ack(root: ElementTree.Element, call_name: str) -> None:
 # Substrings eBay uses when rejecting a bulkMigrateListing call for a listing that is
 # already an Inventory API object. Matched loosely (case-insensitive substring) because
 # the exact wording is unverified against a live account and a missed match here would
-# turn a harmless retry into a hard failure â€” the cost of a false positive is only that
+# turn a harmless retry into a hard failure — the cost of a false positive is only that
 # a genuinely-failed migration gets its SKUs read back and found absent, which surfaces
 # as a normal "not found" a moment later.
 _ALREADY_MIGRATED_MARKERS = ("already migrated", "already exists", "already an inventory item")
@@ -114,18 +114,18 @@ def _align_new_skus(candidate: ClassicListingCandidate, new_skus: list[str]) -> 
     Length mismatch on a multi-variation listing is the one mistake that could silently
     destroy variations (eBay deletes any variation omitted from a Variations block), so
     it fails loudly here rather than producing a partial payload. Empty SKUs are
-    rejected for the same reason â€” eBay would accept the revision and leave a variation
+    rejected for the same reason — eBay would accept the revision and leave a variation
     unidentifiable to the Inventory API afterwards."""
     if candidate.variation_specifics is None:
         if len(new_skus) != 1:
             raise PlatformSyncError(
-                f"Listing {candidate.external_listing_id} has no variations â€” expected exactly 1 SKU, "
+                f"Listing {candidate.external_listing_id} has no variations — expected exactly 1 SKU, "
                 f"got {len(new_skus)}"
             )
     elif len(new_skus) != len(candidate.variation_specifics):
         raise PlatformSyncError(
             f"Listing {candidate.external_listing_id} has {len(candidate.variation_specifics)} variation(s) but "
-            f"{len(new_skus)} SKU(s) were supplied â€” every variation must be included or eBay would delete the "
+            f"{len(new_skus)} SKU(s) were supplied — every variation must be included or eBay would delete the "
             "omitted ones."
         )
     if any(not sku or not sku.strip() for sku in new_skus):
@@ -153,7 +153,7 @@ def _evaluate_eligibility(
     variation_specifics: list[dict[str, str]] | None,
     detail_loaded: bool = True,
 ) -> list[str]:
-    """Best-effort local pre-filter for bulkMigrateListing eligibility â€” NOT
+    """Best-effort local pre-filter for bulkMigrateListing eligibility — NOT
     authoritative. eBay's own migration call is the real gate (see
     EbayAdapter.migrate_listing); this only exists so the "unmigrated listings" report
     can show a human a reason before they waste a click on a listing eBay will reject
@@ -161,7 +161,7 @@ def _evaluate_eligibility(
     session or network, matching _order_payment_state's style above.
 
     `detail_loaded=False` means the caller only has the bulk-list view of this listing,
-    which doesn't carry per-variation SKUs â€” SKU-based reasons are then suppressed
+    which doesn't carry per-variation SKUs — SKU-based reasons are then suppressed
     entirely rather than guessed at. Getting this wrong in the safe direction matters:
     wrongly claiming "no SKU set" would grey out, in the picker, exactly the
     multi-variation listings this feature exists to adopt."""
@@ -175,18 +175,18 @@ def _evaluate_eligibility(
 
     non_empty_skus = [s for s in skus if s]
     if not non_empty_skus:
-        reasons.append("Listing has no SKU set â€” add a Custom Label (SKU) in Seller Hub before migrating.")
+        reasons.append("Listing has no SKU set — add a Custom Label (SKU) in Seller Hub before migrating.")
     elif variation_specifics is not None:
         missing_variation_skus = sum(1 for sku in skus if not sku)
         if missing_variation_skus:
             reasons.append(
-                f"{missing_variation_skus} of {len(skus)} variation(s) have no SKU â€” every variation needs one "
+                f"{missing_variation_skus} of {len(skus)} variation(s) have no SKU — every variation needs one "
                 "before the whole listing can migrate."
             )
 
     return reasons
 
-# Sandbox and Production are entirely separate keysets AND separate API hosts â€” see
+# Sandbox and Production are entirely separate keysets AND separate API hosts — see
 # docs/plan-marketplace-integrations.md Section 2. auth./api. sandbox hosts are
 # well-documented by eBay; apiz.sandbox.ebay.com follows the same apiz<->api naming
 # eBay uses for its production identity host but, like everything else in this file
@@ -210,11 +210,11 @@ _HOSTS: dict[PlatformEnvironment, dict[str, str]] = {
 
 _REFRESH_SKEW = timedelta(minutes=5)
 
-# Same rationale as EtsyAdapter's own caps â€” bounds one sync/index-build click to a
+# Same rationale as EtsyAdapter's own caps — bounds one sync/index-build click to a
 # reasonable slice of the daily API budget rather than an unbounded crawl.
 _MAX_PAGES = 20
 _PAGE_LIMIT = 200  # eBay's documented max page size for getOrders
-# getInventoryItems' documented limit range is 1-100 (default 100) â€” distinct from
+# getInventoryItems' documented limit range is 1-100 (default 100) — distinct from
 # getOrders' 200 above; conflating the two was a latent bug (never caught because it
 # would 400 loudly rather than silently drop items, and no live account with >100
 # inventory items had exercised this path until now).
@@ -222,7 +222,7 @@ _INVENTORY_PAGE_LIMIT = 100
 _MAX_RATE_LIMIT_RETRIES = 3
 
 # eBay answers a transient fault on its own side with a 5xx and errorId 25001
-# ("A system error has occurred. Dependent service failure") â€” confirmed live on
+# ("A system error has occurred. Dependent service failure") — confirmed live on
 # bulkMigrateListing. It is not a rejection of the request, so failing hard on the first
 # one leaves the user to notice an alarming raw-JSON error and re-click the button
 # themselves. Retried on a smaller budget than 429: a rate limit clears on a schedule and
@@ -230,7 +230,7 @@ _MAX_RATE_LIMIT_RETRIES = 3
 # outage than a hiccup, and every retry here is spent inside a user-facing click.
 #
 # Safe for every call this adapter makes: the reads are idempotent by nature, and the two
-# writes are idempotent by design â€” migrate_listing treats an "already migrated"
+# writes are idempotent by design — migrate_listing treats an "already migrated"
 # rejection as success (see its docstring) and bulk_update_price_quantity sets an
 # absolute quantity rather than adjusting by a delta.
 _MAX_SERVER_ERROR_RETRIES = 2
@@ -248,8 +248,8 @@ _MAX_CONCURRENT_OFFER_LOOKUPS = 8
 # eBay's ListingStatusEnum, as it appears on offer.listing.listingStatus.
 #
 # OUT_OF_STOCK maps to "active" on purpose. It's a live GTC listing sitting at quantity 0
-# â€” eBay's Out-of-Stock Control keeps such a listing alive (hidden from search) for up to
-# 90 days â€” and it's frequently 0 because StockSmith itself pushed 0. Mapping it anywhere
+# — eBay's Out-of-Stock Control keeps such a listing alive (hidden from search) for up to
+# 90 days — and it's frequently 0 because StockSmith itself pushed 0. Mapping it anywhere
 # else would make listing_sync._status_from_match report listing_not_active for every
 # legitimately sold-out item, i.e. flag this app's own correct behaviour as a sync
 # failure. The quantity column already says 0.
@@ -265,7 +265,7 @@ _EBAY_LISTING_STATES = {
 _DEFAULT_TIMEOUT = 15.0
 
 # bulkMigrateListing and ReviseFixedPriceItem are the exceptions: both do real work on
-# eBay's side proportional to the listing's variation count â€” migration creates an
+# eBay's side proportional to the listing's variation count — migration creates an
 # inventory item AND an offer per variation before responding. Confirmed live: a
 # 4-variation listing blew straight through the 15s default and surfaced as an
 # unhandled ReadTimeout, while a smaller listing had completed comfortably. These are
@@ -275,7 +275,7 @@ _MIGRATION_TIMEOUT = 180.0
 _REVISE_TIMEOUT = 90.0
 
 # GetMyeBaySelling's ActiveList is a heavier call than the Sell REST APIs above, and the
-# Trading API's default budget is 5,000 calls/DAY across every Trading call combined â€”
+# Trading API's default budget is 5,000 calls/DAY across every Trading call combined —
 # roughly 400x tighter than the Inventory API's 2,000,000 (see
 # docs/plan-ebay-existing-store-onboarding.md section 5). Short-duration limits are
 # generous (300/15s for this call), so the daily total is the real constraint: every
@@ -286,7 +286,7 @@ _TRADING_PAGE_LIMIT = 200  # eBay's documented max EntriesPerPage for GetMyeBayS
 _TRADING_COMPATIBILITY_LEVEL = "1413"
 
 # The Trading API's X-EBAY-API-SITEID header selects which eBay site the call runs
-# against, and a seller's listings only come back under their own site â€” hardcoding one
+# against, and a seller's listings only come back under their own site — hardcoding one
 # would silently return an empty (or wrong) listing set for every seller registered
 # elsewhere. Resolved per connection from GetUser's <Site> (see
 # EbayAdapter._resolve_site_id) and mapped through this table.
@@ -315,25 +315,25 @@ _DEFAULT_TRADING_SITE_ID = "0"
 
 # Listing types eBay's Inventory API migration does not support, per eBay's own
 # bulkMigrateListing documentation. This is a best-effort local pre-filter, not
-# authoritative â€” bulkMigrateListing's own rejection is the real gate (see
+# authoritative — bulkMigrateListing's own rejection is the real gate (see
 # migrate_listing's docstring).
 _INELIGIBLE_LISTING_TYPES = {"Chinese", "Classified"}
 
 
 class EbayAdapter:
-    """eBay Sell API adapter â€” standard OAuth 2.0 authorization-code grant (NOT PKCE;
+    """eBay Sell API adapter — standard OAuth 2.0 authorization-code grant (NOT PKCE;
     build_authorize_url/exchange_code accept and ignore code_challenge/code_verifier
     purely to satisfy the shared PlatformAdapter Protocol uniformly across adapters).
     Unlike Etsy, eBay's refresh token does not rotate on use and is long-lived
-    (~18 months) â€” refresh() only ever returns a new access token.
+    (~18 months) — refresh() only ever returns a new access token.
 
     fetch_orders_since and build_listing_sku_index have been verified against a live
-    Sandbox connection (empty-result parsing only â€” the test account had no orders or
+    Sandbox connection (empty-result parsing only — the test account had no orders or
     listings yet); push_listing_quantity has not, since no listing existed to push
     against. Treat any request/response shape not exercised that way as best-effort,
     same caveat every uncertain spot in this file already carries. Requires the
     commerce.identity.readonly scope alongside the Sell-API ones (see
-    routers/platforms._SCOPES) â€” fetch_account_id 403s without it, confirmed live.
+    routers/platforms._SCOPES) — fetch_account_id 403s without it, confirmed live.
 
     The listing-adoption methods (fetch_classic_listings, fetch_classic_listing_detail,
     revise_listing_skus, migrate_listing, and _resolve_site_id) are ENTIRELY UNVERIFIED
@@ -342,7 +342,7 @@ class EbayAdapter:
     failure in the response body rather than the HTTP status (hence
     _raise_for_trading_ack), and needs the base api_scope plus a per-seller site id.
     revise_listing_skus in particular writes to a live listing and can delete variations
-    if its payload is wrong â€” see its docstring and test_sku_alignment.py. See
+    if its payload is wrong — see its docstring and test_sku_alignment.py. See
     docs/listing-adoption.md for the operator-facing version of all this.
     """
 
@@ -359,12 +359,12 @@ class EbayAdapter:
         self.identity_base = hosts["identity"]
         self.trading_base = hosts["trading"]
         # Resolved lazily on the first Trading API call and cached for this adapter's
-        # lifetime â€” adapters are cached per (platform, environment) in the registry
+        # lifetime — adapters are cached per (platform, environment) in the registry
         # (services/platforms/__init__.py), so this costs one extra GetUser call per
         # process, not per request. A seller's registration site doesn't change.
         self._site_id: str | None = None
         # Serialises token refresh. Every other eBay call in this file is sequential, but
-        # _enrich_with_offers fans out concurrently on one AsyncSession â€” and _do_refresh
+        # _enrich_with_offers fans out concurrently on one AsyncSession — and _do_refresh
         # commits on that session, which is NOT concurrency-safe. Without this, a token
         # expiring mid-fan-out means several tasks refreshing at once: redundant refresh
         # POSTs, racing commits, and a last-writer-wins token.
@@ -382,7 +382,7 @@ class EbayAdapter:
     def build_authorize_url(self, state: str, code_challenge: str, redirect_uri: str, scopes: list[str]) -> str:
         # Despite the Protocol's parameter name, eBay's `redirect_uri` is the RuName
         # identifier assigned to a redirect configuration in the dev portal, not a
-        # literal URL â€” the caller (routers/platforms.py._redirect_uri) already knows
+        # literal URL — the caller (routers/platforms.py._redirect_uri) already knows
         # this and passes the RuName string through for this platform.
         params = {
             "client_id": self.client_id,
@@ -416,7 +416,7 @@ class EbayAdapter:
                 },
                 data={"grant_type": "refresh_token", "refresh_token": refresh_token},
             )
-        # eBay's refresh response does not include a new refresh_token â€” the same one
+        # eBay's refresh response does not include a new refresh_token — the same one
         # keeps working until its own ~18-month expiry, unlike Etsy's rotate-on-use.
         return self._parse_token_response(response, refresh_token_fallback=refresh_token)
 
@@ -449,20 +449,20 @@ class EbayAdapter:
     async def _authed_request(
         self, session, connection: PlatformConnection, method: str, url: str, **kwargs
     ) -> httpx.Response:
-        """Mirrors EtsyAdapter._authed_request â€” proactive refresh near expiry, reactive
+        """Mirrors EtsyAdapter._authed_request — proactive refresh near expiry, reactive
         refresh once on a 401, then a backoff/retry loop covering both 429 and 5xx.
 
         Network-level failures are translated into PlatformSyncError rather than being
         allowed to escape as raw httpx exceptions: every caller already handles
         PlatformError and maps it to a sensible status, whereas an httpx.ReadTimeout
         propagates all the way out as an opaque "Internal server error" (confirmed live
-        â€” that is exactly how a slow bulkMigrateListing surfaced). Callers that need
+        — that is exactly how a slow bulkMigrateListing surfaced). Callers that need
         operation-specific wording catch httpx.TimeoutException themselves before this
         can reach them.
 
         A 5xx that outlives its retry budget is deliberately returned, not raised: every
         caller already fails on a non-200 with wording specific to the operation
-        ("Failed to migrate eBay listing: 500 â€¦"), which is more use to the user than a
+        ("Failed to migrate eBay listing: 500 …"), which is more use to the user than a
         generic transport error raised from here."""
         await self._ensure_fresh(session, connection)
 
@@ -473,7 +473,7 @@ class EbayAdapter:
                 response = await self._request_once(connection, method, url, **kwargs)
 
             # Separate budgets, so a call that hits a rate limit and then a server error
-            # doesn't find one exhausted by the other â€” they're unrelated faults.
+            # doesn't find one exhausted by the other — they're unrelated faults.
             rate_limit_attempts = 0
             server_error_attempts = 0
             while True:
@@ -509,7 +509,7 @@ class EbayAdapter:
     def _retry_delay(response: httpx.Response, attempt: int) -> float:
         """Backoff for both the 429 and 5xx retry paths. eBay sends Retry-After on rate
         limits and generally not on server errors, so a 5xx falls through to the
-        exponential 1s/2s/â€¦ below â€” which is the intent either way."""
+        exponential 1s/2s/… below — which is the intent either way."""
         retry_after = response.headers.get("retry-after")
         if retry_after is not None:
             try:
@@ -528,7 +528,7 @@ class EbayAdapter:
     async def _ensure_fresh(self, session, connection: PlatformConnection) -> None:
         expires_at = ensure_utc(connection.access_token_expires_at)
         if expires_at is None or connection.refresh_token is None:
-            raise PlatformAuthError("eBay connection has no stored tokens â€” reconnect required")
+            raise PlatformAuthError("eBay connection has no stored tokens — reconnect required")
         if datetime.now(timezone.utc) + _REFRESH_SKEW >= expires_at:
             await self._do_refresh(session, connection)
 
@@ -545,12 +545,12 @@ class EbayAdapter:
         token_before = connection.access_token
         async with self._refresh_lock:
             if connection.access_token != token_before:
-                return  # another task refreshed while we waited â€” that refresh is ours too
+                return  # another task refreshed while we waited — that refresh is ours too
             await self._refresh_now(session, connection)
 
     async def _refresh_now(self, session, connection: PlatformConnection) -> None:
         if connection.refresh_token is None:
-            raise PlatformAuthError("eBay connection has no refresh token â€” reconnect required")
+            raise PlatformAuthError("eBay connection has no refresh token — reconnect required")
         tokens = await self.refresh(connection.refresh_token)
         connection.access_token = tokens.access_token
         connection.refresh_token = tokens.refresh_token
@@ -600,7 +600,7 @@ class EbayAdapter:
         # orderPaymentStatus == FAILED as a cancellation, conflating two genuinely
         # different things: eBay had not been paid, versus the order was called off. A
         # failed payment now routes to PaymentState.unsettled instead, which is both more
-        # accurate and strictly safer â€” an unpaid order is never imported at all, rather
+        # accurate and strictly safer — an unpaid order is never imported at all, rather
         # than being imported and then flagged.
         is_cancelled = str(order.get("cancelStatus", {}).get("cancelState", "")).upper() == "CANCELED"
         fulfillment_status = str(order.get("orderFulfillmentStatus", "")).upper()
@@ -641,7 +641,7 @@ class EbayAdapter:
             grand_total=self._parse_money(pricing.get("total")),
             subtotal=self._parse_money(pricing.get("priceSubtotal")),
             # deliveryCost is documented as "before any shipping/delivery discount is
-            # applied" â€” confirmed live: showed the pre-discount amount as what the buyer
+            # applied" — confirmed live: showed the pre-discount amount as what the buyer
             # paid, overstating it by exactly the deliveryDiscount on an order that had
             # one. What the buyer actually paid is deliveryCost minus deliveryDiscount.
             shipping_charged=self._net_money(pricing.get("deliveryCost"), pricing.get("deliveryDiscount")),
@@ -655,7 +655,7 @@ class EbayAdapter:
         )
 
     def _parse_line_item(self, line_item: dict) -> ExternalOrderLine:
-        # lineItemCost is the TOTAL for the line, not a per-unit price â€” confirmed
+        # lineItemCost is the TOTAL for the line, not a per-unit price — confirmed
         # live: showed exactly double the correct value on a qty-1 line where the
         # buyer had actually been charged for 2 units bundled into one line item.
         cost = (line_item.get("lineItemCost") or {})
@@ -689,7 +689,7 @@ class EbayAdapter:
     @staticmethod
     def _net_money(gross: dict | None, discount: dict | None) -> str | None:
         # eBay reports deliveryDiscount as an already-negative delta (e.g. "-3.4" against
-        # a deliveryCost of "7.2") â€” confirmed live via the raw pricingSummary payload, so
+        # a deliveryCost of "7.2") — confirmed live via the raw pricingSummary payload, so
         # this must ADD the two, not subtract. Subtracting a negative discount here
         # previously overstated shipping (7.2 - (-3.4) = 10.6 instead of the buyer's
         # actual 3.8).
@@ -705,7 +705,7 @@ class EbayAdapter:
     async def _fetch_transactions(
         self, session, connection: PlatformConnection, order_id
     ) -> tuple[str | None, str | None, str | None]:
-        """Sell Finances API getTransactions filtered by orderId â€” mirrors Etsy's
+        """Sell Finances API getTransactions filtered by orderId — mirrors Etsy's
         per-receipt _fetch_payment. Sums SALE-type gross/fee amounts for this order;
         a transaction whose payout hasn't settled yet just means these stay None,
         matching Etsy's own "not failing the sync" behavior."""
@@ -731,7 +731,7 @@ class EbayAdapter:
             if isinstance(fee, dict)
         )
         # totalFeeBasisAmount's exact shape is uncertain without a live account to
-        # verify against â€” falls back to totalFeeAmount if present, matching the
+        # verify against — falls back to totalFeeAmount if present, matching the
         # dedicated field described in eBay's Transaction schema.
         if not total_fees and sale.get("totalFeeAmount"):
             total_fees = float(sale["totalFeeAmount"].get("value", 0))
@@ -747,21 +747,21 @@ class EbayAdapter:
     ) -> None:
         """Sell Inventory API bulkUpdatePriceQuantity, updating both this SKU's
         shipToLocationAvailability.quantity (inventory-item level) and, when a live
-        offer exists for it, that offer's availableQuantity â€” unlike Etsy's
+        offer exists for it, that offer's availableQuantity — unlike Etsy's
         updateListingInventory, this is a targeted partial update, not a full replace, so
         there's no GET-then-PUT round trip needed for the item level.
 
         eBay's own docs state the live listing quantity is min(item-level qty,
-        offer-level availableQuantity) â€” item-level alone is sufficient to correctly
+        offer-level availableQuantity) — item-level alone is sufficient to correctly
         drive a quantity DOWN to (and including) 0, but a later increase could be
         silently capped if the offer-level number was ever set independently at
         offer-creation time and never touched since. Updating both keeps them in sync in
         both directions. A literal 0 is natively accepted by eBay's Inventory API as the
-        standard "out of stock" signal (confirmed via eBay's docs) â€” unlike Etsy, no
+        standard "out of stock" signal (confirmed via eBay's docs) — unlike Etsy, no
         special-casing is needed here for the zero value itself.
 
         Confirmed live: a SKU with no live offer (e.g. its listing was never migrated to
-        an Inventory API object â€” see build_listing_sku_index's docstring) 404s on
+        an Inventory API object — see build_listing_sku_index's docstring) 404s on
         GET .../offer?sku=... with "This Offer is not available"; that's treated as "no
         offer to also update", not an error, since the item-level update alone is still
         valid and matches this method's pre-existing behavior for such SKUs.
@@ -793,11 +793,11 @@ class EbayAdapter:
             )
 
     async def _fetch_offers(self, session, connection: PlatformConnection, sku: str) -> list[dict]:
-        """GET .../offer?sku=... â€” the raw offer objects for one SKU.
+        """GET .../offer?sku=... — the raw offer objects for one SKU.
 
         `sku` is a REQUIRED query parameter on getOffers and there is no bulk-offers
         endpoint (verified against eBay's docs), so anything needing offer data for many
-        SKUs is unavoidably one call each â€” see _enrich_with_offers for how that's bounded.
+        SKUs is unavoidably one call each — see _enrich_with_offers for how that's bounded.
 
         A 404 means no offer exists for this SKU (see push_listing_quantity's docstring),
         not an error; any other non-200 is a real failure."""
@@ -811,7 +811,7 @@ class EbayAdapter:
         return response.json().get("offers", [])
 
     async def _resolve_offer_ids(self, session, connection: PlatformConnection, sku: str) -> list[str]:
-        """Offer ids for a SKU â€” the push path's view of _fetch_offers. A 404 yields an
+        """Offer ids for a SKU — the push path's view of _fetch_offers. A 404 yields an
         empty list rather than raising, since the item-level quantity update alone is
         still valid for a SKU with no live offer."""
         return [o["offerId"] for o in await self._fetch_offers(session, connection, sku) if o.get("offerId")]
@@ -824,7 +824,7 @@ class EbayAdapter:
         enrich: bool = True,
         enrich_skus: set[str] | None = None,
     ) -> dict[str, ExternalListingRef]:
-        """Sell Inventory API getInventoryItems, paginated â€” unlike Etsy, eBay's
+        """Sell Inventory API getInventoryItems, paginated — unlike Etsy, eBay's
         Inventory API is SKU-keyed natively, but this builds the same bulk dict-of-SKU
         shape as EtsyAdapter's version so the shared listing_sync service and its UI need
         no special-casing.
@@ -835,14 +835,14 @@ class EbayAdapter:
         _enrich_with_offers for the cost and how it's bounded.
 
         `enrich`/`enrich_skus` are FIDELITY HINTS, NOT FILTERS. The returned index always
-        contains every SKU eBay reports, whatever they're set to â€” only how much detail a
+        contains every SKU eBay reports, whatever they're set to — only how much detail a
         given entry carries varies. That's load-bearing: two callers use this purely for
         `sku in index` membership tests and would silently start missing SKUs if these
         narrowed the index itself.
 
         A SKU absent from this index most often means the listing it belongs to was
         created via eBay's Seller Hub UI (or the legacy Trading API) and was never
-        migrated to an Inventory API object (eBay's `bulkMigrateListing`) â€” confirmed
+        migrated to an Inventory API object (eBay's `bulkMigrateListing`) — confirmed
         live via a direct GET on a specific missing SKU returning 404 on both
         getInventoryItem and getOffers, i.e. eBay genuinely has no Inventory API record
         for it, not a bug in this pagination/indexing. See _index_inventory_item's
@@ -885,8 +885,8 @@ class EbayAdapter:
     ) -> None:
         """Fills in real listing id, listing state and variation from each SKU's Offer.
 
-        One getOffers call per SKU â€” eBay requires `sku` on that endpoint and offers no
-        bulk equivalent â€” so callers scope `targets` to the SKUs StockSmith actually
+        One getOffers call per SKU — eBay requires `sku` on that endpoint and offers no
+        bulk equivalent — so callers scope `targets` to the SKUs StockSmith actually
         tracks. A seller with 2,000 eBay SKUs and 80 in StockSmith pays 80 calls, not
         2,000.
 
@@ -896,7 +896,7 @@ class EbayAdapter:
         if not targets:
             return
 
-        # Refresh once up front so the common case never contends on the refresh lock â€”
+        # Refresh once up front so the common case never contends on the refresh lock —
         # correctness doesn't depend on this (see _do_refresh), only latency does.
         await self._ensure_fresh(session, connection)
 
@@ -921,7 +921,7 @@ class EbayAdapter:
             offers_by_sku[sku] = offers
 
         # Group by listing so variation can be narrowed to the aspects that actually vary
-        # within a listing â€” see _varying_aspects.
+        # within a listing — see _varying_aspects.
         skus_by_listing: dict[str, list[str]] = {}
         for sku, offers in offers_by_sku.items():
             offer = self._select_offer(offers)
@@ -962,15 +962,15 @@ class EbayAdapter:
             return
         product = item.get("product") or {}
         availability = (item.get("availability") or {}).get("shipToLocationAvailability") or {}
-        # An inventory item carries no listing id and no listing state â€” those live on the
+        # An inventory item carries no listing id and no listing state — those live on the
         # associated Offer. This pass therefore sets the coarse "an inventory item exists"
         # placeholder of "active", which _enrich_with_offers replaces with the real state.
         # It's also what an entry keeps when enrichment is skipped or its lookup fails.
         #
-        # `title` stays None when absent rather than "" â€” getInventoryItems (plural) is
+        # `title` stays None when absent rather than "" — getInventoryItems (plural) is
         # known to omit the whole `product` container for some items that
         # getInventoryItem (singular) returns in full, and "" would defeat the UI's
-        # `?? "â€”"` placeholder and render as a blank cell.
+        # `?? "—"` placeholder and render as a blank cell.
         index[sku] = ExternalListingRef(
             external_listing_id=sku,
             title=product.get("title"),
@@ -991,7 +991,7 @@ class EbayAdapter:
         auction and a fixed-price offer at once).
 
         Prefers a published offer that actually produced a listing, then any published
-        one, then whatever exists â€” so a live listing is never passed over in favour of an
+        one, then whatever exists — so a live listing is never passed over in favour of an
         unpublished draft."""
         if not offers:
             return None
@@ -1007,7 +1007,7 @@ class EbayAdapter:
             return "unpublished"
         listing_status = str((offer.get("listing") or {}).get("listingStatus", "")).upper()
         if not listing_status:
-            return "active"  # published, but no listing container â€” trust `status`
+            return "active"  # published, but no listing container — trust `status`
         # Unknown values pass through lowercased rather than being forced to a known one:
         # eBay can add enum members, and inventing "active" for something unrecognised
         # would claim a listing is live on no evidence.
@@ -1019,7 +1019,7 @@ class EbayAdapter:
         ("Size: Large, Colour: Caramel"). The `variation` column is cross-platform and
         shown in one shared table, so the two must not drift.
 
-        eBay's own aspect order is preserved rather than sorted â€” it matches how the
+        eBay's own aspect order is preserved rather than sorted — it matches how the
         listing itself reads, and sorting would reorder "Size, Colour" into "Colour, Size".
         """
         parts = [f"{name}: {', '.join(values)}" for name, values in aspects.items() if name and values]
@@ -1037,7 +1037,7 @@ class EbayAdapter:
         would be wrong. eBay's authoritative answer lives on the inventory item group
         (variesBy.specifications), which is unreachable here: getInventoryItemGroup needs
         a group key that getInventoryItems doesn't return, and there's no list-groups
-        endpoint. Deriving it degrades correctly either way â€” if eBay already returned
+        endpoint. Deriving it degrades correctly either way — if eBay already returned
         only the varying aspects this is a no-op, and if it returned common ones too they
         get stripped.
 
@@ -1046,8 +1046,8 @@ class EbayAdapter:
 
         Caveat: when the caller scopes enrichment to a subset of SKUs, a listing group can
         be incomplete, so an aspect that varies only against an untracked sibling looks
-        constant and is dropped. For a product whose variants are all tracked â€” the normal
-        case â€” the group is complete.
+        constant and is dropped. For a product whose variants are all tracked — the normal
+        case — the group is complete.
         """
         varying: dict[str, dict[str, list[str]]] = {}
         for skus in skus_by_listing.values():
@@ -1071,7 +1071,7 @@ class EbayAdapter:
     async def fetch_classic_listings(
         self, session, connection: PlatformConnection
     ) -> list[ClassicListingCandidate]:
-        """Trading API GetMyeBaySelling (ActiveList), paginated â€” surfaces every active
+        """Trading API GetMyeBaySelling (ActiveList), paginated — surfaces every active
         listing regardless of Inventory API migration state, unlike build_listing_sku_index
         which only sees listings already migrated. This is the fetch side of the
         unmigrated-listing adoption feature: a classic listing with a SKU set in Seller
@@ -1148,7 +1148,7 @@ class EbayAdapter:
     async def _resolve_site_id(self, session, connection: PlatformConnection) -> str:
         """The seller's own eBay site, needed for every Trading API call's SITEID header.
 
-        Resolved via GetUser (which itself needs a SITEID header â€” chicken-and-egg, so
+        Resolved via GetUser (which itself needs a SITEID header — chicken-and-egg, so
         the bootstrap call goes out under eBay's own default site; GetUser returns the
         user's registration site regardless of which site it's asked under). Any failure
         degrades to _DEFAULT_TRADING_SITE_ID rather than raising: a wrong-but-plausible
@@ -1171,20 +1171,20 @@ class EbayAdapter:
                     self._site_id = resolved
                     logger.info("Resolved eBay Trading API site '%s' -> id %s", site_name, resolved)
                     return resolved
-                logger.warning("eBay GetUser returned unmapped site '%s' â€” falling back to site id %s", site_name, _DEFAULT_TRADING_SITE_ID)
+                logger.warning("eBay GetUser returned unmapped site '%s' — falling back to site id %s", site_name, _DEFAULT_TRADING_SITE_ID)
         except Exception:
-            logger.warning("eBay GetUser site lookup failed â€” falling back to site id %s", _DEFAULT_TRADING_SITE_ID, exc_info=True)
+            logger.warning("eBay GetUser site lookup failed — falling back to site id %s", _DEFAULT_TRADING_SITE_ID, exc_info=True)
 
         self._site_id = _DEFAULT_TRADING_SITE_ID
         return self._site_id
 
     def _trading_headers(self, connection: PlatformConnection, call_name: str, site_id: str) -> dict[str, str]:
         """The Trading API does NOT take the OAuth token as `Authorization: Bearer` the
-        way every Sell REST call in this file does â€” per its own HTTP-headers table the
+        way every Sell REST call in this file does — per its own HTTP-headers table the
         user access token goes in X-EBAY-API-IAF-TOKEN, with RequesterCredentials
         omitted. Notably this needs no DevID/AppName/CertName either: those are
         "only required for calls that set up and retrieve a user's authentication
-        tokenâ€¦ In all other calls, this value is ignored", which is what makes the
+        token… In all other calls, this value is ignored", which is what makes the
         Trading API reachable at all with the credentials StockSmith already stores
         (PlatformAppCredential holds only client_id/secret/ru_name).
 
@@ -1234,14 +1234,14 @@ class EbayAdapter:
         adapter.
 
         The 5xx retries do consume the Trading API's tight 5,000/day budget, unlike the
-        Inventory API's â€” but only on a call that already failed, and capped at
+        Inventory API's — but only on a call that already failed, and capped at
         _MAX_SERVER_ERROR_RETRIES, so the worst case is a handful of extra calls on a day
         eBay is already unhealthy."""
         site_id = await self._resolve_site_id(session, connection)
         try:
             response = await self._trading_request_once(session, connection, call_name, xml_body, site_id, timeout)
 
-            # Separate budgets â€” see _authed_request for why.
+            # Separate budgets — see _authed_request for why.
             rate_limit_attempts = 0
             server_error_attempts = 0
             while True:
@@ -1320,7 +1320,7 @@ class EbayAdapter:
             listing_type=listing_type,
             # Variation SKUs are kept positionally aligned with variation_specifics (an
             # empty string marks a variation with no SKU, which _evaluate_eligibility
-            # counts) â€” only the single-SKU path filters, since there's no alignment to
+            # counts) — only the single-SKU path filters, since there's no alignment to
             # preserve there.
             skus=skus if variation_specifics is not None else [s for s in skus if s],
             variation_specifics=variation_specifics,
@@ -1333,17 +1333,17 @@ class EbayAdapter:
     async def fetch_classic_listing_detail(
         self, session, connection: PlatformConnection, external_listing_id: str
     ) -> ClassicListingCandidate:
-        """Trading API GetItem for one listing â€” the authoritative source for a
+        """Trading API GetItem for one listing — the authoritative source for a
         listing's SKU(s) and per-variation specifics.
 
         Needed because GetMyeBaySelling's ActiveList is a summary view that does not
         reliably return the <Variations> block, so fetch_classic_listings alone cannot
         be trusted to know a multi-variation listing's SKUs. Every path that actually
         depends on those SKUs (variation mapping, SKU alignment, adoption) calls this
-        for the single selected listing instead of trusting the list payload â€” which is
+        for the single selected listing instead of trusting the list payload — which is
         also far cheaper than re-running the whole paginated list crawl.
 
-        UNVERIFIED against a live account â€” same caveat as fetch_classic_listings."""
+        UNVERIFIED against a live account — same caveat as fetch_classic_listings."""
         body = (
             '<?xml version="1.0" encoding="utf-8"?>'
             '<GetItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
@@ -1372,14 +1372,14 @@ class EbayAdapter:
 
         SAFETY: for a multi-variation listing, eBay treats an omitted variation as one to
         DELETE, so every variation must be echoed back, each identified by its
-        VariationSpecifics (the immutable identity of a variation â€” the SKU itself is
+        VariationSpecifics (the immutable identity of a variation — the SKU itself is
         just a mutable attribute of it, which is exactly why it can be rewritten this
         way). `new_skus` is therefore required to be positionally aligned with, and the
         same length as, candidate.variation_specifics; the caller is responsible for
         that and _align_new_skus enforces it.
 
-        Pure and static so the generated XML â€” the part that could silently destroy
-        variations if it were wrong â€” is unit-testable without a network call."""
+        Pure and static so the generated XML — the part that could silently destroy
+        variations if it were wrong — is unit-testable without a network call."""
         item_id = _xml_escape(candidate.external_listing_id)
 
         if candidate.variation_specifics is None:
@@ -1419,7 +1419,7 @@ class EbayAdapter:
 
         This is deliberately done BEFORE migration rather than after. eBay's Inventory
         API keys inventory_item and offer objects *by SKU in the URL path*, so there is
-        no documented rename operation once migrated â€” the only known route would be
+        no documented rename operation once migrated — the only known route would be
         create-new / repoint-offer / delete-old, and deleteInventoryItem also deletes the
         associated offers and ends the live listing. Revising a classic listing's SKU, by
         contrast, is an ordinary non-destructive edit that sellers make routinely through
@@ -1428,10 +1428,10 @@ class EbayAdapter:
         operation entirely, and the migrated objects get created with the right SKUs from
         the start rather than needing surgery afterwards.
 
-        UNVERIFIED against a live account â€” same caveat as fetch_classic_listings."""
+        UNVERIFIED against a live account — same caveat as fetch_classic_listings."""
         if candidate.is_migrated:
             raise PlatformSyncError(
-                f"Listing {candidate.external_listing_id} is already migrated â€” its SKUs can no longer be safely "
+                f"Listing {candidate.external_listing_id} is already migrated — its SKUs can no longer be safely "
                 "revised through this path (see this method's docstring)."
             )
         aligned = _align_new_skus(candidate, new_skus)
@@ -1446,7 +1446,7 @@ class EbayAdapter:
             # already match (see listing_adoption.plan_sku_alignment).
             raise PlatformSyncError(
                 f"eBay did not respond within {int(_REVISE_TIMEOUT)}s while rewriting SKUs on listing "
-                f"{candidate.external_listing_id}. The change may still have applied â€” run this again to "
+                f"{candidate.external_listing_id}. The change may still have applied — run this again to "
                 "check. Re-running is safe: it does nothing if the SKUs already match."
             ) from e
         if response.status_code != 200:
@@ -1459,7 +1459,7 @@ class EbayAdapter:
     async def migrate_listing(
         self, session, connection: PlatformConnection, external_listing_id: str
     ) -> MigrationResult:
-        """Sell Inventory API bulkMigrateListing â€” migrates a classic (Trading API /
+        """Sell Inventory API bulkMigrateListing — migrates a classic (Trading API /
         Seller Hub) listing into the Inventory API, creating inventory_item/offer
         objects for each of its SKUs. This is a modern Sell REST API (unlike
         GetMyeBaySelling above), so it reuses the normal JSON _authed_request path.
@@ -1467,12 +1467,12 @@ class EbayAdapter:
         Idempotent by design: migration is IRREVERSIBLE on eBay's side, so a caller that
         fails partway (e.g. the local Listing write blows up after eBay has already
         migrated) must be able to simply retry the whole operation. An
-        "already migrated" rejection is therefore treated as success â€” see
-        _is_already_migrated_error â€” with the resulting SKUs read back from the
+        "already migrated" rejection is therefore treated as success — see
+        _is_already_migrated_error — with the resulting SKUs read back from the
         Inventory API instead of from the migration response.
 
         UNVERIFIED against a live account (no listing has been migrated through this
-        code yet) â€” same caveat as fetch_classic_listings above."""
+        code yet) — same caveat as fetch_classic_listings above."""
         body = {"requests": [{"listingId": external_listing_id}]}
         try:
             response = await self._authed_request(
@@ -1485,13 +1485,13 @@ class EbayAdapter:
             )
         except EbayTimeout as e:
             # eBay very likely carried on and finished after we stopped listening, so
-            # this is emphatically NOT "nothing happened" â€” saying so would invite the
+            # this is emphatically NOT "nothing happened" — saying so would invite the
             # user to assume the listing is untouched. Re-running is the right move and
             # is safe: an already-migrated listing is treated as success (see this
             # method's docstring), which is precisely what makes a timeout recoverable.
             raise PlatformSyncError(
                 f"eBay did not respond within {int(_MIGRATION_TIMEOUT)}s while migrating listing "
-                f"{external_listing_id}. The migration may still have completed on eBay's side â€” "
+                f"{external_listing_id}. The migration may still have completed on eBay's side — "
                 "run this again to check and finish linking. Migrating twice is safe."
             ) from e
         if response.status_code != 200:
@@ -1510,7 +1510,7 @@ class EbayAdapter:
                     f"eBay rejected migration of listing '{external_listing_id}': {status_code} {matched.get('errors')}"
                 )
             logger.info(
-                "eBay listing %s was already migrated â€” treating as success and reading back its SKUs",
+                "eBay listing %s was already migrated — treating as success and reading back its SKUs",
                 external_listing_id,
             )
             detail = await self.fetch_classic_listing_detail(session, connection, external_listing_id)
