@@ -1,9 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { platformsApi, type ProductSyncStatus } from "../../api/platforms";
 import { productsApi } from "../../api/products";
-import type { Product } from "../../api/types";
+import type { ListingPlatform, Product } from "../../api/types";
+import { CONNECTABLE_PLATFORMS } from "../../lib/platforms";
 import { useAssetUrl } from "../../hooks/useAssetUrl";
 import { useLazyVisible } from "../../hooks/useLazyVisible";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
@@ -28,11 +29,23 @@ function ProductsList() {
   });
   const products = data?.items;
   const total = data?.total ?? 0;
-  const { data: etsyStatusByProduct } = useQuery({
-    queryKey: ["platforms", "etsy", "all-sync-status"],
-    queryFn: () => platformsApi.getAllSyncStatus("etsy"),
-    retry: false,
+  // One cheap DB-backed query per connectable platform (no marketplace traffic — this
+  // reads stored Listing rows). `retry: false` because a platform that isn't connected
+  // 400s, which is an expected steady state here, not a transient failure worth retrying.
+  const storeStatusQueries = useQueries({
+    queries: CONNECTABLE_PLATFORMS.map((platform) => ({
+      queryKey: ["platforms", platform, "all-sync-status"],
+      queryFn: () => platformsApi.getAllSyncStatus(platform),
+      retry: false,
+    })),
   });
+  // A platform whose query errored (not connected) is dropped entirely rather than shown
+  // as an empty cell, so a shop that only sells on Etsy doesn't get a column of blanks.
+  const storeStatuses: { platform: ListingPlatform; byProduct: Record<number, ProductSyncStatus> }[] =
+    CONNECTABLE_PLATFORMS.flatMap((platform, i) => {
+      const result = storeStatusQueries[i];
+      return result?.data ? [{ platform, byProduct: result.data }] : [];
+    });
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
   const [sku, setSku] = useState("");
@@ -100,12 +113,12 @@ function ProductsList() {
             <th className="p-2">Expected max buildable</th>
             <th className="p-2">Max sellable</th>
             <th className="p-2">Cost per unit</th>
-            <th className="p-2">Etsy</th>
+            <th className="p-2">Stores</th>
           </tr>
         </thead>
         <tbody>
           {products?.map((p) => (
-            <ProductRow key={p.id} product={p} etsyStatus={etsyStatusByProduct?.[p.id]} />
+            <ProductRow key={p.id} product={p} storeStatuses={storeStatuses} />
           ))}
         </tbody>
       </table>
@@ -137,7 +150,13 @@ function ProductsList() {
   );
 }
 
-function ProductRow({ product: p, etsyStatus }: { product: Product; etsyStatus: ProductSyncStatus | undefined }) {
+function ProductRow({
+  product: p,
+  storeStatuses,
+}: {
+  product: Product;
+  storeStatuses: { platform: ListingPlatform; byProduct: Record<number, ProductSyncStatus> }[];
+}) {
   const rowRef = useRef<HTMLTableRowElement>(null);
   const isVisible = useLazyVisible(rowRef);
   const imageUrl = useAssetUrl(isVisible ? p.main_image_asset_id : null);
@@ -162,7 +181,19 @@ function ProductRow({ product: p, etsyStatus }: { product: Product; etsyStatus: 
         {p.is_bundle ? "—" : p.max_sellable ?? "—"}
       </td>
       <td className="p-2">{p.cost_per_unit ? formatUnitCost(p.cost_per_unit) : "—"}</td>
-      <td className="p-2">{etsyStatus && <PlatformSyncBadge platform="etsy" status={etsyStatus} />}</td>
+      <td className="p-2">
+        <div className="flex flex-wrap gap-1">
+          {storeStatuses.map(({ platform, byProduct }) => {
+            const status = byProduct[p.id];
+            // A product absent from a platform's index has never been checked against it
+            // — that's "not listed here", so show nothing rather than a "not tested"
+            // badge implying it should be.
+            return status ? (
+              <PlatformSyncBadge key={platform} platform={platform} status={status} compact />
+            ) : null;
+          })}
+        </div>
+      </td>
     </tr>
   );
 }

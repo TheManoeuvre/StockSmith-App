@@ -5,7 +5,7 @@ import { getSettings, openExternalUrl, saveSettings } from "../lib/tauri";
 import { healthCheck } from "../api/client";
 import { platformsApi, type PlatformEnvironment } from "../api/platforms";
 import type { ListingPlatform } from "../api/types";
-import { PLATFORM_LABELS } from "../lib/platforms";
+import { CONNECTABLE_PLATFORMS, PLATFORM_LABELS } from "../lib/platforms";
 import { ErrorBanner } from "../components/common/ErrorBanner";
 import { PlatformSyncPanel } from "../components/settings/PlatformSyncPanel";
 import { PlatformCredentialsForm } from "../components/settings/PlatformCredentialsForm";
@@ -20,10 +20,6 @@ import { useShopIconUrl } from "../hooks/useShopIconUrl";
 export const Route = createFileRoute("/settings")({
   component: Settings,
 });
-
-// Only platforms with a real adapter implemented — Shopify is in the ListingPlatform
-// enum for future use but has no adapter yet, so it isn't offered here.
-const CONNECTABLE_PLATFORMS: ListingPlatform[] = ["etsy", "ebay"];
 
 const SETTINGS_TABS: TabDef[] = [
   { id: "connection", label: "Connection" },
