@@ -87,7 +87,19 @@ export function PlatformSyncSection({ productId, platform }: { productId: number
       <ErrorBanner error={checkMutation.error} />
       {data && data.units.length > 0 && (
         <>
-          <table className="w-full border-collapse text-left text-sm">
+          <table className="w-full table-fixed border-collapse text-left text-sm">
+            {/* Fixed widths (shared across the Etsy and eBay instances of this component) so the
+                two tables' columns line up vertically when stacked, regardless of how long either
+                platform's listing title happens to be. */}
+            <colgroup>
+              <col className="w-[14%]" />
+              <col className="w-[16%]" />
+              <col className="w-[13%]" />
+              <col className="w-[27%]" />
+              <col className="w-[13%]" />
+              <col className="w-[8%]" />
+              <col className="w-[9%]" />
+            </colgroup>
             <thead>
               <tr className="border-b border-slate-200 text-slate-500">
                 <th className="p-1">Unit</th>
@@ -122,15 +134,19 @@ export function PlatformSyncSection({ productId, platform }: { productId: number
 function UnitSyncRow({ unit, platform }: { unit: UnitSyncResult; platform: ListingPlatform }) {
   return (
     <tr className="border-b border-slate-100">
-      <td className="p-1">{unit.variant_name ?? "(product)"}</td>
-      <td className="p-1 font-mono text-xs">{unit.sku ?? "—"}</td>
+      <td className="truncate p-1">{unit.variant_name ?? "(product)"}</td>
+      <td className="truncate p-1 font-mono text-xs">{unit.sku ?? "—"}</td>
       <td className="p-1">
         <PlatformSyncBadge platform={platform} status={unit.status} />
       </td>
-      <td className="p-1">{unit.external_title ?? "—"}</td>
-      <td className="p-1">{unit.external_variation ?? "—"}</td>
-      <td className="p-1">{unit.external_state ?? "—"}</td>
-      <td className="p-1">{unit.external_quantity ?? "—"}</td>
+      <td className="truncate p-1" title={unit.external_title ?? undefined}>
+        {unit.external_title ?? "—"}
+      </td>
+      <td className="truncate p-1" title={unit.external_variation ?? undefined}>
+        {unit.external_variation ?? "—"}
+      </td>
+      <td className="truncate p-1">{unit.external_state ?? "—"}</td>
+      <td className="truncate p-1">{unit.external_quantity ?? "—"}</td>
     </tr>
   );
 }
