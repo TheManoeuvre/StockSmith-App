@@ -663,7 +663,11 @@ async def check_product_sync(
     connection = await _require_connection(session, platform)
     adapter = await get_adapter(session, platform)
     try:
-        index = await adapter.build_listing_sku_index(session, connection)
+        # Scoped to this product's own SKUs so a single-product check doesn't pay for a
+        # per-SKU offer lookup across the whole catalogue.
+        index = await adapter.build_listing_sku_index(
+            session, connection, enrich_skus=await listing_sync.product_skus(session, product_id)
+        )
         # Read-only: this reports a quantity drift, it does not correct it. Pushing from
         # a "test" action would make a diagnostic silently mutate the live marketplace —
         # correcting is the separate, explicitly-confirmed push-corrections endpoint.
@@ -750,7 +754,9 @@ async def check_all_listings(
     connection = await _require_connection(session, platform)
     adapter = await get_adapter(session, platform)
     try:
-        index = await adapter.build_listing_sku_index(session, connection)
+        index = await adapter.build_listing_sku_index(
+            session, connection, enrich_skus=await listing_sync.tracked_skus(session)
+        )
         return await listing_sync.check_all_products_sku_sync(session, index, platform)
     except PlatformError as e:
         raise _map_platform_error(e)
@@ -802,7 +808,9 @@ async def _load_candidate_detail(
     paginated list crawl just to look one listing up would be far more expensive
     besides."""
     candidate = await adapter.fetch_classic_listing_detail(session, connection, external_listing_id)
-    index = await adapter.build_listing_sku_index(session, connection)
+    # Membership test only (is this candidate's SKU already migrated?) — no need to pay
+    # for per-SKU offer lookups.
+    index = await adapter.build_listing_sku_index(session, connection, enrich=False)
     candidate.is_migrated = any(sku in index for sku in candidate.skus if sku)
     return candidate
 

@@ -22,6 +22,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Testing itself stays read-only — nothing is pushed until you click.
 
 ### Fixed
+- The **eBay variation** column on the Platform Sync tab is no longer always blank — it now
+  shows each SKU's variation (e.g. "Model: Button Dual") in the same format as Etsy's.
+- eBay listing status is now read from the actual listing rather than assumed active, so a
+  listing that's ended, inactive or not yet published is reported as such. A sold-out
+  listing still counts as active, since eBay keeps it live at quantity 0.
 - Transient eBay server errors (`errorId 25001`, "Dependent service failure") are now
   retried automatically instead of failing immediately — this most often showed up when
   migrating a listing with **Migrate & link**.

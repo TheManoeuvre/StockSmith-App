@@ -58,7 +58,12 @@ class FakeEbayAdapter:
         self.calls.append(("detail", external_listing_id))
         return self.candidate
 
-    async def build_listing_sku_index(self, session, connection):
+    async def build_listing_sku_index(self, session, connection, *, enrich=True, enrich_skus=None):
+        # Records the enrichment hints so callers that shouldn't pay for per-SKU offer
+        # lookups can be asserted on. Deliberately returns the whole index regardless:
+        # these are fidelity hints, not filters, and a fake that narrowed the index would
+        # hide exactly the bug that contract exists to prevent.
+        self.calls.append(("index", enrich, enrich_skus))
         return self.index
 
     async def fetch_classic_listings(self, session, connection):

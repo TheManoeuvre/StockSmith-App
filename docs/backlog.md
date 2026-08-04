@@ -20,11 +20,13 @@ Informal list of improvements not yet scheduled into a plan doc.
 
 **Ask:** Explore a system-tray background process that can start on PC boot and keep running when the main StockSmith window is closed, so platform stock sync stays alive continuously.
 
-## eBay Platform Sync — variation column always blank
+## eBay listing index — use the real listing id as external_listing_id
 
-**Problem:** On a product's Platform Sync tab, the "eBay variation" column is always "—" for every unit, even when the product has multiple variants all synced under one eBay listing (e.g. IKEA BILRESA Wall Mount Plate's Button/Scroll variants). This isn't a bug specific to that product — `EbayAdapter._index_inventory_item` (`backend/app/services/platforms/ebay.py:769-776`) hardcodes `variation=None` unconditionally, because eBay's Inventory API `getInventoryItems` response doesn't carry variation info at the item level — it lives on the associated Offer, which `build_listing_sku_index` doesn't fetch per-SKU. Etsy's equivalent index does populate `variation` (`ExternalListingRef.variation`, `backend/app/services/platforms/base.py:123-127`), which is why the same column works for Etsy but not eBay.
+**Problem:** `EbayAdapter._index_inventory_item` sets `external_listing_id=sku`, which isn't a listing id. The real one is now fetched during offer enrichment (`_enrich_with_offers`) but deliberately not written, because for eBay that field holding the SKU is a documented invariant with a second writer: `listing_adoption.apply_adoption` mirrors it, and `docs/listing-adoption.md` states it as a safety property.
 
-**Ask:** Either fetch the per-SKU Offer (which carries the variation-defining specifics) when building eBay's listing index and populate `variation`, or hide/relabel the "eBay variation" column so it doesn't imply data that was never fetched.
+Functionally nothing reads it except null checks, and the frontend types but never renders it. One behaviour would improve: `listing_push._get_listing_lock` would key on the real listing id, so variants of one multi-variation listing serialise instead of racing.
+
+**Ask:** Switch `external_listing_id` to the real eBay listing id, updating `listing_adoption.apply_adoption`, `docs/listing-adoption.md` and the ~8 test assertions that encode the current invariant in lockstep. Worth doing as its own commit so it stays revertible.
 
 ## Variant BOM — audit existing substitutions onto un-ruled base lines
 
