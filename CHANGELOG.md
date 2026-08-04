@@ -20,8 +20,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Testing a store sync now flags any listing whose quantity has drifted from StockSmith's,
   with a **Push corrections** button to set the marketplace back to StockSmith's numbers.
   Testing itself stays read-only — nothing is pushed until you click.
+- **Bulk-edit BOM overrides** on the Variants tab corrects a BOM line across every variant
+  sharing an attribute value (e.g. every "Large"), instead of editing each one by hand. It
+  previews exactly what would change before anything is written.
 
 ### Fixed
+- Generating variants with conflicting BOM rules now explains the conflict and names the
+  attribute value responsible, instead of failing with "Internal server error".
+- Editing a variant's BOM now pushes the new stock figure to your marketplaces. Previously
+  the corrected number stayed local until some other stock change happened to trigger a push.
 - The **eBay variation** column on the Platform Sync tab is no longer always blank — it now
   shows each SKU's variation (e.g. "Model: Button Dual") in the same format as Etsy's.
 - eBay listing status is now read from the actual listing rather than assumed active, so a

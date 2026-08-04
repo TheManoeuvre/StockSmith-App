@@ -2,18 +2,6 @@
 
 Informal list of improvements not yet scheduled into a plan doc.
 
-## Variant BOM setup — conflict detection
-
-**Problem:** In the product Variants tab, an attribute using "Material driven by this attribute" (e.g. Colourway substituting one BOM material for another) can silently collide with a different attribute's own BOM line for the same target material (e.g. a "Quantity driven" rule on the real Ivory White line). "Generate variants" then fails with a raw `IntegrityError` on `uq_product_variant_materials_variant_material`, surfaced to the user only as a generic "Internal server error" (see `backend/app/services/variants.py:145-169`, `backend/app/services/variants.py:230`, `backend/app/models/variant.py:74`).
-
-**Ask:** Validate BOM rules across attributes before generating variants and flag the specific conflicting combination in the UI (e.g. "Colourway 'Ivory' on Lilac Purple conflicts with existing Ivory White BOM line") instead of letting it fail at commit time as an opaque 500.
-
-## Variant setup — bulk amend BOM overrides
-
-**Problem:** BOM quantity/material overrides are set per attribute value during initial variant generation. If a mistake is found after variants already exist (e.g. wrong material quantity for all "Large" variants), there's no way to bulk-correct it — every affected variant has to be edited individually.
-
-**Ask:** Add a UI method to bulk-edit BOM overrides for variants sharing an attribute value (e.g. "update quantity for all Large variants") without regenerating/recreating the variants from scratch.
-
 ## Background/tray process to keep stock sync alive
 
 **Problem:** Platform stock sync currently only runs while the StockSmith app is open, so stock levels can drift out of sync while the app is closed.

@@ -472,3 +472,240 @@ async def generate_variants(
     for variant in created:
         await session.refresh(variant)
     return created
+
+
+_ATTRIBUTE_SLOTS = (
+    ("variant_attribute1_name", "attribute1_value"),
+    ("variant_attribute2_name", "attribute2_value"),
+    ("variant_attribute3_name", "attribute3_value"),
+)
+
+
+def _resolve_attribute_slot(product: Product, attribute_name: str) -> str:
+    """Maps an attribute name to the ProductVariant column holding its value.
+
+    Attributes are denormalised onto three name columns on the product and three value
+    columns on the variant — there is no attribute table — so this is the only way in.
+    Matched case- and whitespace-insensitively because the name arrives from a form field
+    the user typed, not from a picker."""
+    wanted = attribute_name.strip().casefold()
+    for name_attr, value_attr in _ATTRIBUTE_SLOTS:
+        name = getattr(product, name_attr)
+        if name is not None and name.strip().casefold() == wanted:
+            return value_attr
+    known = [getattr(product, n) for n, _ in _ATTRIBUTE_SLOTS if getattr(product, n)]
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=(
+            f"'{attribute_name}' is not an attribute of this product"
+            + (f" — it has {', '.join(repr(k) for k in known)}" if known else " (it has no variant attributes)")
+        ),
+    )
+
+
+async def amend_attribute_bom_overrides(
+    session: AsyncSession,
+    product_id: int,
+    attribute_name: str,
+    attribute_value: str,
+    lines: list,
+    *,
+    apply: bool = False,
+    include_inactive: bool = False,
+) -> tuple[list, int, int]:
+    """Rewrites one base BOM line per amend line, across every variant sharing an
+    attribute value — "set the Ivory White quantity to 3 for all Large variants".
+
+    Until now overrides could only be set per attribute value at generation time; a
+    mistake found afterwards had to be corrected variant by variant.
+
+    Returns (units, matched_count, skipped_inactive_count). With apply=False nothing is
+    written and the units describe what would change.
+
+    Merge semantics are deliberately narrow: for each named base line, any existing
+    quantity-override or substitution row for that line is replaced, and every other row
+    on the variant — including hand-added additive lines — is left alone. It cannot do
+    better than that, because ProductVariantMaterial has no provenance column: a
+    rule-generated row and a hand-edited one are indistinguishable. The preview is the
+    answer to that, not a heuristic; the user sees each row that would be replaced and
+    consents to it.
+    """
+    product = await session.get(Product, product_id)
+    if product is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    value_attr = _resolve_attribute_slot(product, attribute_name)
+
+    base_lines = {
+        pm.material_id: pm
+        for pm in (
+            await session.execute(select(ProductMaterial).where(ProductMaterial.product_id == product_id))
+        ).scalars()
+    }
+    missing = {line.base_material_id for line in lines} - set(base_lines)
+    if missing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Material(s) {sorted(missing)} are not on this product's build BOM",
+        )
+
+    referenced = {line.base_material_id for line in lines} | {
+        line.material_id for line in lines if line.material_id is not None
+    }
+    material_rows = (
+        await session.execute(
+            select(Material.id, Material.name, Material.material_type_id).where(
+                Material.id.in_(referenced | set(base_lines))
+            )
+        )
+    ).all()
+    name_by_material_id = {r.id: r.name for r in material_rows}
+    type_by_material_id = {r.id: r.material_type_id for r in material_rows}
+
+    # Same strict material-type check generation applies, and for the same reason: this
+    # fans out across many variants at once rather than being reviewed one at a time.
+    for line in lines:
+        if line.material_id is None or line.material_id == line.base_material_id:
+            continue
+        if type_by_material_id.get(line.material_id) != type_by_material_id.get(line.base_material_id):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"Material {line.material_id} is not the same material type as base "
+                    f"material {line.base_material_id} — can't auto-substitute across types"
+                ),
+            )
+
+    variant_query = select(ProductVariant).where(
+        ProductVariant.product_id == product_id,
+        getattr(ProductVariant, value_attr) == attribute_value,
+    )
+    matched = list((await session.execute(variant_query)).scalars())
+    targets = matched if include_inactive else [v for v in matched if v.is_active]
+    skipped_inactive = len(matched) - len(targets)
+
+    existing_by_variant: dict[int, list[ProductVariantMaterial]] = {}
+    if targets:
+        rows = (
+            await session.execute(
+                select(ProductVariantMaterial).where(
+                    ProductVariantMaterial.variant_id.in_([v.id for v in targets])
+                )
+            )
+        ).scalars()
+        for row in rows:
+            existing_by_variant.setdefault(row.variant_id, []).append(row)
+
+    units: list = []
+    unit_validation: list[tuple[int, Decimal]] = []
+    for variant in targets:
+        existing = existing_by_variant.get(variant.id, [])
+        changes, replaced_rows, new_rows = _plan_amend(variant, existing, lines, base_lines, name_by_material_id)
+
+        # Validate the variant's RESULTING full row set, not just the new rows — the
+        # amend can collide with an override this variant already had from a different
+        # attribute, which neither set would reveal alone.
+        surviving = [r for r in existing if r not in replaced_rows]
+        resulting = [
+            ResolvedOverride(
+                base_material_id=r.replaces_material_id or r.material_id,
+                material_id=r.material_id,
+                replaces_material_id=r.replaces_material_id,
+                qty_required=Decimal(r.qty_required),
+            )
+            for r in surviving
+        ] + new_rows
+        messages = _collision_messages(resulting, set(base_lines), name_by_material_id, variant.variant_name)
+        if messages:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=messages[0])
+
+        unit_validation.extend((row.material_id, row.qty_required) for row in new_rows)
+        units.append((variant, changes, replaced_rows, new_rows))
+
+    await validate_lines_against_units(session, unit_validation, "qty_required")
+
+    if apply:
+        for _variant, _changes, replaced_rows, _new_rows in units:
+            for row in replaced_rows:
+                await session.delete(row)
+        # Flush the deletes before inserting: a replacement reuses the same
+        # (variant_id, material_id), and in a single flush SQLAlchemy orders the INSERT
+        # before the DELETE, tripping the unique constraint.
+        await session.flush()
+        for variant, _changes, _replaced_rows, new_rows in units:
+            for row in new_rows:
+                session.add(row.to_row(variant.id))
+        await session.commit()
+
+    return units, len(matched), skipped_inactive
+
+
+def _plan_amend(
+    variant: ProductVariant,
+    existing: list[ProductVariantMaterial],
+    lines: list,
+    base_lines: dict[int, ProductMaterial],
+    name_by_material_id: dict[int, str],
+) -> tuple[list, list[ProductVariantMaterial], list[ResolvedOverride]]:
+    """Works out, for one variant, which existing rows the amend replaces and what it
+    writes in their place. Pure — no session, no I/O — so the merge rules are testable
+    directly and the caller can reuse the result for both preview and apply."""
+    changes: list = []
+    replaced: list[ProductVariantMaterial] = []
+    new_rows: list[ResolvedOverride] = []
+
+    for line in lines:
+        base_id = line.base_material_id
+        base_qty = Decimal(base_lines[base_id].qty_required)
+        # A row "for this base line" is either a quantity override on the line itself or a
+        # substitution away from it. Additive rows (a material not on the base BOM, with no
+        # replaces_material_id) belong to neither and are never touched.
+        current = next(
+            (
+                r
+                for r in existing
+                if (r.material_id == base_id and r.replaces_material_id is None)
+                or r.replaces_material_id == base_id
+            ),
+            None,
+        )
+        before_material = current.material_id if current is not None else None
+        before_qty = Decimal(current.qty_required) if current is not None else None
+
+        target_material = line.material_id if line.material_id is not None else base_id
+        target_qty = line.qty_required if line.qty_required is not None else base_qty
+
+        # Same skip rule the generator uses: a result identical to the base BOM needs no
+        # row at all, so the amend deletes the old one and writes nothing.
+        is_noop = target_material == base_id and target_qty == base_qty
+
+        if current is not None:
+            if not is_noop and current.material_id == target_material and Decimal(current.qty_required) == target_qty:
+                continue  # already exactly right — no change for this line
+            replaced.append(current)
+
+        if not is_noop:
+            new_rows.append(
+                ResolvedOverride(
+                    base_material_id=base_id,
+                    material_id=target_material,
+                    replaces_material_id=base_id if target_material != base_id else None,
+                    qty_required=target_qty,
+                )
+            )
+
+        if current is None and is_noop:
+            continue  # inherited the base BOM before, still does — nothing happened
+
+        changes.append(
+            {
+                "base_material_id": base_id,
+                "base_material_name": _name(name_by_material_id, base_id),
+                "before_material_id": before_material,
+                "before_qty": before_qty,
+                "after_material_id": None if is_noop else target_material,
+                "after_qty": None if is_noop else target_qty,
+            }
+        )
+
+    return changes, replaced, new_rows
