@@ -47,23 +47,14 @@ jobs:
       # what the in-app update prompt displays. Without this the body is empty and the
       # prompt has nothing to show but a version number.
       #
-      # Missing section is a warning, not a failure: a release with thin notes is better
-      # than a release that didn't build. The draft is reviewed by hand before publishing
-      # anyway, so a missing section gets caught there.
+      # The extraction itself lives in scripts/Get-ReleaseNotes.ps1 rather than inline,
+      # because this workflow only runs on v* tags: anything embedded here is unexercised
+      # until the moment it matters. The script is unit-tested by the Tests workflow.
       - name: Extract release notes from CHANGELOG
         id: notes
         shell: pwsh
         run: |
-          $version = "${{ github.ref_name }}" -replace '^v', ''
-          $content = Get-Content CHANGELOG.md -Raw
-          $pattern = "(?ms)^## \[$([regex]::Escape($version))\].*?\r?\n(.*?)(?=^## |\z)"
-          $match = [regex]::Match($content, $pattern)
-          if ($match.Success) {
-            $notes = $match.Groups[1].Value.Trim()
-          } else {
-            Write-Warning "No CHANGELOG.md section found for version $version"
-            $notes = "See the commit history for changes in this release."
-          }
+          $notes = ./scripts/Get-ReleaseNotes.ps1 -Version "${{ github.ref_name }}"
           "notes<<CHANGELOG_EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           $notes | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "CHANGELOG_EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
