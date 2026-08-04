@@ -103,9 +103,21 @@ try {
     Assert-Match 'falls back when the changelog is missing' 'commit history' $noFile
 
     # Guards against the real changelog drifting into a shape the pattern can't read.
+    # Deliberately a shipped version rather than [Unreleased], which is legitimately empty
+    # immediately after a release is cut — asserting content there would fail every time.
     $realChangelog = Join-Path (Join-Path $PSScriptRoot '..') 'CHANGELOG.md'
-    $unreleased = & $extract -Version 'Unreleased' -ChangelogPath $realChangelog -WarningAction SilentlyContinue
-    Assert-Match 'reads the real CHANGELOG.md Unreleased section' '###' $unreleased
+    $shipped = & $extract -Version '0.4.2' -ChangelogPath $realChangelog
+    Assert-Match 'reads a shipped section from the real CHANGELOG.md' '###' $shipped
+
+    # Exercises the default -ChangelogPath, which nothing above reaches because they all
+    # pass it explicitly. That is exactly how a broken default shipped unnoticed.
+    Push-Location (Join-Path $PSScriptRoot '..')
+    try {
+        $defaulted = & $extract -Version '0.4.2'
+        Assert-Match 'resolves the default changelog path' '###' $defaulted
+    } finally {
+        Pop-Location
+    }
 } finally {
     Remove-Item $fixture -ErrorAction SilentlyContinue
 }

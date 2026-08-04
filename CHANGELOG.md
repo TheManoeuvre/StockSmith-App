@@ -12,6 +12,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-04
+
 ### Added
 - Products list now has a **Stores** column showing a colour-coded badge per connected
   marketplace, so it's glanceable which stores each product is listed on.

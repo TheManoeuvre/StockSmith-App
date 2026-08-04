@@ -28,13 +28,18 @@ param(
     [Parameter(Mandatory = $true)]
     [string] $Version,
 
-    # Nested rather than the 3-argument Join-Path, which is PowerShell 7+ only — this has
-    # to run under Windows PowerShell 5.1 locally as well as pwsh in CI.
-    [string] $ChangelogPath = (Join-Path (Join-Path $PSScriptRoot '..') 'CHANGELOG.md')
+    [string] $ChangelogPath
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# Resolved here rather than as a param default: under Windows PowerShell 5.1 $PSScriptRoot
+# is empty while param defaults are being bound, so the default silently produced a broken
+# path. Nested Join-Path rather than the 3-argument form, which is PowerShell 7+ only.
+if (-not $ChangelogPath) {
+    $ChangelogPath = Join-Path (Join-Path $PSScriptRoot '..') 'CHANGELOG.md'
+}
 
 $fallback = 'See the commit history for changes in this release.'
 
