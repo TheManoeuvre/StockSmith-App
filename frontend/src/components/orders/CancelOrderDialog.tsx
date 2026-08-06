@@ -100,7 +100,7 @@ export function CancelOrderDialog({
                     {line.kitting_materials.length > 0 && (
                       <div className="mt-2 rounded bg-slate-50 p-2">
                         <p className="text-xs text-slate-500">
-                          Packaging: {line.kitting_materials.map((m) => m.material_name).join(", ")}
+                          Kitting: {line.kitting_materials.map((m) => `${m.material_name} ×${m.qty}`).join(", ")}
                         </p>
                         <DispositionRadio
                           name={`kitting-${line.order_line_id}`}

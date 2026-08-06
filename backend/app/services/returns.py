@@ -5,6 +5,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.kitting import OrderKittingAllocation
 from app.models.material import Material, MaterialAdjustment
 from app.models.order import Order, OrderLine, OrderStatus
 from app.models.order_return import OrderLineReturn, ReturnDisposition, ReturnScope, ReturnSource
@@ -19,7 +20,6 @@ from app.schemas.order_return import (
 )
 from app.services import allocation, listing_push
 from app.services.costing import recompute_material
-from app.services.kitting import get_resolved_kitting_bom
 
 """Cancellation and return handling — the per-line scrap/return-to-stock workflow from
 docs/plan-marketplace-integrations.md Section 4. Supersedes allocation.cancel_order,
@@ -52,6 +52,35 @@ async def _resolve_names(session: AsyncSession, product_id: int | None, variant_
     return product_name, variant_name
 
 
+async def _consumed_kitting_materials(session: AsyncSession, order_id: int) -> list[CancellationKittingMaterial]:
+    ledger_rows = list(
+        (
+            await session.execute(
+                select(OrderKittingAllocation).where(
+                    OrderKittingAllocation.order_id == order_id,
+                    OrderKittingAllocation.consumed_qty > 0,
+                )
+            )
+        ).scalars()
+    )
+    if not ledger_rows:
+        return []
+    materials = {
+        m.id: m
+        for m in (
+            await session.execute(select(Material).where(Material.id.in_([r.material_id for r in ledger_rows])))
+        ).scalars()
+    }
+    return [
+        CancellationKittingMaterial(
+            material_id=row.material_id,
+            material_name=materials[row.material_id].name if row.material_id in materials else "Unknown material",
+            qty=Decimal(row.consumed_qty),
+        )
+        for row in ledger_rows
+    ]
+
+
 async def get_cancellation_preview(session: AsyncSession, order: Order) -> CancellationPreview:
     lines = await _get_lines(session, order.id)
     options: list[CancellationLineOption] = []
@@ -64,26 +93,13 @@ async def get_cancellation_preview(session: AsyncSession, order: Order) -> Cance
 
         product_name, variant_name = await _resolve_names(session, line.product_id, line.variant_id)
 
+        # Packaging is order-level, so it's listed against the FIRST shipped line only —
+        # showing it per line would imply each line has its own parcel's worth. Quantities
+        # come from the ledger (what was actually consumed), matching what
+        # _process_kitting_returns will dispose of.
         kitting_materials: list[CancellationKittingMaterial] = []
-        if shipped_qty > 0 and line.product_id is not None:
-            bom = await get_resolved_kitting_bom(session, line.product_id, line.variant_id)
-            material_ids = [b.material_id for b in bom]
-            materials = (
-                {
-                    m.id: m
-                    for m in (await session.execute(select(Material).where(Material.id.in_(material_ids)))).scalars()
-                }
-                if material_ids
-                else {}
-            )
-            kitting_materials = [
-                CancellationKittingMaterial(
-                    material_id=b.material_id,
-                    material_name=materials[b.material_id].name if b.material_id in materials else "Unknown material",
-                    qty_per_unit=b.qty_required,
-                )
-                for b in bom
-            ]
+        if shipped_qty > 0 and not any(o.kitting_materials for o in options):
+            kitting_materials = await _consumed_kitting_materials(session, order.id)
 
         options.append(
             CancellationLineOption(
@@ -121,6 +137,84 @@ async def _adjust_product_stock(
         )
     )
     listing_push.enqueue_for_owner(owner)
+
+
+async def _process_kitting_returns(
+    session: AsyncSession,
+    order: Order,
+    lines: list[OrderLine],
+    decisions_by_line: dict[int, LineCancellationDecision],
+    reason: str | None,
+) -> None:
+    """Disposes of the order's packaging once, for the whole order, off the
+    OrderKittingAllocation ledger.
+
+    Packaging is an order-level quantity — one parcel, one set of packaging — so this reads
+    what was ACTUALLY consumed (overrides and all) rather than recomputing the per-unit
+    kitting BOM x shipped_qty per line, which got it wrong twice over: it restocked N boxes
+    for an N-unit order that only ever consumed one (auto_apply_multiunit_kitting_override),
+    and it ran once per line, so two lines sharing a box restocked it twice.
+
+    The dialog still collects a per-line kitting_disposition; return_to_stock on any shipped
+    line means the parcel's packaging came back, because there is only one parcel. Scrap (the
+    default) is the do-nothing baseline.
+
+    consumed_qty is deliberately left alone — it's the monotonic historical record that
+    OrderRead.kitting_cogs reads, and a cancelled order should still show what it cost to
+    fulfil."""
+    shipped_lines = [l for l in lines if l.shipped_qty > 0]
+    if not shipped_lines:
+        return
+
+    ledger_rows = list(
+        (
+            await session.execute(
+                select(OrderKittingAllocation).where(
+                    OrderKittingAllocation.order_id == order.id,
+                    OrderKittingAllocation.consumed_qty > 0,
+                )
+            )
+        ).scalars()
+    )
+    # Nothing consumed also covers the drifted-ledger case the comment in
+    # process_cancellation describes — inventing a restock there is exactly the error the
+    # old per-line BOM path made.
+    if not ledger_rows:
+        return
+
+    restock = any(
+        decisions_by_line[l.id].kitting_disposition == ReturnDisposition.return_to_stock
+        for l in shipped_lines
+        if l.id in decisions_by_line
+    )
+    disposition = ReturnDisposition.return_to_stock if restock else ReturnDisposition.scrap
+
+    for row in ledger_rows:
+        qty = Decimal(row.consumed_qty)
+        if restock:
+            session.add(
+                MaterialAdjustment(
+                    material_id=row.material_id,
+                    qty_delta=qty,
+                    reason=f"Order #{order.id} returned — kitting material returned to stock",
+                    order_id=order.id,
+                )
+            )
+            await recompute_material(session, row.material_id)
+        # One audit row per material, not per line. order_line_id is NOT NULL so it's hung
+        # off the first shipped line; the attachment is nominal — qty is an order-level
+        # total, keyed the same way OrderKittingAllocation itself is.
+        session.add(
+            OrderLineReturn(
+                order_line_id=shipped_lines[0].id,
+                scope=ReturnScope.kitting,
+                material_id=row.material_id,
+                qty=qty,
+                disposition=disposition,
+                source=ReturnSource.return_after_ship,
+                reason=reason,
+            )
+        )
 
 
 async def process_cancellation(
@@ -188,31 +282,7 @@ async def process_cancellation(
                 )
             )
 
-            if line.product_id is not None:
-                bom = await get_resolved_kitting_bom(session, line.product_id, line.variant_id)
-                for bom_line in bom:
-                    material_qty = bom_line.qty_required * line.shipped_qty
-                    if decision.kitting_disposition == ReturnDisposition.return_to_stock:
-                        session.add(
-                            MaterialAdjustment(
-                                material_id=bom_line.material_id,
-                                qty_delta=material_qty,
-                                reason=f"Order #{order.id} returned — kitting material returned to stock",
-                                order_id=order.id,
-                            )
-                        )
-                        await recompute_material(session, bom_line.material_id)
-                    session.add(
-                        OrderLineReturn(
-                            order_line_id=line.id,
-                            scope=ReturnScope.kitting,
-                            material_id=bom_line.material_id,
-                            qty=material_qty,
-                            disposition=decision.kitting_disposition,
-                            source=ReturnSource.return_after_ship,
-                            reason=reason,
-                        )
-                    )
+    await _process_kitting_returns(session, order, lines, decisions_by_line, reason)
 
     order.status = OrderStatus.cancelled
     order.cancelled_at = datetime.now(timezone.utc)
@@ -229,4 +299,8 @@ async def process_cancellation(
     # double-charging the material with a second MaterialAdjustment for stock that was
     # already consumed. The scrap/return-to-stock adjustments above are the only stock
     # effects a cancel/return should ever cause beyond releasing a reservation.
+    #
+    # _process_kitting_returns strengthens this: nothing in the return path recomputes a
+    # consumption target any more — it reads the ledger and stops if there isn't one — so
+    # the trap above can't be re-entered from here.
     return order

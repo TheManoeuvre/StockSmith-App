@@ -8,7 +8,9 @@ from app.models.order_return import ReturnDisposition
 class CancellationKittingMaterial(BaseModel):
     material_id: int
     material_name: str
-    qty_per_unit: Decimal
+    # Order-level total actually consumed, from the kitting ledger — not a per-unit rate.
+    # Packaging ships once per parcel, so multiplying by a line's qty over-counts it.
+    qty: Decimal
 
 
 class CancellationLineOption(BaseModel):
@@ -24,8 +26,10 @@ class CancellationLineOption(BaseModel):
     # credited back up. 0 for a line with nothing shipped yet.
     shipped_qty: int
     default_product_disposition: ReturnDisposition
-    # Only populated when shipped_qty > 0 — a not-yet-shipped line has no kitting
-    # materials to dispose of (packaging is applied at ship time, never before).
+    # Only populated on the FIRST shipped line, and only when the order has actually
+    # consumed packaging. A not-yet-shipped line has none to dispose of (packaging is
+    # applied at ship time), and packaging is an order-level quantity — one parcel, one set
+    # — so listing it against every line would imply each line had its own.
     kitting_materials: list[CancellationKittingMaterial]
     default_kitting_disposition: ReturnDisposition
 
