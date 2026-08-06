@@ -12,13 +12,27 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.5.1] - 2026-08-06
+## [0.6.0] - 2026-08-06
 
 ### Added
 - **Fee reporting signature** for eBay, in Settings > Integrations. eBay requires UK and
   EU sellers to digitally sign requests for financial data; setting this up once is what
   lets StockSmith read your eBay fees. See
   [docs/ebay-fee-reporting.md](docs/ebay-fee-reporting.md).
+- **Bill of Materials and Kitting BOM are now one tab**, with the two tables stacked and their
+  columns lined up so you can read a product's build cost and packaging cost together.
+- **Both tables now show cost.** Each line shows what its quantity costs at the material's
+  current price and what share of the total that is, with a total under each table — so it's
+  obvious at a glance which material is driving a product's cost.
+- **Save buttons stay greyed out until there's something to save**, everywhere on the product
+  page. Previously every Save button was always clickable, so it never told you anything.
+- **You're now warned before losing unsaved edits** — switching tabs, collapsing a variant,
+  changing the pricing mode, leaving the page, or closing the app window all ask first, and
+  name what's unsaved. This covers the Materials pages too: editing a material's details, a
+  half-typed stock adjustment, or a part-filled new-material form.
+- **Save buttons on the Materials pages** follow the same rule as products — greyed until
+  there's something to save, and stock adjustments stay disabled until they have both a value
+  and a reason.
 
 ### Fixed
 - **eBay platform fees were never imported.** Every eBay order showed its fees as "Not
@@ -34,6 +48,40 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   fee a second time. Both were masked by the rejection above and are fixed together.
 - An order with no fee figure now reads "Not reported yet" rather than "Not yet settled",
   which claimed to know something the app had no way of knowing.
+- **Editing a product could silently discard your changes.** Saving anything on a product page
+  refreshed the whole product, which wiped out unsaved edits in every other section — so typing
+  a BOM quantity while a background refresh landed could lose it with no warning. Every editor
+  on the page now keeps your edits until you save or discard them yourself.
+- **A variant's name could show out of date.** Renaming a variant elsewhere never reached an
+  open variant row, which kept displaying the old name until the page was reloaded.
+- **Packaging was over-charged on every multi-unit order.** StockSmith has always known
+  that an order shipping several units needs one box, not one per unit — the Kitting
+  section showed exactly that — but cost of goods charged for a box per unit anyway. A
+  three-unit order using a £1 box was charged £3 for packaging, so net profit was
+  understated on every order with more than one item. Packaging cost is now taken from
+  what the order actually consumed, and it moves when you change an override.
+- **Cancelling a shipped order put back too much packaging.** The same per-unit assumption
+  ran on returns, so cancelling a three-unit order returned three boxes to stock when only
+  one had been used — and an order with two items returned the shared box twice.
+
+### Changed
+- **"Max theoretical" is now "Max from free stock"** in both BOM tables, and both count only
+  material that isn't already reserved against an order. The build BOM previously counted all
+  stock on hand, which read higher than what you could actually build today.
+- **Cost of goods is now split into Materials and Kitting** on the order page, instead of
+  one combined figure. A line's Cost is the materials to make it; packaging is shown once
+  for the order, because that is how it is bought and used. The order's Kitting section
+  now shows what each material costs and what the whole order's packaging comes to.
+- **Product and variant margins now include packaging**, so they agree with the net profit
+  shown on orders. Margins will read slightly lower than before — the packaging was always
+  being paid for, it just wasn't counted here.
+- **"Packaging" on the order page is now called "Kitting"**, matching the name used
+  everywhere else.
+
+### Notes
+- Packaging cost is now frozen when an order ships, so a past order's profit no longer
+  drifts as you re-buy boxes at new prices. Orders shipped before this update are valued
+  at today's material cost, since their historical cost isn't recoverable.
 
 ## [0.5.0] - 2026-08-04
 

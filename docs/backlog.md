@@ -49,3 +49,11 @@ Phase 4 of the backlog-burndown plan rejects this configuration at generation ti
 **Problem:** `ProductVariantMaterial` has no column distinguishing a rule-generated override from a hand-edited one. The bulk-amend feature therefore can't preserve manual edits automatically — it has to show a preview and make the human consent to each overwrite.
 
 **Ask:** Add a `source` column (`"rule" | "manual"`) so bulk operations can leave hand-edited rows alone by default.
+
+## Dashboard "Build now" should land on the build form, not the product page
+
+**Problem:** The "Build now" button on a dashboard order awaiting inventory (`frontend/src/routes/index.tsx:105-113`) links to `/products/$productId` and nothing more, dropping the user on the Details tab to go and find the Stock tab themselves — and then to re-select the variant they were already looking at on the dashboard.
+
+**Ask:** Link straight to the product's build form with the variant preselected. Purely frontend: `variant_id` is already on the dashboard payload (`OrderAwaitingInventory`, `frontend/src/api/types.ts:362`), so nothing is needed server-side. `StockSection`'s build form already has a `variantId` field to seed.
+
+Depends on the product page's tab being addressable — it became a URL search param (`?tab=stock`) as part of the merged Bill of Materials work, so this is now mostly a link change plus seeding the variant select from a second search param.
