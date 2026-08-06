@@ -11,6 +11,10 @@ on:
   push:
     tags:
       - "v*"
+  # Manual re-run for a tag whose build failed, or never fired: without this the only
+  # way to retry is to delete and re-push the tag, which rewrites a release marker to
+  # work around a CI problem.
+  workflow_dispatch:
 
 permissions:
   contents: write
