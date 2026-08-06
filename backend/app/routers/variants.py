@@ -11,7 +11,7 @@ from app.schemas.kitting import VariantKittingBomLine
 from app.schemas.variant import VariantBomLine, VariantRead, VariantUpdate
 from app.services import listing_push, platform_fees
 from app.services.buildability import compute_variant_buildability
-from app.services.kitting import compute_max_sellable, sync_listing_ceiling_qty
+from app.services.kitting import compute_max_sellable, kitting_cost_per_unit_from_bom, sync_listing_ceiling_qty
 from app.services.shipping_profiles import get_shipping_profiles_by_id, resolve_variant_shipping_profile
 from app.services.validation import validate_lines_against_units
 from app.services.variants import compute_full_sku
@@ -87,6 +87,7 @@ async def _to_variant_read(session: AsyncSession, variant: ProductVariant) -> Va
             "theoretical_max_sellable": theoretical_max_sellable,
             "theoretical_max_sellable_reason": theoretical_max_sellable_reason,
             "cost_per_unit": cost_per_unit,
+            "kitting_cost_per_unit": kitting_cost_per_unit_from_bom(effective_kitting_bom),
             "effective_bom": effective_bom,
             "effective_kitting_bom": effective_kitting_bom,
             "full_sku": full_sku,
