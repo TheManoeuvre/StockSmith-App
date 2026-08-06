@@ -14,6 +14,19 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.6.0] - 2026-08-06
 
+**Back up your data before updating.** This release changes the database, the app
+applies that automatically on first launch, and it cannot be undone.
+
+**Two figures will move, on existing orders as well as new ones.** Net profit goes
+**up** on any order with more than one item — packaging was charged per unit when only
+one box was ever used. Product and variant margins read slightly **lower** — packaging
+is now counted against them. Your stock, prices and orders are untouched; only the
+arithmetic changed.
+
+Orders shipped before this update need a one-off repair before their packaging cost
+shows up — run `scripts/backfill_order_kitting_ledger.py` (dry run first, then
+`--apply`). It moves no stock.
+
 ### Added
 - **Fee reporting signature** for eBay, in Settings > Integrations. eBay requires UK and
   EU sellers to digitally sign requests for financial data; setting this up once is what
