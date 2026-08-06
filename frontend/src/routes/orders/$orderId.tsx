@@ -256,11 +256,23 @@ function OrderFinancialsPanel({ order }: { order: Order }) {
         <div>
           <p className="text-slate-500">Platform fees</p>
           <p>
-            {order.platform == null
-              ? "—"
-              : order.payment_fees != null
-                ? `-${formatMoney(order.payment_fees, currency)}`
-                : "Not yet settled"}
+            {order.platform == null ? (
+              "—"
+            ) : order.payment_fees != null ? (
+              `-${formatMoney(order.payment_fees, currency)}`
+            ) : (
+              // Deliberately NOT "Not yet settled". This renders whenever no fee figure
+              // has been stored, and the app cannot tell an order the marketplace hasn't
+              // billed yet from one whose fee lookup failed — which is precisely how
+              // every eBay order sitting behind a 403'd Sell Finances call read as
+              // "settling" indefinitely. Say what is actually known.
+              <span
+                className="text-slate-500"
+                title={`StockSmith has no fee figure from this marketplace yet. Either it hasn't billed the order, or the fee lookup is failing — check Settings > Integrations.`}
+              >
+                Not reported yet
+              </span>
+            )}
           </p>
         </div>
         <div>

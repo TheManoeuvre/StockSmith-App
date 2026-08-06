@@ -1,9 +1,12 @@
+from datetime import datetime, timezone
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.listing import ListingPlatform
 from app.models.platform_credential import PlatformAppCredential, PlatformEnvironment
+from app.services.platforms.ebay_signing import EbaySigningKey
 
 """Resolves the app-level marketplace credentials (Client ID/Secret, redirect config)
 adapters and the OAuth flow need — DB-stored rows (Settings > Integrations) take
@@ -35,6 +38,47 @@ async def get_client_credentials(
     if platform == ListingPlatform.ebay:
         return settings.ebay_client_id, settings.ebay_client_secret
     return None, None
+
+
+async def get_ebay_signing_key(
+    session: AsyncSession, environment: PlatformEnvironment = PlatformEnvironment.production
+) -> EbaySigningKey | None:
+    """The Ed25519 keypair eBay's Digital Signatures requirement needs, or None if one
+    was never minted. No .env fallback on purpose: a signing key is not a configuration
+    value a developer types in, it is issued once by eBay's Key Management API and can
+    only have come from create_ebay_signing_key writing it here."""
+    row = await _get_row(session, ListingPlatform.ebay, environment)
+    if row is None or not row.signing_key_jwe or not row.signing_key_private:
+        return None
+    return EbaySigningKey(jwe=row.signing_key_jwe, private_key=row.signing_key_private)
+
+
+async def store_ebay_signing_key(
+    session: AsyncSession, key_response: dict, environment: PlatformEnvironment = PlatformEnvironment.production
+) -> PlatformAppCredential:
+    """Persists a createSigningKey response. eBay returns privateKey exactly once and
+    keeps no copy, so this commits before the caller does anything else with it."""
+    row = await _get_row(session, ListingPlatform.ebay, environment)
+    if row is None:
+        row = PlatformAppCredential(platform=ListingPlatform.ebay, environment=environment)
+        session.add(row)
+    row.signing_key_id = key_response.get("signingKeyId")
+    row.signing_key_jwe = key_response["jwe"]
+    row.signing_key_private = key_response["privateKey"]
+    row.signing_key_created_at = _epoch_or_none(key_response.get("creationTime"))
+    row.signing_key_expires_at = _epoch_or_none(key_response.get("expirationTime"))
+    await session.commit()
+    return row
+
+
+def _epoch_or_none(value) -> datetime | None:
+    """eBay reports these as Unix seconds. Advisory only (nothing gates on them), so an
+    unexpected shape is recorded as "unknown" rather than failing a mint whose private
+    key we would then have no way of getting back."""
+    try:
+        return datetime.fromtimestamp(int(value), tz=timezone.utc)
+    except (TypeError, ValueError):
+        return None
 
 
 async def get_public_base_url(session: AsyncSession, platform: ListingPlatform) -> str | None:

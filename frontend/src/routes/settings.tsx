@@ -9,6 +9,7 @@ import { CONNECTABLE_PLATFORMS, PLATFORM_LABELS } from "../lib/platforms";
 import { ErrorBanner } from "../components/common/ErrorBanner";
 import { PlatformSyncPanel } from "../components/settings/PlatformSyncPanel";
 import { PlatformCredentialsForm } from "../components/settings/PlatformCredentialsForm";
+import { EbaySigningKeyPanel } from "../components/settings/EbaySigningKeyPanel";
 import { MarginFeeSettings } from "../components/settings/MarginFeeSettings";
 import { ShippingProfileSettings } from "../components/settings/ShippingProfileSettings";
 import { CurrencySettings } from "../components/settings/CurrencySettings";
@@ -265,6 +266,7 @@ function PlatformIntegrationCard({ platform }: { platform: ListingPlatform }) {
         </div>
         <ErrorBanner error={connectMutation.error ?? disconnectMutation.error} />
         <PlatformCredentialsForm platform={platform} environment={environment} onEnvironmentChange={setEnvironment} />
+        {platform === "ebay" && <EbaySigningKeyPanel environment={environment} />}
       </div>
       {platformStatus?.connected && <PlatformSyncPanel platform={platform} />}
     </div>

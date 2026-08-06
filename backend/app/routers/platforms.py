@@ -13,13 +13,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.deps import get_db, require_auth
 from app.models.listing import ListingPlatform
 from app.models.platform_connection import PlatformConnection
-from app.models.platform_credential import PlatformEnvironment
+from app.models.platform_credential import PlatformAppCredential, PlatformEnvironment
 from app.models.platform_listing_push import PlatformListingPush
 from app.models.platform_sync_run import PlatformSyncRun, SyncRunMode, SyncRunStatus
 from app.models.product import Product
 from app.models.variant import ProductVariant
 from app.schemas.listing import BulkListingSyncResult, ProductListingSyncSummary, PushCorrectionsResult
 from app.schemas.platform import (
+    EbaySigningKeyStatus,
     ListingPushPage,
     ListingPushRead,
     PlatformConnectResponse,
@@ -307,6 +308,25 @@ async def _status_from_connection(
     )
 
 
+async def _signing_key_status(session: AsyncSession, environment: PlatformEnvironment) -> EbaySigningKeyStatus:
+    """Never returns the private key itself — only whether one is stored, plus the
+    identifiers eBay's own dev portal shows, so a key can be matched up by eye."""
+    result = await session.execute(
+        select(PlatformAppCredential).where(
+            PlatformAppCredential.platform == ListingPlatform.ebay,
+            PlatformAppCredential.environment == environment,
+        )
+    )
+    row = result.scalar_one_or_none()
+    return EbaySigningKeyStatus(
+        environment=environment,
+        configured=bool(row is not None and row.signing_key_jwe and row.signing_key_private),
+        signing_key_id=row.signing_key_id if row is not None else None,
+        created_at=row.signing_key_created_at if row is not None else None,
+        expires_at=row.signing_key_expires_at if row is not None else None,
+    )
+
+
 async def _enrich_etsy_shop_details(connection: PlatformConnection, adapter, access_token: str) -> None:
     """Best-effort shop name/icon lookup — sets connection.shop_name/shop_icon_path when
     available, leaves them unset otherwise. Must never raise: called both from the OAuth
@@ -513,6 +533,42 @@ async def update_platform_credentials(
         public_base_url=public_base_url,
         ru_name=ru_name,
     )
+
+
+@router.get("/ebay/signing-key", response_model=EbaySigningKeyStatus, dependencies=[Depends(require_auth)])
+async def get_ebay_signing_key_status(
+    environment: PlatformEnvironment = Query(PlatformEnvironment.production),
+    session: AsyncSession = Depends(get_db),
+) -> EbaySigningKeyStatus:
+    return await _signing_key_status(session, environment)
+
+
+@router.post("/ebay/signing-key", response_model=EbaySigningKeyStatus, dependencies=[Depends(require_auth)])
+async def create_ebay_signing_key(
+    environment: PlatformEnvironment = Query(PlatformEnvironment.production),
+    session: AsyncSession = Depends(get_db),
+) -> EbaySigningKeyStatus:
+    """Mints the Ed25519 keypair eBay requires to sign requests to its in-scope APIs.
+
+    Not idempotent, and deliberately not guarded against re-running: eBay allows several
+    live keypairs per keyset and the newest simply supersedes the one stored here, so a
+    second call costs an orphaned key on eBay's side and nothing else. The response's
+    privateKey is returned exactly once and eBay retains no copy, so it is persisted
+    before this function does anything else with it.
+    """
+    adapter = await get_adapter(session, ListingPlatform.ebay, environment)
+    if not isinstance(adapter, EbayAdapter):  # pragma: no cover — get_adapter guarantees this
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Signing keys are eBay-only")
+    try:
+        key_response = await adapter.create_signing_key()
+    except PlatformError as e:
+        raise _map_platform_error(e) from e
+    await platform_credentials.store_ebay_signing_key(session, key_response, environment)
+    # The cached adapter was built with the old key (or none) — same contract as a
+    # credential edit, see update_platform_credentials.
+    invalidate_adapter_cache(ListingPlatform.ebay)
+    logger.info("Minted eBay signing key %s (%s)", key_response.get("signingKeyId"), environment.value)
+    return await _signing_key_status(session, environment)
 
 
 @router.post("/{platform}/disconnect", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_auth)])

@@ -12,6 +12,29 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-08-06
+
+### Added
+- **Fee reporting signature** for eBay, in Settings > Integrations. eBay requires UK and
+  EU sellers to digitally sign requests for financial data; setting this up once is what
+  lets StockSmith read your eBay fees. See
+  [docs/ebay-fee-reporting.md](docs/ebay-fee-reporting.md).
+
+### Fixed
+- **eBay platform fees were never imported.** Every eBay order showed its fees as "Not
+  yet settled" indefinitely, even after eBay had taken them and made the payout
+  available — because eBay was rejecting StockSmith's request for the fee breakdown and
+  the failure was never reported anywhere. Net profit on every eBay order was overstated
+  by the missing fee as a result. Fixing this needs a one-off setup step: Settings >
+  Integrations > eBay > **Fee reporting signature**. Orders already imported keep their
+  blank fees until backfilled — see
+  [docs/ebay-fee-reporting.md](docs/ebay-fee-reporting.md).
+- eBay fee data was also being requested from the wrong address (`api.ebay.com` rather
+  than `apiz.ebay.com`), and the amount eBay pays out per order was being reduced by the
+  fee a second time. Both were masked by the rejection above and are fixed together.
+- An order with no fee figure now reads "Not reported yet" rather than "Not yet settled",
+  which claimed to know something the app had no way of knowing.
+
 ## [0.5.0] - 2026-08-04
 
 ### Added
