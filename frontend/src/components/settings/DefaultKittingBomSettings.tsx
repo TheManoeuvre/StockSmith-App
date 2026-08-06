@@ -1,13 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import { appSettingsApi } from "../../api/appSettings";
 import { materialsApi } from "../../api/materials";
 import type { KittingBomLine } from "../../api/types";
-import { MaterialSelect } from "../materials/MaterialSelect";
 import { ErrorBanner } from "../common/ErrorBanner";
-import { SaveIndicator } from "../common/SaveIndicator";
+import { SaveButton } from "../common/SaveButton";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
-import { normalizeQtyForUnit, wholeNumberStepFor } from "../../lib/format";
+import { useEditableCopy } from "../../hooks/useEditableCopy";
+import { BomLineTable } from "../products/BomLineTable";
+
+const toLines = (rows: { material_id: number; qty_required: string }[]): KittingBomLine[] =>
+  rows.map((l) => ({ material_id: l.material_id, qty_required: l.qty_required }));
 
 export function DefaultKittingBomSettings() {
   const queryClient = useQueryClient();
@@ -17,16 +20,26 @@ export function DefaultKittingBomSettings() {
   });
   const { data: materials } = useQuery({ queryKey: ["materials"], queryFn: materialsApi.list });
 
-  const [lines, setLines] = useState<KittingBomLine[]>([]);
   const [filterText, setFilterText] = useState("");
 
-  useEffect(() => {
-    if (bom) setLines(bom.map((l) => ({ material_id: l.material_id, qty_required: l.qty_required })));
-  }, [bom]);
+  // No DirtyRegistryProvider on the settings route, so useEditableCopy's registration is a
+  // no-op here — this gets the seed-once fix and the disabled-until-dirty button, but no
+  // unsaved-changes prompt. That's deliberate; the guard is a product-page feature.
+  const seed = useMemo(() => (bom ? toLines(bom) : undefined), [bom]);
+  const { value: lines, setValue: setLines, isDirty, markSaved } = useEditableCopy<KittingBomLine[]>({
+    key: "default-kitting-bom",
+    label: "Default kitting BOM",
+    initial: [],
+    seed,
+    seedKey: "settings",
+  });
 
   const saveMutation = useMutation({
     mutationFn: () => appSettingsApi.replaceDefaultKittingBom(lines),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["settings", "default-kitting-bom"] }),
+    onSuccess: (rows) => {
+      markSaved(toLines(rows));
+      queryClient.invalidateQueries({ queryKey: ["settings", "default-kitting-bom"] });
+    },
   });
 
   const updateLine = (index: number, patch: Partial<KittingBomLine>) => {
@@ -61,59 +74,30 @@ export function DefaultKittingBomSettings() {
           onChange={(e) => setFilterText(e.target.value)}
         />
       )}
-      <table className="w-full border-collapse bg-white text-left text-sm">
-        <thead>
-          <tr className="border-b border-slate-200">
-            <th className="p-2">Material</th>
-            <th className="p-2">Qty required</th>
-            <th className="p-2" />
-          </tr>
-        </thead>
-        <tbody>
-          {lines.map((line, i) => (
-            <tr key={i} className="border-b border-slate-100">
-              <td className="p-2">
-                <MaterialSelect
-                  materials={materials ?? []}
-                  value={line.material_id}
-                  onChange={(material_id) => updateLine(i, { material_id })}
-                  filterText={filterText}
-                />
-              </td>
-              <td className="p-2">
-                <input
-                  className="w-24 rounded border border-slate-300 px-2 py-1"
-                  step={wholeNumberStepFor(materials?.find((m) => m.id === line.material_id)?.unit)}
-                  value={line.qty_required}
-                  onChange={(e) => updateLine(i, { qty_required: e.target.value })}
-                  onBlur={(e) =>
-                    updateLine(i, {
-                      qty_required: normalizeQtyForUnit(
-                        e.target.value,
-                        materials?.find((m) => m.id === line.material_id)?.unit
-                      ),
-                    })
-                  }
-                />
-              </td>
-              <td className="p-2">
-                <button onClick={() => removeLine(i)} className="text-red-600">
-                  Remove
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <BomLineTable
+        lines={lines}
+        materials={materials}
+        filterText={filterText}
+        onChangeLine={updateLine}
+        onRemoveLine={removeLine}
+        // No stock context here — this list isn't attached to any product.
+        showMaxFromFreeStock={false}
+        isDirty={isDirty}
+        tableClassName="w-full table-fixed border-collapse bg-white text-left text-sm"
+      />
       {lines.length === 0 && <p className="text-sm text-slate-400">No default kitting materials configured.</p>}
       <div className="flex gap-2">
         <button onClick={addLine} className="rounded border border-slate-300 px-3 py-1.5 text-sm">
           + Add material
         </button>
-        <button onClick={() => saveMutation.mutate()} className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white">
+        <SaveButton
+          isDirty={isDirty}
+          isPending={saveMutation.isPending}
+          status={saveStatus}
+          onClick={() => saveMutation.mutate()}
+        >
           Save
-        </button>
-        <SaveIndicator status={saveStatus} />
+        </SaveButton>
       </div>
       <ErrorBanner error={saveMutation.error} />
     </div>

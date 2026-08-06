@@ -9,6 +9,8 @@ import type { Material, MaterialCategory, MaterialUnit } from "../../api/types";
 import { useMaterialImageUrl } from "../../hooks/useMaterialImageUrl";
 import { useLazyVisible } from "../../hooks/useLazyVisible";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
+import { useDirtyRegistration } from "../../hooks/useDirtyRegistry";
+import { useGuard } from "../../hooks/useUnsavedChangesGuard";
 import { CreatableSelect } from "../../components/common/CreatableSelect";
 import { CsvImportExport } from "../../components/common/CsvImportExport";
 import { isLowStock, normalizeQtyForUnit, roundQty, wholeNumberStepFor } from "../../lib/format";
@@ -107,6 +109,21 @@ function MaterialsList() {
     },
   });
 
+  const guard = useGuard();
+  // No seeding effect and no saved baseline here — this is pending input, so "dirty" simply
+  // means the user has typed something into the new-material form.
+  const createFormDirty =
+    showForm &&
+    (name.trim() !== "" ||
+      colour !== "" ||
+      materialType !== "" ||
+      barcode !== "" ||
+      manufacturer !== "" ||
+      defaultSupplier !== "" ||
+      productUrl !== "" ||
+      reorderThreshold !== "0");
+  useDirtyRegistration("new-material", "New material", createFormDirty);
+
   const toggleCategoryFilter = (c: MaterialCategory) => {
     setCategoryFilter((prev) => {
       const next = new Set(prev);
@@ -164,7 +181,10 @@ function MaterialsList() {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold">Materials</h1>
-        <button onClick={() => setShowForm((v) => !v)} className="rounded bg-slate-900 px-4 py-2 text-white">
+        <button
+          onClick={() => guard.attempt(() => setShowForm((v) => !v), { prefix: "new-material" })}
+          className="rounded bg-slate-900 px-4 py-2 text-white"
+        >
           {showForm ? "Cancel" : "Add material"}
         </button>
       </div>
@@ -290,7 +310,11 @@ function MaterialsList() {
               onChange={(e) => setProductUrl(e.target.value)}
             />
           </label>
-          <button type="submit" className="rounded bg-slate-900 px-4 py-1.5 text-white">
+          <button
+            type="submit"
+            disabled={!name.trim() || createMutation.isPending}
+            className="rounded bg-slate-900 px-4 py-1.5 text-white disabled:cursor-not-allowed disabled:opacity-50"
+          >
             Save
           </button>
           <ErrorBanner error={createMutation.error} />

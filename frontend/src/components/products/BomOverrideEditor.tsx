@@ -1,10 +1,11 @@
 import { useMutation } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useMemo } from "react";
 import type { Material } from "../../api/types";
 import { MaterialSelect } from "../materials/MaterialSelect";
 import { ErrorBanner } from "../common/ErrorBanner";
-import { SaveIndicator } from "../common/SaveIndicator";
+import { SaveButton } from "../common/SaveButton";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
+import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { normalizeQtyForUnit, wholeNumberStepFor } from "../../lib/format";
 
 type OverrideMode = "inherit" | "qty" | "substitute";
@@ -31,6 +32,7 @@ interface EffectiveLine extends OverrideableLine {
 export function BomOverrideEditor({
   title,
   seedKey,
+  dirtyKey,
   baseBom,
   effectiveBom,
   materials,
@@ -39,21 +41,21 @@ export function BomOverrideEditor({
 }: {
   title: string;
   seedKey: number;
+  /**
+   * Registry key within the enclosing <DirtyPath> — both instances in a variant row share
+   * seedKey (the variant id), so they need distinct keys to avoid colliding in the registry.
+   */
+  dirtyKey: string;
   baseBom: OverrideableLine[];
   effectiveBom: EffectiveLine[];
   materials: Material[];
   onSave: (payload: EffectiveLine[]) => Promise<unknown>;
   onSaved: () => void;
 }) {
-  const [overrides, setOverrides] = useState<Record<number, OverrideRow>>({});
-  const [additiveLines, setAdditiveLines] = useState<EffectiveLine[]>([]);
-  const seededKey = useRef<number | null>(null);
-
-  useEffect(() => {
-    // Seed local edit state once per seedKey (the variant id), not on every background
-    // refetch — otherwise a refetch while the user is mid-edit silently discards their
-    // unsaved changes before they get a chance to save.
-    if (seededKey.current === seedKey) return;
+  // Derived, not stored: useEditableCopy takes it from here once per seedKey (the variant
+  // id) and then ignores later changes, which is what stops a background refetch discarding
+  // an in-progress edit.
+  const seed = useMemo(() => {
     const next: Record<number, OverrideRow> = {};
     for (const base of baseBom) {
       const subLine = effectiveBom.find((l) => l.replaces_material_id === base.material_id);
@@ -72,12 +74,26 @@ export function BomOverrideEditor({
       }
       next[base.material_id] = { mode: "inherit", qty_required: "", substitute_material_id: null };
     }
-    setOverrides(next);
-
     const baseIds = new Set(baseBom.map((b) => b.material_id));
-    setAdditiveLines(effectiveBom.filter((l) => l.replaces_material_id == null && !baseIds.has(l.material_id)));
-    seededKey.current = seedKey;
-  }, [effectiveBom, baseBom, seedKey]);
+    return {
+      overrides: next,
+      additiveLines: effectiveBom.filter((l) => l.replaces_material_id == null && !baseIds.has(l.material_id)),
+    };
+  }, [baseBom, effectiveBom]);
+
+  const { value, setValue, isDirty, markSaved } = useEditableCopy<{
+    overrides: Record<number, OverrideRow>;
+    additiveLines: EffectiveLine[];
+  }>({
+    key: dirtyKey,
+    label: title,
+    initial: { overrides: {}, additiveLines: [] },
+    seed,
+    seedKey,
+  });
+  const { overrides, additiveLines } = value;
+  const setOverrides = (updater: (prev: Record<number, OverrideRow>) => Record<number, OverrideRow>) =>
+    setValue((prev) => ({ ...prev, overrides: updater(prev.overrides) }));
 
   const saveMutation = useMutation({
     mutationFn: () => {
@@ -102,7 +118,13 @@ export function BomOverrideEditor({
       ];
       return onSave(payload);
     },
-    onSuccess: onSaved,
+    onSuccess: () => {
+      // The endpoint returns stored override rows, not this editor's derived
+      // overrides/additiveLines shape, so the baseline is what we sent. Safe here: the values
+      // are echoed back unchanged, and a later refetch can no longer re-seed anyway.
+      markSaved();
+      onSaved();
+    },
   });
 
   const setMode = (materialId: number, mode: OverrideMode) => {
@@ -236,10 +258,15 @@ export function BomOverrideEditor({
           })}
         </tbody>
       </table>
-      <button onClick={() => saveMutation.mutate()} className="mt-2 rounded bg-slate-900 px-3 py-1.5 text-sm text-white">
+      <SaveButton
+        isDirty={isDirty}
+        isPending={saveMutation.isPending}
+        status={saveStatus}
+        onClick={() => saveMutation.mutate()}
+        className="mt-2 rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
+      >
         Save {title.toLowerCase()}
-      </button>
-      <SaveIndicator status={saveStatus} />
+      </SaveButton>
       <ErrorBanner error={saveMutation.error} />
     </div>
   );

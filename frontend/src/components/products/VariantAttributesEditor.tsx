@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { materialsApi } from "../../api/materials";
 import { productsApi } from "../../api/products";
 import type { AttributeMaterialRule, AttributeQuantityRule, Material, Product, VariantAttributeSpec } from "../../api/types";
 import { ErrorBanner } from "../common/ErrorBanner";
+import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { BulkBomAmendModal } from "./BulkBomAmendModal";
 
 interface MaterialRuleState {
@@ -42,20 +43,30 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
   const { data: materials } = useQuery({ queryKey: ["materials"], queryFn: materialsApi.list });
   const colourListId = useId();
 
-  const [rows, setRows] = useState<AttributeRow[]>([emptyRow]);
+  // Unusual among these editors: there is no saved server state to mirror. The attribute
+  // NAMES come from the product, but the values and rules are pending input that is consumed
+  // by "Generate variants" and then cleared. So the baseline is the seeded (empty-valued)
+  // rows, and dirty means "there is unsubmitted input here".
+  const seed = useMemo<AttributeRow[]>(() => {
+    const existing = [product.variant_attribute1_name, product.variant_attribute2_name, product.variant_attribute3_name]
+      .filter((n): n is string => !!n)
+      .map((name) => ({ name, valuesText: "", materialRules: [], quantityRules: [] }));
+    return existing.length > 0 ? existing : [emptyRow];
+  }, [product.variant_attribute1_name, product.variant_attribute2_name, product.variant_attribute3_name]);
+
+  const { value: rows, setValue: setRows, markSaved: markGenerated } = useEditableCopy<AttributeRow[]>({
+    key: "variant-attributes",
+    label: "Variant attributes",
+    initial: [emptyRow],
+    seed,
+    seedKey: product.id,
+  });
   const [showBulkAmend, setShowBulkAmend] = useState(false);
   const hasAttributes = !!(
     product.variant_attribute1_name ||
     product.variant_attribute2_name ||
     product.variant_attribute3_name
   );
-
-  useEffect(() => {
-    const existing = [product.variant_attribute1_name, product.variant_attribute2_name, product.variant_attribute3_name]
-      .filter((n): n is string => !!n)
-      .map((name) => ({ name, valuesText: "", materialRules: [], quantityRules: [] }));
-    if (existing.length > 0) setRows(existing);
-  }, [product.id]);
 
   const generateMutation = useMutation({
     mutationFn: () => {
@@ -83,9 +94,14 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["products", product.id, "variants"] });
       queryClient.invalidateQueries({ queryKey: ["products", product.id] });
-      setRows((prev) => prev.map((r) => ({ ...r, valuesText: "", materialRules: [], quantityRules: [] })));
+      // Clears the pending input and the baseline together, so a completed generate leaves
+      // nothing to warn about.
+      markGenerated(rows.map((r) => ({ ...r, valuesText: "", materialRules: [], quantityRules: [] })));
     },
   });
+
+  // "Generate" is an action, not a save: it needs at least one named attribute with values.
+  const canGenerate = rows.some((r) => r.name.trim() && splitValues(r.valuesText).length > 0);
 
   const updateRow = (index: number, patch: Partial<AttributeRow>) => {
     setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
@@ -250,7 +266,8 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
         )}
         <button
           onClick={() => generateMutation.mutate()}
-          className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white"
+          disabled={!canGenerate || generateMutation.isPending}
+          className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
           Generate variants
         </button>
