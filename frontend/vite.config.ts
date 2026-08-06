@@ -31,4 +31,14 @@ export default defineConfig(async () => ({
       ignored: ["**/src-tauri/**"],
     },
   },
+
+  test: {
+    environment: "jsdom",
+    globals: true,
+    setupFiles: ["src/test/setup.ts"],
+    // Route-level tests mount the whole lazy route tree before they can interact, which
+    // alone eats a second or two — the 5s default trips on any test that then clicks
+    // through several steps.
+    testTimeout: 20_000,
+  },
 }));

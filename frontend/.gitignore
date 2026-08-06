@@ -22,3 +22,5 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+# TanStack Router codegen scratch files
+.tanstack

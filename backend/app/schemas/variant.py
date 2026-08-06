@@ -55,6 +55,8 @@ class VariantRead(VariantBase):
     theoretical_max_sellable: int | None = None
     theoretical_max_sellable_reason: str | None = None
     cost_per_unit: Decimal | None = None
+    # Resolved kitting BOM cost per unit (variant overrides applied) — see ProductRead's own.
+    kitting_cost_per_unit: Decimal | None = None
     effective_bom: list[VariantBomLine] = []
     effective_kitting_bom: list[VariantKittingBomLine] = []
     full_sku: str | None = None

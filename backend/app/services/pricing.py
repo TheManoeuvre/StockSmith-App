@@ -27,18 +27,41 @@ def compute_profit_margin(
     cost_per_unit: Decimal | None,
     shipping_cost: Decimal | None,
     platform_fee_percent: Decimal | None,
+    kitting_cost_per_unit: Decimal | None = None,
 ) -> tuple[Decimal | None, Decimal | None]:
     """Returns (profit, margin_percent). Both None if sale_price isn't set — there's
-    nothing meaningful to compute margin against."""
+    nothing meaningful to compute margin against.
+
+    kitting_cost_per_unit is the packaging cost of fulfilling one unit. It's defaulted
+    rather than required because it was added after the fact, but it should be supplied:
+    without it, product margin and order net profit disagree about whether packaging is a
+    cost, and only the order is right. It's an estimate at this level — an order that ships
+    several units together pays for one box, not one per unit (see
+    kitting.auto_apply_multiunit_kitting_override), so a per-unit figure is the pessimistic
+    single-unit case."""
     if sale_price is None:
         return None, None
     fee = sale_price * (platform_fee_percent or Decimal(0)) / Decimal(100)
-    profit = sale_price - (cost_per_unit or Decimal(0)) - (shipping_cost or Decimal(0)) - fee
+    profit = (
+        sale_price
+        - (cost_per_unit or Decimal(0))
+        - (kitting_cost_per_unit or Decimal(0))
+        - (shipping_cost or Decimal(0))
+        - fee
+    )
     margin_percent = (profit / sale_price * Decimal(100)) if sale_price != 0 else None
     return profit, margin_percent
 
 
 async def snapshot_product_pricing(session: AsyncSession, product: Product, cost_per_unit: Decimal) -> None:
+    """Records a price-history point. ProductPriceSnapshot.cost_per_unit deliberately stores
+    the BUILD cost only, unchanged: it's what check_and_snapshot_for_materials' drift
+    comparison is keyed on and what the price-history table renders, so folding packaging in
+    would silently reinterpret every historical row. Only margin_percent accounts for
+    kitting, and only from here forward."""
+    from app.services.kitting import compute_variant_kitting_cost_per_unit
+
+    kitting_cost_per_unit = await compute_variant_kitting_cost_per_unit(session, product.id, None)
     fee_source, fee_components = await platform_fees.get_resolver_context(session)
     shipping_profiles_by_id = await get_shipping_profiles_by_id(session)
     shipping_profile = resolve_product_shipping_profile(shipping_profiles_by_id, product)
@@ -48,7 +71,7 @@ async def snapshot_product_pricing(session: AsyncSession, product: Product, cost
         fee_source, fee_components, product.platform_fee_percent, product.sale_price, shipping_price
     )
     _, margin_percent = compute_profit_margin(
-        product.sale_price, cost_per_unit, shipping_cost, effective_fee_percent
+        product.sale_price, cost_per_unit, shipping_cost, effective_fee_percent, kitting_cost_per_unit
     )
     session.add(
         ProductPriceSnapshot(

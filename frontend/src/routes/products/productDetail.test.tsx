@@ -1,0 +1,457 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router";
+import { render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("../../api/client", async () => (await import("../../test/fakeBackend")).clientMock());
+
+const { setRoutes, calls } = await import("../../test/fakeBackend");
+const { routeTree } = await import("../../routeTree.gen");
+
+const PRODUCT = {
+  id: 1,
+  name: "Doorbell Mount",
+  sku: "DM-1",
+  description: null,
+  barcode: null,
+  is_bundle: false,
+  is_active: true,
+  current_stock: 5,
+  allocated_qty: 0,
+  cost_per_unit: "1.00",
+  kitting_cost_per_unit: "0.30",
+  pricing_mode: "product",
+  push_buildable_capacity: true,
+  platform_ceiling_qty: null,
+  variant_attribute1_name: null,
+  variant_attribute2_name: null,
+  variant_attribute3_name: null,
+  sale_price: null,
+  shipping_profile_id: null,
+  platform_fee_percent: null,
+  effective_platform_fee_percent: null,
+  pricing_variable_attribute: null,
+  max_sellable: 5,
+  theoretical_max_sellable: 5,
+};
+
+const MATERIALS = [
+  { id: 1, name: "Filament", unit: "g", category: "filament", current_qty: "100", allocated_qty: "0", avg_unit_cost: "0.50" },
+  { id: 2, name: "Box", unit: "each", category: "packaging", current_qty: "50", allocated_qty: "0", avg_unit_cost: "0.30" },
+];
+
+function baseRoutes(product: Record<string, unknown> = PRODUCT) {
+  return [
+    { method: "GET" as const, path: "/products/1", respond: () => product },
+    { method: "GET" as const, path: "/products/1/variants", respond: () => [] },
+    { method: "GET" as const, path: "/products/1/bom", respond: () => [{ id: 1, product_id: 1, material_id: 1, qty_required: "2" }] },
+    { method: "GET" as const, path: "/products/1/kitting-bom", respond: () => [{ id: 2, product_id: 1, material_id: 2, qty_required: "1" }] },
+    { method: "GET" as const, path: "/products/1/bundle-items", respond: () => [] },
+    { method: "GET" as const, path: "/materials", respond: () => MATERIALS },
+    { method: "PUT" as const, path: "/products/1/bom", respond: (body: unknown) => body },
+    { method: "PUT" as const, path: "/products/1/kitting-bom", respond: (body: unknown) => body },
+    // Anything else the page or root layout reaches for (assets, sync status, price history…)
+    { method: "GET" as const, path: /.*/, respond: () => [] },
+  ];
+}
+
+const variant = (id: number, name: string, overrides: Record<string, unknown> = {}) => ({
+  id,
+  product_id: 1,
+  variant_name: name,
+  sku_suffix: null,
+  is_active: true,
+  current_stock: 0,
+  allocated_qty: 0,
+  attribute1_value: name,
+  attribute2_value: null,
+  attribute3_value: null,
+  sale_price: "10.00",
+  shipping_profile_id: null,
+  effective_shipping_profile_id: null,
+  platform_fee_percent: null,
+  effective_platform_fee_percent: null,
+  max_buildable: 1,
+  expected_max_buildable: 1,
+  max_sellable: 1,
+  max_sellable_reason: null,
+  expected_max_sellable: 1,
+  expected_max_sellable_reason: null,
+  theoretical_max_sellable: 1,
+  theoretical_max_sellable_reason: null,
+  cost_per_unit: "1.00",
+  kitting_cost_per_unit: "0.30",
+  effective_bom: [{ material_id: 1, qty_required: "2", replaces_material_id: null, line_max_buildable: 50 }],
+  effective_kitting_bom: [{ material_id: 2, qty_required: "1", replaces_material_id: null, line_max_buildable: 50 }],
+  full_sku: `DM-1-${id}`,
+  ...overrides,
+});
+
+/** Adds the endpoints the Variants and Pricing tabs reach for, on top of baseRoutes. */
+function withVariants(variants: ReturnType<typeof variant>[], product: Record<string, unknown> = PRODUCT) {
+  return [
+    { method: "GET" as const, path: "/products/1/variants", respond: () => variants },
+    ...variants.map((v) => ({
+      method: "GET" as const,
+      path: `/variants/${v.id}`,
+      respond: () => v,
+    })),
+    { method: "PATCH" as const, path: /^\/variants\/\d+$/, respond: (body: unknown) => body },
+    { method: "GET" as const, path: "/settings/margin-fee-config", respond: () => ({ fee_source: "manual" }) },
+    { method: "GET" as const, path: "/shipping-profiles", respond: () => [] },
+    { method: "PATCH" as const, path: "/products/1", respond: (body: unknown) => ({ ...product, ...(body as object) }) },
+    ...baseRoutes(product),
+  ];
+}
+
+async function renderProductPage() {
+  const router = createRouter({
+    routeTree,
+    history: createMemoryHistory({ initialEntries: ["/products/1"] }),
+  });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={client}>
+      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+      <RouterProvider router={router as any} />
+    </QueryClientProvider>
+  );
+  // Generous timeout: the first render in a file resolves the whole lazy route tree.
+  await screen.findByRole("heading", { name: "Doorbell Mount" }, { timeout: 5000 });
+  return router;
+}
+
+const bomTab = () => screen.getByRole("button", { name: "Bill of Materials" });
+const pricingTab = () => screen.getByRole("button", { name: "Pricing" });
+
+/** BOM tables only — the page header carries a stock-summary table of its own. */
+const bomTables = () => screen.getAllByRole("table").filter((t) => within(t).queryByText("Share"));
+
+/**
+ * The build BOM's qty input. Async because the Save button renders before the BOM query
+ * resolves, so waiting on the button alone isn't enough to know the rows are there.
+ */
+const buildQtyInput = async () => (await screen.findAllByDisplayValue("2"))[0];
+
+describe("product detail page", () => {
+  beforeEach(() => setRoutes(baseRoutes()));
+
+  it("puts both BOM tables under one Bill of Materials tab", async () => {
+    const user = userEvent.setup();
+    await renderProductPage();
+
+    // The separate "Kitting BOM" tab is gone; the heading inside the merged tab remains.
+    expect(screen.queryByRole("button", { name: "Kitting BOM" })).not.toBeInTheDocument();
+
+    await user.click(bomTab());
+
+    expect(await screen.findByRole("heading", { name: "Build BOM" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Kitting BOM" })).toBeInTheDocument();
+    expect(bomTables()).toHaveLength(2);
+  });
+
+  it("records the open tab in the URL", async () => {
+    const user = userEvent.setup();
+    const router = await renderProductPage();
+
+    await user.click(bomTab());
+    await waitFor(() => expect(router.state.location.search).toEqual({ tab: "bom" }));
+  });
+
+  it("keeps each table's Save independent", async () => {
+    const user = userEvent.setup();
+    await renderProductPage();
+    await user.click(bomTab());
+
+    const buildSave = await screen.findByRole("button", { name: /save build bom/i });
+    const kittingSave = screen.getByRole("button", { name: /save kitting bom/i });
+    expect(buildSave).toBeDisabled();
+    expect(kittingSave).toBeDisabled();
+
+    const qty = await buildQtyInput();
+    await user.clear(qty);
+    await user.type(qty, "3");
+
+    await waitFor(() => expect(buildSave).toBeEnabled());
+    expect(kittingSave).toBeDisabled(); // editing one table must not arm the other
+  });
+
+  it("warns before a tab switch would discard edits, and stays put on Keep editing", async () => {
+    const user = userEvent.setup();
+    const router = await renderProductPage();
+    await user.click(bomTab());
+
+    const qty = await buildQtyInput();
+    await user.clear(qty);
+    await user.type(qty, "9");
+
+    await user.click(pricingTab());
+
+    const dialog = await screen.findByRole("dialog");
+    // Names what is unsaved, rather than a bare "you have unsaved changes". Scoped to the
+    // dialog because "Build BOM" is also the heading on the page behind it.
+    expect(within(dialog).getByText("Build BOM")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /keep editing/i }));
+
+    await waitFor(() => expect(screen.queryByRole("button", { name: /keep editing/i })).not.toBeInTheDocument());
+    expect(router.state.location.search).toEqual({ tab: "bom" });
+    expect(screen.getAllByDisplayValue("9")[0]).toBeInTheDocument(); // edit survived
+  });
+
+  it("lets the navigation through on Discard changes", async () => {
+    const user = userEvent.setup();
+    const router = await renderProductPage();
+    await user.click(bomTab());
+
+    const qty = await buildQtyInput();
+    await user.clear(qty);
+    await user.type(qty, "9");
+
+    await user.click(pricingTab());
+    await screen.findByRole("button", { name: /discard changes/i });
+    await user.click(screen.getByRole("button", { name: /discard changes/i }));
+
+    await waitFor(() => expect(router.state.location.search).toEqual({ tab: "pricing" }));
+    expect(calls.some((c) => c.method === "PUT" && c.path === "/products/1/bom")).toBe(false);
+  });
+
+  it("does not warn when nothing has been edited", async () => {
+    const user = userEvent.setup();
+    const router = await renderProductPage();
+    await user.click(bomTab());
+    await screen.findByRole("heading", { name: "Build BOM" });
+
+    await user.click(pricingTab());
+
+    await waitFor(() => expect(router.state.location.search).toEqual({ tab: "pricing" }));
+    expect(screen.queryByRole("button", { name: /keep editing/i })).not.toBeInTheDocument();
+  });
+
+  it("stops warning once the edit is saved", async () => {
+    const user = userEvent.setup();
+    const router = await renderProductPage();
+    await user.click(bomTab());
+
+    const qty = await buildQtyInput();
+    await user.clear(qty);
+    await user.type(qty, "3");
+    await user.click(await screen.findByRole("button", { name: /save build bom/i }));
+
+    await waitFor(() => expect(calls.some((c) => c.method === "PUT" && c.path === "/products/1/bom")).toBe(true));
+
+    await user.click(pricingTab());
+
+    await waitFor(() => expect(router.state.location.search).toEqual({ tab: "pricing" }));
+    expect(screen.queryByRole("button", { name: /keep editing/i })).not.toBeInTheDocument();
+  });
+
+  it("shows the kitting table for a bundle too", async () => {
+    // Bundles really do consume packaging — apply_default_kitting_bom runs for them and order
+    // fulfilment resolves a kitting BOM for every line, so hiding this would make a bundle
+    // quietly eat boxes with nowhere to see or edit them.
+    const user = userEvent.setup();
+    setRoutes(baseRoutes({ ...PRODUCT, is_bundle: true, kitting_cost_per_unit: null }));
+    await renderProductPage();
+
+    await user.click(bomTab());
+
+    expect(await screen.findByRole("heading", { name: "Bundle components" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Kitting BOM" })).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Build BOM" })).not.toBeInTheDocument();
+  });
+
+  it("shows cost and share per line with a table total", async () => {
+    const user = userEvent.setup();
+    await renderProductPage();
+    await user.click(bomTab());
+
+    await buildQtyInput();
+    const buildTable = bomTables()[0];
+    // 2 x £0.50
+    expect(within(buildTable).getAllByText("£1.00")).toHaveLength(2); // row + total
+    expect(within(buildTable).getByText("100.0%")).toBeInTheDocument();
+    expect(within(buildTable).getByText("Total")).toBeInTheDocument();
+  });
+});
+
+const variantsTab = () => screen.getByRole("button", { name: "Variants" });
+
+describe("variant paths", () => {
+  const two = [variant(11, "Red"), variant(12, "Blue")];
+
+  it("warns before collapsing a variant row with unsaved edits", async () => {
+    const user = userEvent.setup();
+    setRoutes(withVariants(two));
+    await renderProductPage();
+    await user.click(variantsTab());
+
+    // Expand Red and rename it without saving.
+    await user.click(await screen.findByRole("button", { name: /red/i }));
+    const nameInput = await screen.findByDisplayValue("Red");
+    await user.clear(nameInput);
+    await user.type(nameInput, "Crimson");
+
+    // Collapsing unmounts the row's editors, so it has to ask first.
+    await user.click(screen.getByRole("button", { name: /crimson|red/i }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/Variant "Red"/)).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: /keep editing/i }));
+    expect(await screen.findByDisplayValue("Crimson")).toBeInTheDocument();
+  });
+
+  it("does not warn about a dirty row when a DIFFERENT row is toggled", async () => {
+    // Prefix isolation, end to end: variant-11/ must not be matched by variant-12/'s check.
+    const user = userEvent.setup();
+    setRoutes(withVariants(two));
+    await renderProductPage();
+    await user.click(variantsTab());
+
+    await user.click(await screen.findByRole("button", { name: /red/i }));
+    const nameInput = await screen.findByDisplayValue("Red");
+    await user.clear(nameInput);
+    await user.type(nameInput, "Crimson");
+
+    // Expanding Blue collapses Red (single-open accordion), so this SHOULD warn — the row
+    // being unmounted is the dirty one.
+    await user.click(screen.getByRole("button", { name: /blue/i }));
+    const dialog = await screen.findByRole("dialog");
+    await user.click(within(dialog).getByRole("button", { name: /discard changes/i }));
+
+    // Now Blue is open and clean. Collapsing it must NOT warn, even though it was Red that
+    // was dirty a moment ago — Red's registration went with its unmount.
+    await user.click(screen.getByRole("button", { name: /blue/i }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  });
+
+  it("warns before Show less hides a dirty row", async () => {
+    const user = userEvent.setup();
+    const many = Array.from({ length: 7 }, (_, i) => variant(20 + i, `V${i}`));
+    setRoutes(withVariants(many));
+    await renderProductPage();
+    await user.click(variantsTab());
+
+    await user.click(await screen.findByRole("button", { name: /show all 7/i }));
+
+    // V6 is only visible while expanded — it sits past INITIAL_VARIANT_LIMIT of 5.
+    await user.click(await screen.findByRole("button", { name: /^V6/i }));
+    const nameInput = await screen.findByDisplayValue("V6");
+    await user.clear(nameInput);
+    await user.type(nameInput, "V6 edited");
+
+    await user.click(screen.getByRole("button", { name: /show less/i }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/Variant "V6"/)).toBeInTheDocument();
+  });
+
+  it("saves a variant rename and stops warning", async () => {
+    const user = userEvent.setup();
+    setRoutes(withVariants(two));
+    await renderProductPage();
+    await user.click(variantsTab());
+
+    await user.click(await screen.findByRole("button", { name: /red/i }));
+    const nameInput = await screen.findByDisplayValue("Red");
+
+    const saveRename = within(nameInput.closest("div")!.parentElement!).getByRole("button", { name: "Save" });
+    expect(saveRename).toBeDisabled();
+
+    await user.clear(nameInput);
+    await user.type(nameInput, "Crimson");
+    await waitFor(() => expect(saveRename).toBeEnabled());
+
+    await user.click(saveRename);
+    await waitFor(() => expect(saveRename).toBeDisabled());
+    expect(calls.some((c) => c.method === "PATCH" && c.path === "/variants/11")).toBe(true);
+  });
+});
+
+describe("pricing paths", () => {
+  it("warns before the pricing-mode select unmounts a dirty form", async () => {
+    const user = userEvent.setup();
+    setRoutes(withVariants([variant(11, "Red")]));
+    await renderProductPage();
+    await user.click(pricingTab());
+
+    await user.type(await screen.findByLabelText("Sale price (£)"), "12.50");
+
+    // Changing mode swaps the whole deferred form out.
+    await user.selectOptions(screen.getByLabelText("Pricing mode"), "line");
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Pricing")).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: /keep editing/i }));
+    expect(calls.some((c) => c.method === "PATCH" && c.path === "/products/1")).toBe(false);
+  });
+
+  it("warns before Show less hides a dirty line-price row", async () => {
+    const user = userEvent.setup();
+    const many = Array.from({ length: 7 }, (_, i) => variant(30 + i, `L${i}`, { sale_price: null }));
+    setRoutes(withVariants(many, { ...PRODUCT, pricing_mode: "line" }));
+    await renderProductPage();
+    await user.click(pricingTab());
+
+    await user.click(await screen.findByRole("button", { name: /show all 7/i }));
+
+    // Row 7 is past INITIAL_LINE_LIMIT, so Show less unmounts it.
+    const priceInputs = await screen.findAllByLabelText("Sale price (£)");
+    await user.type(priceInputs[6], "9.99");
+
+    await user.click(screen.getByRole("button", { name: /show less/i }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/Pricing — L6/)).toBeInTheDocument();
+  });
+
+  it("warns before the vary-by select re-groups a dirty variable-price form", async () => {
+    // Changing the attribute re-keys the group rows, unmounting whichever was being edited.
+    const user = userEvent.setup();
+    const variable = {
+      ...PRODUCT,
+      pricing_mode: "variable",
+      pricing_variable_attribute: 1,
+      variant_attribute1_name: "Colour",
+      variant_attribute2_name: "Size",
+    };
+    setRoutes(withVariants([variant(11, "Red"), variant(12, "Blue")], variable));
+    await renderProductPage();
+    await user.click(pricingTab());
+
+    const groupPrice = (await screen.findAllByLabelText("Sale price (£)"))[0];
+    await user.clear(groupPrice);
+    await user.type(groupPrice, "15.00");
+
+    await user.selectOptions(screen.getByLabelText("Vary by"), "2");
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/^Pricing — /)).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: /keep editing/i }));
+    expect(calls.some((c) => c.method === "PATCH" && c.path === "/products/1")).toBe(false);
+  });
+});
+
+describe("bundle toggle", () => {
+  it("warns before the bundle toggle rewrites the tabs under a dirty editor", async () => {
+    const user = userEvent.setup();
+    await renderProductPage();
+    await user.click(bomTab());
+
+    const qty = await buildQtyInput();
+    await user.clear(qty);
+    await user.type(qty, "9");
+
+    await user.click(screen.getByRole("checkbox", { name: /this is a bundle/i }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Build BOM")).toBeInTheDocument();
+
+    await user.click(within(dialog).getByRole("button", { name: /keep editing/i }));
+    expect(calls.some((c) => c.method === "PATCH" && c.path === "/products/1")).toBe(false);
+  });
+});

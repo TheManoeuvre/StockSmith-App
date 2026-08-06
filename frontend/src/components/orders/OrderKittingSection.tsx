@@ -7,12 +7,19 @@ import { MaterialSelect } from "../materials/MaterialSelect";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { SaveIndicator } from "../common/SaveIndicator";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
+import { formatMoney } from "../../lib/money";
 
-// Lets a multi-line order override its auto-computed aggregate packaging requirement —
-// e.g. two lines that each nominally need a label only need one shared label for the
-// order as a whole. Overrides here don't change per-unit BOM rates like the product/
-// variant kitting BOM editors; qty_required here is an absolute total for the order.
-export function OrderKittingSection({ orderId }: { orderId: number }) {
+// Lets an order override its auto-computed aggregate kitting requirement — e.g. two lines
+// that each nominally need a label only need one shared label for the order as a whole.
+// Overrides here don't change per-unit BOM rates like the product/variant kitting BOM
+// editors; qty_required here is an absolute total for the order.
+//
+// The Cost column is what this order's packaging costs, and it's why the override matters
+// beyond stock: it feeds Kitting COGS in the panel above. Two bases are shown — Cost is
+// forward-looking (ordered basis, moves as soon as an override is saved) while the consumed
+// total is realised (shipped basis, what Kitting COGS actually reports). They converge once
+// the order has fully shipped.
+export function OrderKittingSection({ orderId, currency }: { orderId: number; currency: string | null }) {
   const queryClient = useQueryClient();
   const { data: summary } = useQuery({
     queryKey: ["orders", orderId, "kitting-overrides"],
@@ -85,10 +92,10 @@ export function OrderKittingSection({ orderId }: { orderId: number }) {
 
   return (
     <div className="rounded bg-white p-4 shadow-sm">
-      <h2 className="mb-1 text-lg font-semibold">Packaging</h2>
+      <h2 className="mb-1 text-lg font-semibold">Kitting</h2>
       <p className="mb-2 text-sm text-slate-500">
         Auto-computed from each line's kitting BOM. Override the qty for a material shared across lines (e.g. one
-        label instead of two).
+        label instead of two) — the cost follows the override, and feeds Kitting COGS above.
       </p>
       <table className="w-full border-collapse text-left text-sm">
         <thead>
@@ -96,6 +103,8 @@ export function OrderKittingSection({ orderId }: { orderId: number }) {
             <th className="p-2">Material</th>
             <th className="p-2">Auto qty</th>
             <th className="p-2">Override</th>
+            <th className="p-2">Effective</th>
+            <th className="p-2">Cost</th>
             <th className="p-2">Reserved</th>
             <th className="p-2">Consumed</th>
           </tr>
@@ -113,8 +122,24 @@ export function OrderKittingSection({ orderId }: { orderId: number }) {
                   onChange={(e) => setOverrides((prev) => ({ ...prev, [line.material_id]: e.target.value }))}
                 />
               </td>
+              <td className="p-2">{line.effective_qty}</td>
+              <td
+                className="p-2"
+                title={
+                  line.unit_cost_is_frozen
+                    ? `${line.unit_cost} each — frozen when this material was consumed`
+                    : `${line.unit_cost} each — today's material cost, frozen once consumed`
+                }
+              >
+                {formatMoney(line.effective_cost, currency)}
+              </td>
               <td className="p-2">{line.reserved_qty}</td>
-              <td className="p-2">{line.consumed_qty}</td>
+              <td className="p-2">
+                {line.consumed_qty}
+                {Number(line.consumed_qty) > 0 && (
+                  <span className="block text-xs text-slate-500">{formatMoney(line.consumed_cost, currency)}</span>
+                )}
+              </td>
             </tr>
           ))}
           {extraOverrides.map((o, i) => {
@@ -137,6 +162,10 @@ export function OrderKittingSection({ orderId }: { orderId: number }) {
                     onChange={(e) => updateExtraOverride(i, { qty_required: e.target.value })}
                   />
                 </td>
+                {/* Effective/Cost/Reserved stay blank until saved — these rows aren't in the
+                    server's computed summary yet. */}
+                <td className="p-2 text-slate-400">—</td>
+                <td className="p-2 text-slate-400">—</td>
                 <td className="p-2 text-slate-400">—</td>
                 <td className="p-2">
                   <button onClick={() => removeExtraOverride(i)} className="text-xs text-red-600">
@@ -148,12 +177,21 @@ export function OrderKittingSection({ orderId }: { orderId: number }) {
           })}
         </tbody>
       </table>
+      <div className="mt-2 text-sm">
+        <p className="font-medium">Kitting cost {formatMoney(summary.effective_cost_total, currency)}</p>
+        {Number(summary.effective_cost_total) !== Number(summary.consumed_cost_total) && (
+          <p className="text-xs text-slate-500">
+            {formatMoney(summary.consumed_cost_total, currency)} consumed so far — that's the figure in Kitting COGS
+            above; they match once the order has fully shipped.
+          </p>
+        )}
+      </div>
       <div className="mt-2 flex items-center gap-2">
         <button onClick={addExtraOverride} className="rounded border border-slate-300 px-3 py-1.5 text-sm">
           + Add material override
         </button>
         <button onClick={() => saveMutation.mutate()} className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white">
-          Save packaging overrides
+          Save kitting overrides
         </button>
         <SaveIndicator status={saveStatus} />
       </div>

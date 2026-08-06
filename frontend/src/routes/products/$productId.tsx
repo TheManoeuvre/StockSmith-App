@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { productsApi } from "../../api/products";
 import { assetsApi } from "../../api/assets";
 import { BomEditor } from "../../components/products/BomEditor";
@@ -14,18 +14,51 @@ import { PricingSection } from "../../components/products/PricingSection";
 import { PlatformSyncSection } from "../../components/products/PlatformSyncSection";
 import { formatUnitCost } from "../../lib/money";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
-import { SaveIndicator } from "../../components/common/SaveIndicator";
+import { SaveButton } from "../../components/common/SaveButton";
 import { Tabs, type TabDef } from "../../components/common/Tabs";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
+import { useEditableCopy } from "../../hooks/useEditableCopy";
+import { useGuard } from "../../hooks/useUnsavedChangesGuard";
 import { useAssetUrl } from "../../hooks/useAssetUrl";
 import { pickFile } from "../../lib/tauri";
 import { sellableReasonTag } from "../../lib/format";
 
+interface DetailsForm {
+  name: string;
+  sku: string;
+  description: string;
+  barcode: string;
+  platformCeilingQty: string;
+}
+
+const EMPTY_DETAILS: DetailsForm = { name: "", sku: "", description: "", barcode: "", platformCeilingQty: "" };
+
+const TAB_IDS = ["details", "bom", "pricing", "variants", "platform-sync", "stock", "assets"] as const;
+type TabId = (typeof TAB_IDS)[number];
+
 export const Route = createFileRoute("/products/$productId")({
   component: ProductDetail,
+  // The active tab lives in the URL rather than component state, which buys two things:
+  // switching tabs becomes a real router navigation (so the unsaved-changes blocker covers
+  // it with the same code path as leaving the page), and a tab is linkable — the dashboard
+  // can send you straight to ?tab=stock.
+  // Optional, so a plain link to a product still works and doesn't have to carry
+  // "?tab=details". An unrecognised value falls back to the default rather than 404ing.
+  validateSearch: (search: Record<string, unknown>): { tab?: TabId } => {
+    const tab = search.tab;
+    return TAB_IDS.includes(tab as TabId) ? { tab: tab as TabId } : {};
+  },
 });
 
 function ProductDetail() {
+  // Registry, blocker and dialog all live at the root (see __root.tsx) — this page only
+  // needs the guard handle for its own controls that would unmount a dirty editor.
+  const guard = useGuard();
+  const activeTab = Route.useSearch().tab ?? "details";
+  const navigate = Route.useNavigate();
+  // No guard call here: this navigates, and the blocker inside useUnsavedChangesGuard
+  // intercepts it.
+  const setActiveTab = (tab: string) => navigate({ search: { tab: tab as TabId } });
   const { productId } = Route.useParams();
   const id = Number(productId);
   const queryClient = useQueryClient();
@@ -35,23 +68,41 @@ function ProductDetail() {
     queryFn: () => productsApi.listVariants(id),
   });
 
-  const [name, setName] = useState("");
-  const [sku, setSku] = useState("");
-  const [description, setDescription] = useState("");
-  const [barcode, setBarcode] = useState("");
-  const [platformCeilingQty, setPlatformCeilingQty] = useState("");
   const [isDragOver, setIsDragOver] = useState(false);
-  const [activeTab, setActiveTab] = useState("details");
 
-  useEffect(() => {
-    if (product) {
-      setName(product.name);
-      setSku(product.sku ?? "");
-      setDescription(product.description ?? "");
-      setBarcode(product.barcode ?? "");
-      setPlatformCeilingQty(product.platform_ceiling_qty != null ? String(product.platform_ceiling_qty) : "");
-    }
-  }, [product]);
+  const detailsSeed = useMemo(
+    () =>
+      product
+        ? {
+            name: product.name,
+            sku: product.sku ?? "",
+            description: product.description ?? "",
+            barcode: product.barcode ?? "",
+            platformCeilingQty: product.platform_ceiling_qty != null ? String(product.platform_ceiling_qty) : "",
+          }
+        : undefined,
+    [product]
+  );
+  const {
+    value: details,
+    setValue: setDetails,
+    isDirty: detailsDirty,
+    markSaved: markDetailsSaved,
+  } = useEditableCopy<DetailsForm>({
+    key: "details",
+    label: "Details",
+    initial: EMPTY_DETAILS,
+    seed: detailsSeed,
+    seedKey: id,
+  });
+  const { name, sku, description, barcode, platformCeilingQty } = details;
+  const setDetailsField = <K extends keyof DetailsForm>(field: K, next: DetailsForm[K]) =>
+    setDetails((prev) => ({ ...prev, [field]: next }));
+  const setName = (v: string) => setDetailsField("name", v);
+  const setSku = (v: string) => setDetailsField("sku", v);
+  const setDescription = (v: string) => setDetailsField("description", v);
+  const setBarcode = (v: string) => setDetailsField("barcode", v);
+  const setPlatformCeilingQty = (v: string) => setDetailsField("platformCeilingQty", v);
 
   const saveDetailsMutation = useMutation({
     mutationFn: () =>
@@ -63,6 +114,7 @@ function ProductDetail() {
         platform_ceiling_qty: platformCeilingQty.trim() ? Number(platformCeilingQty) : null,
       }),
     onSuccess: () => {
+      markDetailsSaved();
       queryClient.invalidateQueries({ queryKey: ["products", id] });
       queryClient.invalidateQueries({ queryKey: ["products"] });
     },
@@ -146,8 +198,7 @@ function ProductDetail() {
 
   const tabs: TabDef[] = [
     { id: "details", label: "Details" },
-    { id: "bom", label: product.is_bundle ? "Bundle components" : "Bill of Materials" },
-    { id: "kitting-bom", label: "Kitting BOM" },
+    { id: "bom", label: "Bill of Materials" },
     { id: "pricing", label: "Pricing" },
     ...(!product.is_bundle ? [{ id: "variants", label: "Variants" }] : []),
     { id: "platform-sync", label: "Platform Sync" },
@@ -299,7 +350,10 @@ function ProductDetail() {
             <input
               type="checkbox"
               checked={product.is_bundle}
-              onChange={(e) => toggleBundleMutation.mutate(e.target.checked)}
+              onChange={(e) => {
+                const next = e.target.checked;
+                guard.attempt(() => toggleBundleMutation.mutate(next));
+              }}
             />
             This is a bundle
           </label>
@@ -352,10 +406,15 @@ function ProductDetail() {
                 onChange={(e) => setPlatformCeilingQty(e.target.value)}
               />
             </label>
-            <button type="submit" className="rounded bg-slate-900 px-4 py-1.5 text-white">
+            <SaveButton
+              type="submit"
+              isDirty={detailsDirty}
+              isPending={saveDetailsMutation.isPending}
+              status={saveDetailsStatus}
+              className="rounded bg-slate-900 px-4 py-1.5 text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
               Save
-            </button>
-            <SaveIndicator status={saveDetailsStatus} />
+            </SaveButton>
             {product.barcode && (
               <Link
                 to="/product-label/$productId"
@@ -396,11 +455,11 @@ function ProductDetail() {
       )}
 
       {activeTab === "bom" && (
-        <section>{product.is_bundle ? <BundleItemsEditor productId={id} /> : <BomEditor productId={id} />}</section>
-      )}
-
-      {activeTab === "kitting-bom" && (
-        <section>
+        <section className="flex flex-col gap-6">
+          {product.is_bundle ? <BundleItemsEditor productId={id} /> : <BomEditor productId={id} />}
+          {/* Bundles get this too: apply_default_kitting_bom runs for them with no is_bundle
+              check and order fulfilment resolves a kitting BOM for every line, so a bundle
+              really does consume packaging. Hiding the table would leave that invisible. */}
           <KittingBomEditor productId={id} />
         </section>
       )}

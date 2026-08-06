@@ -6,7 +6,8 @@ export type ReturnDisposition = "scrap" | "return_to_stock";
 export interface CancellationKittingMaterial {
   material_id: number;
   material_name: string;
-  qty_per_unit: string;
+  // Order-level total actually consumed, from the kitting ledger — not a per-unit rate.
+  qty: string;
 }
 
 export interface CancellationLineOption {

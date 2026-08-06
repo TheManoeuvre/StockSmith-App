@@ -62,6 +62,10 @@ class ProductRead(ProductBase):
     theoretical_max_sellable: int | None = None
     theoretical_max_sellable_reason: str | None = None
     cost_per_unit: Decimal | None = None
+    # Base kitting BOM cost per unit — the packaging half of what it costs to fulfil one
+    # unit, so margin can account for it (see pricing.compute_profit_margin). None for a
+    # bundle, and for a product with no kitting BOM at all.
+    kitting_cost_per_unit: Decimal | None = None
     main_image_asset_id: int | None = None
     ready_to_ship: int | None = None
     effective_platform_fee_percent: Decimal | None = None

@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import { materialsApi } from "../../api/materials";
 import { manufacturersApi } from "../../api/manufacturers";
 import { suppliersApi } from "../../api/suppliers";
@@ -13,11 +13,54 @@ import type { MaterialCategory, MaterialUnit } from "../../api/types";
 import { isLowStock, normalizeQtyForUnit, roundQty, wholeNumberStepFor } from "../../lib/format";
 import { formatUnitCost } from "../../lib/money";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
-import { SaveIndicator } from "../../components/common/SaveIndicator";
+import { SaveButton } from "../../components/common/SaveButton";
+import { useEditableCopy } from "../../hooks/useEditableCopy";
 
 export const Route = createFileRoute("/materials/$materialId")({
   component: MaterialDetail,
 });
+
+interface MaterialDetailsForm {
+  name: string;
+  category: MaterialCategory;
+  unit: MaterialUnit;
+  colour: string;
+  materialType: string;
+  materialTypeId: number | null;
+  barcode: string;
+  manufacturer: string;
+  manufacturerId: number | null;
+  productUrl: string;
+  defaultSupplier: string;
+  defaultSupplierId: number | null;
+  typicalReorderQty: string;
+  reorderThreshold: string;
+}
+
+const EMPTY_MATERIAL_DETAILS: MaterialDetailsForm = {
+  name: "",
+  category: "filament",
+  unit: "g",
+  colour: "",
+  materialType: "",
+  materialTypeId: null,
+  barcode: "",
+  manufacturer: "",
+  manufacturerId: null,
+  productUrl: "",
+  defaultSupplier: "",
+  defaultSupplierId: null,
+  typicalReorderQty: "",
+  reorderThreshold: "0",
+};
+
+interface AdjustForm {
+  adjustMode: "adjust" | "set";
+  adjustValue: string;
+  adjustReason: string;
+}
+
+const EMPTY_ADJUST: AdjustForm = { adjustMode: "adjust", adjustValue: "", adjustReason: "" };
 
 const CATEGORIES: MaterialCategory[] = ["filament", "resin", "pigment", "hardware", "packaging", "blanks", "other"];
 const UNITS: MaterialUnit[] = ["g", "ml", "each"];
@@ -47,42 +90,82 @@ function MaterialDetail() {
     queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
   };
 
-  const [imageUrlInput, setImageUrlInput] = useState("");
+  const { value: imageUrlInput, setValue: setImageUrlInput, markSaved: markImageImported } =
+    useEditableCopy<string>({
+      key: "material-image-url",
+      label: "Material image URL",
+      initial: "",
+      seed: "",
+      seedKey: "const",
+    });
   const [isDragOver, setIsDragOver] = useState(false);
 
-  const [name, setName] = useState("");
-  const [category, setCategory] = useState<MaterialCategory>("filament");
-  const [unit, setUnit] = useState<MaterialUnit>("g");
-  const [colour, setColour] = useState("");
-  const [materialType, setMaterialType] = useState("");
-  const [materialTypeId, setMaterialTypeId] = useState<number | null>(null);
-  const [barcode, setBarcode] = useState("");
-  const [manufacturer, setManufacturer] = useState("");
-  const [manufacturerId, setManufacturerId] = useState<number | null>(null);
-  const [productUrl, setProductUrl] = useState("");
-  const [defaultSupplier, setDefaultSupplier] = useState("");
-  const [defaultSupplierId, setDefaultSupplierId] = useState<number | null>(null);
-  const [typicalReorderQty, setTypicalReorderQty] = useState("");
-  const [reorderThreshold, setReorderThreshold] = useState("0");
-
-  useEffect(() => {
-    if (material) {
-      setName(material.name);
-      setCategory(material.category);
-      setUnit(material.unit);
-      setColour(material.colour ?? "");
-      setMaterialType(material.material_type_name ?? "");
-      setMaterialTypeId(material.material_type_id);
-      setBarcode(material.barcode ?? "");
-      setManufacturer(material.manufacturer_name ?? "");
-      setManufacturerId(material.manufacturer_id);
-      setProductUrl(material.product_url ?? "");
-      setDefaultSupplier(material.default_supplier_name ?? "");
-      setDefaultSupplierId(material.default_supplier_id);
-      setTypicalReorderQty(material.typical_reorder_qty ?? "");
-      setReorderThreshold(material.reorder_threshold);
-    }
-  }, [material]);
+  const detailsSeed = useMemo<MaterialDetailsForm | undefined>(
+    () =>
+      material
+        ? {
+            name: material.name,
+            category: material.category,
+            unit: material.unit,
+            colour: material.colour ?? "",
+            materialType: material.material_type_name ?? "",
+            materialTypeId: material.material_type_id,
+            barcode: material.barcode ?? "",
+            manufacturer: material.manufacturer_name ?? "",
+            manufacturerId: material.manufacturer_id,
+            productUrl: material.product_url ?? "",
+            defaultSupplier: material.default_supplier_name ?? "",
+            defaultSupplierId: material.default_supplier_id,
+            typicalReorderQty: material.typical_reorder_qty ?? "",
+            reorderThreshold: material.reorder_threshold,
+          }
+        : undefined,
+    [material]
+  );
+  const {
+    value: details,
+    setValue: setDetails,
+    isDirty: detailsDirty,
+    markSaved: markDetailsSaved,
+  } = useEditableCopy<MaterialDetailsForm>({
+    key: "material-details",
+    label: "Material details",
+    initial: EMPTY_MATERIAL_DETAILS,
+    seed: detailsSeed,
+    seedKey: id,
+  });
+  const {
+    name,
+    category,
+    unit,
+    colour,
+    materialType,
+    materialTypeId,
+    barcode,
+    manufacturer,
+    manufacturerId,
+    productUrl,
+    defaultSupplier,
+    defaultSupplierId,
+    typicalReorderQty,
+    reorderThreshold,
+  } = details;
+  const setField = <K extends keyof MaterialDetailsForm>(field: K, next: MaterialDetailsForm[K]) =>
+    setDetails((prev) => ({ ...prev, [field]: next }));
+  const setName = (v: string) => setField("name", v);
+  const setCategory = (v: MaterialCategory) => setField("category", v);
+  const setUnit = (v: MaterialUnit) => setField("unit", v);
+  const setColour = (v: string) => setField("colour", v);
+  const setMaterialType = (v: string) => setField("materialType", v);
+  const setMaterialTypeId = (v: number | null) => setField("materialTypeId", v);
+  const setBarcode = (v: string) => setField("barcode", v);
+  const setManufacturer = (v: string) => setField("manufacturer", v);
+  const setManufacturerId = (v: number | null) => setField("manufacturerId", v);
+  const setProductUrl = (v: string) => setField("productUrl", v);
+  const setDefaultSupplier = (v: string) => setField("defaultSupplier", v);
+  const setDefaultSupplierId = (v: number | null) => setField("defaultSupplierId", v);
+  const setTypicalReorderQty = (v: string) => setField("typicalReorderQty", v);
+  const setReorderThreshold = (v: string) => setField("reorderThreshold", v);
 
   const saveDetailsMutation = useMutation({
     mutationFn: async () => {
@@ -113,6 +196,7 @@ function MaterialDetail() {
       });
     },
     onSuccess: () => {
+      markDetailsSaved();
       invalidateMaterial();
       queryClient.invalidateQueries({ queryKey: ["manufacturers"] });
       queryClient.invalidateQueries({ queryKey: ["suppliers"] });
@@ -128,17 +212,31 @@ function MaterialDetail() {
     },
   });
 
-  const [adjustMode, setAdjustMode] = useState<"adjust" | "set">("adjust");
-  const [adjustValue, setAdjustValue] = useState("");
-  const [adjustReason, setAdjustReason] = useState("");
+  // Command form (records an adjustment), not an editor of stored state — it diffs against
+  // its own defaults, so an abandoned half-typed adjustment still warns on navigate-away.
+  const {
+    value: adjust,
+    setValue: setAdjust,
+    markSaved: markAdjustDone,
+  } = useEditableCopy<AdjustForm>({
+    key: "material-adjust",
+    label: "Stock adjustment",
+    initial: EMPTY_ADJUST,
+    seed: EMPTY_ADJUST,
+    seedKey: "const",
+  });
+  const { adjustMode, adjustValue, adjustReason } = adjust;
+  const setAdjustMode = (v: "adjust" | "set") => setAdjust((prev) => ({ ...prev, adjustMode: v }));
+  const setAdjustValue = (v: string) => setAdjust((prev) => ({ ...prev, adjustValue: v }));
+  const setAdjustReason = (v: string) => setAdjust((prev) => ({ ...prev, adjustReason: v }));
+  const canAdjust = adjustValue.trim() !== "" && adjustReason.trim() !== "";
 
   const adjustStockMutation = useMutation({
     mutationFn: () => materialsApi.adjust(id, adjustMode, adjustValue, adjustReason),
     onSuccess: () => {
       invalidateMaterial();
       queryClient.invalidateQueries({ queryKey: ["materials", id, "stock-history"] });
-      setAdjustValue("");
-      setAdjustReason("");
+      markAdjustDone(EMPTY_ADJUST);
     },
   });
 
@@ -160,7 +258,7 @@ function MaterialDetail() {
     mutationFn: (url: string) => materialsApi.importImageUrl(id, url),
     onSuccess: () => {
       invalidateMaterial();
-      setImageUrlInput("");
+      markImageImported("");
     },
   });
 
@@ -227,7 +325,11 @@ function MaterialDetail() {
               value={imageUrlInput}
               onChange={(e) => setImageUrlInput(e.target.value)}
             />
-            <button type="submit" className="rounded border border-slate-300 px-3 py-1 text-sm">
+            <button
+              type="submit"
+              disabled={!imageUrlInput.trim()}
+              className="rounded border border-slate-300 px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+            >
               Import
             </button>
           </form>
@@ -362,10 +464,15 @@ function MaterialDetail() {
               onBlur={(e) => setTypicalReorderQty(normalizeQtyForUnit(e.target.value, unit))}
             />
           </label>
-          <button type="submit" className="rounded bg-slate-900 px-4 py-1.5 text-white">
+          <SaveButton
+            type="submit"
+            isDirty={detailsDirty}
+            isPending={saveDetailsMutation.isPending}
+            status={saveDetailsStatus}
+            className="rounded bg-slate-900 px-4 py-1.5 text-white disabled:cursor-not-allowed disabled:opacity-50"
+          >
             Save
-          </button>
-          <SaveIndicator status={saveDetailsStatus} />
+          </SaveButton>
           {material.barcode && (
             <Link
               to="/material-label/$materialId"
@@ -437,7 +544,11 @@ function MaterialDetail() {
               onChange={(e) => setAdjustReason(e.target.value)}
             />
           </label>
-          <button type="submit" className="rounded bg-slate-900 px-4 py-1.5 text-white">
+          <button
+            type="submit"
+            disabled={!canAdjust || adjustStockMutation.isPending}
+            className="rounded bg-slate-900 px-4 py-1.5 text-white disabled:cursor-not-allowed disabled:opacity-50"
+          >
             Save
           </button>
         </form>

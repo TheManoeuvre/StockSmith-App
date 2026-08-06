@@ -1,13 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { materialsApi } from "../../api/materials";
 import { platformsApi, type UnitSyncResult } from "../../api/platforms";
 import { productsApi } from "../../api/products";
 import { variantsApi } from "../../api/variants";
 import type { BomLineRead, KittingBomLineRead, Variant } from "../../api/types";
 import { ErrorBanner } from "../common/ErrorBanner";
-import { SaveIndicator } from "../common/SaveIndicator";
+import { SaveButton } from "../common/SaveButton";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
+import { useEditableCopy } from "../../hooks/useEditableCopy";
+import { DirtyPath } from "../../hooks/useDirtyRegistry";
+import { useGuard } from "../../hooks/useUnsavedChangesGuard";
 import { PlatformSyncBadge } from "./PlatformSyncBadge";
 import { BomOverrideEditor } from "./BomOverrideEditor";
 import { sellableReasonTag } from "../../lib/format";
@@ -47,6 +50,7 @@ export function VariantEditor({ productId }: { productId: number }) {
   });
   const syncUnitByVariant = new Map((etsySync?.units ?? []).map((u) => [u.variant_id, u]));
 
+  const guard = useGuard();
   const [newVariantName, setNewVariantName] = useState("");
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [showDisabled, setShowDisabled] = useState(false);
@@ -75,22 +79,40 @@ export function VariantEditor({ productId }: { productId: number }) {
       )}
 
       {visibleVariants.map((variant) => (
+        // Every editor inside this row registers under `variant-<id>/`, so collapsing or
+        // disabling the row can ask about exactly its own subtree and nothing else.
+        <DirtyPath key={variant.id} segment={`variant-${variant.id}`}>
         <VariantRow
-          key={variant.id}
           variant={variant}
           baseBom={baseBom ?? []}
           baseKittingBom={baseKittingBom ?? []}
           productId={productId}
           expanded={expandedId === variant.id}
-          onToggle={() => setExpandedId((id) => (id === variant.id ? null : variant.id))}
+          onToggle={() => {
+            // Prefix is the row about to be UNMOUNTED (the currently expanded one), not the
+            // one being clicked — collapsing is what destroys the edits. With nothing
+            // expanded there is nothing to lose, so skip the check entirely rather than
+            // passing a prefix that matches everything.
+            const toggle = () => setExpandedId((id) => (id === variant.id ? null : variant.id));
+            if (expandedId == null) toggle();
+            else guard.attempt(toggle, { prefix: `variant-${expandedId}/` });
+          }}
           syncUnit={syncUnitByVariant.get(variant.id)}
           pushBuildableCapacity={product?.push_buildable_capacity ?? true}
         />
+        </DirtyPath>
       ))}
 
       {filteredVariants.length > INITIAL_VARIANT_LIMIT && (
         <button
-          onClick={() => setShowAllVariants((v) => !v)}
+          onClick={() =>
+            // Collapsing unmounts every row past the limit, so check all of them at once.
+            guard.attempt(() => setShowAllVariants((v) => !v), {
+              prefixes: showAllVariants
+                ? filteredVariants.slice(INITIAL_VARIANT_LIMIT).map((v) => `variant-${v.id}/`)
+                : [],
+            })
+          }
           className="self-start text-sm text-slate-600 underline"
         >
           {showAllVariants ? "Show less" : `Show all ${filteredVariants.length} (${hiddenCount} more)`}
@@ -148,6 +170,7 @@ function VariantRow({
   pushBuildableCapacity: boolean;
 }) {
   const queryClient = useQueryClient();
+  const guard = useGuard();
   const { data: materials } = useQuery({ queryKey: ["materials"], queryFn: materialsApi.list });
   const { data: fullVariant } = useQuery({
     queryKey: ["variants", variant.id],
@@ -155,8 +178,24 @@ function VariantRow({
     enabled: expanded,
   });
 
-  const [name, setName] = useState(variant.variant_name);
-  const [skuSuffix, setSkuSuffix] = useState(variant.sku_suffix ?? "");
+  // Previously these were plain useState initialisers with no effect at all — the opposite
+  // failure from the other editors: nothing could clobber an edit, but a rename made anywhere
+  // else never reached this row, which then showed a stale name indefinitely.
+  const seed = useMemo(
+    () => ({ name: variant.variant_name, skuSuffix: variant.sku_suffix ?? "" }),
+    [variant.variant_name, variant.sku_suffix]
+  );
+  const { value: renameValue, setValue: setRenameValue, isDirty: renameDirty, markSaved: markRenameSaved } =
+    useEditableCopy<{ name: string; skuSuffix: string }>({
+      key: "rename",
+      label: `Variant "${variant.variant_name}"`,
+      initial: seed,
+      seed,
+      seedKey: variant.id,
+    });
+  const { name, skuSuffix } = renameValue;
+  const setName = (next: string) => setRenameValue((prev) => ({ ...prev, name: next }));
+  const setSkuSuffix = (next: string) => setRenameValue((prev) => ({ ...prev, skuSuffix: next }));
 
   const invalidateVariants = () => {
     queryClient.invalidateQueries({ queryKey: ["variants", variant.id] });
@@ -165,7 +204,10 @@ function VariantRow({
 
   const renameMutation = useMutation({
     mutationFn: () => variantsApi.update(variant.id, { variant_name: name, sku_suffix: skuSuffix || null }),
-    onSuccess: invalidateVariants,
+    onSuccess: () => {
+      markRenameSaved();
+      invalidateVariants();
+    },
   });
 
   const toggleActiveMutation = useMutation({
@@ -264,15 +306,21 @@ function VariantRow({
                 {variant.full_sku ?? "—"}
               </span>
             </label>
-            <button
+            <SaveButton
+              isDirty={renameDirty}
+              isPending={renameMutation.isPending}
+              status={renameStatus}
               onClick={() => renameMutation.mutate()}
-              className="rounded border border-slate-300 px-3 py-1.5 text-sm"
+              className="rounded border border-slate-300 px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
             >
               Save
-            </button>
-            <SaveIndicator status={renameStatus} />
+            </SaveButton>
             <button
-              onClick={() => toggleActiveMutation.mutate()}
+              // Never counted dirty (it saves immediately), but disabling can hide the row and
+              // so unmount the editors inside it.
+              onClick={() =>
+                guard.attempt(() => toggleActiveMutation.mutate(), { prefix: `variant-${variant.id}/` })
+              }
               className="rounded border border-slate-300 px-3 py-1.5 text-sm"
             >
               {variant.is_active ? "Disable" : "Reactivate"}
@@ -285,6 +333,7 @@ function VariantRow({
               <BomOverrideEditor
                 title="Bill of Materials overrides"
                 seedKey={variant.id}
+                dirtyKey="bom-overrides"
                 baseBom={baseBom}
                 effectiveBom={fullVariant.effective_bom}
                 materials={materials}
@@ -294,6 +343,7 @@ function VariantRow({
               <BomOverrideEditor
                 title="Kitting BOM overrides"
                 seedKey={variant.id}
+                dirtyKey="kitting-bom-overrides"
                 baseBom={baseKittingBom}
                 effectiveBom={fullVariant.effective_kitting_bom}
                 materials={materials}

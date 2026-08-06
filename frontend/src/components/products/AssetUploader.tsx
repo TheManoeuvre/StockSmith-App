@@ -6,6 +6,7 @@ import { useAssetUrl } from "../../hooks/useAssetUrl";
 import { useLazyVisible } from "../../hooks/useLazyVisible";
 import type { AssetType } from "../../api/types";
 import { ErrorBanner } from "../common/ErrorBanner";
+import { useEditableCopy } from "../../hooks/useEditableCopy";
 
 const SECTIONS: { type: AssetType; label: string }[] = [
   { type: "listing_image", label: "Listing images" },
@@ -73,7 +74,15 @@ function AssetSection({
   onImportUrl: (url: string) => void;
   onRemove: (assetId: number) => void;
 }) {
-  const [url, setUrl] = useState("");
+  // A submit-and-clear command form, so it diffs against "" rather than server data — enough
+  // to warn about a pasted-but-not-imported URL on navigate-away.
+  const { value: url, setValue: setUrl, markSaved: markImported } = useEditableCopy<string>({
+    key: `assets/${assetType}`,
+    label: `${label} image URL`,
+    initial: "",
+    seed: "",
+    seedKey: "const",
+  });
   const [isDragOver, setIsDragOver] = useState(false);
 
   return (
@@ -107,7 +116,7 @@ function AssetSection({
           e.preventDefault();
           if (url.trim()) {
             onImportUrl(url.trim());
-            setUrl("");
+            markImported("");
           }
         }}
       >
@@ -117,7 +126,11 @@ function AssetSection({
           value={url}
           onChange={(e) => setUrl(e.target.value)}
         />
-        <button type="submit" className="rounded border border-slate-300 px-3 py-1 text-sm">
+        <button
+          type="submit"
+          disabled={!url.trim()}
+          className="rounded border border-slate-300 px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+        >
           Import
         </button>
       </form>

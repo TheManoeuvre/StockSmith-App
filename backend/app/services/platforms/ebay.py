@@ -2,6 +2,7 @@ import asyncio
 import base64
 import logging
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
 from xml.etree import ElementTree
 
 import httpx
@@ -18,6 +19,7 @@ from app.services.platforms.base import (
     TokenSet,
     ensure_utc,
 )
+from app.services.platforms.ebay_signing import EbaySigningKey, EbaySigningKeyMissing, build_signature_headers
 from app.services.platforms.errors import PlatformAuthError, PlatformRateLimitError, PlatformSyncError
 
 # eBay's Trading API is XML/SOAP-era and namespaces every element under this URI —
@@ -58,6 +60,13 @@ def _order_payment_state(order: dict) -> PaymentState:
     """
     raw = str(order.get("orderPaymentStatus", "")).upper()
     return _EBAY_PAYMENT_STATES.get(raw, PaymentState.unsettled)
+
+
+def _needs_signature(url: str) -> bool:
+    """Whether this URL is one of the eBay APIs StockSmith signs — matched on path so a
+    host change (api vs. apiz) can't silently switch signing off."""
+    path = urlsplit(url).path
+    return any(path.startswith(prefix) for prefix in _SIGNED_PATH_PREFIXES)
 
 
 class EbayTimeout(PlatformSyncError):
@@ -197,6 +206,17 @@ _HOSTS: dict[PlatformEnvironment, dict[str, str]] = {
         "token": "https://api.ebay.com/identity/v1/oauth2/token",
         "api": "https://api.ebay.com",
         "identity": "https://apiz.ebay.com",
+        # Key Management and Sell Finances live on the same apiz host as Identity, but
+        # each keeps its own entry rather than borrowing "identity": they're unrelated
+        # APIs that happen to share a host today, and one of them moving shouldn't
+        # silently move the others.
+        "keymgmt": "https://apiz.ebay.com",
+        # NOT api.ebay.com. Confirmed live: api.ebay.com answers a *signed* Finances
+        # request with a bodyless 404 — and answered an unsigned one with the signature
+        # error, since the proxy validates before it routes. That ordering is worth
+        # knowing about: it means a wrong host looks exactly like a signing problem right
+        # up until the signature is correct.
+        "finances": "https://apiz.ebay.com",
         "trading": "https://api.ebay.com/ws/api.dll",
     },
     PlatformEnvironment.sandbox: {
@@ -204,9 +224,27 @@ _HOSTS: dict[PlatformEnvironment, dict[str, str]] = {
         "token": "https://api.sandbox.ebay.com/identity/v1/oauth2/token",
         "api": "https://api.sandbox.ebay.com",
         "identity": "https://apiz.sandbox.ebay.com",
+        "keymgmt": "https://apiz.sandbox.ebay.com",
+        "finances": "https://apiz.sandbox.ebay.com",
         "trading": "https://api.sandbox.ebay.com/ws/api.dll",
     },
 }
+
+# Which API paths get RFC 9421 signature headers attached (see ebay_signing.py).
+#
+# Deliberately narrow. eBay gates its in-scope APIs behind Digital Signatures for EU/UK
+# sellers, and that list is widening over time — but Fulfillment and Inventory are NOT
+# being enforced for this seller today, so order sync and quantity pushes work unsigned.
+# Signing them anyway would mean a subtly wrong signature breaks the two things that
+# currently work, in exchange for pre-empting an enforcement date eBay hasn't set. Add
+# the prefix when a call starts 403ing with errorId 215001, which is the unambiguous
+# signal ("Missing x-ebay-signature-key header to fulfill the request").
+_SIGNED_PATH_PREFIXES = ("/sell/finances/",)
+
+# The scope an application (client_credentials) token needs for the Key Management API.
+# The URI is literally api.ebay.com in Sandbox too — eBay's scope identifiers are not
+# per-environment even though its hosts are.
+_APP_TOKEN_SCOPE = "https://api.ebay.com/oauth/api_scope"
 
 _REFRESH_SKEW = timedelta(minutes=5)
 
@@ -347,16 +385,27 @@ class EbayAdapter:
     """
 
     def __init__(
-        self, client_id: str, client_secret: str, environment: PlatformEnvironment = PlatformEnvironment.production
+        self,
+        client_id: str,
+        client_secret: str,
+        environment: PlatformEnvironment = PlatformEnvironment.production,
+        signing_key: EbaySigningKey | None = None,
     ):
         self.client_id = client_id
         self.client_secret = client_secret
         self.environment = environment
+        # None until the operator mints one. Injected at construction, like the client
+        # id/secret it lives beside in platform_app_credentials — which is safe only
+        # because minting invalidates the adapter cache (see routers/platforms.py's
+        # create_ebay_signing_key), the same contract a credential edit already relies on.
+        self.signing_key = signing_key
         hosts = _HOSTS[environment]
         self.authorize_url = hosts["authorize"]
         self.token_url = hosts["token"]
         self.api_base = hosts["api"]
         self.identity_base = hosts["identity"]
+        self.keymgmt_base = hosts["keymgmt"]
+        self.finances_base = hosts["finances"]
         self.trading_base = hosts["trading"]
         # Resolved lazily on the first Trading API call and cached for this adapter's
         # lifetime — adapters are cached per (platform, environment) in the registry
@@ -523,7 +572,70 @@ class EbayAdapter:
         headers = kwargs.pop("headers", {})
         headers = {**headers, "Authorization": f"Bearer {connection.access_token}"}
         async with httpx.AsyncClient(timeout=timeout) as client:
-            return await client.request(method, url, headers=headers, **kwargs)
+            if not _needs_signature(url):
+                return await client.request(method, url, headers=headers, **kwargs)
+            # Signed calls take the two-step route so the Content-Digest can be computed
+            # over request.content — the exact bytes httpx will put on the wire.
+            # Re-serializing a `json=` dict a second time to hash it would be a standing
+            # risk of a digest that doesn't match the body, which eBay reports only as an
+            # opaque signature failure.
+            request = client.build_request(method, url, headers=headers, **kwargs)
+            request.headers.update(self._signature_headers(request))
+            return await client.send(request)
+
+    def _signature_headers(self, request: httpx.Request) -> dict[str, str]:
+        if self.signing_key is None:
+            raise EbaySigningKeyMissing(
+                "eBay requires a digital signature on this call and no signing key is configured. "
+                "Set one up in Settings > Integrations > eBay."
+            )
+        return build_signature_headers(
+            self.signing_key, request.method, str(request.url), request.content or None
+        )
+
+    async def _app_access_token(self) -> str:
+        """A client_credentials (application) token — no seller involved.
+
+        The Key Management API is keyed on the developer keyset, not on any one seller's
+        grant, so it takes an application token rather than the user token every other
+        call in this file carries. Fetched per use and not cached: minting a signing key
+        happens once, by hand, from Settings."""
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            response = await client.post(
+                self.token_url,
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Authorization": self._basic_auth_header,
+                },
+                data={"grant_type": "client_credentials", "scope": _APP_TOKEN_SCOPE},
+            )
+        if response.status_code != 200:
+            raise PlatformAuthError(
+                f"eBay refused an application token ({response.status_code}): {response.text}"
+            )
+        return response.json()["access_token"]
+
+    async def create_signing_key(self) -> dict:
+        """Mints an Ed25519 keypair via eBay's Key Management API.
+
+        The privateKey in the response is returned exactly once and eBay keeps no copy —
+        the caller MUST persist it (see routers/platforms.create_ebay_signing_key) or the
+        only recovery is minting another. Returns eBay's raw response so the caller
+        stores signingKeyId/expirationTime alongside it for diagnosis.
+        """
+        token = await self._app_access_token()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{self.keymgmt_base}/developer/key_management/v1/signing_key",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json={"signingKeyCipher": "ED25519"},
+            )
+        if response.status_code not in (200, 201):
+            raise PlatformSyncError(f"Failed to create eBay signing key: {response.status_code} {response.text}")
+        body = response.json()
+        if not body.get("jwe") or not body.get("privateKey"):
+            raise PlatformSyncError(f"eBay signing key response was missing jwe/privateKey: {body}")
+        return body
 
     async def _ensure_fresh(self, session, connection: PlatformConnection) -> None:
         expires_at = ensure_utc(connection.access_token_expires_at)
@@ -706,39 +818,73 @@ class EbayAdapter:
         self, session, connection: PlatformConnection, order_id
     ) -> tuple[str | None, str | None, str | None]:
         """Sell Finances API getTransactions filtered by orderId — mirrors Etsy's
-        per-receipt _fetch_payment. Sums SALE-type gross/fee amounts for this order;
+        per-receipt _fetch_payment. Reads the SALE transaction's fee total for this order;
         a transaction whose payout hasn't settled yet just means these stay None,
-        matching Etsy's own "not failing the sync" behavior."""
+        matching Etsy's own "not failing the sync" behavior.
+
+        This is one of the APIs eBay gates behind Digital Signatures for EU/UK sellers,
+        so _needs_signature covers its path and the call goes out signed. Every failure
+        mode below degrades to (None, None, None) — the order still imports, with its
+        totals intact, minus the fee breakdown — but each one now LOGS. It previously
+        returned silently, which is how a 403 on every single call went unnoticed for the
+        whole life of the feature: the only symptom was the order page reading "Not yet
+        settled" forever, which is exactly what a genuinely unsettled order looks like.
+        """
         if order_id is None:
             return None, None, None
-        response = await self._authed_request(
-            session,
-            connection,
-            "GET",
-            f"{self.api_base}/sell/finances/v1/transaction",
-            params={"filter": f"orderId:{{{order_id}}}"},
-        )
+        try:
+            response = await self._authed_request(
+                session,
+                connection,
+                "GET",
+                f"{self.finances_base}/sell/finances/v1/transaction",
+                params={"filter": f"orderId:{{{order_id}}}"},
+            )
+        except EbaySigningKeyMissing as e:
+            # Not a transport failure and not retryable — the operator has to mint a key.
+            # Caught here rather than allowed to escape so a missing key costs the fee
+            # breakdown and nothing else; failing the whole sync over it would be a far
+            # worse trade.
+            logger.warning("Skipping eBay fee lookup for order %s: %s", order_id, e)
+            return None, None, None
         if response.status_code != 200:
+            logger.warning(
+                "eBay fee lookup failed for order %s: %d %s", order_id, response.status_code, response.text[:500]
+            )
             return None, None, None
         results = response.json().get("transactions", [])
         sale = next((t for t in results if str(t.get("transactionType")).upper() == "SALE"), None)
         if sale is None:
+            logger.info("eBay returned no SALE transaction for order %s — fees not available yet", order_id)
             return None, None, None
-        gross = (sale.get("amount") or {}).get("value")
-        total_fees = sum(
-            float((fee.get("amount") or {}).get("value", 0))
-            for fee in sale.get("totalFeeBasisAmount", [])
-            if isinstance(fee, dict)
-        )
-        # totalFeeBasisAmount's exact shape is uncertain without a live account to
-        # verify against — falls back to totalFeeAmount if present, matching the
-        # dedicated field described in eBay's Transaction schema.
-        if not total_fees and sale.get("totalFeeAmount"):
-            total_fees = float(sale["totalFeeAmount"].get("value", 0))
-        net = float(gross) - total_fees if gross is not None else None
+
+        # totalFeeAmount is the dedicated total-fees field on eBay's Transaction schema.
+        # This previously summed totalFeeBasisAmount instead, which is wrong twice over:
+        # it is a single Amount object rather than a list (iterating it yields the string
+        # keys "value"/"currency", every one of which the isinstance guard then discarded,
+        # so the sum was always 0), and it is the *basis* fees are calculated against —
+        # the gross the buyer paid — not the fee itself.
+        total_fees = float((sale.get("totalFeeAmount") or {}).get("value", 0) or 0)
+        if not total_fees:
+            # Some transactions carry no rolled-up total and only the per-line breakdown.
+            total_fees = sum(
+                float((fee.get("amount") or {}).get("value", 0) or 0)
+                for line in sale.get("orderLineItems", [])
+                for fee in (line.get("marketplaceFees") or [])
+                if isinstance(fee, dict)
+            )
+
+        # `amount` on a SALE is ALREADY net of fees — it is the CREDIT eBay books to the
+        # seller, not the gross the buyer paid. Confirmed live on order 26-14962-77224:
+        # amount 15.14, totalFeeBasisAmount (the gross) 18.59, totalFeeAmount 3.45, and
+        # 18.59 - 3.45 = 15.14 exactly. Subtracting the fees from it again — as this did —
+        # would have reported 11.69 against a real credit of 15.14, understating the net
+        # by the fee on every order, which is the same size of error in the opposite
+        # direction from the one this whole change set out to fix.
+        net = (sale.get("amount") or {}).get("value")
         return (
             f"{total_fees:.2f}" if total_fees else None,
-            f"{net:.2f}" if net is not None else None,
+            f"{float(net):.2f}" if net is not None else None,
             sale.get("transactionStatus"),
         )
 

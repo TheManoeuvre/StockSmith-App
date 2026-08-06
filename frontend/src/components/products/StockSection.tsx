@@ -1,9 +1,30 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { buildsApi, productsApi, stockAdjustmentsApi } from "../../api/products";
 import { materialsApi } from "../../api/materials";
 import type { ProductStockEvent } from "../../api/types";
 import { ErrorBanner } from "../common/ErrorBanner";
+import { useEditableCopy } from "../../hooks/useEditableCopy";
+
+interface BuildForm {
+  variantId: number | "";
+  qtyBuilt: string;
+  qtyFailed: string;
+  notes: string;
+  consumption: Record<number, boolean>;
+}
+
+// qtyBuilt starts at "1", not "": recording a single build should be one click.
+const EMPTY_BUILD_FORM: BuildForm = { variantId: "", qtyBuilt: "1", qtyFailed: "0", notes: "", consumption: {} };
+
+interface AdjustForm {
+  adjVariantId: number | "";
+  adjMode: "adjust" | "set";
+  adjValue: string;
+  adjReason: string;
+}
+
+const EMPTY_ADJUST_FORM: AdjustForm = { adjVariantId: "", adjMode: "adjust", adjValue: "", adjReason: "" };
 
 const EVENT_LABELS: Record<ProductStockEvent["event_type"], string> = {
   build_success: "Build",
@@ -36,11 +57,30 @@ export function StockSection({ productId }: { productId: number }) {
   const hasActiveVariants = activeVariants.length > 0;
   const hasAnyVariants = (variants?.length ?? 0) > 0;
 
-  const [variantId, setVariantId] = useState<number | "">("");
-  const [qtyBuilt, setQtyBuilt] = useState("1");
-  const [qtyFailed, setQtyFailed] = useState("0");
-  const [notes, setNotes] = useState("");
-  const [consumption, setConsumption] = useState<Record<number, boolean>>({});
+  // A command form, not an editor of stored state — so it diffs against its own defaults
+  // rather than server data. That still makes "dirty" meaningful (a typed note or a changed
+  // qty warns on navigate-away), but the Record button is gated on validity instead: the qty
+  // defaults to 1 precisely so recording one build is a single click.
+  const {
+    value: buildForm,
+    setValue: setBuildForm,
+    markSaved: markBuildDone,
+  } = useEditableCopy<BuildForm>({
+    key: "build",
+    label: "Record a build",
+    initial: EMPTY_BUILD_FORM,
+    seed: EMPTY_BUILD_FORM,
+    seedKey: "const",
+  });
+  const { variantId, qtyBuilt, qtyFailed, notes, consumption } = buildForm;
+  const setBuildField = <K extends keyof BuildForm>(field: K, next: BuildForm[K]) =>
+    setBuildForm((prev) => ({ ...prev, [field]: next }));
+  const setVariantId = (next: number | "") => setBuildField("variantId", next);
+  const setQtyBuilt = (next: string) => setBuildField("qtyBuilt", next);
+  const setQtyFailed = (next: string) => setBuildField("qtyFailed", next);
+  const setNotes = (next: string) => setBuildField("notes", next);
+  const setConsumption = (updater: (prev: Record<number, boolean>) => Record<number, boolean>) =>
+    setBuildForm((prev) => ({ ...prev, consumption: updater(prev.consumption) }));
 
   const selectedVariant = variants?.find((v) => v.id === variantId);
   const resolvedBom = hasActiveVariants ? selectedVariant?.effective_bom ?? [] : bom ?? [];
@@ -69,17 +109,30 @@ export function StockSection({ productId }: { productId: number }) {
       queryClient.invalidateQueries({ queryKey: ["products", productId, "stock-history"] });
       queryClient.invalidateQueries({ queryKey: ["products"] });
       queryClient.invalidateQueries({ queryKey: ["materials"] });
-      setQtyBuilt("1");
-      setQtyFailed("0");
-      setNotes("");
-      setConsumption({});
+      // Resets the fields AND the dirty baseline together — a recorded build leaves nothing
+      // unsaved, so navigating away must not prompt.
+      markBuildDone(EMPTY_BUILD_FORM);
     },
   });
 
-  const [adjVariantId, setAdjVariantId] = useState<number | "">("");
-  const [adjMode, setAdjMode] = useState<"adjust" | "set">("adjust");
-  const [adjValue, setAdjValue] = useState("");
-  const [adjReason, setAdjReason] = useState("");
+  const {
+    value: adjForm,
+    setValue: setAdjForm,
+    markSaved: markAdjDone,
+  } = useEditableCopy<AdjustForm>({
+    key: "adjust",
+    label: "Stock adjustment",
+    initial: EMPTY_ADJUST_FORM,
+    seed: EMPTY_ADJUST_FORM,
+    seedKey: "const",
+  });
+  const { adjVariantId, adjMode, adjValue, adjReason } = adjForm;
+  const setAdjField = <K extends keyof AdjustForm>(field: K, next: AdjustForm[K]) =>
+    setAdjForm((prev) => ({ ...prev, [field]: next }));
+  const setAdjVariantId = (next: number | "") => setAdjField("adjVariantId", next);
+  const setAdjMode = (next: "adjust" | "set") => setAdjField("adjMode", next);
+  const setAdjValue = (next: string) => setAdjField("adjValue", next);
+  const setAdjReason = (next: string) => setAdjField("adjReason", next);
 
   const adjustMutation = useMutation({
     mutationFn: () =>
@@ -95,10 +148,16 @@ export function StockSection({ productId }: { productId: number }) {
       queryClient.invalidateQueries({ queryKey: ["products", productId, "variants"] });
       queryClient.invalidateQueries({ queryKey: ["products", productId, "stock-history"] });
       queryClient.invalidateQueries({ queryKey: ["products"] });
-      setAdjValue("");
-      setAdjReason("");
+      markAdjDone(EMPTY_ADJUST_FORM);
     },
   });
+
+  // Gates the action buttons. Not the same question as "is this dirty" — the build form is
+  // valid the moment it loads (qty 1), but only dirty once something is typed.
+  const canRecordBuild =
+    (Number(qtyBuilt) > 0 || qtyFailedNum > 0) && (!hasActiveVariants || variantId !== "");
+  const canAdjust =
+    adjValue.trim() !== "" && adjReason.trim() !== "" && (!hasActiveVariants || adjVariantId !== "");
 
   const variantName = (id: number | null) => variants?.find((v) => v.id === id)?.variant_name ?? "—";
 
@@ -172,7 +231,11 @@ export function StockSection({ productId }: { productId: number }) {
             <span className="text-sm">Notes</span>
             <input className="rounded border border-slate-300 px-2 py-1" value={notes} onChange={(e) => setNotes(e.target.value)} />
           </label>
-          <button type="submit" className="rounded bg-slate-900 px-4 py-1.5 text-white">
+          <button
+            type="submit"
+            disabled={!canRecordBuild || buildMutation.isPending}
+            className="rounded bg-slate-900 px-4 py-1.5 text-white disabled:cursor-not-allowed disabled:opacity-50"
+          >
             Record
           </button>
         </form>
@@ -261,7 +324,11 @@ export function StockSection({ productId }: { productId: number }) {
               onChange={(e) => setAdjReason(e.target.value)}
             />
           </label>
-          <button type="submit" className="rounded bg-slate-900 px-4 py-1.5 text-white">
+          <button
+            type="submit"
+            disabled={!canAdjust || adjustMutation.isPending}
+            className="rounded bg-slate-900 px-4 py-1.5 text-white disabled:cursor-not-allowed disabled:opacity-50"
+          >
             Save
           </button>
         </form>

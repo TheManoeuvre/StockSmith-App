@@ -72,7 +72,11 @@ async def get_adapter(
     if platform == ListingPlatform.etsy:
         adapter = EtsyAdapter(client_id, client_secret)
     else:
-        adapter = EbayAdapter(client_id, client_secret, resolved_environment)
+        # None when no keypair has been minted yet — the adapter degrades to unsigned
+        # requests, which is fine for everything except the APIs eBay gates behind
+        # Digital Signatures (see EbayAdapter._signature_headers).
+        signing_key = await platform_credentials.get_ebay_signing_key(session, resolved_environment)
+        adapter = EbayAdapter(client_id, client_secret, resolved_environment, signing_key=signing_key)
 
     _adapters[cache_key] = adapter
     return adapter

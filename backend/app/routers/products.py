@@ -56,6 +56,8 @@ from app.services.kitting import (
     compute_max_sellable_bulk,
     get_expected_kitting_capacity_by_product,
     get_kitting_capacity_by_product,
+    get_kitting_cost_per_unit_by_product,
+    kitting_cost_per_unit_from_bom,
     sync_listing_ceiling_qty,
 )
 from app.services.pricing import snapshot_product_pricing
@@ -92,6 +94,7 @@ def _read_product(
     max_buildable_by_product: dict,
     expected_max_buildable_by_product: dict,
     cost_per_unit_by_product: dict,
+    kitting_cost_per_unit_by_product: dict,
     main_image_asset_id_by_product: dict,
     ready_to_ship_by_bundle: dict,
     bundle_cost_per_unit: dict,
@@ -108,6 +111,9 @@ def _read_product(
         max_buildable = None
         expected_max_buildable = None
         cost_per_unit = bundle_cost_per_unit.get(product.id)
+        # A bundle has no kitting BOM of its own — packaging for one is whatever its
+        # components' own BOMs say, which isn't a single per-unit figure.
+        kitting_cost_per_unit = None
         ready_to_ship = ready_to_ship_by_bundle.get(product.id)
         max_sellable = None
         max_sellable_reason = None
@@ -126,6 +132,7 @@ def _read_product(
         max_buildable = max_buildable_by_product.get(product.id)
         expected_max_buildable = expected_max_buildable_by_product.get(product.id)
         cost_per_unit = cost_per_unit_by_product.get(product.id)
+        kitting_cost_per_unit = kitting_cost_per_unit_by_product.get(product.id)
         ready_to_ship = None
         free_stock = current_stock - allocated_qty
         kitting_capacity = kitting_capacity_by_product.get(product.id)
@@ -164,6 +171,7 @@ def _read_product(
             "theoretical_max_sellable": theoretical_max_sellable,
             "theoretical_max_sellable_reason": theoretical_max_sellable_reason,
             "cost_per_unit": cost_per_unit,
+            "kitting_cost_per_unit": kitting_cost_per_unit,
             "main_image_asset_id": main_image_asset_id_by_product.get(product.id),
             "ready_to_ship": ready_to_ship,
             "effective_platform_fee_percent": effective_platform_fee_percent,
@@ -193,6 +201,7 @@ async def list_products(
     max_buildable_by_product = await get_max_buildable_by_product(session)
     expected_max_buildable_by_product = await get_expected_max_buildable_by_product(session)
     cost_per_unit_by_product = await get_cost_per_unit_by_product(session)
+    kitting_cost_per_unit_by_product = await get_kitting_cost_per_unit_by_product(session)
     main_image_asset_id_by_product = await _get_main_image_asset_id_by_product(session)
     ready_to_ship_by_bundle = await get_ready_to_ship_by_bundle(session)
     bundle_cost_per_unit = await get_bundle_cost_per_unit(session, cost_per_unit_by_product)
@@ -207,6 +216,7 @@ async def list_products(
             max_buildable_by_product,
             expected_max_buildable_by_product,
             cost_per_unit_by_product,
+            kitting_cost_per_unit_by_product,
             main_image_asset_id_by_product,
             ready_to_ship_by_bundle,
             bundle_cost_per_unit,
@@ -260,6 +270,7 @@ async def get_product(product_id: int, session: AsyncSession = Depends(get_db)) 
     max_buildable_by_product = await get_max_buildable_by_product(session)
     expected_max_buildable_by_product = await get_expected_max_buildable_by_product(session)
     cost_per_unit_by_product = await get_cost_per_unit_by_product(session)
+    kitting_cost_per_unit_by_product = await get_kitting_cost_per_unit_by_product(session)
     main_image_asset_id_by_product = await _get_main_image_asset_id_by_product(session)
     ready_to_ship_by_bundle = await get_ready_to_ship_by_bundle(session)
     bundle_cost_per_unit = await get_bundle_cost_per_unit(session, cost_per_unit_by_product)
@@ -273,6 +284,7 @@ async def get_product(product_id: int, session: AsyncSession = Depends(get_db)) 
         max_buildable_by_product,
         expected_max_buildable_by_product,
         cost_per_unit_by_product,
+        kitting_cost_per_unit_by_product,
         main_image_asset_id_by_product,
         ready_to_ship_by_bundle,
         bundle_cost_per_unit,
@@ -523,6 +535,7 @@ async def _variants_to_reads_bulk(
                     "theoretical_max_sellable": theoretical_max_sellable,
                     "theoretical_max_sellable_reason": theoretical_max_sellable_reason,
                     "cost_per_unit": cost_per_unit,
+                    "kitting_cost_per_unit": kitting_cost_per_unit_from_bom(effective_kitting_bom),
                     "effective_bom": effective_bom,
                     "effective_kitting_bom": effective_kitting_bom,
                     "full_sku": full_sku,
@@ -680,6 +693,7 @@ async def _to_variant_read_with_buildability(session: AsyncSession, variant: Pro
             "theoretical_max_sellable": theoretical_max_sellable,
             "theoretical_max_sellable_reason": theoretical_max_sellable_reason,
             "cost_per_unit": cost_per_unit,
+            "kitting_cost_per_unit": kitting_cost_per_unit_from_bom(effective_kitting_bom),
             "effective_bom": effective_bom,
             "effective_kitting_bom": effective_kitting_bom,
             "full_sku": full_sku,

@@ -11,7 +11,13 @@ from sqlalchemy import select
 from app.models.material import Material, MaterialCategory, MaterialUnit
 from app.models.order import Order, OrderLine
 from app.models.product import Product, ProductMaterial
-from app.routers.orders import _cogs_pending, _compute_net_profit, _get_order_with_lines, create_order
+from app.routers.orders import (
+    _cogs_pending,
+    _compute_net_profit,
+    _get_order_with_lines,
+    _materials_cogs,
+    create_order,
+)
 from app.schemas.order import OrderCreate, OrderLineInput
 from app.services import allocation
 
@@ -45,7 +51,7 @@ async def test_line_has_no_snapshot_until_first_allocation(session):
     line = order_read.lines[0]
     assert line.allocated_qty == 0
     assert line.cost_per_unit_snapshot is None
-    assert line.kitting_cost_per_unit_snapshot is None
+    assert order_read.materials_cogs is None
     assert order_read.cogs_pending is True
 
 
@@ -79,8 +85,10 @@ async def test_net_profit_uses_shipped_qty_not_ordered_qty(session):
     await session.commit()
 
     order = await _get_order_with_lines(session, order.id)
-    net_profit = _compute_net_profit(order)
+    materials_cogs = _materials_cogs(order)
+    net_profit = _compute_net_profit(order, materials_cogs, None)
     # revenue 20 - cogs (1 unit * 10) = 10, not 20 - (2*10) = 0
+    assert materials_cogs == Decimal("10")
     assert net_profit == Decimal("10")
 
 

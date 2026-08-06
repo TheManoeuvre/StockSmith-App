@@ -47,6 +47,22 @@ class PlatformStatus(BaseModel):
     needs_reconnect_reason: str | None = None
 
 
+class EbaySigningKeyStatus(BaseModel):
+    """Whether an eBay signing keypair is stored for this environment.
+
+    Never carries the private key — eBay returns it once and it is write-only from the
+    UI's point of view, same rule as PlatformCredentialRead.client_secret_set. Without a
+    key, eBay 403s every Sell Finances call, which shows up in the app as eBay orders
+    permanently missing their fee breakdown.
+    """
+
+    environment: PlatformEnvironment
+    configured: bool
+    signing_key_id: str | None
+    created_at: datetime | None
+    expires_at: datetime | None
+
+
 class SyncStartDateUpdate(BaseModel):
     sync_start_date: date
 

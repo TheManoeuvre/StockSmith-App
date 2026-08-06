@@ -275,6 +275,18 @@ export interface PlatformCredentialWrite {
   ru_name?: string;
 }
 
+// eBay requires requests to its in-scope APIs to be digitally signed when the seller is
+// EU/UK-domiciled. Without a keypair, every Sell Finances call 403s and eBay orders
+// import with no platform-fee figure at all. Never carries the private key — eBay
+// returns that exactly once, to the backend, and it stays there encrypted.
+export interface EbaySigningKeyStatus {
+  environment: PlatformEnvironment;
+  configured: boolean;
+  signing_key_id: string | null;
+  created_at: string | null;
+  expires_at: string | null;
+}
+
 export const platformsApi = {
   status: (platform: ListingPlatform) => api.get<PlatformStatus>(`/platforms/${platform}/status`),
   connect: (platform: ListingPlatform, environment: PlatformEnvironment = "production") =>
@@ -309,6 +321,10 @@ export const platformsApi = {
     payload: PlatformCredentialWrite,
     environment: PlatformEnvironment = "production"
   ) => api.patch<PlatformCredential>(`/platforms/${platform}/credentials?environment=${environment}`, payload),
+  getEbaySigningKey: (environment: PlatformEnvironment = "production") =>
+    api.get<EbaySigningKeyStatus>(`/platforms/ebay/signing-key?environment=${environment}`),
+  createEbaySigningKey: (environment: PlatformEnvironment = "production") =>
+    api.post<EbaySigningKeyStatus>(`/platforms/ebay/signing-key?environment=${environment}`),
   fetchUnmigratedListings: () => api.get<UnmigratedListingsReport>(`/platforms/ebay/unmigrated-listings`),
   fetchProductUnmigratedListings: (productId: number) =>
     api.get<UnmigratedListingsReport>(`/platforms/ebay/products/${productId}/unmigrated-listings`),

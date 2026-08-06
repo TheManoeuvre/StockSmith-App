@@ -1,13 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import { materialsApi } from "../../api/materials";
 import { productsApi } from "../../api/products";
 import type { KittingBomLine } from "../../api/types";
-import { MaterialSelect } from "../materials/MaterialSelect";
 import { ErrorBanner } from "../common/ErrorBanner";
-import { SaveIndicator } from "../common/SaveIndicator";
+import { SaveButton } from "../common/SaveButton";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
-import { normalizeQtyForUnit, wholeNumberStepFor } from "../../lib/format";
+import { useEditableCopy } from "../../hooks/useEditableCopy";
+import { BomLineTable } from "./BomLineTable";
+
+const toLines = (rows: { material_id: number; qty_required: string }[]): KittingBomLine[] =>
+  rows.map((l) => ({ material_id: l.material_id, qty_required: l.qty_required }));
 
 export function KittingBomEditor({ productId }: { productId: number }) {
   const queryClient = useQueryClient();
@@ -17,16 +20,21 @@ export function KittingBomEditor({ productId }: { productId: number }) {
   });
   const { data: materials } = useQuery({ queryKey: ["materials"], queryFn: materialsApi.list });
 
-  const [lines, setLines] = useState<KittingBomLine[]>([]);
   const [filterText, setFilterText] = useState("");
 
-  useEffect(() => {
-    if (bom) setLines(bom.map((l) => ({ material_id: l.material_id, qty_required: l.qty_required })));
-  }, [bom]);
+  const seed = useMemo(() => (bom ? toLines(bom) : undefined), [bom]);
+  const { value: lines, setValue: setLines, isDirty, markSaved } = useEditableCopy<KittingBomLine[]>({
+    key: "kitting-bom",
+    label: "Kitting BOM",
+    initial: [],
+    seed,
+    seedKey: productId,
+  });
 
   const saveMutation = useMutation({
     mutationFn: () => productsApi.replaceKittingBom(productId, lines),
-    onSuccess: () => {
+    onSuccess: (rows) => {
+      markSaved(toLines(rows));
       queryClient.invalidateQueries({ queryKey: ["products", productId] });
       queryClient.invalidateQueries({ queryKey: ["products", productId, "kitting-bom"] });
       queryClient.invalidateQueries({ queryKey: ["products", productId, "variants"] });
@@ -48,24 +56,9 @@ export function KittingBomEditor({ productId }: { productId: number }) {
     setLines((prev) => [...prev, { material_id: firstUnused.id, qty_required: "0" }]);
   };
 
-  const maxTheoretical = (line: KittingBomLine): number | null => {
-    const material = materials?.find((m) => m.id === line.material_id);
-    const qtyRequired = Number(line.qty_required);
-    if (!material || !qtyRequired) return null;
-    const free = Number(material.current_qty) - Number(material.allocated_qty);
-    return Math.floor(free / qtyRequired);
-  };
-
-  const bottleneckIndex = (() => {
-    const values = lines.map(maxTheoretical);
-    const real = values.filter((v): v is number => v !== null);
-    if (real.length < 2) return -1;
-    const min = Math.min(...real);
-    return values.indexOf(min);
-  })();
-
   return (
     <div className="flex flex-col gap-2">
+      <h3 className="text-md font-semibold">Kitting BOM</h3>
       <p className="text-sm text-slate-500">
         Packaging (boxes, labels, packing materials) required to pack and ship one unit — reserved when an order
         allocates, consumed only when it ships. Never consumed by recording a build.
@@ -78,63 +71,26 @@ export function KittingBomEditor({ productId }: { productId: number }) {
           onChange={(e) => setFilterText(e.target.value)}
         />
       )}
-      <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">
-        <thead>
-          <tr className="border-b border-slate-200">
-            <th className="p-2">Material</th>
-            <th className="p-2">Qty required</th>
-            <th className="p-2">Max theoretical</th>
-            <th className="p-2" />
-          </tr>
-        </thead>
-        <tbody>
-          {lines.map((line, i) => (
-            <tr key={i} className="border-b border-slate-100">
-              <td className="p-2">
-                <MaterialSelect
-                  materials={materials ?? []}
-                  value={line.material_id}
-                  onChange={(material_id) => updateLine(i, { material_id })}
-                  filterText={filterText}
-                />
-              </td>
-              <td className="p-2">
-                <input
-                  className="w-24 rounded border border-slate-300 px-2 py-1"
-                  step={wholeNumberStepFor(materials?.find((m) => m.id === line.material_id)?.unit)}
-                  value={line.qty_required}
-                  onChange={(e) => updateLine(i, { qty_required: e.target.value })}
-                  onBlur={(e) =>
-                    updateLine(i, {
-                      qty_required: normalizeQtyForUnit(
-                        e.target.value,
-                        materials?.find((m) => m.id === line.material_id)?.unit
-                      ),
-                    })
-                  }
-                />
-              </td>
-              <td className={`p-2 ${i === bottleneckIndex ? "font-semibold text-amber-700" : "text-slate-500"}`}>
-                {maxTheoretical(line) ?? "—"}
-                {i === bottleneckIndex && <span className="ml-1 text-xs">(bottleneck)</span>}
-              </td>
-              <td className="p-2">
-                <button onClick={() => removeLine(i)} className="text-red-600">
-                  Remove
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <BomLineTable
+        lines={lines}
+        materials={materials}
+        filterText={filterText}
+        onChangeLine={updateLine}
+        onRemoveLine={removeLine}
+        isDirty={isDirty}
+      />
       <div className="flex gap-2">
         <button onClick={addLine} className="rounded border border-slate-300 px-3 py-1.5 text-sm">
           + Add material
         </button>
-        <button onClick={() => saveMutation.mutate()} className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white">
+        <SaveButton
+          isDirty={isDirty}
+          isPending={saveMutation.isPending}
+          status={saveStatus}
+          onClick={() => saveMutation.mutate()}
+        >
           Save kitting BOM
-        </button>
-        <SaveIndicator status={saveStatus} />
+        </SaveButton>
       </div>
       <ErrorBanner error={saveMutation.error} />
     </div>

@@ -1,29 +1,40 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import { materialsApi } from "../../api/materials";
 import { productsApi } from "../../api/products";
 import type { BomLine } from "../../api/types";
-import { MaterialSelect } from "../materials/MaterialSelect";
 import { ErrorBanner } from "../common/ErrorBanner";
-import { SaveIndicator } from "../common/SaveIndicator";
+import { SaveButton } from "../common/SaveButton";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
-import { normalizeQtyForUnit, wholeNumberStepFor } from "../../lib/format";
+import { useEditableCopy } from "../../hooks/useEditableCopy";
+import { BomLineTable } from "./BomLineTable";
+
+const toLines = (rows: { material_id: number; qty_required: string }[]): BomLine[] =>
+  rows.map((l) => ({ material_id: l.material_id, qty_required: l.qty_required }));
 
 export function BomEditor({ productId }: { productId: number }) {
   const queryClient = useQueryClient();
   const { data: bom } = useQuery({ queryKey: ["products", productId, "bom"], queryFn: () => productsApi.getBom(productId) });
   const { data: materials } = useQuery({ queryKey: ["materials"], queryFn: materialsApi.list });
 
-  const [lines, setLines] = useState<BomLine[]>([]);
   const [filterText, setFilterText] = useState("");
 
-  useEffect(() => {
-    if (bom) setLines(bom.map((l) => ({ material_id: l.material_id, qty_required: l.qty_required })));
-  }, [bom]);
+  const seed = useMemo(() => (bom ? toLines(bom) : undefined), [bom]);
+  const { value: lines, setValue: setLines, isDirty, markSaved } = useEditableCopy<BomLine[]>({
+    key: "bom",
+    label: "Build BOM",
+    initial: [],
+    seed,
+    seedKey: productId,
+  });
 
   const saveMutation = useMutation({
     mutationFn: () => productsApi.replaceBom(productId, lines),
-    onSuccess: () => {
+    onSuccess: (rows) => {
+      // Baseline from what the server stored, not what we sent — the two differ once a qty
+      // is normalised ("1" -> "1.000"), which would otherwise leave the editor looking dirty
+      // the instant it re-renders.
+      markSaved(toLines(rows));
       queryClient.invalidateQueries({ queryKey: ["products", productId] });
       queryClient.invalidateQueries({ queryKey: ["products", productId, "bom"] });
       queryClient.invalidateQueries({ queryKey: ["products"] });
@@ -44,23 +55,12 @@ export function BomEditor({ productId }: { productId: number }) {
     setLines((prev) => [...prev, { material_id: firstUnused.id, qty_required: "0" }]);
   };
 
-  const maxTheoretical = (line: BomLine): number | null => {
-    const material = materials?.find((m) => m.id === line.material_id);
-    const qtyRequired = Number(line.qty_required);
-    if (!material || !qtyRequired) return null;
-    return Math.floor(Number(material.current_qty) / qtyRequired);
-  };
-
-  const bottleneckIndex = (() => {
-    const values = lines.map(maxTheoretical);
-    const real = values.filter((v): v is number => v !== null);
-    if (real.length < 2) return -1;
-    const min = Math.min(...real);
-    return values.indexOf(min);
-  })();
-
   return (
     <div className="flex flex-col gap-2">
+      <h3 className="text-md font-semibold">Build BOM</h3>
+      <p className="text-sm text-slate-500">
+        Materials consumed to make one unit — drawn down when you record a build.
+      </p>
       {materials && materials.length > 8 && (
         <input
           className="w-64 rounded border border-slate-300 px-2 py-1 text-sm"
@@ -69,63 +69,30 @@ export function BomEditor({ productId }: { productId: number }) {
           onChange={(e) => setFilterText(e.target.value)}
         />
       )}
-      <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">
-        <thead>
-          <tr className="border-b border-slate-200">
-            <th className="p-2">Material</th>
-            <th className="p-2">Qty required</th>
-            <th className="p-2">Max theoretical</th>
-            <th className="p-2" />
-          </tr>
-        </thead>
-        <tbody>
-          {lines.map((line, i) => (
-            <tr key={i} className="border-b border-slate-100">
-              <td className="p-2">
-                <MaterialSelect
-                  materials={materials ?? []}
-                  value={line.material_id}
-                  onChange={(material_id) => updateLine(i, { material_id })}
-                  filterText={filterText}
-                />
-              </td>
-              <td className="p-2">
-                <input
-                  className="w-24 rounded border border-slate-300 px-2 py-1"
-                  step={wholeNumberStepFor(materials?.find((m) => m.id === line.material_id)?.unit)}
-                  value={line.qty_required}
-                  onChange={(e) => updateLine(i, { qty_required: e.target.value })}
-                  onBlur={(e) =>
-                    updateLine(i, {
-                      qty_required: normalizeQtyForUnit(
-                        e.target.value,
-                        materials?.find((m) => m.id === line.material_id)?.unit
-                      ),
-                    })
-                  }
-                />
-              </td>
-              <td className={`p-2 ${i === bottleneckIndex ? "font-semibold text-amber-700" : "text-slate-500"}`}>
-                {maxTheoretical(line) ?? "—"}
-                {i === bottleneckIndex && <span className="ml-1 text-xs">(bottleneck)</span>}
-              </td>
-              <td className="p-2">
-                <button onClick={() => removeLine(i)} className="text-red-600">
-                  Remove
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <BomLineTable
+        lines={lines}
+        materials={materials}
+        filterText={filterText}
+        onChangeLine={updateLine}
+        onRemoveLine={removeLine}
+        isDirty={isDirty}
+      />
+      <p className="text-xs text-slate-500">
+        Max from free stock counts <em>unallocated</em> material only. The Build figure in the header above counts
+        gross on-hand, so this can read lower.
+      </p>
       <div className="flex gap-2">
         <button onClick={addLine} className="rounded border border-slate-300 px-3 py-1.5 text-sm">
           + Add material
         </button>
-        <button onClick={() => saveMutation.mutate()} className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white">
-          Save BOM
-        </button>
-        <SaveIndicator status={saveStatus} />
+        <SaveButton
+          isDirty={isDirty}
+          isPending={saveMutation.isPending}
+          status={saveStatus}
+          onClick={() => saveMutation.mutate()}
+        >
+          Save build BOM
+        </SaveButton>
       </div>
       <ErrorBanner error={saveMutation.error} />
     </div>

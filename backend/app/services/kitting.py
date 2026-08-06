@@ -1,4 +1,4 @@
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -34,6 +34,15 @@ _ON_ORDER_BY_MATERIAL_SUBQUERY = """
 _KITTING_CAPACITY_BY_PRODUCT_SQL = text(
     """
     SELECT pkm.product_id, MIN(FLOOR((m.current_qty - m.allocated_qty) / pkm.qty_required)) AS kitting_capacity
+    FROM product_kitting_materials pkm
+    JOIN materials m ON m.id = pkm.material_id
+    GROUP BY pkm.product_id
+    """
+)
+
+_KITTING_COST_PER_UNIT_BY_PRODUCT_SQL = text(
+    """
+    SELECT pkm.product_id, SUM(pkm.qty_required * m.avg_unit_cost) AS kitting_cost_per_unit
     FROM product_kitting_materials pkm
     JOIN materials m ON m.id = pkm.material_id
     GROUP BY pkm.product_id
@@ -255,7 +264,8 @@ async def compute_variant_kitting_capacity(
     rows = await session.execute(
         text(
             f"""
-            SELECT m.id, m.current_qty, m.allocated_qty, COALESCE(oo.on_order_qty, 0) AS on_order_qty
+            SELECT m.id, m.current_qty, m.allocated_qty, m.avg_unit_cost,
+                   COALESCE(oo.on_order_qty, 0) AS on_order_qty
             FROM materials m
             LEFT JOIN ({_ON_ORDER_BY_MATERIAL_SUBQUERY}) oo ON oo.material_id = m.id
             WHERE m.id IN :ids
@@ -271,6 +281,7 @@ async def compute_variant_kitting_capacity(
         expected_free = free + Decimal(m.on_order_qty)
         line.line_max_buildable = int(free // line.qty_required)
         line.line_expected_max_buildable = int(expected_free // line.qty_required)
+        line.unit_cost = Decimal(m.avg_unit_cost)
 
     kitting_capacity = min(line.line_max_buildable for line in bom)
     expected_kitting_capacity = min(line.line_expected_max_buildable for line in bom)
@@ -298,6 +309,28 @@ async def compute_variant_kitting_cost_per_unit(
     )
     cost_by_id = {row.id: Decimal(row.avg_unit_cost) for row in rows}
     return sum((cost_by_id[line.material_id] * line.qty_required for line in bom), start=Decimal(0))
+
+
+def kitting_cost_per_unit_from_bom(bom: list[VariantKittingBomLine]) -> Decimal | None:
+    """SUM(qty_required * unit_cost) over an already-resolved, already-costed kitting BOM —
+    the zero-extra-query form of compute_variant_kitting_cost_per_unit, for callers that
+    already hold a BOM back from compute_variant_kitting_capacity or its bulk sibling (the
+    only two paths that populate unit_cost).
+
+    None when there's no kitting BOM, matching compute_variant_kitting_cost_per_unit, so
+    "this product has no packaging" stays distinguishable from "its packaging is free"."""
+    if not bom:
+        return None
+    return sum((line.qty_required * (line.unit_cost or Decimal(0)) for line in bom), start=Decimal(0))
+
+
+async def get_kitting_cost_per_unit_by_product(session: AsyncSession) -> dict[int, Decimal]:
+    """Bulk base-product kitting cost per unit, one query for the whole catalog — the
+    packaging analog of buildability.get_cost_per_unit_by_product, and the same shape as
+    get_kitting_capacity_by_product beside it. Base BOM only: variant overrides are resolved
+    per variant by the capacity paths, which carry their own unit costs."""
+    rows = await session.execute(_KITTING_COST_PER_UNIT_BY_PRODUCT_SQL)
+    return {row.product_id: Decimal(row.kitting_cost_per_unit) for row in rows if row.kitting_cost_per_unit is not None}
 
 
 def _clamp_value_to_ceiling(
@@ -409,7 +442,8 @@ async def compute_variants_kitting_capacity_bulk(
         rows = await session.execute(
             text(
                 f"""
-                SELECT m.id, m.current_qty, m.allocated_qty, COALESCE(oo.on_order_qty, 0) AS on_order_qty
+                SELECT m.id, m.current_qty, m.allocated_qty, m.avg_unit_cost,
+                       COALESCE(oo.on_order_qty, 0) AS on_order_qty
                 FROM materials m
                 LEFT JOIN ({_ON_ORDER_BY_MATERIAL_SUBQUERY}) oo ON oo.material_id = m.id
                 WHERE m.id IN :ids
@@ -431,6 +465,7 @@ async def compute_variants_kitting_capacity_bulk(
             expected_free = free + Decimal(m.on_order_qty)
             line.line_max_buildable = int(free // line.qty_required)
             line.line_expected_max_buildable = int(expected_free // line.qty_required)
+            line.unit_cost = Decimal(m.avg_unit_cost)
         kitting_capacity = min(line.line_max_buildable for line in bom)
         expected_kitting_capacity = min(line.line_expected_max_buildable for line in bom)
         results[variant_id] = (kitting_capacity, expected_kitting_capacity, bom)
@@ -586,6 +621,10 @@ async def reconcile_order_kitting(session: AsyncSession, order: Order) -> None:
     — consume_delta is only ever nonzero right after a ship, since nothing else changes
     shipped_qty, so the raise below can only trigger from the ship path.
 
+    Also freezes each material's unit cost onto the ledger the first time it's consumed,
+    which is what makes this ledger the order's complete kitting-COGS record — see
+    get_kitting_cogs_by_order.
+
     Reservation shortfalls (at allocate/cancel/deallocate time) never block or raise — a
     grant is simply partial, same as _allocate_line's product stock grant; see
     get_orders_awaiting_packaging for how that shortfall is surfaced instead. Consumption
@@ -613,6 +652,14 @@ async def reconcile_order_kitting(session: AsyncSession, order: Order) -> None:
         ledger = ledger_rows.get(material_id)
         current_reserved = Decimal(ledger.reserved_qty) if ledger else Decimal(0)
         current_consumed = Decimal(ledger.consumed_qty) if ledger else Decimal(0)
+        # Seeded from the existing row and only ever assigned when still None (below), so a
+        # second partial ship never re-freezes an already-frozen cost at a newer price, and
+        # a reservation-only pass leaves it NULL.
+        consumed_unit_cost = (
+            Decimal(ledger.unit_cost_snapshot)
+            if ledger is not None and ledger.unit_cost_snapshot is not None
+            else None
+        )
         target_reserved = reserved_target.get(material_id, Decimal(0))
         target_consumed = consumed_target.get(material_id, Decimal(0))
 
@@ -647,6 +694,13 @@ async def reconcile_order_kitting(session: AsyncSession, order: Order) -> None:
                 )
             material.allocated_qty = max(Decimal(0), Decimal(material.allocated_qty) - release)
             current_reserved -= release
+
+            # Freeze what this packaging actually cost, at the moment it's first consumed —
+            # the kitting analog of Order.shipping_cost_snapshot. Read before the adjustment
+            # purely for clarity: costing.recompute_material derives avg_unit_cost from
+            # purchases alone, so a negative adjustment can't move it either way.
+            if consumed_unit_cost is None:
+                consumed_unit_cost = Decimal(material.avg_unit_cost)
 
             session.add(
                 MaterialAdjustment(
@@ -689,11 +743,63 @@ async def reconcile_order_kitting(session: AsyncSession, order: Order) -> None:
                     material_id=material_id,
                     reserved_qty=current_reserved,
                     consumed_qty=current_consumed,
+                    unit_cost_snapshot=consumed_unit_cost,
                 )
             )
         else:
             ledger.reserved_qty = current_reserved
             ledger.consumed_qty = current_consumed
+            ledger.unit_cost_snapshot = consumed_unit_cost
+
+
+_KITTING_COGS_ROWS_SQL = text(
+    """
+    SELECT oka.order_id,
+           oka.consumed_qty,
+           COALESCE(oka.unit_cost_snapshot, m.avg_unit_cost) AS unit_cost
+    FROM order_kitting_allocations oka
+    JOIN materials m ON m.id = oka.material_id
+    WHERE oka.order_id IN :ids AND oka.consumed_qty > 0
+    """
+).bindparams(bindparam("ids", expanding=True))
+
+
+async def get_kitting_cogs_by_order(session: AsyncSession, order_ids: Sequence[int]) -> dict[int, Decimal]:
+    """Realised (shipped-basis) packaging cost per order, in one query no matter how many
+    orders are asked for — list_orders pages up to 200 at a time, so a per-order recompute
+    of _compute_kitting_requirement is not an option on that path.
+
+    Reads the OrderKittingAllocation ledger rather than recomputing
+    _compute_kitting_requirement(..., lambda l: l.shipped_qty): the ledger IS that target,
+    materialised by reconcile_order_kitting at ship time, and it's the more truthful of the
+    two. Consumption is monotonic (reconcile only ever applies a positive consume_delta), so
+    lowering an override after the order shipped leaves the recomputed target below what
+    physically left the building while consumed_qty stays right.
+
+    unit_cost_snapshot is the cost frozen at first consumption; it's NULL on rows written
+    before that column existed, which fall back to the material's live avg_unit_cost.
+
+    An order with no consumption is absent from the result rather than present with a zero —
+    callers decide whether that reads as "nothing shipped yet" or "no packaging"; both
+    contribute nothing to COGS.
+
+    The rows are summed here rather than by SQL's SUM(). On SQLite these columns come back
+    as floats, so SUM() accumulates binary error that no amount of post-hoc conversion can
+    undo: order 20 on real data summed a 0.552442 box and a 0.01099 label to
+    0.5634319999999999, and that figure reached net_profit and disagreed with the same
+    total computed by get_order_kitting_summary, which has always used Decimal. Converting
+    each factor separately keeps both paths exact and identical by construction. Still one
+    query — it returns a handful of rows per order instead of one, which is nothing next to
+    the round trip."""
+    if not order_ids:
+        return {}
+    rows = await session.execute(_KITTING_COGS_ROWS_SQL, {"ids": list(order_ids)})
+    totals: dict[int, Decimal] = {}
+    for row in rows:
+        # str() first: Decimal(float) would expand the full binary representation.
+        cost = Decimal(str(row.consumed_qty)) * Decimal(str(row.unit_cost))
+        totals[row.order_id] = totals.get(row.order_id, Decimal(0)) + cost
+    return totals
 
 
 async def get_order_kitting_summary(session: AsyncSession, order_id: int) -> OrderKittingSummary:
@@ -702,7 +808,18 @@ async def get_order_kitting_summary(session: AsyncSession, order_id: int) -> Ord
     just what's currently allocated/shipped — this is a forward-looking "what will this
     order need" view, independent of allocation state), the effective requirement after
     overrides, current saved overrides, and the ledger's actual reserved/consumed qty for
-    transparency."""
+    transparency.
+
+    Costs come in both bases, deliberately. effective_cost is forward-looking (ordered
+    basis) so the editor's Cost column sits consistently beside auto_qty/effective_qty and
+    moves the moment an override is saved — that's the number the user is steering.
+    consumed_cost is realised (shipped basis) and consumed_cost_total is exactly what
+    OrderRead.kitting_cogs reports, exposed here so the UI can show both without a second
+    round-trip. They converge once the order has fully shipped.
+
+    unit_cost is the cost frozen at first consumption where there is one (unit_cost_is_frozen
+    says which), else the material's live avg_unit_cost — matching how
+    get_kitting_cogs_by_order values the same rows."""
     lines = list((await session.execute(select(OrderLine).where(OrderLine.order_id == order_id))).scalars())
     auto = await _compute_auto_kitting_totals(session, lines, lambda l: l.ordered_qty)
 
@@ -727,17 +844,33 @@ async def get_order_kitting_summary(session: AsyncSession, order_id: int) -> Ord
         ).scalars()
     } if material_ids else {}
 
-    result_lines = [
-        OrderKittingRequirementLine(
-            material_id=material_id,
-            material_name=materials[material_id].name if material_id in materials else "Unknown material",
-            auto_qty=auto.get(material_id, Decimal(0)),
-            effective_qty=effective.get(material_id, Decimal(0)),
-            reserved_qty=Decimal(ledger_rows[material_id].reserved_qty) if material_id in ledger_rows else Decimal(0),
-            consumed_qty=Decimal(ledger_rows[material_id].consumed_qty) if material_id in ledger_rows else Decimal(0),
+    result_lines = []
+    for material_id in material_ids:
+        ledger = ledger_rows.get(material_id)
+        material = materials.get(material_id)
+        frozen = ledger.unit_cost_snapshot if ledger is not None else None
+        if frozen is not None:
+            unit_cost = Decimal(frozen)
+        elif material is not None:
+            unit_cost = Decimal(material.avg_unit_cost)
+        else:
+            unit_cost = Decimal(0)
+        effective_qty = effective.get(material_id, Decimal(0))
+        consumed_qty = Decimal(ledger.consumed_qty) if ledger is not None else Decimal(0)
+        result_lines.append(
+            OrderKittingRequirementLine(
+                material_id=material_id,
+                material_name=material.name if material is not None else "Unknown material",
+                auto_qty=auto.get(material_id, Decimal(0)),
+                effective_qty=effective_qty,
+                reserved_qty=Decimal(ledger.reserved_qty) if ledger is not None else Decimal(0),
+                consumed_qty=consumed_qty,
+                unit_cost=unit_cost,
+                unit_cost_is_frozen=frozen is not None,
+                effective_cost=effective_qty * unit_cost,
+                consumed_cost=consumed_qty * unit_cost,
+            )
         )
-        for material_id in material_ids
-    ]
     result_lines.sort(key=lambda l: l.material_name)
 
     override_lines = [
@@ -747,7 +880,12 @@ async def get_order_kitting_summary(session: AsyncSession, order_id: int) -> Ord
         for o in overrides
     ]
 
-    return OrderKittingSummary(overrides=override_lines, lines=result_lines)
+    return OrderKittingSummary(
+        overrides=override_lines,
+        lines=result_lines,
+        effective_cost_total=sum((l.effective_cost for l in result_lines), start=Decimal(0)),
+        consumed_cost_total=sum((l.consumed_cost for l in result_lines), start=Decimal(0)),
+    )
 
 
 async def sync_listing_ceiling_qty(

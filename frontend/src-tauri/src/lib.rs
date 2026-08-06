@@ -208,9 +208,19 @@ pub fn run() {
             });
             Ok(())
         })
-        .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { .. } = event {
-                let state: State<SidecarState> = window.state();
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        // Reap the sidecar on Exit, NOT on CloseRequested.
+        //
+        // CloseRequested fires when the user *asks* to close, which the frontend can now
+        // veto: the window has unsaved work, so it calls preventDefault() and shows a
+        // confirmation (see useTauriCloseGuard). Killing the backend there meant a user who
+        // chose "Keep editing" was left in a live window with a dead backend and no way to
+        // save the very work they'd just protected. Exit only fires once the app is really
+        // going away.
+        .run(|app_handle, event| {
+            if let tauri::RunEvent::Exit = event {
+                let state: State<SidecarState> = app_handle.state();
                 let mut guard = state.0.lock().unwrap();
                 if let Some(pid) = guard.take() {
                     // /T kills the whole process tree — see the SidecarState doc comment
@@ -220,9 +230,7 @@ pub fn run() {
                         .output();
                 }
             }
-        })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        });
 }
 
 #[cfg(test)]

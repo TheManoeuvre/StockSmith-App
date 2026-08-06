@@ -52,6 +52,24 @@ class PlatformAppCredential(Base):
     # EbayAdapter.build_authorize_url's own docstring for why eBay's redirect_uri isn't
     # one.
     ru_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    # eBay only: the Ed25519 keypair minted by eBay's Key Management API, used to sign
+    # requests to the APIs eBay gates behind Digital Signatures for EU/UK sellers (see
+    # services/platforms/ebay_signing.py). It belongs here rather than on
+    # PlatformConnection because a signing key is issued against the developer *keyset* —
+    # the same Client ID this row already holds — not against one seller's OAuth grant,
+    # and Sandbox and Production keysets get entirely separate keys.
+    #
+    # signing_key_private is the half eBay returns exactly once and stores nowhere: if
+    # this column is lost the only recovery is minting a new keypair. Encrypted at rest
+    # with the same Fernet key as client_secret.
+    signing_key_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    signing_key_jwe: Mapped[str | None] = mapped_column(String, nullable=True)
+    signing_key_private: Mapped[str | None] = mapped_column(EncryptedString, nullable=True)
+    # eBay's own stated expiry for the keypair. Not enforced anywhere — it's recorded so
+    # a signature that starts failing has a checkable explanation rather than looking like
+    # a code fault.
+    signing_key_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    signing_key_created_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

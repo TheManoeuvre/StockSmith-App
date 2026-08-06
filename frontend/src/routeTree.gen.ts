@@ -26,6 +26,7 @@ import { Route as OrdersNewRouteImport } from './routes/orders/new'
 import { Route as OrdersOrderIdRouteImport } from './routes/orders/$orderId'
 import { Route as MaterialsMaterialIdRouteImport } from './routes/materials/$materialId'
 import { Route as MaterialLabelMaterialIdRouteImport } from './routes/material-label.$materialId'
+import { Route as DevBomPreviewRouteImport } from './routes/dev.bom-preview'
 
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
@@ -112,10 +113,16 @@ const MaterialLabelMaterialIdRoute = MaterialLabelMaterialIdRouteImport.update({
   path: '/material-label/$materialId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DevBomPreviewRoute = DevBomPreviewRouteImport.update({
+  id: '/dev/bom-preview',
+  path: '/dev/bom-preview',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/settings': typeof SettingsRoute
+  '/dev/bom-preview': typeof DevBomPreviewRoute
   '/material-label/$materialId': typeof MaterialLabelMaterialIdRoute
   '/materials/$materialId': typeof MaterialsMaterialIdRoute
   '/orders/$orderId': typeof OrdersOrderIdRoute
@@ -135,6 +142,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/settings': typeof SettingsRoute
+  '/dev/bom-preview': typeof DevBomPreviewRoute
   '/material-label/$materialId': typeof MaterialLabelMaterialIdRoute
   '/materials/$materialId': typeof MaterialsMaterialIdRoute
   '/orders/$orderId': typeof OrdersOrderIdRoute
@@ -155,6 +163,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/settings': typeof SettingsRoute
+  '/dev/bom-preview': typeof DevBomPreviewRoute
   '/material-label/$materialId': typeof MaterialLabelMaterialIdRoute
   '/materials/$materialId': typeof MaterialsMaterialIdRoute
   '/orders/$orderId': typeof OrdersOrderIdRoute
@@ -176,6 +185,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/settings'
+    | '/dev/bom-preview'
     | '/material-label/$materialId'
     | '/materials/$materialId'
     | '/orders/$orderId'
@@ -195,6 +205,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/settings'
+    | '/dev/bom-preview'
     | '/material-label/$materialId'
     | '/materials/$materialId'
     | '/orders/$orderId'
@@ -214,6 +225,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/settings'
+    | '/dev/bom-preview'
     | '/material-label/$materialId'
     | '/materials/$materialId'
     | '/orders/$orderId'
@@ -234,6 +246,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   SettingsRoute: typeof SettingsRoute
+  DevBomPreviewRoute: typeof DevBomPreviewRoute
   MaterialLabelMaterialIdRoute: typeof MaterialLabelMaterialIdRoute
   MaterialsMaterialIdRoute: typeof MaterialsMaterialIdRoute
   OrdersOrderIdRoute: typeof OrdersOrderIdRoute
@@ -372,12 +385,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof MaterialLabelMaterialIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/dev/bom-preview': {
+      id: '/dev/bom-preview'
+      path: '/dev/bom-preview'
+      fullPath: '/dev/bom-preview'
+      preLoaderRoute: typeof DevBomPreviewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   SettingsRoute: SettingsRoute,
+  DevBomPreviewRoute: DevBomPreviewRoute,
   MaterialLabelMaterialIdRoute: MaterialLabelMaterialIdRoute,
   MaterialsMaterialIdRoute: MaterialsMaterialIdRoute,
   OrdersOrderIdRoute: OrdersOrderIdRoute,

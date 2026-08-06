@@ -49,3 +49,21 @@ Phase 4 of the backlog-burndown plan rejects this configuration at generation ti
 **Problem:** `ProductVariantMaterial` has no column distinguishing a rule-generated override from a hand-edited one. The bulk-amend feature therefore can't preserve manual edits automatically — it has to show a preview and make the human consent to each overwrite.
 
 **Ask:** Add a `source` column (`"rule" | "manual"`) so bulk operations can leave hand-edited rows alone by default.
+
+## Dashboard "Build now" should land on the build form, not the product page
+
+**Problem:** The "Build now" button on a dashboard order awaiting inventory (`frontend/src/routes/index.tsx:105-113`) links to `/products/$productId` and nothing more, dropping the user on the Details tab to go and find the Stock tab themselves — and then to re-select the variant they were already looking at on the dashboard.
+
+**Ask:** Link straight to the product's build form with the variant preselected. Purely frontend: `variant_id` is already on the dashboard payload (`OrderAwaitingInventory`, `frontend/src/api/types.ts:362`), so nothing is needed server-side. `StockSection`'s build form already has a `variantId` field to seed.
+
+Depends on the product page's tab being addressable — it became a URL search param (`?tab=stock`) as part of the merged Bill of Materials work, so this is now mostly a link change plus seeding the variant select from a second search param.
+
+## Line endings are mixed across the repo
+
+**Problem:** 32 committed files use CRLF while the rest of the tree uses LF, and there's no `.gitattributes` — so which one a file gets depends on whatever tool last wrote it. `core.autocrlf` is `false`, so nothing normalises on the way in. The CRLF set includes source that's actively edited: `backend/app/routers/platforms.py`, `backend/app/services/platforms/ebay.py`, `frontend/package.json`, `frontend/package-lock.json` and `frontend/.gitignore`.
+
+This bites when a tool rewrites a whole file. During the 0.6.0 work, edit scripts run through Python (whose `write_text` emits `os.linesep`, i.e. CRLF on Windows) silently converted 15 LF files to CRLF. Every one then showed as a whole-file diff — `frontend/src/routes/materials/$materialId.tsx` reported 663 added / 552 removed for a ~110-line change — which makes review impossible and destroys `git blame` lineage. Caught in the pre-release audit and reverted, but only because someone looked; nothing in the tooling would have flagged it.
+
+**Ask:** Add `.gitattributes` with `* text=auto eol=lf` (or per-extension rules) so the convention is enforced rather than incidental.
+
+Deliberately **not** done as part of 0.6.0: the rule renormalises all 32 existing CRLF files the next time each is committed, which would have meant a large unrelated diff landing inside a release audit. It wants its own commit, done deliberately, ideally as a single `git add --renormalize .` with nothing else in it — and worth adding to `.git-blame-ignore-revs` afterwards so the reformat doesn't pollute blame.
