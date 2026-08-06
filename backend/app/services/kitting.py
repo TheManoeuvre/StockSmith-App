@@ -752,14 +752,14 @@ async def reconcile_order_kitting(session: AsyncSession, order: Order) -> None:
             ledger.unit_cost_snapshot = consumed_unit_cost
 
 
-_KITTING_COGS_BY_ORDER_SQL = text(
+_KITTING_COGS_ROWS_SQL = text(
     """
     SELECT oka.order_id,
-           SUM(oka.consumed_qty * COALESCE(oka.unit_cost_snapshot, m.avg_unit_cost)) AS kitting_cogs
+           oka.consumed_qty,
+           COALESCE(oka.unit_cost_snapshot, m.avg_unit_cost) AS unit_cost
     FROM order_kitting_allocations oka
     JOIN materials m ON m.id = oka.material_id
     WHERE oka.order_id IN :ids AND oka.consumed_qty > 0
-    GROUP BY oka.order_id
     """
 ).bindparams(bindparam("ids", expanding=True))
 
@@ -781,16 +781,25 @@ async def get_kitting_cogs_by_order(session: AsyncSession, order_ids: Sequence[i
 
     An order with no consumption is absent from the result rather than present with a zero —
     callers decide whether that reads as "nothing shipped yet" or "no packaging"; both
-    contribute nothing to COGS."""
+    contribute nothing to COGS.
+
+    The rows are summed here rather than by SQL's SUM(). On SQLite these columns come back
+    as floats, so SUM() accumulates binary error that no amount of post-hoc conversion can
+    undo: order 20 on real data summed a 0.552442 box and a 0.01099 label to
+    0.5634319999999999, and that figure reached net_profit and disagreed with the same
+    total computed by get_order_kitting_summary, which has always used Decimal. Converting
+    each factor separately keeps both paths exact and identical by construction. Still one
+    query — it returns a handful of rows per order instead of one, which is nothing next to
+    the round trip."""
     if not order_ids:
         return {}
-    rows = await session.execute(_KITTING_COGS_BY_ORDER_SQL, {"ids": list(order_ids)})
-    # via str(): SQLite hands back a raw float for SUM() over NUMERIC columns, and
-    # Decimal(float) expands its full binary representation (0.30629 becomes
-    # 0.3062900000000000066968...), which would leak into net_profit and the API response.
-    # str() takes the shortest round-tripping form first. A no-op on Postgres, where SUM
-    # over numeric already returns a Decimal.
-    return {row.order_id: Decimal(str(row.kitting_cogs)) for row in rows if row.kitting_cogs is not None}
+    rows = await session.execute(_KITTING_COGS_ROWS_SQL, {"ids": list(order_ids)})
+    totals: dict[int, Decimal] = {}
+    for row in rows:
+        # str() first: Decimal(float) would expand the full binary representation.
+        cost = Decimal(str(row.consumed_qty)) * Decimal(str(row.unit_cost))
+        totals[row.order_id] = totals.get(row.order_id, Decimal(0)) + cost
+    return totals
 
 
 async def get_order_kitting_summary(session: AsyncSession, order_id: int) -> OrderKittingSummary:

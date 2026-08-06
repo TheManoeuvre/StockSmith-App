@@ -22,7 +22,7 @@ from app.routers.orders import _get_order_with_lines, _serialize_one, create_ord
 from app.schemas.order import OrderCreate, OrderLineInput
 from app.services import allocation, listing_push
 from app.services.costing import recompute_material
-from app.services.kitting import get_kitting_cogs_by_order, reconcile_order_kitting
+from app.services.kitting import get_kitting_cogs_by_order, get_order_kitting_summary, reconcile_order_kitting
 
 
 _STOCKED_AT = datetime(2020, 1, 1, tzinfo=timezone.utc)
@@ -254,6 +254,44 @@ async def test_kitting_cogs_bulk_covers_multiple_orders_in_one_call(session):
     # override capping them at one box for the whole order.
     assert cogs == {orders[0].id: Decimal("2.00"), orders[1].id: Decimal("2.00"), orders[2].id: Decimal("2.00")}
     assert await get_kitting_cogs_by_order(session, []) == {}
+
+
+async def test_costs_that_accumulate_float_error_stay_exact(session):
+    """Regression: summing in SQL rather than Decimal produced 0.5634319999999999.
+
+    Order 20 on real data: a 0.552442 box and a 0.01099 label. Those two are exactly
+    representable enough individually that a str() conversion looks like it works, but
+    SQLite adds them as floats and the error appears in the total — which then reached
+    net_profit and disagreed with get_order_kitting_summary's Decimal arithmetic.
+    """
+    box = await _box(session, unit_cost=Decimal("0.552442"))
+    label = Material(name="Label", category=MaterialCategory.packaging, unit=MaterialUnit.each)
+    session.add(label)
+    await session.flush()
+    purchase = Purchase(status=PurchaseStatus.received, received_at=_STOCKED_AT)
+    purchase.lines = [MaterialPurchase(material_id=label.id, qty=Decimal(100), total_cost=Decimal("1.099"))]
+    session.add(purchase)
+    await session.commit()
+    await recompute_material(session, label.id)
+    await session.commit()
+
+    product = Product(name="Product", sku="SKU-FLOAT", current_stock=10, allocated_qty=0)
+    session.add(product)
+    await session.flush()
+    session.add(ProductKittingMaterial(product_id=product.id, material_id=box.id, qty_required=1))
+    session.add(ProductKittingMaterial(product_id=product.id, material_id=label.id, qty_required=1))
+    await session.commit()
+
+    order = await _make_order(session, product, qty=1)
+    await _ship_all(session, order.id)
+
+    cogs = await get_kitting_cogs_by_order(session, [order.id])
+    assert cogs[order.id] == Decimal("0.563432")
+    assert str(cogs[order.id]) == "0.563432"
+
+    # The two code paths must agree — they are shown side by side in the UI.
+    summary = await get_order_kitting_summary(session, order.id)
+    assert summary.consumed_cost_total == cogs[order.id]
 
 
 async def test_net_profit_splits_materials_and_kitting(session):
