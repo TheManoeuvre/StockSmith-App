@@ -28,6 +28,9 @@ class VariantKittingBomLine(KittingBomLine):
     replaces_material_id: int | None = None
     line_max_buildable: int | None = None
     line_expected_max_buildable: int | None = None
+    # Populated only by the capacity paths, which already SELECT the material row — lets
+    # kitting.kitting_cost_per_unit_from_bom cost an already-resolved BOM without re-querying.
+    unit_cost: Decimal | None = None
 
 
 class OrderKittingOverrideLine(BaseModel):
@@ -43,8 +46,18 @@ class OrderKittingRequirementLine(BaseModel):
     effective_qty: Decimal
     reserved_qty: Decimal
     consumed_qty: Decimal
+    # unit_cost is frozen-at-consumption where the ledger has one (unit_cost_is_frozen), else
+    # the material's live avg_unit_cost. effective_cost is the forward-looking ordered-basis
+    # figure the editor steers; consumed_cost is the realised shipped-basis one that feeds
+    # OrderRead.kitting_cogs. See kitting.get_order_kitting_summary for why both are here.
+    unit_cost: Decimal
+    unit_cost_is_frozen: bool
+    effective_cost: Decimal
+    consumed_cost: Decimal
 
 
 class OrderKittingSummary(BaseModel):
     overrides: list[OrderKittingOverrideLine]
     lines: list[OrderKittingRequirementLine]
+    effective_cost_total: Decimal
+    consumed_cost_total: Decimal

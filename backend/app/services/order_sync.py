@@ -509,11 +509,12 @@ async def _upsert_lines(session: AsyncSession, order: Order, ext_order: External
         if needs_mapping:
             needs_mapping_count += 1
 
-        # cost_per_unit_snapshot/kitting_cost_per_unit_snapshot are deliberately left NULL
-        # here — they're captured at first allocation instead (allocation._allocate_line),
-        # once the line is actually going to be fulfilled from real stock at a real cost,
-        # rather than off whatever a brand-new/not-yet-costed material's avg_unit_cost
-        # happens to be at the instant this line is imported.
+        # cost_per_unit_snapshot is deliberately left NULL here — it's captured at first
+        # allocation instead (allocation._allocate_line), once the line is actually going to
+        # be fulfilled from real stock at a real cost, rather than off whatever a brand-new/
+        # not-yet-costed material's avg_unit_cost happens to be at the instant this line is
+        # imported. Packaging cost isn't a line concern at all; it's frozen onto the order's
+        # kitting ledger at ship time (kitting.reconcile_order_kitting).
         session.add(
             OrderLine(
                 order_id=order.id,

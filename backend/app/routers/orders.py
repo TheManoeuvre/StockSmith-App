@@ -27,7 +27,12 @@ from app.schemas.order import (
 )
 from app.schemas.order_return import CancellationPreview, OrderCancelRequest
 from app.services import allocation, returns
-from app.services.kitting import apply_default_kitting_bom, get_order_kitting_summary, reconcile_order_kitting
+from app.services.kitting import (
+    apply_default_kitting_bom,
+    get_kitting_cogs_by_order,
+    get_order_kitting_summary,
+    reconcile_order_kitting,
+)
 from app.services.variants import compute_full_sku
 
 router = APIRouter(prefix="/orders", tags=["orders"], dependencies=[Depends(require_auth)])
@@ -92,7 +97,26 @@ async def _remember_sku(
         session.add(SkuAlias(platform=platform, external_sku=external_sku, product_id=product_id, variant_id=variant_id))
 
 
-def _compute_net_profit(order: Order) -> Decimal | None:
+def _materials_cogs(order: Order) -> Decimal | None:
+    """The build-BOM half of cost of goods: each line's snapshotted cost per unit across its
+    shipped_qty. Packaging is deliberately NOT here — it's consumed per order, not per unit
+    (see kitting.get_kitting_cogs_by_order).
+
+    Returns None rather than 0 when no shipped line carries a snapshot at all, so a caller
+    can render "—" instead of asserting the goods were free."""
+    total = Decimal(0)
+    found = False
+    for line in order.lines:
+        if line.shipped_qty <= 0 or line.cost_per_unit_snapshot is None:
+            continue
+        found = True
+        total += Decimal(line.cost_per_unit_snapshot) * line.shipped_qty
+    return total if found else None
+
+
+def _compute_net_profit(
+    order: Order, materials_cogs: Decimal | None, kitting_cogs: Decimal | None
+) -> Decimal | None:
     """Order Value Paid + Postage Paid - Platform Fees - Postage cost - Cost of Goods.
 
     Order Value Paid (subtotal) and Postage Paid (shipping_charged) are what the buyer
@@ -104,11 +128,16 @@ def _compute_net_profit(order: Order) -> Decimal | None:
     the card-processing portion of it. Postage cost (shipping_cost_snapshot) is the
     seller's own cost for that shipping method, frozen at ship time — Etsy doesn't
     expose actual per-order postage cost anywhere reliably attributable, so this always
-    comes from the assigned Shipping Profile, never from synced marketplace data. Cost
-    of Goods sums each line's snapshotted build+kitting cost per unit across its
-    shipped_qty — cost isn't real until units have actually left the building, and
-    snapshotting happens at first allocation (see allocation._allocate_line), not
-    creation, so an unallocated line has nothing to sum yet anyway.
+    comes from the assigned Shipping Profile, never from synced marketplace data.
+
+    Cost of Goods arrives in two halves, computed elsewhere and passed in, because they're
+    sourced and frozen differently. materials_cogs (_materials_cogs) is per line: the
+    build-BOM cost per unit across shipped_qty, frozen at first allocation (see
+    allocation._allocate_line). kitting_cogs (kitting.get_kitting_cogs_by_order) is per
+    ORDER: what the kitting ledger actually consumed, valued at the cost frozen when it was
+    consumed. Packaging can't be a per-unit rate — one box ships three units, and
+    auto_apply_multiunit_kitting_override encodes exactly that. Both halves count only
+    shipped units: cost isn't real until they've left the building.
 
     Returns None rather than a misleading number when Order Value Paid isn't known yet
     (a marketplace order whose financials haven't synced, or a manual order created
@@ -119,15 +148,7 @@ def _compute_net_profit(order: Order) -> Decimal | None:
     revenue = Decimal(order.subtotal) + Decimal(order.shipping_charged or 0) - Decimal(order.refunded_amount or 0)
     platform_fees = Decimal(order.payment_fees or 0)
     postage_cost = Decimal(order.shipping_cost_snapshot or 0)
-
-    cogs = Decimal(0)
-    for line in order.lines:
-        if line.shipped_qty <= 0:
-            continue
-        if line.cost_per_unit_snapshot is None and line.kitting_cost_per_unit_snapshot is None:
-            continue
-        line_cost = Decimal(line.cost_per_unit_snapshot or 0) + Decimal(line.kitting_cost_per_unit_snapshot or 0)
-        cogs += line_cost * line.shipped_qty
+    cogs = (materials_cogs or Decimal(0)) + (kitting_cogs or Decimal(0))
 
     return revenue - platform_fees - postage_cost - cogs
 
@@ -136,12 +157,13 @@ def _cogs_pending(order: Order) -> bool:
     """True when at least one line that should have a cost by now (it's been allocated,
     or shipped, or is simply awaiting its first allocation) still has no snapshot — the
     signal a UI should show as "COGS pending" rather than silently reading net_profit as
-    though that line cost nothing."""
+    though that line cost nothing.
+
+    Materials only, deliberately. Kitting has no per-line snapshot to be missing; a shipped
+    order whose kitting ledger drifted is a data-repair problem
+    (scripts/backfill_order_kitting_ledger.py), not something to flag on every read."""
     return any(
-        not line.needs_mapping
-        and line.product_id is not None
-        and line.cost_per_unit_snapshot is None
-        and line.kitting_cost_per_unit_snapshot is None
+        not line.needs_mapping and line.product_id is not None and line.cost_per_unit_snapshot is None
         for line in order.lines
     )
 
@@ -162,7 +184,10 @@ async def _recompute_manual_order_totals(session: AsyncSession, order: Order) ->
     order.grand_total = subtotal + Decimal(order.shipping_charged or 0)
 
 
-def _serialize_order(order: Order) -> OrderRead:
+def _serialize_order(order: Order, kitting_cogs: Decimal | None) -> OrderRead:
+    """kitting_cogs is passed in rather than computed here because it needs a DB round-trip
+    and this stays synchronous — list_orders fetches one aggregate for its whole page. Single
+    order? Use _serialize_one."""
     lines = [
         OrderLineRead(
             id=line.id,
@@ -180,10 +205,10 @@ def _serialize_order(order: Order) -> OrderRead:
             external_line_id=line.external_line_id,
             needs_mapping=line.needs_mapping,
             cost_per_unit_snapshot=line.cost_per_unit_snapshot,
-            kitting_cost_per_unit_snapshot=line.kitting_cost_per_unit_snapshot,
         )
         for line in order.lines
     ]
+    materials_cogs = _materials_cogs(order)
     return OrderRead(
         id=order.id,
         platform=order.platform,
@@ -212,12 +237,20 @@ def _serialize_order(order: Order) -> OrderRead:
         payment_net=order.payment_net,
         payment_status=order.payment_status,
         financials_synced_at=order.financials_synced_at,
-        net_profit=_compute_net_profit(order),
+        materials_cogs=materials_cogs,
+        kitting_cogs=kitting_cogs,
+        net_profit=_compute_net_profit(order, materials_cogs, kitting_cogs),
         cogs_pending=_cogs_pending(order),
         sync_issue=order.sync_issue,
         pending_marketplace_cancellation=order.pending_marketplace_cancellation,
         lines=lines,
     )
+
+
+async def _serialize_one(session: AsyncSession, order: Order) -> OrderRead:
+    """_serialize_order for the single-order endpoints, fetching that order's kitting COGS."""
+    kitting = await get_kitting_cogs_by_order(session, [order.id])
+    return _serialize_order(order, kitting.get(order.id))
 
 
 @router.get("", response_model=OrderPage)
@@ -244,7 +277,14 @@ async def list_orders(
         query = query.where(Order.status == status_filter)
     total = await session.scalar(count_query)
     result = await session.execute(query)
-    return OrderPage(items=[_serialize_order(o) for o in result.scalars()], total=total or 0)
+    orders = list(result.scalars())
+    # One aggregate for the whole page rather than one per order — this endpoint serves up
+    # to 200 at a time. See get_kitting_cogs_by_order.
+    kitting_by_order = await get_kitting_cogs_by_order(session, [o.id for o in orders])
+    return OrderPage(
+        items=[_serialize_order(o, kitting_by_order.get(o.id)) for o in orders],
+        total=total or 0,
+    )
 
 
 @router.post("", response_model=OrderRead, status_code=status.HTTP_201_CREATED)
@@ -320,12 +360,12 @@ async def create_order(payload: OrderCreate, session: AsyncSession = Depends(get
 
     await session.commit()
     order = await _get_order_with_lines(session, order.id)
-    return _serialize_order(order)
+    return await _serialize_one(session, order)
 
 
 @router.get("/{order_id}", response_model=OrderRead)
 async def get_order(order_id: int, session: AsyncSession = Depends(get_db)) -> OrderRead:
-    return _serialize_order(await _get_order_with_lines(session, order_id))
+    return await _serialize_one(session, await _get_order_with_lines(session, order_id))
 
 
 @router.patch("/{order_id}", response_model=OrderRead)
@@ -353,7 +393,7 @@ async def update_order(order_id: int, payload: OrderUpdate, session: AsyncSessio
         await _recompute_manual_order_totals(session, order)
 
     await session.commit()
-    return _serialize_order(await _get_order_with_lines(session, order_id))
+    return await _serialize_one(session, await _get_order_with_lines(session, order_id))
 
 
 @router.delete("/{order_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -386,7 +426,7 @@ async def cancel_order_endpoint(
     order = await _get_order_with_lines(session, order_id)
     await returns.process_cancellation(session, order, payload.line_decisions, payload.reason)
     await session.commit()
-    return _serialize_order(await _get_order_with_lines(session, order_id))
+    return await _serialize_one(session, await _get_order_with_lines(session, order_id))
 
 
 @router.post("/{order_id}/ship", response_model=OrderRead)
@@ -394,7 +434,7 @@ async def ship_order_endpoint(order_id: int, session: AsyncSession = Depends(get
     order = await _get_order_with_lines(session, order_id)
     await allocation.ship_order(session, order)
     await session.commit()
-    return _serialize_order(await _get_order_with_lines(session, order_id))
+    return await _serialize_one(session, await _get_order_with_lines(session, order_id))
 
 
 @router.post("/{order_id}/allocate", response_model=OrderRead)
@@ -411,7 +451,7 @@ async def allocate_order_endpoint(order_id: int, session: AsyncSession = Depends
         )
     await allocation.allocate_order(session, order, source="manual")
     await session.commit()
-    return _serialize_order(await _get_order_with_lines(session, order_id))
+    return await _serialize_one(session, await _get_order_with_lines(session, order_id))
 
 
 @router.patch("/lines/{line_id}", response_model=OrderRead)
@@ -424,7 +464,7 @@ async def update_line_qty(
     if order is not None:
         await _recompute_manual_order_totals(session, order)
     await session.commit()
-    return _serialize_order(await _get_order_with_lines(session, line.order_id))
+    return await _serialize_one(session, await _get_order_with_lines(session, line.order_id))
 
 
 @router.post("/lines/{line_id}/unassign", response_model=OrderRead)
@@ -434,7 +474,7 @@ async def unassign_line(
     line = await _get_line(session, line_id)
     await allocation.deallocate_line(session, line, payload.qty)
     await session.commit()
-    return _serialize_order(await _get_order_with_lines(session, line.order_id))
+    return await _serialize_one(session, await _get_order_with_lines(session, line.order_id))
 
 
 @router.post("/lines/{line_id}/map-sku", response_model=OrderRead)
@@ -467,7 +507,7 @@ async def map_sku(line_id: int, payload: MapSkuRequest, session: AsyncSession = 
     await allocation.allocate_order(session, order, source="map-sku")
 
     await session.commit()
-    return _serialize_order(await _get_order_with_lines(session, line.order_id))
+    return await _serialize_one(session, await _get_order_with_lines(session, line.order_id))
 
 
 @router.post(
@@ -499,7 +539,7 @@ async def create_product_and_map(
     await allocation.allocate_order(session, order, source="create-product-and-map")
 
     await session.commit()
-    return _serialize_order(await _get_order_with_lines(session, line.order_id))
+    return await _serialize_one(session, await _get_order_with_lines(session, line.order_id))
 
 
 @router.get("/{order_id}/kitting-overrides", response_model=OrderKittingSummary)

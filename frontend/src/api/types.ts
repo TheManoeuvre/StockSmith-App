@@ -114,6 +114,7 @@ export interface Product {
   platform_ceiling_qty: number | null;
   push_buildable_capacity: boolean;
   cost_per_unit: string | null;
+  kitting_cost_per_unit: string | null;
   main_image_asset_id: number | null;
   ready_to_ship: number | null;
   variant_attribute1_name: string | null;
@@ -233,6 +234,7 @@ export interface VariantKittingBomLine extends KittingBomLine {
   replaces_material_id: number | null;
   line_max_buildable?: number | null;
   line_expected_max_buildable?: number | null;
+  unit_cost?: string | null;
 }
 
 export interface AttributeMaterialRule {
@@ -314,6 +316,7 @@ export interface Variant {
   theoretical_max_sellable: number | null;
   theoretical_max_sellable_reason: string | null;
   cost_per_unit: string | null;
+  kitting_cost_per_unit: string | null;
   effective_bom: VariantBomLine[];
   effective_kitting_bom: VariantKittingBomLine[];
   full_sku: string | null;
@@ -400,7 +403,6 @@ export interface OrderLine {
   external_line_id: string | null;
   needs_mapping: boolean;
   cost_per_unit_snapshot: string | null;
-  kitting_cost_per_unit_snapshot: string | null;
 }
 
 export interface Order {
@@ -431,6 +433,11 @@ export interface Order {
   payment_net: string | null;
   payment_status: string | null;
   financials_synced_at: string | null;
+  // The two halves of cost of goods. materials_cogs is per line (build BOM x shipped qty,
+  // frozen at first allocation); kitting_cogs is per order (what the kitting ledger actually
+  // consumed, frozen at ship). Both null when there is nothing to report — render "—".
+  materials_cogs: string | null;
+  kitting_cogs: string | null;
   net_profit: string | null;
   cogs_pending: boolean;
   sync_issue: string | null;
@@ -456,11 +463,19 @@ export interface OrderKittingRequirementLine {
   effective_qty: string;
   reserved_qty: string;
   consumed_qty: string;
+  unit_cost: string;
+  unit_cost_is_frozen: boolean;
+  effective_cost: string;
+  consumed_cost: string;
 }
 
 export interface OrderKittingSummary {
   overrides: OrderKittingOverrideLine[];
   lines: OrderKittingRequirementLine[];
+  // effective_cost_total is forward-looking (what this order will need); consumed_cost_total
+  // is realised and equals Order.kitting_cogs. They converge once fully shipped.
+  effective_cost_total: string;
+  consumed_cost_total: string;
 }
 
 export interface ShippingProfile {

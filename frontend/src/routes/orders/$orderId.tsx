@@ -155,8 +155,11 @@ function OrderDetail() {
           ))}
         </tbody>
       </table>
+      <p className="-mt-2 text-xs text-slate-500">
+        Value and cost cover all ordered units. The panel above counts only shipped units.
+      </p>
 
-      <OrderKittingSection orderId={id} />
+      <OrderKittingSection orderId={id} currency={order.currency} />
 
       <div className="flex gap-2">
         {canAllocate && (
@@ -219,15 +222,6 @@ function OrderDetail() {
 
 function OrderFinancialsPanel({ order }: { order: Order }) {
   const currency = order.currency;
-  const materialsCogsTotal = order.lines.reduce((sum, line) => {
-    if (line.shipped_qty <= 0) return sum;
-    if (line.cost_per_unit_snapshot == null && line.kitting_cost_per_unit_snapshot == null) return sum;
-    const perUnit = Number(line.cost_per_unit_snapshot ?? 0) + Number(line.kitting_cost_per_unit_snapshot ?? 0);
-    return sum + perUnit * line.shipped_qty;
-  }, 0);
-  const hasMaterialsCogs = order.lines.some(
-    (l) => l.cost_per_unit_snapshot != null || l.kitting_cost_per_unit_snapshot != null
-  );
 
   return (
     <div className="rounded bg-white p-4 text-sm shadow-sm">
@@ -280,8 +274,16 @@ function OrderFinancialsPanel({ order }: { order: Order }) {
           <p>{order.shipping_cost_snapshot != null ? `-${formatMoney(order.shipping_cost_snapshot, currency)}` : "—"}</p>
         </div>
         <div>
-          <p className="text-slate-500">Cost of goods (materials + kitting)</p>
-          <p>{hasMaterialsCogs ? `-${formatMoney(materialsCogsTotal.toFixed(2), currency)}` : "—"}</p>
+          <p className="text-slate-500">Materials COGS</p>
+          <p title="Each line's build-BOM cost per unit across the units that have shipped, frozen when the line was first allocated.">
+            {order.materials_cogs != null ? `-${formatMoney(order.materials_cogs, currency)}` : "—"}
+          </p>
+        </div>
+        <div>
+          <p className="text-slate-500">Kitting COGS</p>
+          <p title="Packaging actually consumed for this order's shipped units — one box per parcel, not per unit — valued at what each material cost when it was consumed.">
+            {order.kitting_cogs != null ? `-${formatMoney(order.kitting_cogs, currency)}` : "—"}
+          </p>
         </div>
         <div>
           <p className="text-slate-500">Net profit</p>
@@ -376,11 +378,15 @@ function OrderLineRow({
   onUnassign: (qty: number) => void;
 }) {
   const unassignable = line.allocated_qty - line.shipped_qty;
+  // Both on ordered_qty, deliberately. Value has to be, to reconcile with the receipt
+  // subtotal, and a row that priced revenue over all ordered units but cost over only the
+  // shipped ones read as pure margin mid-fulfilment. Everything below the financials panel
+  // is forward-looking; the panel itself counts only what has shipped.
+  //
+  // Materials only — packaging is an order-level cost, shown in the Kitting section.
   const lineValue = line.unit_price != null ? Number(line.unit_price) * line.ordered_qty : null;
   const lineCost =
-    line.shipped_qty > 0 && (line.cost_per_unit_snapshot != null || line.kitting_cost_per_unit_snapshot != null)
-      ? (Number(line.cost_per_unit_snapshot ?? 0) + Number(line.kitting_cost_per_unit_snapshot ?? 0)) * line.shipped_qty
-      : null;
+    line.cost_per_unit_snapshot != null ? Number(line.cost_per_unit_snapshot) * line.ordered_qty : null;
   return (
     <tr className="border-b border-slate-100">
       <td className="p-2">

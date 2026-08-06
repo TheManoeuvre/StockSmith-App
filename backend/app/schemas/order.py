@@ -81,7 +81,6 @@ class OrderLineRead(BaseModel):
     external_line_id: str | None
     needs_mapping: bool
     cost_per_unit_snapshot: Decimal | None = None
-    kitting_cost_per_unit_snapshot: Decimal | None = None
 
 
 class OrderRead(BaseModel):
@@ -114,6 +113,13 @@ class OrderRead(BaseModel):
     payment_net: Decimal | None = None
     payment_status: str | None = None
     financials_synced_at: datetime | None = None
+    # The two halves of cost of goods, kept separate because they're sourced and frozen
+    # differently: materials_cogs from each line's build-BOM snapshot (frozen at first
+    # allocation), kitting_cogs from the order's kitting ledger (frozen at first
+    # consumption). Both None-not-zero when there's nothing to report, so the UI can render
+    # "—" rather than a confident zero.
+    materials_cogs: Decimal | None = None
+    kitting_cogs: Decimal | None = None
     net_profit: Decimal | None = None
     cogs_pending: bool = False
     sync_issue: str | None = None

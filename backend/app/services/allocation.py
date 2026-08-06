@@ -68,12 +68,17 @@ async def _allocate_line(session: AsyncSession, line: OrderLine, source: str) ->
         return 0
     line.allocated_qty += take
     owner.allocated_qty += take
-    if line.cost_per_unit_snapshot is None and line.kitting_cost_per_unit_snapshot is None:
+    if line.cost_per_unit_snapshot is None:
         # First allocation is when COGS actually gets captured — see OrderLine's own
         # docstring for why this moved off line-creation time (a synced order could
         # otherwise freeze a stale/zero material cost from before its first real
         # purchase or BOM entry landed).
-        line.cost_per_unit_snapshot, line.kitting_cost_per_unit_snapshot = await compute_line_cost_snapshot(
+        #
+        # A product with no build BOM at all resolves to None and so re-attempts this on
+        # every subsequent allocation. Harmless — the computation is idempotent and returns
+        # None again — and identical to how a line with no BOM behaved before packaging
+        # moved off this snapshot.
+        line.cost_per_unit_snapshot = await compute_line_cost_snapshot(
             session, line.product_id, line.variant_id
         )
     listing_push.enqueue_for_owner(owner)  # now allocated ⇒ less of it is sellable elsewhere

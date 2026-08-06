@@ -130,6 +130,14 @@ class OrderKittingAllocation(Base):
     material_id: Mapped[int] = mapped_column(ForeignKey("materials.id", ondelete="RESTRICT"), nullable=False)
     reserved_qty: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False, default=0)
     consumed_qty: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False, default=0)
+    # Weighted-average unit cost of this material at the moment it was FIRST physically
+    # consumed for this order (reconcile_order_kitting's consume_delta > 0 branch) — the
+    # kitting analog of Order.shipping_cost_snapshot's freeze-at-ship rule, so a historical
+    # order's packaging cost doesn't drift as the material is re-bought at new prices.
+    # NULL until this order has consumed any of this material, and on rows written before
+    # this column existed; both fall back to the material's live avg_unit_cost at read time
+    # (see kitting.get_kitting_cogs_by_order). No CHECK — a zero cost is legitimate.
+    unit_cost_snapshot: Mapped[float | None] = mapped_column(Numeric(14, 6), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
