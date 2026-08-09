@@ -12,6 +12,69 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-09
+
+**Back up your data before updating.** This release changes the database and the app
+applies that automatically on first launch. Nothing here is designed to lose data, but
+this is the last update where you have to do that by hand — from now on StockSmith backs
+itself up.
+
+### Added
+- **StockSmith now backs itself up.** Settings > Backup. One backup is a single zip
+  holding your database and every product image. It runs automatically once a day while
+  the app is open, keeps the last seven, and you can take one on demand at any time.
+- **Copy each backup to a second folder.** Point it at OneDrive, Dropbox or anywhere that
+  syncs, and your backups end up somewhere other than this computer — which is the copy
+  that still helps if this computer is the thing that fails. If that folder ever stops
+  working, StockSmith tells you instead of failing quietly.
+- **Restore from a backup.** Choose one, confirm, and StockSmith restarts and puts your
+  data back as it was. A snapshot of your current data is taken first, so a restore can
+  itself be undone. Marketplace connections are deliberately not included in backups, so
+  after restoring onto a different computer you'll need to reconnect Etsy and eBay —
+  nothing else is lost. Restore runs on the computer hosting StockSmith; other devices
+  wait and reconnect on their own.
+- **Reference data can be edited.** Manufacturers, suppliers, material types and the new
+  Colours list all live under Settings > Reference data, and open in place so you can
+  correct several without leaving the page. Renaming one updates every material, purchase
+  and order that uses it. Duplicates — the two spellings of one supplier that built up
+  over time — can be merged into a single entry.
+- **Colours are a real list now.** They used to be free text typed onto each material, so
+  "Black", "black" and "BLACK" were three different colours. Existing values are merged
+  automatically on first launch, keeping whichever spelling you used most.
+- **Shipping profiles can be archived.** A profile you no longer offer disappears from the
+  pickers while every past order it shipped under keeps its costs.
+- **Unsaved changes are protected in Settings too.** Editing forecasting thresholds,
+  marketplace credentials or backup settings and then navigating away now asks first,
+  the same way the product and material pages already did.
+
+### Changed
+- **Products show one sellable figure instead of four raw numbers.** The list had three
+  columns of buildable/sellable counts and the product page repeated them. There is now a
+  single headline — what you can actually sell right now, which is also what's pushed to
+  your marketplaces — with the breakdown in words underneath: how many are built and free,
+  how many more you could build, and what open purchase orders would add.
+- **Settings is reorganised.** General comes first and Connection last. Each marketplace's
+  fee components moved onto that marketplace's own card under Integrations, and shipping
+  profiles moved to Reference data. The Pricing tab keeps the one setting that really is
+  shop-wide — which channel your margins are estimated for — and now shows which fees that
+  choice actually applies.
+- Copy buttons on product names and SKUs.
+
+### Fixed
+- **A quantity limit was reported as "nothing built" even when units were on the shelf.**
+  The label only appears now when something genuinely external — packaging, or a platform
+  quantity cap — is holding the figure down.
+- **Deleting a shipping profile silently changed past orders.** It removed the profile from
+  every product, variant and completed order that referenced it, quietly altering what those
+  orders recorded being shipped under. Profiles in use can no longer be deleted; archive
+  them instead.
+- **StockSmith stopped writing its own log file after startup.** Applying database updates
+  switched off the logging configured moments earlier, so `backend.log` was missing almost
+  everything that happened after launch — which is exactly what's needed when diagnosing a
+  problem.
+- Reference data lists could never be corrected: there was no way to rename, merge or remove
+  an entry once created, so a typo introduced by an import was permanent.
+
 ## [0.6.0] - 2026-08-06
 
 **Back up your data before updating.** This release changes the database, the app
