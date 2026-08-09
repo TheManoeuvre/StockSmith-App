@@ -22,6 +22,7 @@ import { ForecastSettings } from "../components/settings/ForecastSettings";
 import { DefaultKittingBomSettings } from "../components/settings/DefaultKittingBomSettings";
 import { Tabs, type TabDef } from "../components/common/Tabs";
 import { useShopIconUrl } from "../hooks/useShopIconUrl";
+import { DirtyPath, useDirtyRegistration } from "../hooks/useDirtyRegistry";
 
 const TAB_IDS = ["general", "integrations", "pricing", "reference", "connection"] as const;
 type TabId = (typeof TAB_IDS)[number];
@@ -89,6 +90,11 @@ function Settings() {
   const setActiveTab = (tab: string) => navigate({ search: { tab: tab as TabId } });
 
   const isDirty = backendUrl !== savedBackendUrl || sharedPassword !== savedSharedPassword;
+  // This block already knew whether it was dirty; it just never told anyone. Registering it is
+  // what makes navigating away — or switching tabs, now that's a navigation — prompt instead of
+  // silently dropping a half-typed backend URL. Everything else (blocker, dialog) is already
+  // mounted at the root.
+  useDirtyRegistration("connection", "Connection settings", isDirty);
 
   const handleSave = async () => {
     await saveSettings({ backendUrl, sharedPassword });
@@ -269,6 +275,11 @@ function PlatformIntegrationCard({ platform }: { platform: ListingPlatform }) {
   const refreshStatus = () => queryClient.invalidateQueries({ queryKey: ["platforms", platform, "status"] });
 
   return (
+    // Nested so each platform's editors sit under integrations/<platform>/…, which is what lets
+    // a prefix veto target one card without catching the other. The trailing-slash convention in
+    // isDirtyUnder keeps "ebay/" from matching a hypothetical "ebay-sandbox/".
+    <DirtyPath segment="integrations">
+      <DirtyPath segment={platform}>
     <div className="flex flex-col gap-2">
       <div className="rounded border border-slate-300 p-3">
         <div className="flex items-center justify-between">
@@ -325,5 +336,7 @@ function PlatformIntegrationCard({ platform }: { platform: ListingPlatform }) {
       </div>
       {platformStatus?.connected && <PlatformSyncPanel platform={platform} />}
     </div>
+      </DirtyPath>
+    </DirtyPath>
   );
 }

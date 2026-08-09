@@ -3,7 +3,9 @@ import { Link } from "@tanstack/react-router";
 import { feeConfigApi, type MarginFeeSource } from "../../api/feeConfig";
 import type { ListingPlatform } from "../../api/types";
 import { PLATFORM_LABELS } from "../../lib/platforms";
+import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { ErrorBanner } from "../common/ErrorBanner";
+import { SaveIndicator } from "../common/SaveIndicator";
 import { BASIS_LABELS } from "./PlatformFeeComponents";
 
 const SOURCE_LABELS: Record<MarginFeeSource, string> = {
@@ -39,6 +41,7 @@ export function MarginFeeSettings() {
       queryClient.invalidateQueries({ queryKey: ["products"] });
     },
   });
+  const saveStatus = useSaveStatus(sourceMutation.status);
 
   const source = config?.fee_source ?? "manual";
 
@@ -51,18 +54,24 @@ export function MarginFeeSettings() {
           which shipping cost each shipping profile contributes.
         </p>
       </div>
-      <select
-        aria-label="Margin estimate basis"
-        className="w-fit rounded border border-slate-300 px-2 py-1 text-sm"
-        value={source}
-        onChange={(e) => sourceMutation.mutate(e.target.value as MarginFeeSource)}
-      >
-        {(Object.keys(SOURCE_LABELS) as MarginFeeSource[]).map((option) => (
-          <option key={option} value={option}>
-            {SOURCE_LABELS[option]}
-          </option>
-        ))}
-      </select>
+      {/* Auto-save: one atomic choice whose options are all visible in the control. The indicator
+          matters more here than anywhere else in settings — this silently moves every margin
+          figure in the app, so "did that take?" is a real question. */}
+      <div className="flex items-center gap-2">
+        <select
+          aria-label="Margin estimate basis"
+          className="w-fit rounded border border-slate-300 px-2 py-1 text-sm"
+          value={source}
+          onChange={(e) => sourceMutation.mutate(e.target.value as MarginFeeSource)}
+        >
+          {(Object.keys(SOURCE_LABELS) as MarginFeeSource[]).map((option) => (
+            <option key={option} value={option}>
+              {SOURCE_LABELS[option]}
+            </option>
+          ))}
+        </select>
+        <SaveIndicator status={saveStatus} />
+      </div>
       <ErrorBanner error={sourceMutation.error} />
 
       {source === "manual" ? (

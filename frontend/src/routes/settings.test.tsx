@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -168,6 +168,95 @@ describe("settings page", () => {
       await user.click(tab("Integrations"));
       expect(await screen.findByRole("heading", { name: "Etsy fee components" })).toBeInTheDocument();
       expect(screen.getByRole("heading", { name: "eBay fee components" })).toBeInTheDocument();
+    });
+  });
+
+  describe("unsaved changes", () => {
+    const warningField = () => screen.getByLabelText(/Warning threshold/);
+
+    /** The General tab has several cards, each with its own Save — scope to the one under test. */
+    const forecastCard = () => {
+      const heading = screen.getByRole("heading", { name: "Materials forecasting" });
+      const card = heading.closest("div.rounded");
+      if (!card) throw new Error("Could not find the forecasting card");
+      return within(card as HTMLElement);
+    };
+    const saveButton = () => forecastCard().getByRole("button", { name: "Save" });
+    const dialog = () => within(screen.getByRole("dialog"));
+
+    it("enables Save only once something has actually changed", async () => {
+      const user = userEvent.setup();
+      await renderSettings();
+
+      await screen.findByRole("heading", { name: "Materials forecasting" });
+      expect(saveButton()).toBeDisabled();
+
+      await user.clear(warningField());
+      await user.type(warningField(), "9");
+
+      expect(saveButton()).toBeEnabled();
+    });
+
+    it("warns before a tab switch discards a dirty settings form", async () => {
+      const user = userEvent.setup();
+      await renderSettings();
+
+      await screen.findByRole("heading", { name: "Materials forecasting" });
+      await user.clear(warningField());
+      await user.type(warningField(), "9");
+
+      await user.click(tab("Pricing"));
+
+      // The whole point of Phase 2: the blocker was already mounted at the root and already
+      // covered this route — nothing here registered as dirty, so it never fired.
+      expect(await screen.findByRole("dialog")).toBeInTheDocument();
+      // Names what's unsaved rather than just saying something is.
+      expect(dialog().getByText(/Materials forecasting/)).toBeInTheDocument();
+    });
+
+    it("stays put when you choose to keep editing", async () => {
+      const user = userEvent.setup();
+      const router = await renderSettings();
+
+      await screen.findByRole("heading", { name: "Materials forecasting" });
+      await user.clear(warningField());
+      await user.type(warningField(), "9");
+      await user.click(tab("Pricing"));
+
+      await user.click(await screen.findByRole("button", { name: "Keep editing" }));
+
+      expect(router.state.location.search).toEqual({});
+      expect(warningField()).toHaveValue(9);
+    });
+
+    it("lets the tab switch through once saved", async () => {
+      const user = userEvent.setup();
+      await renderSettings();
+
+      await screen.findByRole("heading", { name: "Materials forecasting" });
+      await user.clear(warningField());
+      await user.type(warningField(), "9");
+      await user.click(saveButton());
+
+      await waitFor(() => expect(saveButton()).toBeDisabled());
+
+      await user.click(tab("Pricing"));
+
+      expect(await screen.findByText("Margin estimate basis")).toBeInTheDocument();
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    it("warns about a half-typed connection URL", async () => {
+      const user = userEvent.setup();
+      await renderSettings("/settings?tab=connection");
+
+      await user.click(await screen.findByRole("button", { name: /advanced connection settings/ }));
+      await user.type(screen.getByLabelText("Backend URL"), "-typo");
+
+      await user.click(tab("General"));
+
+      expect(await screen.findByRole("dialog")).toBeInTheDocument();
+      expect(dialog().getByText(/Connection settings/)).toBeInTheDocument();
     });
   });
 });

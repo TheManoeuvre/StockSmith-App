@@ -1,8 +1,19 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
 import { appSettingsApi, type ForecastSettings as ForecastSettingsValue } from "../../api/appSettings";
+import { useEditableCopy } from "../../hooks/useEditableCopy";
+import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { ErrorBanner } from "../common/ErrorBanner";
+import { SaveButton } from "../common/SaveButton";
 
+/**
+ * Buffered rather than auto-saved, for two reasons that both apply here.
+ *
+ * These are numbers typed into free-text inputs, so an auto-save would fire per keystroke on a
+ * half-entered value. And they carry a cross-field constraint — the backend rejects
+ * critical > warning (routers/fee_config.py) — so a valid end state routinely passes through an
+ * invalid intermediate: raising both thresholds gets rejected or not depending purely on which
+ * field you happen to touch first.
+ */
 export function ForecastSettings() {
   const queryClient = useQueryClient();
   const { data } = useQuery({
@@ -10,21 +21,38 @@ export function ForecastSettings() {
     queryFn: appSettingsApi.getForecastSettings,
   });
 
-  const [form, setForm] = useState<ForecastSettingsValue | null>(null);
-  useEffect(() => {
-    if (data && !form) setForm(data);
-  }, [data, form]);
+  const {
+    value: form,
+    setValue: setForm,
+    isDirty,
+    isSeeded,
+    markSaved,
+  } = useEditableCopy<ForecastSettingsValue | null>({
+    key: "general/forecast",
+    label: "Materials forecasting",
+    initial: null,
+    seed: data,
+    // A constant: there is only ever one settings row, so the only thing that could re-seed is a
+    // refetch — which is precisely what must not clobber an in-progress edit.
+    seedKey: "settings",
+  });
 
   const updateMutation = useMutation({
     mutationFn: (settings: ForecastSettingsValue) => appSettingsApi.updateForecastSettings(settings),
     onSuccess: (settings) => {
+      // Baseline from what was stored, not what was sent — the server normalises "6" to "6.00",
+      // which would otherwise leave the form looking dirty the moment it re-rendered.
+      markSaved(settings);
       queryClient.invalidateQueries({ queryKey: ["settings", "forecast-settings"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
-      setForm(settings);
     },
   });
+  const saveStatus = useSaveStatus(updateMutation.status);
 
-  if (!form) return null;
+  if (!isSeeded || !form) return null;
+
+  const setField = <K extends keyof ForecastSettingsValue>(field: K, next: ForecastSettingsValue[K]) =>
+    setForm((prev) => (prev ? { ...prev, [field]: next } : prev));
 
   return (
     <div className="flex flex-col gap-3 rounded border border-slate-300 p-3">
@@ -45,7 +73,7 @@ export function ForecastSettings() {
             step="0.5"
             className="rounded border border-slate-300 px-2 py-1"
             value={form.forecast_warning_weeks}
-            onChange={(e) => setForm({ ...form, forecast_warning_weeks: e.target.value })}
+            onChange={(e) => setField("forecast_warning_weeks", e.target.value)}
           />
         </label>
         <label className="flex flex-col gap-1 text-sm">
@@ -56,7 +84,7 @@ export function ForecastSettings() {
             step="0.5"
             className="rounded border border-slate-300 px-2 py-1"
             value={form.forecast_critical_weeks}
-            onChange={(e) => setForm({ ...form, forecast_critical_weeks: e.target.value })}
+            onChange={(e) => setField("forecast_critical_weeks", e.target.value)}
           />
         </label>
         <label className="flex flex-col gap-1 text-sm">
@@ -67,7 +95,7 @@ export function ForecastSettings() {
             step="1"
             className="rounded border border-slate-300 px-2 py-1"
             value={form.forecast_lookback_weeks}
-            onChange={(e) => setForm({ ...form, forecast_lookback_weeks: Number(e.target.value) })}
+            onChange={(e) => setField("forecast_lookback_weeks", Number(e.target.value))}
           />
         </label>
         <label className="flex flex-col gap-1 text-sm">
@@ -78,7 +106,7 @@ export function ForecastSettings() {
             step="0.5"
             className="rounded border border-slate-300 px-2 py-1"
             value={form.default_lead_time_weeks}
-            onChange={(e) => setForm({ ...form, default_lead_time_weeks: e.target.value })}
+            onChange={(e) => setField("default_lead_time_weeks", e.target.value)}
           />
         </label>
       </div>
@@ -86,12 +114,16 @@ export function ForecastSettings() {
         Default lead time estimates when an on-order purchase will arrive if it wasn't given its own expected
         arrival date — used so a distant order doesn't mask a material about to run out.
       </p>
-      <button
-        onClick={() => updateMutation.mutate(form)}
-        className="w-fit rounded border border-slate-300 bg-slate-100 px-3 py-1 text-sm"
-      >
-        Save
-      </button>
+      <div className="flex items-center gap-2">
+        <SaveButton
+          isDirty={isDirty}
+          isPending={updateMutation.isPending}
+          status={saveStatus}
+          onClick={() => updateMutation.mutate(form)}
+        >
+          Save
+        </SaveButton>
+      </div>
       <ErrorBanner error={updateMutation.error} />
     </div>
   );

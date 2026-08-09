@@ -13,6 +13,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalS
  *
  * ## Path allocation (the contract — keep this list current)
  *
+ * Product page:
  *   details                                  Details form
  *   bom / kitting-bom / bundle-items         the Bill of Materials tab's editors
  *   variant-attributes                       Generate variants form
@@ -24,6 +25,22 @@ import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalS
  *   variant-${id}/rename                     variant name + SKU suffix
  *   variant-${id}/bom-overrides              build BOM overrides
  *   variant-${id}/kitting-bom-overrides      kitting BOM overrides
+ *
+ * Materials:
+ *   material-details, material-adjust, material-image-url
+ *   new-material                             the list page's create form
+ *
+ * Settings:
+ *   connection                                        backend URL + shared password
+ *   general/forecast                                  forecasting thresholds
+ *   default-kitting-bom                               default packaging BOM
+ *   integrations/${platform}/credentials              developer app credentials
+ *   integrations/${platform}/fee-components/new       add-a-fee-component form
+ *
+ * Not every settings control registers, and that's deliberate: a single select whose whole
+ * option set is visible in the control auto-saves and has nothing to be dirty about. Buffering
+ * is for free text, numbers, and multi-field forms whose valid end state passes through invalid
+ * intermediates. See MarginFeeSettings (auto-save) against ForecastSettings (buffered).
  *
  * Paths are built by nesting <DirtyPath segment="..."> around a subtree; each editor then
  * registers a short local key. Prefix queries use the trailing slash, so `variant-1/` never

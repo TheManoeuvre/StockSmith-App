@@ -1,9 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
 import { feeConfigApi, type FeeBasis, type PlatformFeeComponent } from "../../api/feeConfig";
 import type { ListingPlatform } from "../../api/types";
+import { useEditableCopy } from "../../hooks/useEditableCopy";
+import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { PLATFORM_LABELS } from "../../lib/platforms";
 import { ErrorBanner } from "../common/ErrorBanner";
+import { SaveButton } from "../common/SaveButton";
+
+interface NewComponentForm {
+  name: string;
+  basis: FeeBasis;
+  rate: string;
+  fixed: string;
+}
+
+const EMPTY_COMPONENT: NewComponentForm = { name: "", basis: "sale_price_plus_shipping", rate: "", fixed: "" };
 
 /**
  * One platform's fee breakdown, shown on that platform's integration card.
@@ -32,10 +43,23 @@ export function PlatformFeeComponents({ platform }: { platform: ListingPlatform 
     queryFn: () => feeConfigApi.listFeeComponents(platform),
   });
 
-  const [newName, setNewName] = useState("");
-  const [newBasis, setNewBasis] = useState<FeeBasis>("sale_price_plus_shipping");
-  const [newRate, setNewRate] = useState("");
-  const [newFixed, setNewFixed] = useState("");
+  // A command form rather than an editor: it has no server state to mirror, so it seeds from a
+  // constant and is registered purely so half-typed input isn't silently dropped on navigate.
+  const {
+    value: draft,
+    setValue: setDraft,
+    isDirty: draftDirty,
+    markSaved: clearDraft,
+  } = useEditableCopy<NewComponentForm>({
+    key: "fee-components/new",
+    label: `New ${PLATFORM_LABELS[platform]} fee component`,
+    initial: EMPTY_COMPONENT,
+    seed: EMPTY_COMPONENT,
+    seedKey: "const",
+  });
+
+  const setDraftField = <K extends keyof NewComponentForm>(field: K, next: NewComponentForm[K]) =>
+    setDraft((prev) => ({ ...prev, [field]: next }));
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["settings", "platform-fee-components", platform] });
@@ -58,19 +82,19 @@ export function PlatformFeeComponents({ platform }: { platform: ListingPlatform 
   const createMutation = useMutation({
     mutationFn: () =>
       feeConfigApi.createFeeComponent(platform, {
-        name: newName,
-        basis: newBasis,
-        rate_percent: newRate || null,
-        fixed_amount: newFixed || null,
+        name: draft.name,
+        basis: draft.basis,
+        rate_percent: draft.rate || null,
+        fixed_amount: draft.fixed || null,
         display_order: (components?.length ?? 0) + 1,
       }),
     onSuccess: () => {
       invalidate();
-      setNewName("");
-      setNewRate("");
-      setNewFixed("");
+      // Resets the fields and the baseline in one go, so the emptied form doesn't read as dirty.
+      clearDraft(EMPTY_COMPONENT);
     },
   });
+  const createStatus = useSaveStatus(createMutation.status);
 
   return (
     <div className="flex flex-col gap-2 border-t border-slate-200 pt-3">
@@ -125,14 +149,14 @@ export function PlatformFeeComponents({ platform }: { platform: ListingPlatform 
           placeholder="Component name"
           aria-label="Component name"
           className="rounded border border-slate-300 px-2 py-1 text-sm"
-          value={newName}
-          onChange={(e) => setNewName(e.target.value)}
+          value={draft.name}
+          onChange={(e) => setDraftField("name", e.target.value)}
         />
         <select
           aria-label="Applies to"
           className="rounded border border-slate-300 px-2 py-1 text-sm"
-          value={newBasis}
-          onChange={(e) => setNewBasis(e.target.value as FeeBasis)}
+          value={draft.basis}
+          onChange={(e) => setDraftField("basis", e.target.value as FeeBasis)}
         >
           {(Object.keys(BASIS_LABELS) as FeeBasis[]).map((basis) => (
             <option key={basis} value={basis}>
@@ -144,19 +168,28 @@ export function PlatformFeeComponents({ platform }: { platform: ListingPlatform 
           placeholder="Rate %"
           aria-label="Rate %"
           className="w-20 rounded border border-slate-300 px-2 py-1 text-sm"
-          value={newRate}
-          onChange={(e) => setNewRate(e.target.value)}
+          value={draft.rate}
+          onChange={(e) => setDraftField("rate", e.target.value)}
         />
         <input
           placeholder="Fixed £"
           aria-label="Fixed £"
           className="w-20 rounded border border-slate-300 px-2 py-1 text-sm"
-          value={newFixed}
-          onChange={(e) => setNewFixed(e.target.value)}
+          value={draft.fixed}
+          onChange={(e) => setDraftField("fixed", e.target.value)}
         />
-        <button type="submit" className="rounded border border-slate-300 px-3 py-1 text-sm">
+        <SaveButton
+          type="submit"
+          isDirty={draftDirty}
+          isPending={createMutation.isPending}
+          status={createStatus}
+          // A name is the only required field, so gate on that rather than on dirtiness —
+          // the form is an action, not a save. It still reports dirty to the registry.
+          enabledWhen={!!draft.name.trim()}
+          className="rounded border border-slate-300 px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+        >
           + Add component
-        </button>
+        </SaveButton>
       </form>
       <p className="text-xs text-slate-400">
         Rates seeded from research in July 2026 — platforms change these periodically, so re-check against{" "}
