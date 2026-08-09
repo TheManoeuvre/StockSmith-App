@@ -125,7 +125,7 @@ async function renderProductPage() {
 const bomTab = () => screen.getByRole("button", { name: "Bill of Materials" });
 const pricingTab = () => screen.getByRole("button", { name: "Pricing" });
 
-/** BOM tables only — the page header carries a stock-summary table of its own. */
+/** BOM tables only — other tabs render tables of their own. */
 const bomTables = () => screen.getAllByRole("table").filter((t) => within(t).queryByText("Share"));
 
 /**
@@ -280,6 +280,43 @@ const variantsTab = () => screen.getByRole("button", { name: "Variants" });
 
 describe("variant paths", () => {
   const two = [variant(11, "Red"), variant(12, "Blue")];
+
+  it("opens the tab on the variants, not the attributes form, once variants exist", async () => {
+    const user = userEvent.setup();
+    setRoutes(withVariants(two));
+    await renderProductPage();
+    await user.click(variantsTab());
+
+    await screen.findByRole("button", { name: /red/i });
+    expect(screen.queryByRole("button", { name: "Generate variants" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /variant attributes/i }));
+    expect(screen.getByRole("button", { name: "Generate variants" })).toBeInTheDocument();
+  });
+
+  it("leaves the attributes form open for a product with no variants yet", async () => {
+    const user = userEvent.setup();
+    setRoutes(withVariants([]));
+    await renderProductPage();
+    await user.click(variantsTab());
+
+    expect(await screen.findByRole("button", { name: "Generate variants" })).toBeInTheDocument();
+  });
+
+  it("warns before collapsing the attributes form with unsubmitted input", async () => {
+    const user = userEvent.setup();
+    setRoutes(withVariants([]));
+    await renderProductPage();
+    await user.click(variantsTab());
+
+    // Nothing saves this input until "Generate variants" consumes it, so collapsing —
+    // which unmounts the form — has to ask first.
+    await user.type(await screen.findByPlaceholderText("Size, Colour…"), "Colour");
+    await user.click(screen.getByRole("button", { name: /variant attributes/i }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText(/Variant attributes/)).toBeInTheDocument();
+  });
 
   it("warns before collapsing a variant row with unsaved edits", async () => {
     const user = userEvent.setup();

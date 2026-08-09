@@ -5,6 +5,7 @@ import { platformsApi, type UnitSyncResult } from "../../api/platforms";
 import { productsApi } from "../../api/products";
 import { variantsApi } from "../../api/variants";
 import type { BomLineRead, KittingBomLineRead, Variant } from "../../api/types";
+import { CopyButton } from "../common/CopyButton";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { SaveButton } from "../common/SaveButton";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
@@ -13,7 +14,7 @@ import { DirtyPath } from "../../hooks/useDirtyRegistry";
 import { useGuard } from "../../hooks/useUnsavedChangesGuard";
 import { PlatformSyncBadge } from "./PlatformSyncBadge";
 import { BomOverrideEditor } from "./BomOverrideEditor";
-import { sellableReasonTag } from "../../lib/format";
+import { sellableSummary } from "../../lib/format";
 import { formatUnitCost } from "../../lib/money";
 
 const INITIAL_VARIANT_LIMIT = 5;
@@ -144,10 +145,15 @@ export function VariantEditor({ productId }: { productId: number }) {
   );
 }
 
+// Attribute values are usually what the variant is NAMED after ("Orange" / "Orange",
+// "4 Stud Standard / Blue" / "4 Stud Standard", "Blue"), so a badge for one is a badge
+// for something already on the row. Only the values the name doesn't already state earn
+// their space.
 function attributeBadges(variant: Variant): string[] {
-  return [variant.attribute1_value, variant.attribute2_value, variant.attribute3_value].filter(
-    (v): v is string => !!v
-  );
+  const name = variant.variant_name.toLowerCase();
+  return [variant.attribute1_value, variant.attribute2_value, variant.attribute3_value]
+    .filter((v): v is string => !!v)
+    .filter((v) => !name.includes(v.toLowerCase()));
 }
 
 function VariantRow({
@@ -217,69 +223,55 @@ function VariantRow({
 
   const badges = attributeBadges(variant);
   const renameStatus = useSaveStatus(renameMutation.status);
+  const sellable = sellableSummary(variant, { pushBuildableCapacity });
 
   return (
     <div className={`rounded bg-white shadow-sm ${!variant.is_active ? "opacity-60" : ""}`}>
-      <div className="flex w-full items-center justify-between p-3">
-        <button onClick={onToggle} className="flex flex-1 items-center gap-2 text-left">
-          <span className="font-medium">{variant.variant_name}</span>
-          {variant.full_sku && (
-            <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-600">
-              {variant.full_sku}
-            </span>
-          )}
-          {badges.map((b) => (
-            <span key={b} className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
-              {b}
-            </span>
-          ))}
-          {!variant.is_active && (
-            <span className="rounded bg-red-100 px-2 py-0.5 text-xs text-red-700">Disabled</span>
-          )}
-          {syncUnit && <PlatformSyncBadge platform="etsy" status={syncUnit.status} />}
-        </button>
-        <span className="text-sm text-slate-500">
-          On hand: {variant.current_stock} · Allocated: {variant.allocated_qty} · Free:{" "}
-          {variant.current_stock - variant.allocated_qty} · Max buildable: {variant.max_buildable ?? "No BOM set"} ·
-          Expected max buildable: {variant.expected_max_buildable ?? "No BOM set"} · Max sellable:{" "}
-          <span className={variant.max_sellable === 0 ? "font-semibold text-red-600" : undefined}>
-            {variant.max_sellable ?? "—"}
-          </span>
-          {sellableReasonTag(variant.max_sellable, variant.max_buildable, variant.max_sellable_reason) && (
-            <span className={variant.max_sellable === 0 ? "text-red-500" : undefined}>
-              {" "}
-              {sellableReasonTag(variant.max_sellable, variant.max_buildable, variant.max_sellable_reason)}
-            </span>
-          )}{" "}
-          · Expected max sellable: {variant.expected_max_sellable ?? "—"}
-          {sellableReasonTag(
-            variant.expected_max_sellable,
-            variant.expected_max_buildable,
-            variant.expected_max_sellable_reason
-          ) && (
-            <>
-              {" "}
-              {sellableReasonTag(
-                variant.expected_max_sellable,
-                variant.expected_max_buildable,
-                variant.expected_max_sellable_reason
-              )}
-            </>
-          )}{" "}
-          · Cost/unit: {variant.cost_per_unit ? formatUnitCost(variant.cost_per_unit) : "—"}
-          <br />
-          Pushing to marketplaces:{" "}
-          <strong
-            className={
-              (pushBuildableCapacity ? variant.theoretical_max_sellable : variant.max_sellable) === 0
-                ? "text-red-600"
-                : undefined
-            }
-          >
-            {(pushBuildableCapacity ? variant.theoretical_max_sellable : variant.max_sellable) ?? "—"}
-          </strong>{" "}
-          ({pushBuildableCapacity ? "buildable included" : "on-hand only"})
-        </span>
+      <div className="flex w-full items-center justify-between gap-3 p-3">
+        {/* The copy button is a SIBLING of the toggle, never a child: nested buttons are
+            invalid, and burying it inside would put "Copy …" into the row's accessible
+            name. variant_name stays first for the same reason — that name is how the
+            row is found. */}
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <button onClick={onToggle} className="flex min-w-0 items-center gap-2 text-left">
+            <span className="font-medium">{variant.variant_name}</span>
+            {variant.full_sku && (
+              <span
+                className="truncate rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-600"
+                title={variant.full_sku}
+              >
+                {variant.full_sku}
+              </span>
+            )}
+            {badges.map((b) => (
+              <span key={b} className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+                {b}
+              </span>
+            ))}
+            {!variant.is_active && (
+              <span className="rounded bg-red-100 px-2 py-0.5 text-xs text-red-700">Disabled</span>
+            )}
+            {syncUnit && <PlatformSyncBadge platform="etsy" status={syncUnit.status} />}
+          </button>
+          {variant.full_sku && <CopyButton value={variant.full_sku} label={`Copy ${variant.full_sku}`} />}
+        </div>
+        <div className="shrink-0 text-right">
+          <div className="flex items-baseline justify-end gap-2">
+            <strong className={`text-lg font-medium ${sellable.headline === 0 ? "text-red-600" : ""}`}>
+              {sellable.headline ?? "—"}
+            </strong>
+            {sellable.capLabel && (
+              <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">{sellable.capLabel}</span>
+            )}
+          </div>
+          {/* Everything the old line spelled out is still reachable: the expanded row's
+              BOM tables carry each material's own "Max theoretical" bottleneck, which is
+              the actual answer to "why only this many?". */}
+          <div className="text-xs text-slate-500">
+            {sellable.builtFree} built + {sellable.buildable ?? 0} buildable ·{" "}
+            {variant.cost_per_unit ? formatUnitCost(variant.cost_per_unit) : "—"}
+          </div>
+        </div>
       </div>
       {expanded && (
         <div className="border-t border-slate-100 p-3">

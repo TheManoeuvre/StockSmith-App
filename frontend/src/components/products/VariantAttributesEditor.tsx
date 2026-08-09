@@ -5,6 +5,7 @@ import { productsApi } from "../../api/products";
 import type { AttributeMaterialRule, AttributeQuantityRule, Material, Product, VariantAttributeSpec } from "../../api/types";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
+import { useGuard } from "../../hooks/useUnsavedChangesGuard";
 import { BulkBomAmendModal } from "./BulkBomAmendModal";
 
 interface MaterialRuleState {
@@ -35,6 +36,7 @@ function splitValues(valuesText: string): string[] {
 
 export function VariantAttributesEditor({ product }: { product: Product }) {
   const queryClient = useQueryClient();
+  const guard = useGuard();
   const { data: colours } = useQuery({ queryKey: ["materials", "colours"], queryFn: materialsApi.listColours });
   const { data: bom } = useQuery({
     queryKey: ["products", product.id, "bom"],
@@ -62,6 +64,25 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
     seedKey: product.id,
   });
   const [showBulkAmend, setShowBulkAmend] = useState(false);
+
+  // Shares the parent route's query key, so this resolves from cache rather than
+  // costing a request of its own.
+  const { data: variants } = useQuery({
+    queryKey: ["products", product.id, "variants"],
+    queryFn: () => productsApi.listVariants(product.id),
+  });
+  // null means "nobody has clicked yet, follow the default". Defaulting to collapsed
+  // while the query is still in flight is deliberate: a product that turns out to have
+  // variants must not flash the form open and then snap it shut.
+  const [expandedOverride, setExpandedOverride] = useState<boolean | null>(null);
+  const isExpanded = expandedOverride ?? (variants != null && variants.length === 0);
+  const toggleExpanded = () => {
+    // Collapsing unmounts the form, and this editor's pending input is never saved
+    // anywhere until "Generate variants" consumes it — so it has to ask first.
+    if (isExpanded) guard.attempt(() => setExpandedOverride(false), { prefix: "variant-attributes" });
+    else setExpandedOverride(true);
+  };
+
   const hasAttributes = !!(
     product.variant_attribute1_name ||
     product.variant_attribute2_name ||
@@ -118,6 +139,20 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
 
   return (
     <div className="flex flex-col gap-2 rounded bg-white p-4 shadow-sm">
+      <button
+        onClick={toggleExpanded}
+        aria-expanded={isExpanded}
+        className="flex items-center gap-2 self-start text-left text-sm font-medium"
+      >
+        <span aria-hidden="true" className="text-xs text-slate-400">
+          {isExpanded ? "▾" : "▸"}
+        </span>
+        Variant attributes
+        <span className="font-normal text-slate-500">— define attributes and generate variants</span>
+      </button>
+
+      {isExpanded && (
+        <>
       {rows.map((row, i) => {
         const values = splitValues(row.valuesText);
         return (
@@ -285,6 +320,8 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
       </div>
       <ErrorBanner error={generateMutation.error} />
       {showBulkAmend && <BulkBomAmendModal product={product} onClose={() => setShowBulkAmend(false)} />}
+        </>
+      )}
     </div>
   );
 }

@@ -7,10 +7,11 @@ import type { ListingPlatform, Product } from "../../api/types";
 import { CONNECTABLE_PLATFORMS } from "../../lib/platforms";
 import { useAssetUrl } from "../../hooks/useAssetUrl";
 import { useLazyVisible } from "../../hooks/useLazyVisible";
+import { CopyButton } from "../../components/common/CopyButton";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { CsvImportExport } from "../../components/common/CsvImportExport";
 import { PlatformSyncBadge } from "../../components/products/PlatformSyncBadge";
-import { sellableReasonTag } from "../../lib/format";
+import { sellableSummary } from "../../lib/format";
 import { formatUnitCost } from "../../lib/money";
 
 export const Route = createFileRoute("/products/")({
@@ -109,9 +110,7 @@ function ProductsList() {
             <th className="p-2">Name</th>
             <th className="p-2">SKU</th>
             <th className="p-2">On hand</th>
-            <th className="p-2">Max buildable</th>
-            <th className="p-2">Expected max buildable</th>
-            <th className="p-2">Max sellable</th>
+            <th className="p-2">Sellable</th>
             <th className="p-2">Cost per unit</th>
             <th className="p-2">Stores</th>
           </tr>
@@ -160,6 +159,10 @@ function ProductRow({
   const rowRef = useRef<HTMLTableRowElement>(null);
   const isVisible = useLazyVisible(rowRef);
   const imageUrl = useAssetUrl(isVisible ? p.main_image_asset_id : null);
+  const sellable = sellableSummary(p, {
+    pushBuildableCapacity: p.push_buildable_capacity,
+    platformCeilingQty: p.platform_ceiling_qty,
+  });
 
   return (
     <tr ref={rowRef} className="border-b border-slate-100 hover:bg-slate-50">
@@ -173,12 +176,36 @@ function ProductRow({
           {p.name}
         </Link>
       </td>
-      <td className="p-2">{p.sku ?? "—"}</td>
+      <td className="p-2">
+        {p.sku ? (
+          <span className="flex items-center gap-1">
+            {p.sku}
+            <CopyButton value={p.sku} label={`Copy ${p.sku}`} />
+          </span>
+        ) : (
+          "—"
+        )}
+      </td>
       <td className="p-2">{p.is_bundle ? `Ready to ship: ${p.ready_to_ship ?? "—"}` : p.current_stock}</td>
-      <td className="p-2">{p.is_bundle ? "—" : p.max_buildable ?? "No BOM set"}</td>
-      <td className="p-2">{p.is_bundle ? "—" : p.expected_max_buildable ?? "No BOM set"}</td>
-      <td className="p-2" title={p.is_bundle ? undefined : sellableReasonTag(p.max_sellable, p.max_buildable, p.max_sellable_reason) ?? undefined}>
-        {p.is_bundle ? "—" : p.max_sellable ?? "—"}
+      {/* One column, and it's the figure that reaches the marketplaces — the three it
+          replaced (max buildable / expected max buildable / max sellable) were all
+          inputs to it rather than answers in their own right. */}
+      <td className="p-2">
+        {p.is_bundle ? (
+          "—"
+        ) : (
+          <>
+            <span className="flex items-baseline gap-2">
+              <strong className={sellable.headline === 0 ? "text-red-600" : ""}>{sellable.headline ?? "—"}</strong>
+              {sellable.capLabel && (
+                <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">{sellable.capLabel}</span>
+              )}
+            </span>
+            <span className="block text-xs text-slate-500">
+              {sellable.builtFree} built + {sellable.buildable ?? 0} buildable
+            </span>
+          </>
+        )}
       </td>
       <td className="p-2">{p.cost_per_unit ? formatUnitCost(p.cost_per_unit) : "—"}</td>
       <td className="p-2">
