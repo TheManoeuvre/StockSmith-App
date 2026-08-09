@@ -116,6 +116,45 @@ export async function pickFile(): Promise<{ path: string; name: string } | null>
   return { path: selected, name };
 }
 
+/**
+ * Whether this device is the one running the backend.
+ *
+ * Restore is host-only — applying one needs the backend to stop and come back, and only the
+ * shell on the host can restart its own sidecar. The stored backend URL already encodes the
+ * distinction: an auto-provisioned host points at loopback, a thin client at a Tailscale name.
+ *
+ * Used to explain the situation rather than to enforce it. The server enforces (require_host);
+ * this just avoids offering a button that would 403.
+ */
+export async function isHostDevice(): Promise<boolean> {
+  const { backendUrl } = await getSettings();
+  if (!backendUrl) return false;
+  try {
+    return ["127.0.0.1", "localhost", "::1", "[::1]"].includes(new URL(backendUrl).hostname);
+  } catch {
+    return false;
+  }
+}
+
+/** The host name a thin client is pointed at, for telling the user where to go instead. */
+export async function backendHostname(): Promise<string | null> {
+  const { backendUrl } = await getSettings();
+  if (!backendUrl) return null;
+  try {
+    return new URL(backendUrl).hostname;
+  } catch {
+    return null;
+  }
+}
+
+export async function restartApp(): Promise<void> {
+  if (!isTauri) {
+    throw new Error("Restarting requires the StockSmith desktop app.");
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  await invoke("restart_app");
+}
+
 export async function pickDirectory(): Promise<string | null> {
   if (!isTauri) {
     throw new Error("Folder picking requires the Tauri desktop app (not available in browser preview).");

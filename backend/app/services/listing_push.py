@@ -159,6 +159,30 @@ async def _debounced_push(key: tuple[int, int | None]) -> None:
         _pending.pop(key, None)
 
 
+async def quiesce(timeout: float = 5.0) -> None:
+    """Cancel every debounced push and wait for them to unwind.
+
+    Called before a restore is staged. Both this and sync_scheduler write to the database in the
+    background, and a commit that lands after the pre-restore snapshot but before the process
+    dies is data that silently disappears if the restore is later rolled back.
+
+    Safe by construction, which is why cancelling outright is acceptable rather than draining: a
+    pending push is a debounce timer, and the push recomputes its quantity from current stock at
+    send time. Cancelling one is indistinguishable from the app having been closed a second
+    earlier — already an ordinary, supported state. Nothing is lost that the next stock movement
+    won't re-enqueue.
+    """
+    tasks = list(_pending.values())
+    if not tasks:
+        return
+    for task in tasks:
+        task.cancel()
+    # Bounded: a push already past the debounce and inside an HTTP call to a marketplace could
+    # otherwise hold the restore open for as long as that request takes to time out.
+    await asyncio.wait(tasks, timeout=timeout)
+    _pending.clear()
+
+
 async def resolve_push_quantity(session: AsyncSession, product_id: int, variant_id: int | None) -> int | None:
     """The quantity this service would send to a marketplace for this unit right now.
 

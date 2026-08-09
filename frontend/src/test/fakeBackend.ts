@@ -50,6 +50,7 @@ export function clientMock() {
     ApiError: class ApiError extends Error {},
     platformFetch: notImplemented,
     healthCheck: () => Promise.resolve(true),
+    fetchSystemStatus: () => handle("GET", "/system/status"),
     assetDownloadUrl: notImplemented,
     assetThumbnailUrl: notImplemented,
     assetUploadUrl: notImplemented,

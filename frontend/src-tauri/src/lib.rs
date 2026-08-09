@@ -9,6 +9,7 @@ use tauri_plugin_shell::ShellExt;
 use tauri_plugin_updater::UpdaterExt;
 
 const BACKEND_HEALTH_URL: &str = "http://127.0.0.1:8000/healthz";
+const BACKEND_STATUS_URL: &str = "http://127.0.0.1:8000/system/status";
 const READY_TIMEOUT_SECS: u64 = 20;
 
 /// Holds the sidecar's PID so the shutdown hook can kill it. `None` when nothing was
@@ -26,12 +27,58 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
+/// Restart the whole app so a staged database restore can be applied.
+///
+/// The restore itself happens in the backend's bootstrap, before it opens the database — see
+/// backend/app/bootstrap.py's maybe_apply_staged_restore. All this has to do is make sure the
+/// current backend process really dies and a fresh one starts.
+///
+/// `request_restart()`, deliberately, NOT `restart()`. Tauri documents that `restart()` called on
+/// the main thread cannot guarantee delivery of exit events and skips them — and a synchronous
+/// `#[tauri::command]` runs on the main thread. Skipping them means `RunEvent::Exit` never fires,
+/// so the `taskkill` in the run handler below never runs, the old sidecar survives still holding
+/// the database file, and `spawn_sidecar_if_needed` in the new process adopts it. The restore
+/// would then silently never apply. `request_restart()` always routes through the ordinary exit
+/// path, so the reaper runs first.
+///
+/// It also emits `ExitRequested` rather than a window `CloseRequested`, which means the
+/// frontend's unsaved-changes close guard can't veto it into a deadlock. The frontend guards this
+/// call itself instead (see restartApp's caller).
+#[tauri::command]
+fn restart_app(app: tauri::AppHandle) {
+    app.request_restart();
+}
+
 async fn is_backend_healthy() -> bool {
     let client = match reqwest::Client::builder().timeout(Duration::from_secs(2)).build() {
         Ok(c) => c,
         Err(_) => return false,
     };
     matches!(client.get(BACKEND_HEALTH_URL).send().await, Ok(resp) if resp.status().is_success())
+}
+
+/// Whether the backend answering on the port is one we should reuse.
+///
+/// Healthy is not sufficient. A backend that reports a maintenance `phase` is the *outgoing*
+/// process from a restart-for-restore that hasn't finished dying yet. Adopting it would leave the
+/// new shell talking to a process still holding the old database, and the staged restore would
+/// never be applied — silently, since everything would otherwise look fine.
+///
+/// Anything other than a clear "I am in maintenance" counts as adoptable, including an older
+/// build with no /system/status at all. Being conservative in the other direction would mean
+/// refusing to reuse a perfectly good dev backend.
+async fn is_backend_adoptable() -> bool {
+    let client = match reqwest::Client::builder().timeout(Duration::from_secs(2)).build() {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    let Ok(response) = client.get(BACKEND_STATUS_URL).send().await else {
+        return true;
+    };
+    let Ok(body) = response.json::<serde_json::Value>().await else {
+        return true;
+    };
+    body.get("phase").map(|p| p.is_null()).unwrap_or(true)
 }
 
 async fn wait_for_backend_ready(timeout_secs: u64) -> bool {
@@ -68,10 +115,11 @@ fn show_startup_error(app: &tauri::AppHandle, message: &str) {
 }
 
 async fn spawn_sidecar_if_needed(app: &tauri::AppHandle) -> Result<(), String> {
-    if is_backend_healthy().await {
+    if is_backend_healthy().await && is_backend_adoptable().await {
         // Something (e.g. a manually-started dev backend) already answers on the port —
         // reuse it instead of spawning a second instance, matching the "reuse if already
-        // running" convenience the old dev scripts had.
+        // running" convenience the old dev scripts had. Unless it's mid-restore: see
+        // is_backend_adoptable.
         return Ok(());
     }
 
@@ -204,7 +252,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(SidecarState(Mutex::new(None)))
-        .invoke_handler(tauri::generate_handler![greet])
+        .invoke_handler(tauri::generate_handler![greet, restart_app])
         .setup(|app| {
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {

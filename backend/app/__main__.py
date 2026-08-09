@@ -26,6 +26,10 @@ def main() -> None:
     from app.main import app
 
     port = int(os.environ.get("PORT", "8000"))
+    # Loopback only. If this is ever opened up so other devices on the Tailscale network can
+    # reach the host directly, note that app/deps.py's require_host becomes load-bearing at that
+    # moment — it is what keeps a thin client from triggering a restore that would kill the
+    # backend with nothing able to restart it.
     uvicorn.run(app, host="127.0.0.1", port=port)
 
 

@@ -31,8 +31,11 @@ Thumbs.db
 # Logs
 *.log
 
-# Local SQLite dev databases
+# Local SQLite dev databases. The -wal/-shm sidecars appear now that the app runs in WAL mode
+# (see app/db.py configure_sqlite_pragmas) — they're part of the database, not separate artefacts.
 backend/*.db
+backend/*.db-wal
+backend/*.db-shm
 backend/*.dump
 
 # PyInstaller build output

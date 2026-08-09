@@ -8,6 +8,10 @@ vi.mock("../../lib/tauri", () => ({
   getSettings: () => Promise.resolve({ backendUrl: "http://127.0.0.1:8000", sharedPassword: "x" }),
   pickDirectory: () => Promise.resolve(null),
   saveFileTo: () => Promise.resolve(null),
+  // Loopback: these tests exercise the panel as the host sees it.
+  isHostDevice: () => Promise.resolve(true),
+  backendHostname: () => Promise.resolve("127.0.0.1"),
+  restartApp: () => Promise.resolve(),
 }));
 
 const { setRoutes, calls } = await import("../../test/fakeBackend");
@@ -53,6 +57,19 @@ function routes(settings: Record<string, unknown> = SETTINGS, backups: unknown[]
     { method: "PUT" as const, path: "/backups/settings", respond: (body: unknown) => ({ ...settings, ...(body as object) }) },
     { method: "POST" as const, path: "/backups", respond: () => BACKUP },
     { method: "DELETE" as const, path: /^\/backups\//, respond: () => null },
+    { method: "GET" as const, path: "/restore/pending", respond: () => ({ staged: false }) },
+    {
+      method: "GET" as const,
+      path: "/system/status",
+      respond: () => ({
+        status: "ok",
+        phase: null,
+        app_version: "0.6.0",
+        alembic_revision: "c4e8f21a7b93",
+        data_fingerprint: "abc:",
+        last_restore: null,
+      }),
+    },
   ];
 }
 
@@ -85,14 +102,18 @@ describe("BackupSettings", () => {
   it("lists what a backup contains, not just its filename", async () => {
     renderPanel();
 
+    // Scoped to the table: the restore panel below describes the same backup, on purpose —
+    // "restore the one with 120 products" only works if both places word it identically.
+    const table = within(await screen.findByRole("table"));
+
     // The filename is a timestamp; what tells you whether this is the backup you want is the
     // date and what's in it.
-    expect(await screen.findByText(/120 products/)).toBeInTheDocument();
-    expect(screen.getByText(/88 materials/)).toBeInTheDocument();
+    expect(table.getByText(/120 products/)).toBeInTheDocument();
+    expect(table.getByText(/88 materials/)).toBeInTheDocument();
     // Zero-count tables are omitted rather than listed as "0 orders".
-    expect(screen.queryByText(/0 orders/)).not.toBeInTheDocument();
-    expect(screen.getByText("42 asset files")).toBeInTheDocument();
-    expect(screen.getByText("2.4 MB")).toBeInTheDocument();
+    expect(table.queryByText(/0 orders/)).not.toBeInTheDocument();
+    expect(table.getByText("42 asset files")).toBeInTheDocument();
+    expect(table.getByText("2.4 MB")).toBeInTheDocument();
   });
 
   describe("schedule form", () => {

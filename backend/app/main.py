@@ -21,13 +21,14 @@ from app.routers import (
     platforms,
     products,
     purchases,
+    restore,
     shipping_profiles,
     stock_adjustments,
     suppliers,
     system,
     variants,
 )
-from app.services import backup_scheduler, sync_scheduler
+from app.services import backup_scheduler, maintenance, sync_scheduler
 
 logger = logging.getLogger("stocksmith")
 
@@ -64,10 +65,43 @@ class CatchUnhandledExceptionsMiddleware(BaseHTTPMiddleware):
             return JSONResponse(status_code=500, content={"detail": "Internal server error"})
 
 
+class MaintenanceModeMiddleware(BaseHTTPMiddleware):
+    """Refuses ordinary API work while a restore is staged or being applied.
+
+    Everything under /api/v1 gets a 503; /healthz, /system/status and the endpoint that cancels
+    a staged restore stay reachable. That allowlist is the point: a client polling to find out
+    when the outage ends must not be behind the wall, and the escape hatch that clears a staged
+    restore must keep working while one is staged.
+
+    Registration order below is load-bearing for the same reason the comment there gives —
+    this must end up *inside* CORSMiddleware, or a thin client reads the 503 as an opaque
+    "Failed to fetch" and can't tell a maintenance window from a dead backend.
+    """
+
+    _ALLOWED_EXACT = {"/healthz", "/system/status", "/api/v1/restore/pending"}
+
+    async def dispatch(self, request: Request, call_next):
+        phase = maintenance.current_phase()
+        if phase is None or not request.url.path.startswith("/api/v1"):
+            return await call_next(request)
+        if request.url.path in self._ALLOWED_EXACT:
+            return await call_next(request)
+        return JSONResponse(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            content={
+                "detail": "StockSmith is restoring a backup. This will only take a moment.",
+                "maintenance": True,
+                "phase": phase,
+            },
+            headers={"Retry-After": "10"},
+        )
+
+
 # Registration order matters: Starlette wraps middleware in reverse of registration order
 # (last added = outermost), so CORSMiddleware must be added after the exception-catching
 # middleware to end up wrapping around it.
 app.add_middleware(CatchUnhandledExceptionsMiddleware)
+app.add_middleware(MaintenanceModeMiddleware)
 
 # The real Tauri app talks to this API over the http plugin, which bypasses the webview's
 # CORS restrictions entirely — this CORS config only matters for iterating against the
@@ -97,6 +131,7 @@ app.include_router(fee_config.router, prefix="/api/v1")
 app.include_router(shipping_profiles.router, prefix="/api/v1")
 app.include_router(stock_adjustments.router, prefix="/api/v1")
 app.include_router(backups.router, prefix="/api/v1")
+app.include_router(restore.router, prefix="/api/v1")
 
 # Intentionally *not* under /api/v1: a client polling for the end of a restore has to reach this
 # while everything under that prefix is answering 503. See app/routers/system.py.

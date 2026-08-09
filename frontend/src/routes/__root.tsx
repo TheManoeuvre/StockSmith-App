@@ -1,5 +1,6 @@
 import { createRootRoute, Link, Outlet } from "@tanstack/react-router";
 import { SyncStatusIndicator } from "../components/common/SyncStatusIndicator";
+import { MaintenanceOverlay } from "../components/common/MaintenanceOverlay";
 import { UnsavedChangesDialog } from "../components/common/UnsavedChangesDialog";
 import { DirtyRegistryProvider } from "../hooks/useDirtyRegistry";
 import { GuardProvider, useUnsavedChangesGuard } from "../hooks/useUnsavedChangesGuard";
@@ -35,6 +36,9 @@ function RootShell() {
     <GuardProvider guard={guard}>
       <RootChrome />
       <UnsavedChangesDialog {...guard.dialogProps} />
+      {/* App-wide for the same reason the guard is: a restore on the host locks out every page,
+          not just Settings. */}
+      <MaintenanceOverlay />
     </GuardProvider>
   );
 }

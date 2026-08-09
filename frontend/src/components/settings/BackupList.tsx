@@ -5,6 +5,7 @@ import { backupDownloadUrl } from "../../api/client";
 import { saveFileTo } from "../../lib/tauri";
 import { ConfirmDialog } from "../common/ConfirmDialog";
 import { ErrorBanner } from "../common/ErrorBanner";
+import { describeContents, formatBytes, formatWhen } from "./backupFormatting";
 
 const LOCATION_LABELS: Record<Backup["location"], string> = {
   primary: "This computer",
@@ -17,32 +18,6 @@ const KIND_LABELS: Record<Backup["manifest"]["kind"], string> = {
   scheduled: "Scheduled",
   "pre-restore": "Automatic",
 };
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const units = ["KB", "MB", "GB"];
-  let value = bytes / 1024;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit += 1;
-  }
-  return `${value.toFixed(value < 10 ? 1 : 0)} ${units[unit]}`;
-}
-
-function formatWhen(iso: string): string {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
-}
-
-/** "120 products · 88 materials" — only the non-zero counts, so an empty backup says so. */
-function describeContents(counts: Record<string, number>): string {
-  const parts = Object.entries(counts)
-    .filter(([, n]) => n > 0)
-    .map(([table, n]) => `${n} ${table.replace(/_/g, " ")}`);
-  return parts.length > 0 ? parts.join(" · ") : "No records";
-}
 
 export function BackupList() {
   const queryClient = useQueryClient();

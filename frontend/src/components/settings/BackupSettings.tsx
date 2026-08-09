@@ -7,6 +7,8 @@ import { pickDirectory } from "../../lib/tauri";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { SaveButton } from "../common/SaveButton";
 import { BackupList } from "./BackupList";
+import { RestoreOutcomeBanner } from "./RestoreOutcomeBanner";
+import { RestorePanel } from "./RestorePanel";
 
 interface ScheduleForm {
   scheduledEnabled: boolean;
@@ -143,6 +145,8 @@ export function BackupSettings() {
 
   return (
     <div className="flex flex-col gap-4">
+      <RestoreOutcomeBanner />
+
       <div className="flex flex-col gap-3 rounded border border-slate-300 p-3">
         <div>
           <h2 className="font-medium">Backups</h2>
@@ -266,6 +270,8 @@ export function BackupSettings() {
         <h2 className="font-medium">Available backups</h2>
         <BackupList />
       </div>
+
+      <RestorePanel />
     </div>
   );
 }

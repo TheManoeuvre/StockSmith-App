@@ -82,6 +82,19 @@ export async function healthCheck(backendUrl: string): Promise<boolean> {
   }
 }
 
+/**
+ * Fetch /system/status — deliberately not through `api.get`.
+ *
+ * It lives outside the /api/v1 prefix and outside auth, because it is what a client polls while
+ * every /api/v1 route is answering 503 during a restore. Routing it through the normal request
+ * helper would put it behind exactly the wall it exists to see over.
+ */
+export async function fetchSystemStatus<T>(): Promise<T> {
+  const response = await platformFetch(`${await baseUrl()}/system/status`);
+  if (!response.ok) throw new ApiError(response.status, response.statusText);
+  return (await response.json()) as T;
+}
+
 export async function assetDownloadUrl(assetId: number): Promise<{ url: string; headers: Record<string, string> }> {
   return { url: `${await baseUrl()}/api/v1/assets/${assetId}/download`, headers: await authHeaders() };
 }

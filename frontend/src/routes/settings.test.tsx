@@ -14,6 +14,11 @@ vi.mock("../lib/tauri", () => ({
   getSettings: () => Promise.resolve(tauriSettings),
   saveSettings: () => Promise.resolve(),
   openExternalUrl: () => Promise.resolve(),
+  pickDirectory: () => Promise.resolve(null),
+  saveFileTo: () => Promise.resolve(null),
+  isHostDevice: () => Promise.resolve(true),
+  backendHostname: () => Promise.resolve("127.0.0.1"),
+  restartApp: () => Promise.resolve(),
 }));
 
 const { setRoutes } = await import("../test/fakeBackend");
@@ -68,6 +73,19 @@ function baseRoutes() {
     },
     { method: "GET" as const, path: /^\/platforms\/\w+\/credentials/, respond: () => ({}) },
     { method: "GET" as const, path: /^\/platforms\/ebay\/signing-key/, respond: () => ({}) },
+    { method: "GET" as const, path: "/restore/pending", respond: () => ({ staged: false }) },
+    {
+      method: "GET" as const,
+      path: "/system/status",
+      respond: () => ({
+        status: "ok",
+        phase: null,
+        app_version: "0.6.0",
+        alembic_revision: "c4e8f21a7b93",
+        data_fingerprint: "abc:",
+        last_restore: null,
+      }),
+    },
     { method: "GET" as const, path: /.*/, respond: () => [] },
   ];
 }
