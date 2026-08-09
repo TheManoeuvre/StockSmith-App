@@ -139,7 +139,10 @@ export function PricingSection({ product }: { product: Product }) {
   });
   const { data: shippingProfiles } = useQuery({
     queryKey: ["settings", "shipping-profiles"],
-    queryFn: shippingProfilesApi.list,
+    // Wrapped, not passed by reference: React Query calls queryFn with a context object,
+    // which as a positional arg would read as includeArchived=true and put retired
+    // profiles back into this picker.
+    queryFn: () => shippingProfilesApi.list(),
   });
   const guard = useGuard();
   const isCalculatedFee = feeConfig?.fee_source != null && feeConfig.fee_source !== "manual";

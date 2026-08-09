@@ -21,7 +21,10 @@ function NewOrder() {
   const { data: products } = useQuery({ queryKey: ["products"], queryFn: productsApi.list });
   const { data: shippingProfiles } = useQuery({
     queryKey: ["settings", "shipping-profiles"],
-    queryFn: shippingProfilesApi.list,
+    // Wrapped, not passed by reference: React Query calls queryFn with a context object,
+    // which as a positional arg would read as includeArchived=true and put retired
+    // profiles back into this picker.
+    queryFn: () => shippingProfilesApi.list(),
   });
   const { data: defaultCurrency } = useQuery({
     queryKey: ["settings", "default-currency"],

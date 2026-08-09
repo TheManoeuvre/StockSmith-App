@@ -487,6 +487,10 @@ export interface OrderKittingSummary {
 export interface ShippingProfile {
   id: number;
   name: string;
+  /** Retired from the pickers, but still resolving for orders and products that use it. */
+  is_archived: boolean;
+  /** Products, variants and orders pointing at this. Computed per request. */
+  usage_count: number;
   price: string;
   cost_etsy: string;
   cost_ebay: string;

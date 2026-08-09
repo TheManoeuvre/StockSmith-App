@@ -22,11 +22,15 @@ class ShippingProfileUpdate(BaseModel):
     cost_etsy: Decimal | None = None
     cost_ebay: Decimal | None = None
     cost_manual: Decimal | None = None
+    is_archived: bool | None = None
 
 
 class ShippingProfileRead(ShippingProfileBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    is_archived: bool = False
+    # How many products, variants and orders point at this. Computed per request.
+    usage_count: int = 0
     created_at: datetime
     updated_at: datetime

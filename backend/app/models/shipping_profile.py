@@ -34,6 +34,12 @@ class ShippingProfile(Base):
     cost_etsy: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
     cost_ebay: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
     cost_manual: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    # Archived profiles disappear from every picker but keep resolving for rows that already
+    # point at them. Needed because orders reference a profile too: deleting one would rewrite
+    # what a historical order was shipped under, and merging it into another would do the same.
+    # Retiring a profile you no longer offer is the actual intent, and it has to be expressible
+    # without touching the past.
+    is_archived: Mapped[bool] = mapped_column(nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

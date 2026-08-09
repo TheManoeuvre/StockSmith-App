@@ -23,8 +23,12 @@ from app.models.base import Base
 from app.models.manufacturer import Manufacturer
 from app.models.material import Material
 from app.models.material_type import MaterialType
+from app.models.order import Order
+from app.models.product import Product
 from app.models.purchase import Purchase
+from app.models.shipping_profile import ShippingProfile
 from app.models.supplier import Supplier
+from app.models.variant import ProductVariant
 
 
 class ReferenceDataError(RuntimeError):
@@ -51,6 +55,10 @@ class Reference:
     column: InstrumentedAttribute
     noun_singular: str
     noun_plural: str
+    # Repointing this reference would rewrite history rather than tidy up a duplicate. Orders are
+    # the case: an order shipped under a profile is a record of what happened, not a preference
+    # that can be restated. A merge touching one of these is refused outright.
+    historical: bool = False
 
 
 # Every FK into each reference table. Keep this current when a new referencing column is added —
@@ -64,6 +72,11 @@ REFERENCES: dict[type[Base], Sequence[Reference]] = {
         Reference(Purchase.supplier_id, "purchase", "purchases"),
     ),
     MaterialType: (Reference(Material.material_type_id, "material", "materials"),),
+    ShippingProfile: (
+        Reference(Product.shipping_profile_id, "product", "products"),
+        Reference(ProductVariant.shipping_profile_id, "variant", "variants"),
+        Reference(Order.shipping_profile_id, "order", "orders", historical=True),
+    ),
 }
 
 
@@ -179,7 +192,22 @@ async def merge(session: AsyncSession, model: type[Base], source_id: int, target
     source = await get_or_404(session, model, source_id)
     target = await get_or_404(session, model, target_id)
 
-    for reference in _references_for(model):
+    references = _references_for(model)
+
+    for reference in references:
+        if not reference.historical:
+            continue
+        count = (
+            await session.execute(select(func.count()).where(reference.column == source_id))
+        ).scalar_one()
+        if count:
+            raise InUseError(
+                f'"{source.name}" is used by {count} '
+                f"{reference.noun_singular if count == 1 else reference.noun_plural}, which record what "
+                f"actually happened. Merging would rewrite them — archive it instead."
+            )
+
+    for reference in references:
         await session.execute(
             update(reference.column.parent.class_)
             .where(reference.column == source_id)
