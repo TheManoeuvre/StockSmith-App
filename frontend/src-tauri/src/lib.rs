@@ -75,10 +75,14 @@ async fn spawn_sidecar_if_needed(app: &tauri::AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
+    // Hand the shell's own version to the backend rather than keeping a second copy of it in
+    // Python. The backend records it in every backup manifest and reports it from
+    // /system/status; a restore uses it to explain *which* build wrote a backup it can't read.
     let sidecar = app
         .shell()
         .sidecar("stocksmith-backend")
-        .map_err(|e| format!("Failed to locate backend sidecar: {e}"))?;
+        .map_err(|e| format!("Failed to locate backend sidecar: {e}"))?
+        .env("STOCKSMITH_APP_VERSION", app.package_info().version.to_string());
     let (mut rx, child) = sidecar.spawn().map_err(|e| format!("Failed to start backend: {e}"))?;
 
     let state: State<SidecarState> = app.state();

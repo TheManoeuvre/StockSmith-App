@@ -144,9 +144,9 @@ describe("registry integration", () => {
     expect(registry.isDirtyUnder("variant-2/")).toBe(false);
   });
 
-  it("is inert outside a provider, so shared editors work on other routes", () => {
-    // DefaultKittingBomSettings uses the same hooks on the settings route, which has no
-    // provider and deliberately gets no unsaved-changes prompt.
+  it("is inert outside a provider, so editors can be mounted bare", () => {
+    // The app always has a provider at the root, so this is about unit tests: any component
+    // built on useEditableCopy has to render on its own, without a registry or a router.
     expect(() => render(<Editor dirty />)).not.toThrow();
   });
 });

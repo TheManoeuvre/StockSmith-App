@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import DateTime, Numeric, func
+from sqlalchemy import DateTime, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, portable_enum
@@ -27,6 +27,15 @@ class GeneralSettings(Base):
     __tablename__ = "general_settings"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    # Identifies this database's *lineage*, not this install. Generated once (lazily, see
+    # services/system_status.py) and thereafter travels inside the database file — so a copy
+    # restored from a backup carries the id of whatever database that backup was taken from.
+    #
+    # That is the whole point: connected clients poll /system/status and compare a fingerprint
+    # built from this id. If it changes underneath them, every cached query they hold describes
+    # a different database and has to be thrown away rather than merely refetched. Nullable
+    # because databases predating this column exist and get one on first read.
+    db_instance_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     default_currency: Mapped[CurrencyCode] = mapped_column(
         portable_enum(CurrencyCode, name="currency_code"),
         nullable=False,

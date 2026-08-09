@@ -87,9 +87,9 @@ export function useUnsavedChangesGuard(): UnsavedChangesGuard {
 
 // Passing the guard down as props would mean threading it through VariantEditor -> VariantRow
 // -> BomOverrideEditor and PricingSection -> LinePriceTable -> LineRow purely to reach a
-// couple of click handlers. Context instead. Defaults to running the action unguarded, so a
-// component used outside the product page (BomLineTable is also on the settings route) still
-// works.
+// couple of click handlers. Context instead. Defaults to running the action unguarded so a
+// component still works when mounted with no provider above it — which in practice means unit
+// tests, since the app wires GuardProvider in at the root (see routes/__root.tsx).
 const GuardContext = createContext<UnsavedChangesGuard>({
   attempt: (action) => action(),
   dialogProps: { open: false, labels: [], onDiscard: () => {}, onCancel: () => {} },

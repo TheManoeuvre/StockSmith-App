@@ -23,6 +23,7 @@ from app.routers import (
     shipping_profiles,
     stock_adjustments,
     suppliers,
+    system,
     variants,
 )
 from app.services import sync_scheduler
@@ -92,6 +93,10 @@ app.include_router(platforms.router, prefix="/api/v1")
 app.include_router(fee_config.router, prefix="/api/v1")
 app.include_router(shipping_profiles.router, prefix="/api/v1")
 app.include_router(stock_adjustments.router, prefix="/api/v1")
+
+# Intentionally *not* under /api/v1: a client polling for the end of a restore has to reach this
+# while everything under that prefix is answering 503. See app/routers/system.py.
+app.include_router(system.router)
 
 
 @app.get("/healthz")

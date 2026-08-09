@@ -22,9 +22,6 @@ export function DefaultKittingBomSettings() {
 
   const [filterText, setFilterText] = useState("");
 
-  // No DirtyRegistryProvider on the settings route, so useEditableCopy's registration is a
-  // no-op here — this gets the seed-once fix and the disabled-until-dirty button, but no
-  // unsaved-changes prompt. That's deliberate; the guard is a product-page feature.
   const seed = useMemo(() => (bom ? toLines(bom) : undefined), [bom]);
   const { value: lines, setValue: setLines, isDirty, markSaved } = useEditableCopy<KittingBomLine[]>({
     key: "default-kitting-bom",

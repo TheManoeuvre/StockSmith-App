@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
 import app.models  # noqa: F401 — registers every model on Base.metadata
-from app.db import enforce_sqlite_foreign_keys
+from app.db import configure_sqlite_pragmas, enforce_sqlite_foreign_keys
 from app.models.base import Base
 from app.models.listing import ListingPlatform
 from app.models.platform_connection import PlatformConnection
@@ -44,6 +44,10 @@ async def engine():
     # test_foreign_key_enforcement.py deliberately builds its own engines instead of using
     # this fixture, since it needs to compare enforced against unenforced behaviour.
     enforce_sqlite_foreign_keys(engine)
+    # Also match production's pragmas. `journal_mode = WAL` is a no-op on :memory: (it stays
+    # "memory" and doesn't error), but busy_timeout and synchronous apply, so the suite runs
+    # against the same connection settings the app does.
+    configure_sqlite_pragmas(engine)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield engine

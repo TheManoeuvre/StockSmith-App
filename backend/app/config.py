@@ -1,3 +1,4 @@
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -7,6 +8,18 @@ class Settings(BaseSettings):
     database_url: str
     asset_root: str
     shared_password_hash: str
+
+    # The Tauri shell passes its own package version to the sidecar as STOCKSMITH_APP_VERSION
+    # (see spawn_sidecar_if_needed in src-tauri/src/lib.rs), so the version lives in exactly one
+    # place — tauri.conf.json — rather than being duplicated backend-side and drifting. Stays
+    # "dev" under `uv run uvicorn`, where there is no shell to supply it.
+    #
+    # Recorded in every backup manifest and reported by /system/status, which is what lets a
+    # restore refuse a backup written by a newer build than the one being asked to read it.
+    # Explicitly aliased rather than left to derive `APP_VERSION`: the sidecar inherits the
+    # shell's whole environment, and a bare APP_VERSION is generic enough to already mean
+    # something else on a developer's machine.
+    app_version: str = Field(default="dev", validation_alias="STOCKSMITH_APP_VERSION")
 
     # All nullable — the app runs with zero Etsy connection at every stage until these
     # are set. etsy_client_id/secret come from a developer app registered at

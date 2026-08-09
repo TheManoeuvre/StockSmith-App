@@ -93,9 +93,10 @@ export class DirtyRegistry {
 }
 
 // Default is a real (shared, never-written-to) registry rather than null, so
-// useDirtyRegistration is inert outside a provider. Required: BomLineTable and the editors
-// built on useEditableCopy are also used on the settings route, which has no provider and
-// wants no guard.
+// useDirtyRegistration is inert outside a provider. That keeps components built on
+// useEditableCopy renderable standalone — unit tests mount them bare, with no provider and no
+// router. The app itself always has one: DirtyRegistryProvider wraps everything at the root
+// (see routes/__root.tsx), so every route is covered, settings included.
 const NOOP_REGISTRY = new DirtyRegistry();
 
 const RegistryContext = createContext<DirtyRegistry>(NOOP_REGISTRY);
