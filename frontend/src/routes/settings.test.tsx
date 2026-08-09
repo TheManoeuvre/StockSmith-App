@@ -39,6 +39,23 @@ function baseRoutes() {
     { method: "GET" as const, path: "/suppliers", respond: () => [] },
     { method: "GET" as const, path: "/material-types", respond: () => [] },
     { method: "GET" as const, path: "/materials", respond: () => [] },
+    {
+      method: "GET" as const,
+      path: "/backups/settings",
+      respond: () => ({
+        supported: true,
+        unsupported_reason: null,
+        scheduled_enabled: true,
+        scheduled_hour_local: 3,
+        retention_count: 7,
+        secondary_dir: null,
+        secondary_dir_last_ok_at: null,
+        secondary_dir_last_error: null,
+        last_run_at: null,
+        last_run_status: null,
+        last_run_error: null,
+      }),
+    },
     { method: "PUT" as const, path: /^\/settings\//, respond: (body: unknown) => body },
     // The object-shaped endpoints the integration cards reach for. Listed explicitly because
     // the catch-all below has to be an array — most of what's left is a list, and handing a
@@ -142,6 +159,16 @@ describe("settings page", () => {
       await user.click(tab("Pricing"));
       await screen.findByText("Margin estimate basis");
       expect(screen.queryByRole("heading", { name: "Shipping profiles" })).not.toBeInTheDocument();
+    });
+
+    it("gives backups their own tab", async () => {
+      const user = userEvent.setup();
+      await renderSettings();
+
+      await user.click(tab("Backup"));
+
+      expect(await screen.findByRole("heading", { name: "Backups" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Back up now" })).toBeInTheDocument();
     });
 
     it("shows reference data inline rather than linking out", async () => {

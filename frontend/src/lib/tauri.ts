@@ -116,6 +116,49 @@ export async function pickFile(): Promise<{ path: string; name: string } | null>
   return { path: selected, name };
 }
 
+export async function pickDirectory(): Promise<string | null> {
+  if (!isTauri) {
+    throw new Error("Folder picking requires the Tauri desktop app (not available in browser preview).");
+  }
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const selected = await open({ multiple: false, directory: true });
+  if (!selected || Array.isArray(selected)) return null;
+  return selected;
+}
+
+/**
+ * Save a URL's response straight to a file the user picks.
+ *
+ * Deliberately not the Blob + `<a download>` trick that downloadCsv uses (api/client.ts). That
+ * buffers the entire response in the webview's memory before writing a byte, which is fine for
+ * a few hundred KB of CSV and not fine for a backup archive carrying every product image. The
+ * upload plugin's `download` streams to disk and reports progress while it does.
+ *
+ * Returns the chosen path, or null if the save dialog was dismissed.
+ */
+export async function saveFileTo(
+  url: string,
+  headers: Record<string, string>,
+  suggestedName: string,
+  onProgress?: (loaded: number, total: number) => void
+): Promise<string | null> {
+  if (!isTauri) {
+    throw new Error("Saving a file requires the Tauri desktop app (not available in browser preview).");
+  }
+  const { save } = await import("@tauri-apps/plugin-dialog");
+  const target = await save({ defaultPath: suggestedName });
+  if (!target) return null;
+
+  const { download } = await import("@tauri-apps/plugin-upload");
+  await download(
+    url,
+    target,
+    (progress) => onProgress?.(progress.progress, progress.total),
+    new Map(Object.entries(headers))
+  );
+  return target;
+}
+
 export async function readFileBytes(path: string): Promise<Uint8Array> {
   const { readFile } = await import("@tauri-apps/plugin-fs");
   return readFile(path);

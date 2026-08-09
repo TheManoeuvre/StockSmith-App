@@ -116,6 +116,14 @@ export async function shopIconUrl(platform: string): Promise<{ url: string; head
   return { url: `${await baseUrl()}/api/v1/platforms/${platform}/shop-icon`, headers: await authHeaders() };
 }
 
+/** For streaming a backup archive to disk via saveFileTo, which needs the absolute URL. */
+export async function backupDownloadUrl(filename: string): Promise<{ url: string; headers: Record<string, string> }> {
+  return {
+    url: `${await baseUrl()}/api/v1/backups/${encodeURIComponent(filename)}/download`,
+    headers: await authHeaders(),
+  };
+}
+
 export interface CsvImportResult {
   created: number;
   updated: number;

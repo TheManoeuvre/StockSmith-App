@@ -20,11 +20,12 @@ import { materialTypesApi } from "../api/materialTypes";
 import { CurrencySettings } from "../components/settings/CurrencySettings";
 import { ForecastSettings } from "../components/settings/ForecastSettings";
 import { DefaultKittingBomSettings } from "../components/settings/DefaultKittingBomSettings";
+import { BackupSettings } from "../components/settings/BackupSettings";
 import { Tabs, type TabDef } from "../components/common/Tabs";
 import { useShopIconUrl } from "../hooks/useShopIconUrl";
 import { DirtyPath, useDirtyRegistration } from "../hooks/useDirtyRegistry";
 
-const TAB_IDS = ["general", "integrations", "pricing", "reference", "connection"] as const;
+const TAB_IDS = ["general", "integrations", "pricing", "reference", "backup", "connection"] as const;
 type TabId = (typeof TAB_IDS)[number];
 
 export const Route = createFileRoute("/settings")({
@@ -45,6 +46,7 @@ const SETTINGS_TABS: TabDef[] = [
   { id: "integrations", label: "Integrations" },
   { id: "pricing", label: "Pricing" },
   { id: "reference", label: "Reference data" },
+  { id: "backup", label: "Backup" },
   { id: "connection", label: "Connection" },
 ];
 
@@ -234,6 +236,12 @@ function Settings() {
               looked like a pricing concern; those are per-(platform × profile), so they belong
               on the profile itself. */}
           <ShippingProfileSettings />
+        </div>
+      )}
+
+      {activeTab === "backup" && (
+        <div className="max-w-3xl">
+          <BackupSettings />
         </div>
       )}
     </div>

@@ -57,6 +57,7 @@ export function clientMock() {
     materialImageThumbnailUrl: notImplemented,
     materialImageUploadUrl: notImplemented,
     shopIconUrl: notImplemented,
+    backupDownloadUrl: notImplemented,
     uploadCsv: notImplemented,
     downloadCsv: notImplemented,
   };

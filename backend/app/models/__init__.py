@@ -1,5 +1,6 @@
 from app.models.allocation_event import AllocationEvent, AllocationEventType
 from app.models.asset import AssetType, ProductAsset
+from app.models.backup_settings import BackupSettings
 from app.models.base import Base
 from app.models.build import Build, BuildFailedConsumption
 from app.models.general_settings import CurrencyCode, GeneralSettings
@@ -33,6 +34,7 @@ from app.models.variant import ProductVariant, ProductVariantMaterial
 
 __all__ = [
     "Base",
+    "BackupSettings",
     "Material",
     "MaterialCategory",
     "MaterialUnit",

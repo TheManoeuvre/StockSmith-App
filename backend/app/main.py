@@ -10,6 +10,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.routers import (
     assets,
+    backups,
     builds,
     dashboard,
     fee_config,
@@ -26,7 +27,7 @@ from app.routers import (
     system,
     variants,
 )
-from app.services import sync_scheduler
+from app.services import backup_scheduler, sync_scheduler
 
 logger = logging.getLogger("stocksmith")
 
@@ -34,10 +35,12 @@ logger = logging.getLogger("stocksmith")
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     sync_scheduler.start()
+    backup_scheduler.start()
     try:
         yield
     finally:
         sync_scheduler.stop()
+        backup_scheduler.stop()
 
 
 app = FastAPI(title="StockSmith API", lifespan=lifespan)
@@ -93,6 +96,7 @@ app.include_router(platforms.router, prefix="/api/v1")
 app.include_router(fee_config.router, prefix="/api/v1")
 app.include_router(shipping_profiles.router, prefix="/api/v1")
 app.include_router(stock_adjustments.router, prefix="/api/v1")
+app.include_router(backups.router, prefix="/api/v1")
 
 # Intentionally *not* under /api/v1: a client polling for the end of a restore has to reach this
 # while everything under that prefix is answering 503. See app/routers/system.py.

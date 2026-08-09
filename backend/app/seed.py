@@ -9,6 +9,7 @@ app/bootstrap.py) and is a no-op on every run after the first.
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.backup_settings import BackupSettings
 from app.models.general_settings import CurrencyCode, GeneralSettings
 from app.models.platform_fee import FeeBasis, MarginFeeConfig, MarginFeeSource, PlatformFeeComponent
 
@@ -108,6 +109,14 @@ async def _ensure_general_settings(session: AsyncSession) -> None:
         session.add(GeneralSettings(id=1, default_currency=CurrencyCode.GBP))
 
 
+async def _ensure_backup_settings(session: AsyncSession) -> None:
+    existing = await session.execute(select(BackupSettings).where(BackupSettings.id == 1))
+    if existing.scalar_one_or_none() is None:
+        # Scheduling on by default — see the model docstring. An opt-in backup is the one
+        # nobody turned on.
+        session.add(BackupSettings(id=1))
+
+
 async def _ensure_margin_fee_config(session: AsyncSession) -> None:
     existing = await session.execute(select(MarginFeeConfig).where(MarginFeeConfig.id == 1))
     if existing.scalar_one_or_none() is None:
@@ -125,6 +134,7 @@ async def _ensure_platform_fee_components(session: AsyncSession) -> None:
 async def ensure_seed_data(session: AsyncSession) -> None:
     """Idempotent — safe to call on every startup, only inserts what's missing."""
     await _ensure_general_settings(session)
+    await _ensure_backup_settings(session)
     await _ensure_margin_fee_config(session)
     await _ensure_platform_fee_components(session)
     await session.commit()
