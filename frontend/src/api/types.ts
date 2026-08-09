@@ -32,6 +32,8 @@ export interface Material {
 export interface Manufacturer {
   id: number;
   name: string;
+  /** How many records reference this. Computed per request — see the backend's list_with_usage. */
+  usage_count: number;
   website_url: string | null;
   created_at: string;
 }
@@ -39,6 +41,8 @@ export interface Manufacturer {
 export interface Supplier {
   id: number;
   name: string;
+  /** How many records reference this. Computed per request — see the backend's list_with_usage. */
+  usage_count: number;
   website_url: string | null;
   created_at: string;
 }
@@ -46,6 +50,8 @@ export interface Supplier {
 export interface MaterialType {
   id: number;
   name: string;
+  /** How many records reference this. Computed per request — see the backend's list_with_usage. */
+  usage_count: number;
   created_at: string;
 }
 

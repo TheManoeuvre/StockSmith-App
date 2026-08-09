@@ -36,6 +36,9 @@ import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalS
  *   default-kitting-bom                               default packaging BOM
  *   integrations/${platform}/credentials              developer app credentials
  *   integrations/${platform}/fee-components/new       add-a-fee-component form
+ *   backup/settings                                   schedule and second-folder form
+ *   ${resource}/new                                   reference-data create form
+ *   ${resource}/row-${id}/fields                      an expanded reference-data row
  *
  * Not every settings control registers, and that's deliberate: a single select whose whole
  * option set is visible in the control auto-saves and has nothing to be dirty about. Buffering

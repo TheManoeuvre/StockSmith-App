@@ -13,7 +13,7 @@ import { EbaySigningKeyPanel } from "../components/settings/EbaySigningKeyPanel"
 import { MarginFeeSettings } from "../components/settings/MarginFeeSettings";
 import { PlatformFeeComponents } from "../components/settings/PlatformFeeComponents";
 import { ShippingProfileSettings } from "../components/settings/ShippingProfileSettings";
-import { ReferenceDataSection } from "../components/reference/ReferenceDataSection";
+import { ReferenceDataTable } from "../components/reference/ReferenceDataTable";
 import { manufacturersApi } from "../api/manufacturers";
 import { suppliersApi } from "../api/suppliers";
 import { materialTypesApi } from "../api/materialTypes";
@@ -210,26 +210,56 @@ function Settings() {
 
       {activeTab === "reference" && (
         <div className="max-w-3xl flex flex-col gap-4">
-          <ReferenceDataSection
+          <ReferenceDataTable
             title="Manufacturers"
-            description="Who makes a material. Referenced by materials."
+            description="Who makes a material. Renaming one updates every material that uses it."
+            segment="manufacturers"
             queryKey={["manufacturers"]}
-            list={manufacturersApi.list}
-            findOrCreate={manufacturersApi.findOrCreate}
+            api={{
+              list: manufacturersApi.list,
+              create: manufacturersApi.findOrCreate,
+              update: manufacturersApi.update,
+              remove: manufacturersApi.remove,
+              merge: manufacturersApi.merge,
+            }}
+            fields={[
+              { key: "name", label: "Name" },
+              { key: "website_url", label: "Website", type: "url", placeholder: "https://…" },
+            ]}
+            usageLabel={(n) => `${n} material${n === 1 ? "" : "s"}`}
           />
-          <ReferenceDataSection
+          <ReferenceDataTable
             title="Suppliers"
-            description="Who you buy from. Referenced by materials and purchases."
+            description="Who you buy from. Renaming one updates every material and purchase that uses it."
+            segment="suppliers"
             queryKey={["suppliers"]}
-            list={suppliersApi.list}
-            findOrCreate={suppliersApi.findOrCreate}
+            api={{
+              list: suppliersApi.list,
+              create: suppliersApi.findOrCreate,
+              update: suppliersApi.update,
+              remove: suppliersApi.remove,
+              merge: suppliersApi.merge,
+            }}
+            fields={[
+              { key: "name", label: "Name" },
+              { key: "website_url", label: "Website", type: "url", placeholder: "https://…" },
+            ]}
+            usageLabel={(n) => `${n} record${n === 1 ? "" : "s"}`}
           />
-          <ReferenceDataSection
+          <ReferenceDataTable
             title="Material types"
-            description="What a material is made of. Referenced by materials."
+            description="What a material is made of. Renaming one updates every material that uses it."
+            segment="material-types"
             queryKey={["material-types"]}
-            list={materialTypesApi.list}
-            findOrCreate={materialTypesApi.findOrCreate}
+            api={{
+              list: materialTypesApi.list,
+              create: materialTypesApi.findOrCreate,
+              update: materialTypesApi.update,
+              remove: materialTypesApi.remove,
+              merge: materialTypesApi.merge,
+            }}
+            fields={[{ key: "name", label: "Name" }]}
+            usageLabel={(n) => `${n} material${n === 1 ? "" : "s"}`}
           />
           {/* Shipping profiles are reference data too — a named row that products, variants and
               orders point at. They sat under Pricing only because their eBay/Etsy cost columns

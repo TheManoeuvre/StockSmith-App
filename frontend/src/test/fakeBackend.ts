@@ -16,6 +16,22 @@ export interface FakeRoute {
   respond: (body: unknown) => unknown;
 }
 
+/**
+ * Mirrors the real ApiError's shape, including `status`.
+ *
+ * It has to be the same class the components import, or their `error instanceof ApiError`
+ * checks silently fail — which is how a route that rejects with a 409 ends up looking like a
+ * generic failure and the "merge instead?" affordance never renders.
+ */
+export class FakeApiError extends Error {
+  constructor(
+    public status: number,
+    message: string
+  ) {
+    super(message);
+  }
+}
+
 export const calls: { method: string; path: string; body?: unknown }[] = [];
 
 let routes: FakeRoute[] = [];
@@ -47,7 +63,7 @@ export function clientMock() {
       patch: (path: string, body?: unknown) => handle("PATCH", path, body),
       delete: (path: string) => handle("DELETE", path),
     },
-    ApiError: class ApiError extends Error {},
+    ApiError: FakeApiError,
     platformFetch: notImplemented,
     healthCheck: () => Promise.resolve(true),
     fetchSystemStatus: () => handle("GET", "/system/status"),
