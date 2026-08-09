@@ -55,7 +55,7 @@ export function ShippingProfileSettings() {
   return (
     <div className="flex flex-col gap-3 rounded border border-slate-300 p-3">
       <div>
-        <p className="font-medium">Shipping profiles</p>
+        <h2 className="font-medium">Shipping profiles</h2>
         <p className="text-sm text-slate-500">
           Reusable shipping methods — Price is what you charge the customer (doesn't vary by channel). Cost is what
           it actually costs you, which can differ by where the label is bought — Etsy, eBay, or a manual order.

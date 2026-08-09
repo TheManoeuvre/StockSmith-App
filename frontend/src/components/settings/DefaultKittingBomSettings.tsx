@@ -56,7 +56,7 @@ export function DefaultKittingBomSettings() {
   return (
     <div className="flex flex-col gap-3 rounded border border-slate-300 p-3">
       <div>
-        <p className="font-medium">Default kitting BOM</p>
+        <h2 className="font-medium">Default kitting BOM</h2>
         <p className="text-sm text-slate-500">
           Packaging materials (box, label, tape) automatically added to every new product's kitting BOM when it's
           created — pick materials you already track stock for. This is a one-time snapshot: changing it here only

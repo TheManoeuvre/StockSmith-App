@@ -29,7 +29,7 @@ export function ForecastSettings() {
   return (
     <div className="flex flex-col gap-3 rounded border border-slate-300 p-3">
       <div>
-        <p className="font-medium">Materials forecasting</p>
+        <h2 className="font-medium">Materials forecasting</h2>
         <p className="text-sm text-slate-500">
           Controls the "Time to stockout" figures on the dashboard — how far back consumption history is
           averaged, and the two weeks-of-cover thresholds that decide when a material shows up as a warning

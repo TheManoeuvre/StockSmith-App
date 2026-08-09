@@ -23,7 +23,7 @@ export function CurrencySettings() {
   return (
     <div className="flex flex-col gap-3 rounded border border-slate-300 p-3">
       <div>
-        <p className="font-medium">Default currency</p>
+        <h2 className="font-medium">Default currency</h2>
         <p className="text-sm text-slate-500">
           Pre-fills the currency on a new manual order — you can still change it per order. No conversion is
           applied anywhere; this is a label only.

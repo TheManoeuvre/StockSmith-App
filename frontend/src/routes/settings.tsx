@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { getSettings, openExternalUrl, saveSettings } from "../lib/tauri";
@@ -11,27 +11,45 @@ import { PlatformSyncPanel } from "../components/settings/PlatformSyncPanel";
 import { PlatformCredentialsForm } from "../components/settings/PlatformCredentialsForm";
 import { EbaySigningKeyPanel } from "../components/settings/EbaySigningKeyPanel";
 import { MarginFeeSettings } from "../components/settings/MarginFeeSettings";
+import { PlatformFeeComponents } from "../components/settings/PlatformFeeComponents";
 import { ShippingProfileSettings } from "../components/settings/ShippingProfileSettings";
+import { ReferenceDataSection } from "../components/reference/ReferenceDataSection";
+import { manufacturersApi } from "../api/manufacturers";
+import { suppliersApi } from "../api/suppliers";
+import { materialTypesApi } from "../api/materialTypes";
 import { CurrencySettings } from "../components/settings/CurrencySettings";
 import { ForecastSettings } from "../components/settings/ForecastSettings";
 import { DefaultKittingBomSettings } from "../components/settings/DefaultKittingBomSettings";
 import { Tabs, type TabDef } from "../components/common/Tabs";
 import { useShopIconUrl } from "../hooks/useShopIconUrl";
 
+const TAB_IDS = ["general", "integrations", "pricing", "reference", "connection"] as const;
+type TabId = (typeof TAB_IDS)[number];
+
 export const Route = createFileRoute("/settings")({
   component: Settings,
+  // Same reasoning as the product page (see routes/products/$productId.tsx): keeping the
+  // active tab in the URL makes switching tabs a real router navigation, so the root
+  // unsaved-changes blocker covers it without this route knowing the guard exists. It also
+  // makes a section linkable, which the reference-data tab needs now that it holds the tables
+  // themselves rather than links out to standalone pages.
+  validateSearch: (search: Record<string, unknown>): { tab?: TabId } => {
+    const tab = search.tab;
+    return TAB_IDS.includes(tab as TabId) ? { tab: tab as TabId } : {};
+  },
 });
 
 const SETTINGS_TABS: TabDef[] = [
-  { id: "connection", label: "Connection" },
+  { id: "general", label: "General" },
   { id: "integrations", label: "Integrations" },
   { id: "pricing", label: "Pricing" },
-  { id: "general", label: "General" },
   { id: "reference", label: "Reference data" },
+  { id: "connection", label: "Connection" },
 ];
 
 function Settings() {
-  const [activeTab, setActiveTab] = useState("connection");
+  const navigate = Route.useNavigate();
+  const tabFromUrl = Route.useSearch().tab;
   const [backendUrl, setBackendUrl] = useState("");
   const [sharedPassword, setSharedPassword] = useState("");
   const [savedBackendUrl, setSavedBackendUrl] = useState("");
@@ -54,6 +72,21 @@ function Settings() {
       setShowConnectionFields(!s.backendUrl || !s.sharedPassword);
     });
   }, []);
+
+  // General leads for everyone with a working connection — which, thanks to auto-provisioning,
+  // is the overwhelmingly common case. Connection only jumps the queue when there's genuinely
+  // something to fill in, reusing the same condition that decides whether to expand its fields.
+  const needsConnectionSetup = settingsLoaded && (!backendUrl || !sharedPassword);
+  // Re-checked here rather than trusting validateSearch to have dropped an unknown value: a tab
+  // id that matches nothing renders a page with a heading and no content, which is a far worse
+  // failure than ignoring a bad URL. The default can't live in validateSearch anyway — it
+  // depends on the Tauri store, which the route loader has no access to.
+  const activeTab: TabId = TAB_IDS.includes(tabFromUrl as TabId)
+    ? (tabFromUrl as TabId)
+    : needsConnectionSetup
+      ? "connection"
+      : "general";
+  const setActiveTab = (tab: string) => navigate({ search: { tab: tab as TabId } });
 
   const isDirty = backendUrl !== savedBackendUrl || sharedPassword !== savedSharedPassword;
 
@@ -154,9 +187,8 @@ function Settings() {
       )}
 
       {activeTab === "pricing" && (
-        <div className="flex flex-col gap-2">
+        <div className="max-w-2xl flex flex-col gap-4">
           <MarginFeeSettings />
-          <ShippingProfileSettings />
         </div>
       )}
 
@@ -169,16 +201,33 @@ function Settings() {
       )}
 
       {activeTab === "reference" && (
-        <div className="max-w-md flex flex-col gap-2">
-          <Link to="/manufacturers" className="rounded border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100">
-            Manufacturers
-          </Link>
-          <Link to="/suppliers" className="rounded border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100">
-            Suppliers
-          </Link>
-          <Link to="/material-types" className="rounded border border-slate-300 px-3 py-2 text-sm hover:bg-slate-100">
-            Material Types
-          </Link>
+        <div className="max-w-3xl flex flex-col gap-4">
+          <ReferenceDataSection
+            title="Manufacturers"
+            description="Who makes a material. Referenced by materials."
+            queryKey={["manufacturers"]}
+            list={manufacturersApi.list}
+            findOrCreate={manufacturersApi.findOrCreate}
+          />
+          <ReferenceDataSection
+            title="Suppliers"
+            description="Who you buy from. Referenced by materials and purchases."
+            queryKey={["suppliers"]}
+            list={suppliersApi.list}
+            findOrCreate={suppliersApi.findOrCreate}
+          />
+          <ReferenceDataSection
+            title="Material types"
+            description="What a material is made of. Referenced by materials."
+            queryKey={["material-types"]}
+            list={materialTypesApi.list}
+            findOrCreate={materialTypesApi.findOrCreate}
+          />
+          {/* Shipping profiles are reference data too — a named row that products, variants and
+              orders point at. They sat under Pricing only because their eBay/Etsy cost columns
+              looked like a pricing concern; those are per-(platform × profile), so they belong
+              on the profile itself. */}
+          <ShippingProfileSettings />
         </div>
       )}
     </div>
@@ -267,6 +316,12 @@ function PlatformIntegrationCard({ platform }: { platform: ListingPlatform }) {
         <ErrorBanner error={connectMutation.error ?? disconnectMutation.error} />
         <PlatformCredentialsForm platform={platform} environment={environment} onEnvironmentChange={setEnvironment} />
         {platform === "ebay" && <EbaySigningKeyPanel environment={environment} />}
+        {/* Keyed by platform alone, so it belongs to the platform. The global "which channel am
+            I estimating for" switch stays in Pricing — see MarginFeeSettings. */}
+        <PlatformFeeComponents platform={platform} />
+        <p className="mt-2 text-xs text-slate-400">
+          Per-profile {label} shipping costs live under Reference data → Shipping profiles.
+        </p>
       </div>
       {platformStatus?.connected && <PlatformSyncPanel platform={platform} />}
     </div>
