@@ -18,6 +18,7 @@ import os
 import secrets
 import shutil
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -105,6 +106,42 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
+# How long to keep retrying a move that Windows refuses because something still has the file
+# open. Comfortably longer than a dying process needs to release its handles, and short enough
+# that a genuinely stuck lock still reports rather than hanging the launch.
+_MOVE_RETRY_SECONDS = 15.0
+
+
+def _replace_with_retry(src: Path, dst: Path, log) -> None:
+    """os.replace, retried while Windows says the file is in use.
+
+    POSIX renames over an open file happily; Windows raises PermissionError (WinError 32) until
+    every handle is closed. The restore swap runs moments after the previous sidecar was killed
+    with `taskkill /F /T`, and process teardown is not instantaneous — so a brief window exists
+    where the old process is gone but its handle on stocksmith.db is not yet released.
+
+    Observed, not theorised: a dry run against real data with a live engine still attached failed
+    exactly this way. The rollback handled it correctly and no data was lost, but the restore was
+    marked failed and burned one of only two attempts — for a condition that clears itself in
+    milliseconds. Retrying turns a likely-transient race into a non-event.
+    """
+    deadline = time.monotonic() + _MOVE_RETRY_SECONDS
+    attempt = 0
+    while True:
+        try:
+            os.replace(src, dst)
+            if attempt:
+                log.info("Moved %s after %d retries", src.name, attempt)
+            return
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            attempt += 1
+            if attempt == 1:
+                log.info("%s is still in use — waiting for the previous process to release it", src.name)
+            time.sleep(0.25)
+
+
 def maybe_apply_staged_restore(root: Path) -> None:
     """Swap in a staged backup, if one is waiting.
 
@@ -187,7 +224,7 @@ def maybe_apply_staged_restore(root: Path) -> None:
         # Same volume throughout (everything lives under the one data directory), so each move
         # is atomic rather than a copy that could be interrupted halfway.
         if db_path.exists():
-            os.replace(db_path, displaced_db)
+            _replace_with_retry(db_path, displaced_db, log)
         # Critical: a WAL left over from the *old* database would be applied to the new file
         # sitting at that name. Not a stale read — corruption.
         for sidecar in (
@@ -195,12 +232,12 @@ def maybe_apply_staged_restore(root: Path) -> None:
             db_path.with_name("stocksmith.db-shm"),
         ):
             sidecar.unlink(missing_ok=True)
-        os.replace(staged_db, db_path)
+        _replace_with_retry(staged_db, db_path, log)
 
         if assets_path.exists():
-            os.replace(assets_path, displaced_assets)
+            _replace_with_retry(assets_path, displaced_assets, log)
         if staged_assets.exists():
-            os.replace(staged_assets, assets_path)
+            _replace_with_retry(staged_assets, assets_path, log)
         else:
             # A backup with no assets is legitimate (a brand-new shop). Give the app the empty
             # directory it expects rather than leaving nothing there.

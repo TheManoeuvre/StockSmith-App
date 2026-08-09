@@ -274,6 +274,56 @@ class TestBootTimeApply:
         assert record["state"] == "failed"
         assert "unchanged" in record["error"]
 
+    def test_waits_out_a_file_lock_instead_of_failing(self, data_root, monkeypatch):
+        """Windows refuses to rename a file anything still has open, and the swap runs moments
+        after the previous sidecar was killed — so a handle can outlive the process briefly.
+
+        Found for real: a dry run against production data hit exactly this and marked the restore
+        failed, for a condition that clears itself in milliseconds. The rollback was correct and
+        lost nothing, but it burned one of only two attempts.
+        """
+        _make_db(data_root / "data" / "stocksmith.db", ["Original"])
+        self._stage_manually(data_root, ["Restored"], {})
+
+        import os as os_module
+
+        real_replace = os_module.replace
+        calls = {"n": 0}
+
+        def locked_for_the_first_few_tries(src, dst):
+            calls["n"] += 1
+            if calls["n"] <= 3:
+                raise PermissionError(32, "The process cannot access the file because it is being used")
+            return real_replace(src, dst)
+
+        monkeypatch.setattr("app.bootstrap.os.replace", locked_for_the_first_few_tries)
+        # Keep the test quick — the production window is 15s of quarter-second retries.
+        monkeypatch.setattr("app.bootstrap._MOVE_RETRY_SECONDS", 5.0)
+
+        maybe_apply_staged_restore(data_root)
+
+        assert _names_in(data_root / "data" / "stocksmith.db") == {"Restored"}
+        record = json.loads((data_root / "restore" / "last-restore.json").read_text())
+        assert record["state"] == "done"
+
+    def test_a_lock_that_never_clears_still_rolls_back(self, data_root, monkeypatch):
+        """The retry must not turn a permanent lock into a hang or, worse, a partial swap."""
+        original = _make_db(data_root / "data" / "stocksmith.db", ["Precious"])
+        before = original.read_bytes()
+        self._stage_manually(data_root, ["Never applied"], {})
+
+        def always_locked(src, dst):
+            raise PermissionError(32, "The process cannot access the file because it is being used")
+
+        monkeypatch.setattr("app.bootstrap.os.replace", always_locked)
+        monkeypatch.setattr("app.bootstrap._MOVE_RETRY_SECONDS", 0.5)
+
+        maybe_apply_staged_restore(data_root)
+
+        assert (data_root / "data" / "stocksmith.db").read_bytes() == before
+        record = json.loads((data_root / "restore" / "last-restore.json").read_text())
+        assert record["state"] == "failed"
+
     def test_gives_up_after_two_attempts_rather_than_looping(self, data_root):
         """A restore that hard-crashes the process must not brick the app into a reboot loop."""
         _make_db(data_root / "data" / "stocksmith.db", ["Original"])
