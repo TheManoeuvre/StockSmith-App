@@ -3,6 +3,7 @@ from app.models.asset import AssetType, ProductAsset
 from app.models.backup_settings import BackupSettings
 from app.models.base import Base
 from app.models.build import Build, BuildFailedConsumption
+from app.models.colour import Colour
 from app.models.general_settings import CurrencyCode, GeneralSettings
 from app.models.kitting import (
     DefaultKittingMaterial,
@@ -35,6 +36,7 @@ from app.models.variant import ProductVariant, ProductVariantMaterial
 __all__ = [
     "Base",
     "BackupSettings",
+    "Colour",
     "Material",
     "MaterialCategory",
     "MaterialUnit",

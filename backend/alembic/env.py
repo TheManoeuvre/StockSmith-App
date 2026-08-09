@@ -14,9 +14,13 @@ from app.models import Base
 config = context.config
 
 # Interpret the config file for Python logging.
-# This line sets up loggers basically.
+#
+# disable_existing_loggers=False matters more here than the default alembic template suggests.
+# bootstrap.py sets up file logging to backend.log and *then* runs migrations in-process, so with
+# the default (True) every logger configured a moment earlier is switched off for the rest of the
+# app's life — the packaged app would migrate and then quietly stop writing its own log.
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 config.set_main_option("sqlalchemy.url", settings.database_url)
 

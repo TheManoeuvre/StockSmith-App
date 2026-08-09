@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from app.models.material import MaterialAdjustmentMode, MaterialCategory, MaterialUnit
 
@@ -11,7 +11,11 @@ class MaterialBase(BaseModel):
     category: MaterialCategory
     unit: MaterialUnit
     reorder_threshold: Decimal = Decimal(0)
+    # Both accepted, mirroring how material_type_name/material_type_id already behave: a client
+    # can send a colour_id it picked, or just a name to be found-or-created. Nothing is forced
+    # to change on day one, which is what keeps the CSV importer and the existing UI working.
     colour: str | None = None
+    colour_id: int | None = None
     material_type_id: int | None = None
     barcode: str | None = None
     manufacturer_id: int | None = None
@@ -39,6 +43,7 @@ class MaterialUpdate(BaseModel):
     reorder_threshold: Decimal | None = None
     is_active: bool | None = None
     colour: str | None = None
+    colour_id: int | None = None
     material_type_id: int | None = None
     barcode: str | None = None
     manufacturer_id: int | None = None
@@ -60,6 +65,10 @@ class MaterialRead(MaterialBase):
     allocated_qty: Decimal
     avg_unit_cost: Decimal
     is_active: bool
+    # Reads through the relationship, falling back to the legacy column — see
+    # Material.colour_name. Aliased rather than renamed so every existing consumer of `colour`
+    # (the CSV export, the materials list, materialDetail.test.tsx) is unaffected.
+    colour: str | None = Field(default=None, validation_alias=AliasChoices("colour_name", "colour"))
     manufacturer_name: str | None = None
     default_supplier_name: str | None = None
     material_type_name: str | None = None

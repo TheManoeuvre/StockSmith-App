@@ -22,6 +22,7 @@ from sqlalchemy.orm import InstrumentedAttribute
 from app.models.base import Base
 from app.models.manufacturer import Manufacturer
 from app.models.material import Material
+from app.models.colour import Colour
 from app.models.material_type import MaterialType
 from app.models.order import Order
 from app.models.product import Product
@@ -72,6 +73,7 @@ REFERENCES: dict[type[Base], Sequence[Reference]] = {
         Reference(Purchase.supplier_id, "purchase", "purchases"),
     ),
     MaterialType: (Reference(Material.material_type_id, "material", "materials"),),
+    Colour: (Reference(Material.colour_id, "material", "materials"),),
     ShippingProfile: (
         Reference(Product.shipping_profile_id, "product", "products"),
         Reference(ProductVariant.shipping_profile_id, "variant", "variants"),

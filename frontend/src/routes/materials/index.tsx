@@ -5,6 +5,7 @@ import { materialsApi } from "../../api/materials";
 import { manufacturersApi } from "../../api/manufacturers";
 import { suppliersApi } from "../../api/suppliers";
 import { materialTypesApi } from "../../api/materialTypes";
+import { coloursApi } from "../../api/colours";
 import type { Material, MaterialCategory, MaterialUnit } from "../../api/types";
 import { useMaterialImageUrl } from "../../hooks/useMaterialImageUrl";
 import { useLazyVisible } from "../../hooks/useLazyVisible";
@@ -37,6 +38,7 @@ function MaterialsList() {
   const { data: manufacturers } = useQuery({ queryKey: ["manufacturers"], queryFn: manufacturersApi.list });
   const { data: suppliers } = useQuery({ queryKey: ["suppliers"], queryFn: suppliersApi.list });
   const { data: materialTypes } = useQuery({ queryKey: ["material-types"], queryFn: materialTypesApi.list });
+  const { data: colourOptions } = useQuery({ queryKey: ["colours"], queryFn: coloursApi.list });
 
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
@@ -263,7 +265,17 @@ function MaterialsList() {
             <>
               <label className="flex flex-col gap-1">
                 <span className="text-sm">Colour / hex</span>
-                <input className="rounded border border-slate-300 px-2 py-1" value={colour} onChange={(e) => setColour(e.target.value)} />
+                {/* Backed by the colours reference table now, so the same colour on two materials
+                    is one row that can be renamed once. onResolved is unused deliberately: the
+                    backend matches the name case-insensitively and find-or-creates, which is
+                    more reliable than trusting an id the client resolved from a stale list. */}
+                <CreatableSelect
+                  className="rounded border border-slate-300 px-2 py-1"
+                  options={colourOptions ?? []}
+                  value={colour}
+                  onChange={setColour}
+                  onResolved={() => {}}
+                />
               </label>
               <label className="flex flex-col gap-1">
                 <span className="text-sm">Material type</span>

@@ -12,6 +12,7 @@ from app.routers import (
     assets,
     backups,
     builds,
+    colours,
     dashboard,
     fee_config,
     manufacturers,
@@ -117,6 +118,7 @@ app.add_middleware(
 
 app.include_router(materials.router, prefix="/api/v1")
 app.include_router(material_types.router, prefix="/api/v1")
+app.include_router(colours.router, prefix="/api/v1")
 app.include_router(products.router, prefix="/api/v1")
 app.include_router(variants.router, prefix="/api/v1")
 app.include_router(assets.router, prefix="/api/v1")

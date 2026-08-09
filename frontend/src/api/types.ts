@@ -47,6 +47,15 @@ export interface Supplier {
   created_at: string;
 }
 
+export interface Colour {
+  id: number;
+  name: string;
+  /** Set when the value parses as a hex colour — the field was historically "Colour / hex". */
+  hex_code: string | null;
+  usage_count: number;
+  created_at: string;
+}
+
 export interface MaterialType {
   id: number;
   name: string;

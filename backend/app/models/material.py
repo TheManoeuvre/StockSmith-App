@@ -58,7 +58,13 @@ class Material(Base):
 
     # Filament-specific in the UI (only shown/edited when category=filament), but not
     # enforced at the DB level — plain nullable metadata usable by any category.
+    #
+    # `colour` is the legacy free-text column, kept in step with colour_id during the transition
+    # and deliberately not dropped yet: SQLite needs a table rebuild to drop a column, and now
+    # that restoring an older backup and migrating it forward is a routine operation, one-way
+    # changes want to wait a release. Read through `colour_name`; write both.
     colour: Mapped[str | None] = mapped_column(String, nullable=True)
+    colour_id: Mapped[int | None] = mapped_column(ForeignKey("colours.id", ondelete="SET NULL"), nullable=True)
     material_type_id: Mapped[int | None] = mapped_column(
         ForeignKey("material_types.id", ondelete="SET NULL"), nullable=True
     )
@@ -84,6 +90,18 @@ class Material(Base):
     manufacturer: Mapped["Manufacturer | None"] = relationship()
     default_supplier: Mapped["Supplier | None"] = relationship()
     material_type: Mapped["MaterialType | None"] = relationship()
+    colour_ref: Mapped["Colour | None"] = relationship()
+
+    @property
+    def colour_name(self) -> str | None:
+        """Prefers the reference row, falling back to the legacy column.
+
+        The fallback matters during the transition and for any row a migration couldn't resolve
+        — a material keeps showing its colour either way.
+        """
+        if self.colour_ref is not None:
+            return self.colour_ref.name
+        return self.colour
 
     @property
     def manufacturer_name(self) -> str | None:

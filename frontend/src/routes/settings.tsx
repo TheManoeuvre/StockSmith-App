@@ -17,6 +17,7 @@ import { ReferenceDataTable } from "../components/reference/ReferenceDataTable";
 import { manufacturersApi } from "../api/manufacturers";
 import { suppliersApi } from "../api/suppliers";
 import { materialTypesApi } from "../api/materialTypes";
+import { coloursApi } from "../api/colours";
 import { CurrencySettings } from "../components/settings/CurrencySettings";
 import { ForecastSettings } from "../components/settings/ForecastSettings";
 import { DefaultKittingBomSettings } from "../components/settings/DefaultKittingBomSettings";
@@ -259,6 +260,24 @@ function Settings() {
               merge: materialTypesApi.merge,
             }}
             fields={[{ key: "name", label: "Name" }]}
+            usageLabel={(n) => `${n} material${n === 1 ? "" : "s"}`}
+          />
+          <ReferenceDataTable
+            title="Colours"
+            description="Promoted from free text, so the same colour on several materials is one entry you can rename or merge. Duplicates like 'Black' and 'black' were folded together when this table was created."
+            segment="colours"
+            queryKey={["colours"]}
+            api={{
+              list: coloursApi.list,
+              create: coloursApi.findOrCreate,
+              update: coloursApi.update,
+              remove: coloursApi.remove,
+              merge: coloursApi.merge,
+            }}
+            fields={[
+              { key: "name", label: "Name" },
+              { key: "hex_code", label: "Hex code", placeholder: "#ff00aa" },
+            ]}
             usageLabel={(n) => `${n} material${n === 1 ? "" : "s"}`}
           />
           {/* Shipping profiles are reference data too — a named row that products, variants and

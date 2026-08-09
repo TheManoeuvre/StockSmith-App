@@ -43,6 +43,7 @@ function baseRoutes() {
     { method: "GET" as const, path: "/manufacturers", respond: () => [] },
     { method: "GET" as const, path: "/suppliers", respond: () => [] },
     { method: "GET" as const, path: "/material-types", respond: () => [] },
+    { method: "GET" as const, path: "/colours", respond: () => [] },
     { method: "GET" as const, path: "/materials", respond: () => [] },
     {
       method: "GET" as const,
@@ -199,6 +200,8 @@ describe("settings page", () => {
       expect(await screen.findByRole("heading", { name: "Manufacturers" })).toBeInTheDocument();
       expect(screen.getByRole("heading", { name: "Suppliers" })).toBeInTheDocument();
       expect(screen.getByRole("heading", { name: "Material types" })).toBeInTheDocument();
+      // Colours joined the others once it stopped being free text on each material.
+      expect(screen.getByRole("heading", { name: "Colours" })).toBeInTheDocument();
     });
 
     it("keeps the global fee basis in Pricing and the fee components on each integration", async () => {

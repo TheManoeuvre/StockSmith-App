@@ -8,9 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.manufacturer import Manufacturer
 from app.models.material import Material, MaterialAdjustment, MaterialAdjustmentMode, MaterialCategory, MaterialUnit
+from app.models.colour import Colour
 from app.models.material_type import MaterialType
 from app.models.product import Product
 from app.models.supplier import Supplier
+from app.services.colours import find_or_create as find_or_create_colour
 from app.services.costing import recompute_material
 from app.services.kitting import apply_default_kitting_bom
 from app.services.validation import validate_qty_for_unit
@@ -67,6 +69,15 @@ async def export_materials_csv(session: AsyncSession) -> str:
         rows = await session.execute(select(Supplier).where(Supplier.id.in_(supplier_ids)))
         supplier_names = {s.id: s.name for s in rows.scalars()}
 
+    # The CSV keeps a `colour` column holding the NAME, not the id — ids aren't portable
+    # between machines and this file is meant to be human-editable, the same reasoning behind
+    # manufacturer_name and material_type_name.
+    colour_ids = {m.colour_id for m in materials if m.colour_id is not None}
+    colour_names: dict[int, str] = {}
+    if colour_ids:
+        rows = await session.execute(select(Colour).where(Colour.id.in_(colour_ids)))
+        colour_names = {c.id: c.name for c in rows.scalars()}
+
     material_type_ids = {m.material_type_id for m in materials if m.material_type_id is not None}
     material_type_names: dict[int, str] = {}
     if material_type_ids:
@@ -84,7 +95,7 @@ async def export_materials_csv(session: AsyncSession) -> str:
                 "unit": m.unit.value,
                 "current_qty": str(m.current_qty),
                 "reorder_threshold": str(m.reorder_threshold),
-                "colour": m.colour or "",
+                "colour": (colour_names.get(m.colour_id) if m.colour_id else None) or m.colour or "",
                 "material_type_name": material_type_names.get(m.material_type_id, "") if m.material_type_id else "",
                 "barcode": m.barcode or "",
                 "manufacturer_name": manufacturer_names.get(m.manufacturer_id, "") if m.manufacturer_id else "",
@@ -138,6 +149,8 @@ async def import_materials_csv(session: AsyncSession, content: bytes) -> dict:
             if material_type_name:
                 material_type_id = (await _find_or_create_by_name(session, MaterialType, material_type_name)).id
 
+            colour_row = await find_or_create_colour(session, row.get("colour"))
+
             existing = (
                 await session.execute(select(Material).where(func.trim(Material.name) == name))
             ).scalar_one_or_none()
@@ -148,7 +161,8 @@ async def import_materials_csv(session: AsyncSession, content: bytes) -> dict:
                     category=category,
                     unit=unit,
                     reorder_threshold=reorder_threshold,
-                    colour=row.get("colour") or None,
+                    colour=colour_row.name if colour_row else None,
+                    colour_id=colour_row.id if colour_row else None,
                     material_type_id=material_type_id,
                     barcode=row.get("barcode") or None,
                     manufacturer_id=manufacturer_id,
@@ -175,7 +189,8 @@ async def import_materials_csv(session: AsyncSession, content: bytes) -> dict:
                 existing.category = category
                 existing.unit = unit
                 existing.reorder_threshold = reorder_threshold
-                existing.colour = row.get("colour") or None
+                existing.colour = colour_row.name if colour_row else None
+                existing.colour_id = colour_row.id if colour_row else None
                 existing.material_type_id = material_type_id
                 existing.barcode = row.get("barcode") or None
                 existing.manufacturer_id = manufacturer_id

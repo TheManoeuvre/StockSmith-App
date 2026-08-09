@@ -8,9 +8,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.deps import get_db, require_auth
+from app.models.colour import Colour
 from app.models.material import Material
 from app.models.purchase import MaterialPurchase, Purchase
 from app.schemas.material import DraftPurchaseCreate, MaterialAdjustmentCreate, MaterialCreate, MaterialRead, MaterialUpdate
+from app.services.colours import resolve_updates as resolve_colour_updates
 from app.schemas.purchase import MaterialStockHistoryRead, PurchaseRead
 from app.services.costing import create_adjustment, get_on_order_qty_by_material
 from app.services.csv_io import export_materials_csv, import_materials_csv
@@ -66,6 +68,7 @@ async def _get_material_with_manufacturer(session: AsyncSession, material_id: in
             selectinload(Material.manufacturer),
             selectinload(Material.default_supplier),
             selectinload(Material.material_type),
+            selectinload(Material.colour_ref),
         )
         .execution_options(populate_existing=True)
     )
@@ -85,6 +88,7 @@ async def list_materials(
             selectinload(Material.manufacturer),
             selectinload(Material.default_supplier),
             selectinload(Material.material_type),
+            selectinload(Material.colour_ref),
         )
         .order_by(Material.name)
     )
@@ -98,9 +102,14 @@ async def list_materials(
 
 @router.get("/colours", response_model=list[str])
 async def list_material_colours(session: AsyncSession = Depends(get_db)) -> list[str]:
-    result = await session.execute(
-        select(Material.colour).where(Material.colour.is_not(None), Material.colour != "").distinct().order_by(Material.colour)
-    )
+    """Colour names, for the datalist on the variant-attributes editor.
+
+    A shim over the colours table now that one exists — it used to be SELECT DISTINCT over the
+    free-text column, which is exactly the substitute-for-a-lookup-table this replaced. Kept for
+    one release so VariantAttributesEditor can move to coloursApi at its own pace; delete it once
+    nothing calls it.
+    """
+    result = await session.execute(select(Colour.name).order_by(Colour.name))
     return [row[0] for row in result]
 
 
@@ -125,7 +134,8 @@ async def create_material(payload: MaterialCreate, session: AsyncSession = Depen
     validate_qty_for_unit(payload.reorder_threshold, payload.unit, "reorder_threshold")
     if payload.typical_reorder_qty is not None:
         validate_qty_for_unit(payload.typical_reorder_qty, payload.unit, "typical_reorder_qty")
-    material = Material(**payload.model_dump())
+    fields = await resolve_colour_updates(session, payload.model_dump())
+    material = Material(**fields)
     session.add(material)
     await session.commit()
     return await _get_material_with_manufacturer(session, material.id)
@@ -145,7 +155,7 @@ async def update_material(
     material = await session.get(Material, material_id)
     if material is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Material not found")
-    updates = payload.model_dump(exclude_unset=True)
+    updates = await resolve_colour_updates(session, payload.model_dump(exclude_unset=True))
     effective_unit = updates.get("unit", material.unit)
     if "reorder_threshold" in updates:
         validate_qty_for_unit(updates["reorder_threshold"], effective_unit, "reorder_threshold")
