@@ -12,6 +12,34 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-08-14
+
+Fixes an update that could apply itself only halfway, and makes setting up listing profiles
+possible without going and looking up id numbers by hand.
+
+### Fixed
+- **Updating no longer leaves you running half of the old version.** Windows can't replace
+  a file that's in use, so if StockSmith was running when an update installed, the app
+  updated but the part of it that does the actual work didn't — and the two carried on
+  together looking almost fine. That's what made the Integrations page fail after updating
+  to 0.6.2. StockSmith now notices and tells you to close it fully and run the installer
+  again, rather than carrying on in a half-updated state. **If you're on 0.6.2 and the
+  Integrations page is erroring, this is why — installing this version fixes it.**
+- **The window closes when you click the X.** If StockSmith wanted to ask about unsaved
+  work but couldn't show the question, the close was cancelled and nothing appeared, which
+  left the X looking broken. It now closes rather than trapping you.
+
+### Changed
+- **Listing profiles are set up by name, not by id number.** Etsy identifies your category,
+  shipping profile and return policy by numbers it never shows you anywhere in Etsy itself.
+  Now you search for a category the way you would on Etsy, and pick your shipping profile
+  and return policy from a list of your own. Return policies are described by what they do
+  — "Returns and exchanges within 30 days" — because Etsy doesn't give them names.
+- **Options read as words.** "I did" rather than `i_did`, and eBay's item condition is a
+  list to choose from instead of something to type.
+- **Etsy needs reconnecting once.** Reading your shipping profiles needs a permission
+  StockSmith didn't previously ask for. Everything else works as before until you do.
+
 ## [0.6.2] - 2026-08-14
 
 Groundwork for creating listings from StockSmith, plus the tool that makes it possible:
