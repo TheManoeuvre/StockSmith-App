@@ -8,6 +8,11 @@ import type { ListingPlatform } from "../api/types";
 import { CONNECTABLE_PLATFORMS, PLATFORM_LABELS } from "../lib/platforms";
 import { ErrorBanner } from "../components/common/ErrorBanner";
 import { PlatformSyncPanel } from "../components/settings/PlatformSyncPanel";
+import { PlatformCompatibilityPanel } from "../components/settings/PlatformCompatibilityPanel";
+import { EtsyBackfillPanel } from "../components/settings/EtsyBackfillPanel";
+import { PlatformLimitsEditor } from "../components/settings/PlatformLimitsEditor";
+import { ListingProfiles } from "../components/settings/ListingProfiles";
+import { EtsyProfileProposalsPanel } from "../components/settings/EtsyProfileProposalsPanel";
 import { PlatformCredentialsForm } from "../components/settings/PlatformCredentialsForm";
 import { EbaySigningKeyPanel } from "../components/settings/EbaySigningKeyPanel";
 import { MarginFeeSettings } from "../components/settings/MarginFeeSettings";
@@ -391,6 +396,11 @@ function PlatformIntegrationCard({ platform }: { platform: ListingPlatform }) {
           Per-profile {label} shipping costs live under Reference data → Shipping profiles.
         </p>
       </div>
+      {platformStatus?.connected && <PlatformCompatibilityPanel platform={platform} />}
+      {platformStatus?.connected && platform === "etsy" && <EtsyBackfillPanel />}
+      {platformStatus?.connected && <ListingProfiles platform={platform} />}
+      {platformStatus?.connected && platform === "etsy" && <EtsyProfileProposalsPanel />}
+      {platformStatus?.connected && <PlatformLimitsEditor platform={platform} />}
       {platformStatus?.connected && <PlatformSyncPanel platform={platform} />}
     </div>
       </DirtyPath>

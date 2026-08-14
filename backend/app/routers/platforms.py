@@ -34,6 +34,24 @@ from app.schemas.platform import (
     SyncSettingsUpdate,
     SyncStartDateUpdate,
 )
+from app.schemas.platform_limits import CatalogueCompatibilityReport
+from app.schemas.listing_profile import (
+    DraftReadinessReport,
+    ProductPlatformSettingsRead,
+    ProductPlatformSettingsWrite,
+    ReadinessIssue,
+)
+from app.schemas.etsy_backfill import (
+    ApplyProfileProposalsRequest,
+    ApplyProfileProposalsResult,
+    EtsyBackfillPreview,
+    EtsyBackfillRequest,
+    EtsyBackfillResult,
+    ProductBackfillProposal,
+    ProfileProposalRead,
+    ProfileProposalsRead,
+    VariantPriceProposal,
+)
 from app.schemas.listing_adoption import (
     AdoptListingRequest,
     AdoptListingResult,
@@ -46,7 +64,13 @@ from app.schemas.listing_adoption import (
     VariationMappingProposal,
 )
 from app.services import (
+    catalogue_compatibility,
+    draft_readiness,
+    etsy_backfill,
     listing_adoption,
+    listing_profile_backfill,
+    listing_copy,
+    listing_profiles,
     listing_push,
     listing_sync,
     order_sync,
@@ -704,6 +728,254 @@ async def listing_push_log(
         for p in pushes
     ]
     return ListingPushPage(items=items, total=total or 0)
+
+
+def _proposal_schema(proposal) -> ProductBackfillProposal:
+    return ProductBackfillProposal(
+        product_id=proposal.product_id,
+        product_name=proposal.product_name,
+        external_listing_id=proposal.external_listing_id,
+        listing_title=proposal.listing_title,
+        description=proposal.description,
+        description_chars=proposal.description_chars,
+        sale_price=proposal.sale_price,
+        image_url=proposal.image_url,
+        variant_prices=[
+            VariantPriceProposal(
+                variant_id=v.variant_id,
+                variant_name=v.variant_name,
+                sku=v.sku,
+                proposed_price=v.proposed_price,
+            )
+            for v in proposal.variant_prices
+        ],
+    )
+
+
+@router.get("/etsy/profile-proposals", response_model=ProfileProposalsRead, dependencies=[Depends(require_auth)])
+async def get_etsy_profile_proposals(session: AsyncSession = Depends(get_db)) -> ProfileProposalsRead:
+    """Listing profiles derived from the Etsy listings these products already have.
+
+    A shop's catalogue spans a handful of genuine metadata combinations rather than one per
+    product, so this proposes one profile per combination — turning profile setup into
+    reviewing a few suggestions instead of looking nine fields up by hand."""
+    adapter, connection = await _get_etsy_adapter(session)
+    try:
+        listings = await adapter.fetch_all_listings(session, connection)
+    except PlatformError as e:
+        raise _map_platform_error(e)
+
+    proposals = await listing_profile_backfill.propose_profiles(session, listings)
+    return ProfileProposalsRead(
+        proposals=[
+            ProfileProposalRead(
+                index=index,
+                suggested_name=p.suggested_name,
+                is_complete=p.is_complete,
+                product_count=len(p.product_ids),
+                product_names=p.product_names[:5],
+                taxonomy_id=p.signature.taxonomy_id,
+                who_made=p.signature.who_made,
+                when_made=p.signature.when_made,
+                is_supply=p.signature.is_supply,
+                shipping_profile_id=p.signature.shipping_profile_id,
+                return_policy_id=p.signature.return_policy_id,
+                processing_min=p.processing_min,
+                processing_max=p.processing_max,
+            )
+            for index, p in enumerate(proposals)
+        ]
+    )
+
+
+@router.post(
+    "/etsy/profile-proposals/apply",
+    response_model=ApplyProfileProposalsResult,
+    dependencies=[Depends(require_auth)],
+)
+async def apply_etsy_profile_proposals(
+    payload: ApplyProfileProposalsRequest, session: AsyncSession = Depends(get_db)
+) -> ApplyProfileProposalsResult:
+    """Creates the accepted proposals as profiles and points their products at them."""
+    adapter, connection = await _get_etsy_adapter(session)
+    try:
+        listings = await adapter.fetch_all_listings(session, connection)
+    except PlatformError as e:
+        raise _map_platform_error(e)
+
+    result = await listing_profile_backfill.apply_proposals(
+        session,
+        listings,
+        {item.index: item.name for item in payload.items},
+        assign_products=payload.assign_products,
+    )
+    return ApplyProfileProposalsResult(
+        profiles_created=result.profiles_created, products_assigned=result.products_assigned
+    )
+
+
+@router.get("/etsy/backfill-preview", response_model=EtsyBackfillPreview, dependencies=[Depends(require_auth)])
+async def get_etsy_backfill_preview(session: AsyncSession = Depends(get_db)) -> EtsyBackfillPreview:
+    """What could be filled from the Etsy listings these products are already matched to.
+
+    Reads only — nothing is written until the user picks. See services/etsy_backfill.py
+    for the fill-blanks-only rule and why per-offering prices are used rather than the
+    listing price."""
+    adapter, connection = await _get_etsy_adapter(session)
+    try:
+        listings = await adapter.fetch_all_listings(session, connection, with_images=True)
+    except PlatformError as e:
+        raise _map_platform_error(e)
+
+    preview = await etsy_backfill.build_preview(session, listings)
+    return EtsyBackfillPreview(
+        products=[_proposal_schema(p) for p in preview.products],
+        already_complete=preview.already_complete,
+        unmatched=preview.unmatched,
+    )
+
+
+@router.post("/etsy/backfill", response_model=EtsyBackfillResult, dependencies=[Depends(require_auth)])
+async def apply_etsy_backfill(
+    payload: EtsyBackfillRequest, session: AsyncSession = Depends(get_db)
+) -> EtsyBackfillResult:
+    """Applies the ticked fields for the ticked products.
+
+    Re-crawls rather than trusting the previewed values: the preview the user was looking
+    at may be minutes old, and this writes to their catalogue. Same reasoning as
+    push_product_corrections re-deriving its quantities at send time."""
+    adapter, connection = await _get_etsy_adapter(session)
+    try:
+        listings = await adapter.fetch_all_listings(session, connection, with_images=True)
+    except PlatformError as e:
+        raise _map_platform_error(e)
+
+    selections = {item.product_id: set(item.fields) for item in payload.items}
+    result = await etsy_backfill.apply_backfill(session, connection, listings, selections)
+    return EtsyBackfillResult(
+        products_updated=result.products_updated,
+        descriptions_filled=result.descriptions_filled,
+        prices_filled=result.prices_filled,
+        images_filled=result.images_filled,
+        errors=result.errors,
+    )
+
+
+async def _settings_schema(session, product_id: int, platform: ListingPlatform) -> ProductPlatformSettingsRead:
+    product = await session.get(Product, product_id)
+    if product is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    settings = await listing_copy.get_settings(session, product_id, platform)
+    resolved = listing_copy.resolve_copy(product, settings)
+    return ProductPlatformSettingsRead(
+        product_id=product_id,
+        platform=platform,
+        listing_profile_id=settings.listing_profile_id if settings else None,
+        is_target=settings.is_target if settings else None,
+        listing_title=settings.listing_title if settings else None,
+        listing_description=settings.listing_description if settings else None,
+        resolved_title=resolved.title,
+        resolved_title_source=resolved.title_source,
+        resolved_description=resolved.description,
+        resolved_description_source=resolved.description_source,
+    )
+
+
+@router.get(
+    "/{platform}/products/{product_id}/settings",
+    response_model=ProductPlatformSettingsRead,
+    dependencies=[Depends(require_auth)],
+)
+async def get_product_platform_settings(
+    platform: ListingPlatform, product_id: int, session: AsyncSession = Depends(get_db)
+) -> ProductPlatformSettingsRead:
+    """This product's listing profile and copy for one platform, plus what each field
+    resolves to once the fallback chain is applied."""
+    return await _settings_schema(session, product_id, platform)
+
+
+@router.put(
+    "/{platform}/products/{product_id}/settings",
+    response_model=ProductPlatformSettingsRead,
+    dependencies=[Depends(require_auth)],
+)
+async def update_product_platform_settings(
+    platform: ListingPlatform,
+    product_id: int,
+    payload: ProductPlatformSettingsWrite,
+    session: AsyncSession = Depends(get_db),
+) -> ProductPlatformSettingsRead:
+    product = await session.get(Product, product_id)
+    if product is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+
+    settings = await listing_profiles.get_or_create_settings(session, product_id, platform)
+    settings.listing_profile_id = payload.listing_profile_id
+    settings.is_target = payload.is_target
+    # Empty strings are stored as NULL so the value falls back rather than resolving to a
+    # blank title — clearing the box means "use the shared copy", not "publish nothing".
+    settings.listing_title = (payload.listing_title or "").strip() or None
+    settings.listing_description = (payload.listing_description or "").strip() or None
+    await session.commit()
+    return await _settings_schema(session, product_id, platform)
+
+
+@router.get(
+    "/{platform}/products/{product_id}/draft-readiness",
+    response_model=DraftReadinessReport,
+    dependencies=[Depends(require_auth)],
+)
+async def get_draft_readiness(
+    platform: ListingPlatform, product_id: int, session: AsyncSession = Depends(get_db)
+) -> DraftReadinessReport:
+    """Whether a draft listing could be created for this product, and what is missing.
+
+    Purely local — no adapter call, nothing spent. That is what lets it drive a button's
+    enabled state directly, so the user never clicks "create draft" only to be told it was
+    never possible."""
+    report = await draft_readiness.evaluate(session, product_id, platform)
+    if report is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    return DraftReadinessReport(
+        product_id=report.product_id,
+        platform=report.platform,
+        can_create=report.can_create,
+        profile_id=report.profile_id,
+        profile_name=report.profile_name,
+        title=report.title,
+        title_source=report.title_source,
+        description_chars=report.description_chars,
+        unit_count=report.unit_count,
+        priced_unit_count=report.priced_unit_count,
+        image_count=report.image_count,
+        issues=[
+            ReadinessIssue(
+                field=i.field, severity=i.severity, message=i.message, fix_hint=i.fix_hint
+            )
+            for i in report.issues
+        ],
+    )
+
+
+@router.get(
+    "/{platform}/catalogue-compatibility",
+    response_model=CatalogueCompatibilityReport,
+    dependencies=[Depends(require_auth)],
+)
+async def get_catalogue_compatibility(
+    platform: ListingPlatform, session: AsyncSession = Depends(get_db)
+) -> CatalogueCompatibilityReport:
+    """Reports which existing products breach this platform's field limits.
+
+    Deliberately a plain GET rather than a button-triggered mutation like the listing gap
+    scan: this makes no marketplace call at all, so it costs nothing to load and there is
+    no rate-limit budget to protect. A button nobody presses would just hide the answer.
+
+    Also deliberately not a gate on check-sync. Those endpoints are read-only diagnostics,
+    and refusing to run one because the data is non-conformant would withhold exactly the
+    information needed to fix it. The gate belongs on the write paths.
+    """
+    return await catalogue_compatibility.scan_catalogue(session, platform)
 
 
 @router.post(

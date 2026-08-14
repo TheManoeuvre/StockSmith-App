@@ -23,7 +23,7 @@ from app.db import configure_sqlite_pragmas, enforce_sqlite_foreign_keys
 from app.models.base import Base
 from app.models.listing import ListingPlatform
 from app.models.platform_connection import PlatformConnection
-from app.services import listing_push, order_sync
+from app.services import listing_push, order_sync, platform_limits
 from app.services.platforms.base import ExternalOrder, ExternalOrderLine, PaymentState
 
 
@@ -175,3 +175,13 @@ def make_order(
         financials_enriched=financials_enriched,
         **financials,
     )
+
+
+@pytest.fixture(autouse=True)
+def _clear_limit_cache():
+    """platform_limits caches the resolved limit table for the process, so a test that
+    writes an override would otherwise leak its answer into every test after it — and each
+    test here gets a brand-new in-memory database the cache knows nothing about."""
+    platform_limits.invalidate_limits_cache()
+    yield
+    platform_limits.invalidate_limits_cache()

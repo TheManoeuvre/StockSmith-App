@@ -11,6 +11,7 @@ import { VariantAttributesEditor } from "../../components/products/VariantAttrib
 import { AssetUploader } from "../../components/products/AssetUploader";
 import { StockSection } from "../../components/products/StockSection";
 import { PricingSection } from "../../components/products/PricingSection";
+import { ProductPlatformSettingsPanel } from "../../components/products/ProductPlatformSettingsPanel";
 import { PlatformSyncSection } from "../../components/products/PlatformSyncSection";
 import { formatUnitCost } from "../../lib/money";
 import { CopyButton } from "../../components/common/CopyButton";
@@ -497,8 +498,10 @@ function ProductDetail() {
 
       {activeTab === "platform-sync" && (
         <section className="flex flex-col gap-3">
-          <PlatformSyncSection productId={id} platform="etsy" />
-          <PlatformSyncSection productId={id} platform="ebay" />
+          <ProductPlatformSettingsPanel productId={id} platform="etsy" />
+            <PlatformSyncSection productId={id} platform="etsy" />
+          <ProductPlatformSettingsPanel productId={id} platform="ebay" />
+            <PlatformSyncSection productId={id} platform="ebay" />
         </section>
       )}
 
