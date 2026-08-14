@@ -172,6 +172,12 @@ async def check_product_sku_sync(
         listing.external_state = match.state if match else None
         listing.external_quantity = match.quantity if match else None
         listing.last_checked_at = now
+        # A match is a marketplace confirming it holds this SKU, which is the only moment
+        # that fact is knowable. Deliberately not cleared on a miss: a listing that has gone
+        # inactive is still published under this SKU, and forgetting that would let a later
+        # rename change an identifier that is still in use out there.
+        if match is not None and sku:
+            listing.published_sku = sku
 
         status = _status_from_match(match)
         expected_quantity = (
