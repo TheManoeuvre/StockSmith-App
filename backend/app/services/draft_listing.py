@@ -126,9 +126,13 @@ async def build_draft(
             metadata[key] = value
 
     attribute_names = [
-        product.variant_attribute1_name,
-        product.variant_attribute2_name,
-        product.variant_attribute3_name,
+        name
+        for name in (
+            product.variant_attribute1_name,
+            product.variant_attribute2_name,
+            product.variant_attribute3_name,
+        )
+        if name
     ]
 
     units: list[DraftUnit] = []
@@ -183,6 +187,7 @@ async def build_draft(
         title=copy.title,
         description=copy.description or "",
         currency=general.default_currency.value,
+        attribute_names=attribute_names,
         units=units,
         images=images,
         metadata=metadata,

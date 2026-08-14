@@ -242,6 +242,9 @@ class DraftListing:
     title: str
     description: str
     currency: str
+    # Attribute names in slot order, so an adapter can map them onto whatever the
+    # marketplace calls a variation without re-deriving the order from the units.
+    attribute_names: list[str] = field(default_factory=list)
     units: list[DraftUnit] = field(default_factory=list)
     images: list[DraftImage] = field(default_factory=list)
     metadata: dict[str, str | int | bool] = field(default_factory=dict)

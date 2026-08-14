@@ -90,6 +90,12 @@ _MAX_RATE_LIMIT_RETRIES = 3
 # within a couple of seconds, not progressively longer.
 # Etsy's taxonomy is identical for every shop and changes on Etsy's schedule; caching it
 # for the process avoids re-downloading thousands of nodes for every keystroke.
+# Etsy's "Custom Property 1/2" slots. StockSmith's attribute names are free text rather
+# than taxonomy properties, so a variation has to go somewhere that accepts an arbitrary
+# name — these are those slots. UNVERIFIED against a live write; the ids come from Etsy's
+# documentation and are the least-confirmed part of the variation mapping.
+_CUSTOM_PROPERTY_IDS = (513, 514)
+
 _TAXONOMY_CACHE: list[dict] | None = None
 
 _MAX_LISTING_CONFLICT_RETRIES = 3
@@ -1053,6 +1059,14 @@ class EtsyAdapter:
                 warnings.append(f"The draft was created but the image failed to upload: {e}")
                 publish_blockers.append("Etsy needs at least one image before this can be published.")
 
+        # Variations, if there are any. After the image on purpose: a rejected variation
+        # matrix should still leave a draft with its picture attached, and this raises
+        # where the image step deliberately doesn't — an inventory the seller didn't ask
+        # for is worse than a draft they have to finish, but a *wrong* inventory is worse
+        # than both.
+        if len(draft.units) > 1 or any(u.attributes for u in draft.units):
+            await self._set_draft_inventory(session, connection, listing_id, draft)
+
         # On Etsy the listing id is what belongs in Listing.external_listing_id — see
         # _index_listing_skus, which is the reader this has to agree with.
         unit_refs = {str(u.variant_id) if u.variant_id is not None else "": listing_id for u in draft.units}
@@ -1064,6 +1078,103 @@ class EtsyAdapter:
             warnings=warnings,
             publish_blockers=publish_blockers,
         )
+
+
+    async def _set_draft_inventory(self, session, connection, listing_id: str, draft) -> None:
+        """Writes the variation matrix onto a freshly-created draft.
+
+        Every write-key rule here was learned the hard way for push_listing_quantity, one
+        400 at a time, and is reproduced rather than rediscovered — see that method's
+        docstring for the full account. In short: `product_id`, `offering_id`, `is_deleted`
+        and `scale_name` are rejected on write; `property_name` and `readiness_state_id` are
+        required; a literal quantity of 0 is refused, so an out-of-stock offering is
+        quantity 1 with is_enabled False; and price goes as a plain float rather than the
+        nested Money object the GET returns.
+
+        The GET happens first even though this is a brand-new listing, purely to learn the
+        `readiness_state_id` Etsy assigned to the draft's default product. That field is
+        required on write and inventing a value would be guessing at a processing profile.
+        """
+        attribute_names = [n for n in draft.attribute_names if n]
+        property_ids = list(_CUSTOM_PROPERTY_IDS[: len(attribute_names)])
+
+        response = await self._authed_request(
+            session, connection, "GET", f"/listings/{listing_id}/inventory"
+        )
+        if response.status_code != 200:
+            raise PlatformSyncError(
+                f"Failed to read the new draft's inventory: {response.status_code} {response.text}"
+            )
+        current = response.json()
+        readiness_state_id = None
+        for product in current.get("products", []):
+            for offering in product.get("offerings", []):
+                readiness_state_id = offering.get("readiness_state_id")
+                break
+            if readiness_state_id is not None:
+                break
+
+        products_payload = []
+        for unit in draft.units:
+            quantity = unit.quantity
+            is_enabled = True
+            if quantity <= 0:
+                # Etsy refuses a literal 0 ("One offering must have quantity greater than
+                # 0"), so out-of-stock is expressed as present-but-off-sale.
+                quantity, is_enabled = 1, False
+
+            products_payload.append(
+                {
+                    "sku": unit.sku,
+                    "property_values": [
+                        {
+                            "property_id": property_id,
+                            # Required on write, unlike scale_name which is rejected. Not
+                            # symmetric; both directions confirmed live.
+                            "property_name": name,
+                            "scale_id": None,
+                            "value_ids": [],
+                            "values": [unit.attributes.get(name, "")],
+                        }
+                        for property_id, name in zip(property_ids, attribute_names)
+                        if unit.attributes.get(name)
+                    ],
+                    "offerings": [
+                        {
+                            "quantity": quantity,
+                            "is_enabled": is_enabled,
+                            "price": float(unit.price),
+                            "readiness_state_id": readiness_state_id,
+                        }
+                    ],
+                }
+            )
+
+        # SKU, price and quantity are all per-unit in StockSmith, so every property varies
+        # all three. Etsy validates the supplied values against these arrays and rejects a
+        # mismatch, so understating them is what causes a 400 here.
+        put_body = {
+            "products": products_payload,
+            "price_on_property": property_ids,
+            "quantity_on_property": property_ids,
+            "sku_on_property": property_ids,
+        }
+
+        attempt = 0
+        while True:
+            put_response = await self._authed_request(
+                session, connection, "PUT", f"/listings/{listing_id}/inventory", json=put_body
+            )
+            if put_response.status_code == 200:
+                return
+            if put_response.status_code == 409 and attempt < _MAX_LISTING_CONFLICT_RETRIES:
+                attempt += 1
+                await asyncio.sleep(_LISTING_CONFLICT_RETRY_DELAY)
+                continue
+            raise PlatformSyncError(
+                f"The draft was created but its variations were rejected: "
+                f"{put_response.status_code} {put_response.text}"
+            )
 
 
     # --- Reference data for the listing-profile pickers -------------------------------
