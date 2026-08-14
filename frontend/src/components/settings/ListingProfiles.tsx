@@ -1,27 +1,30 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { listingProfilesApi, type ListingProfile, type ListingProfileWrite } from "../../api/listingProfiles";
+import type { ListingPlatform } from "../../api/types";
 import {
+  EBAY_CONDITION,
+  ETSY_IS_SUPPLY,
   ETSY_WHEN_MADE,
   ETSY_WHO_MADE,
-  listingProfilesApi,
-  type ListingProfile,
-  type ListingProfileWrite,
-} from "../../api/listingProfiles";
-import type { ListingPlatform } from "../../api/types";
+  type Option,
+} from "../../lib/listingOptions";
 import { PLATFORM_LABELS } from "../../lib/platforms";
 import { ConfirmDialog } from "../common/ConfirmDialog";
 import { ErrorBanner } from "../common/ErrorBanner";
+import { TaxonomyPicker } from "./TaxonomyPicker";
 
 /**
- * Named bundles of the marketplace metadata a listing needs — category, policies, who
- * made it — with one marked as the default.
+ * Named bundles of the marketplace metadata a listing needs — category, policies, who made
+ * it — with one marked as the default.
  *
  * Bundles rather than per-product fields because products that differ tend to differ
  * together: a different category usually arrives with a different shipping profile and
  * processing time. Most products answer identically, so most shops need one profile.
  *
- * Nothing is pre-filled. A wrong policy id doesn't fail loudly, it silently mis-ships, so
- * an empty field that blocks a draft with a clear message beats a plausible guess.
+ * Every field that a marketplace identifies by numeric id is chosen by name here. Etsy in
+ * particular surfaces none of those ids in its own seller UI, so a form asking for them
+ * directly was asking the user to go and read an API response.
  */
 export function ListingProfiles({ platform }: { platform: ListingPlatform }) {
   const queryClient = useQueryClient();
@@ -159,6 +162,33 @@ function ProfileForm({
     ebay_marketplace_id: profile?.ebay_marketplace_id ?? null,
   });
 
+  // What's stored is an id; this is the name it was chosen by, so re-opening a saved
+  // profile shows a category rather than a number.
+  const [taxonomyPath, setTaxonomyPath] = useState<string | null>(null);
+
+  const { data: resolvedNode } = useQuery({
+    queryKey: ["platforms", "etsy", "taxonomy", "node", profile?.etsy_taxonomy_id],
+    queryFn: () => listingProfilesApi.etsyTaxonomyNode(profile!.etsy_taxonomy_id!),
+    enabled: platform === "etsy" && !!profile?.etsy_taxonomy_id,
+    retry: false,
+  });
+  useEffect(() => {
+    if (resolvedNode && taxonomyPath === null) setTaxonomyPath(resolvedNode.path);
+  }, [resolvedNode, taxonomyPath]);
+
+  const { data: shippingProfiles, error: shippingError } = useQuery({
+    queryKey: ["platforms", "etsy", "shipping-profiles"],
+    queryFn: () => listingProfilesApi.etsyShippingProfiles(),
+    enabled: platform === "etsy",
+    retry: false,
+  });
+  const { data: returnPolicies } = useQuery({
+    queryKey: ["platforms", "etsy", "return-policies"],
+    queryFn: () => listingProfilesApi.etsyReturnPolicies(),
+    enabled: platform === "etsy",
+    retry: false,
+  });
+
   const saveMutation = useMutation({
     mutationFn: () =>
       profile
@@ -168,7 +198,6 @@ function ProfileForm({
   });
 
   const set = (patch: ListingProfileWrite) => setDraft((d) => ({ ...d, ...patch }));
-  const num = (value: string) => (value.trim() === "" ? null : Number(value));
   const text = (value: string) => (value.trim() === "" ? null : value);
 
   return (
@@ -185,69 +214,57 @@ function ProfileForm({
 
       {platform === "etsy" ? (
         <div className="grid grid-cols-2 gap-2">
-          <Field label="Category (taxonomy id)" required>
-            <input
-              type="number"
-              className="w-full rounded border border-slate-300 px-2 py-1"
-              value={draft.etsy_taxonomy_id ?? ""}
-              onChange={(e) => set({ etsy_taxonomy_id: num(e.target.value) })}
+          <Field label="Category" required>
+            <TaxonomyPicker
+              value={draft.etsy_taxonomy_id ?? null}
+              valueLabel={taxonomyPath}
+              onChange={(id, path) => {
+                set({ etsy_taxonomy_id: id });
+                setTaxonomyPath(path);
+              }}
             />
           </Field>
-          <Field label="Etsy shipping profile id" required>
-            <input
-              type="number"
-              className="w-full rounded border border-slate-300 px-2 py-1"
-              value={draft.etsy_shipping_profile_id ?? ""}
-              onChange={(e) => set({ etsy_shipping_profile_id: num(e.target.value) })}
+          <Field label="Shipping profile" required>
+            <RemoteSelect
+              options={shippingProfiles}
+              failed={!!shippingError}
+              value={draft.etsy_shipping_profile_id ?? null}
+              onChange={(v) => set({ etsy_shipping_profile_id: v === null ? null : Number(v) })}
+              emptyHint="No shipping profiles on this Etsy shop."
+              failedHint="Couldn't read your shipping profiles. Reconnect Etsy in Settings — this needs a permission that older connections didn't grant."
             />
           </Field>
           <Field label="Who made it" required>
-            <select
-              className="w-full rounded border border-slate-300 px-2 py-1"
-              value={draft.etsy_who_made ?? ""}
-              onChange={(e) => set({ etsy_who_made: text(e.target.value) })}
-            >
-              <option value="">—</option>
-              {ETSY_WHO_MADE.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
+            <OptionSelect
+              options={ETSY_WHO_MADE}
+              value={draft.etsy_who_made ?? null}
+              onChange={(v) => set({ etsy_who_made: v })}
+            />
           </Field>
-          <Field label="When made" required>
-            <select
-              className="w-full rounded border border-slate-300 px-2 py-1"
-              value={draft.etsy_when_made ?? ""}
-              onChange={(e) => set({ etsy_when_made: text(e.target.value) })}
-            >
-              <option value="">—</option>
-              {ETSY_WHEN_MADE.map((value) => (
-                <option key={value} value={value}>
-                  {value}
-                </option>
-              ))}
-            </select>
+          <Field label="When was it made" required>
+            <OptionSelect
+              options={ETSY_WHEN_MADE}
+              value={draft.etsy_when_made ?? null}
+              onChange={(v) => set({ etsy_when_made: v })}
+            />
           </Field>
-          <Field label="Is a supply">
-            <select
-              className="w-full rounded border border-slate-300 px-2 py-1"
-              value={draft.etsy_is_supply === null || draft.etsy_is_supply === undefined ? "" : String(draft.etsy_is_supply)}
-              onChange={(e) =>
-                set({ etsy_is_supply: e.target.value === "" ? null : e.target.value === "true" })
+          <Field label="This listing is">
+            <OptionSelect
+              options={ETSY_IS_SUPPLY}
+              value={
+                draft.etsy_is_supply === null || draft.etsy_is_supply === undefined
+                  ? null
+                  : String(draft.etsy_is_supply)
               }
-            >
-              <option value="">—</option>
-              <option value="false">Finished product</option>
-              <option value="true">Supply</option>
-            </select>
+              onChange={(v) => set({ etsy_is_supply: v === null ? null : v === "true" })}
+            />
           </Field>
-          <Field label="Return policy id">
-            <input
-              type="number"
-              className="w-full rounded border border-slate-300 px-2 py-1"
-              value={draft.etsy_return_policy_id ?? ""}
-              onChange={(e) => set({ etsy_return_policy_id: num(e.target.value) })}
+          <Field label="Return policy">
+            <RemoteSelect
+              options={returnPolicies}
+              value={draft.etsy_return_policy_id ?? null}
+              onChange={(v) => set({ etsy_return_policy_id: v === null ? null : Number(v) })}
+              emptyHint="No return policies set up on Etsy."
             />
           </Field>
         </div>
@@ -261,11 +278,10 @@ function ProfileForm({
             />
           </Field>
           <Field label="Condition" required>
-            <input
-              className="w-full rounded border border-slate-300 px-2 py-1"
-              value={draft.ebay_condition ?? ""}
-              onChange={(e) => set({ ebay_condition: text(e.target.value) })}
-              placeholder="NEW"
+            <OptionSelect
+              options={EBAY_CONDITION}
+              value={draft.ebay_condition ?? null}
+              onChange={(v) => set({ ebay_condition: v })}
             />
           </Field>
           <Field label="Postage policy id" required>
@@ -344,5 +360,72 @@ function Field({
       </span>
       {children}
     </label>
+  );
+}
+
+/** A select over a fixed vocabulary, showing labels and storing the marketplace's value. */
+function OptionSelect({
+  options,
+  value,
+  onChange,
+}: {
+  options: Option[];
+  value: string | null;
+  onChange: (value: string | null) => void;
+}) {
+  return (
+    <select
+      className="w-full rounded border border-slate-300 px-2 py-1"
+      value={value ?? ""}
+      onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
+    >
+      <option value="">—</option>
+      {options.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+/**
+ * A select over options fetched from the marketplace.
+ *
+ * `failed` is kept separate from an empty list on purpose: "you have none" and "we weren't
+ * allowed to ask" look identical in the data and need completely different actions from the
+ * user. Collapsing them is how someone ends up creating a shipping profile they already had.
+ */
+function RemoteSelect({
+  options,
+  value,
+  onChange,
+  emptyHint,
+  failed,
+  failedHint,
+}: {
+  options: { id: string; label: string }[] | undefined;
+  value: number | null;
+  onChange: (value: string | null) => void;
+  emptyHint: string;
+  failed?: boolean;
+  failedHint?: string;
+}) {
+  if (failed) return <p className="text-xs text-amber-800">{failedHint ?? emptyHint}</p>;
+  if (options && options.length === 0) return <p className="text-xs text-amber-800">{emptyHint}</p>;
+  return (
+    <select
+      className="w-full rounded border border-slate-300 px-2 py-1"
+      value={value === null ? "" : String(value)}
+      onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
+      disabled={!options}
+    >
+      <option value="">{options ? "—" : "Loading…"}</option>
+      {options?.map((option) => (
+        <option key={option.id} value={option.id}>
+          {option.label}
+        </option>
+      ))}
+    </select>
   );
 }

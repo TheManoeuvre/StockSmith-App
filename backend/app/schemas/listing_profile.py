@@ -115,3 +115,23 @@ class DraftReadinessReport(BaseModel):
     priced_unit_count: int
     image_count: int
     issues: list[ReadinessIssue]
+
+
+class NamedOption(BaseModel):
+    """An id the user should never have to see, paired with something they recognise.
+
+    Used for every marketplace reference that is a bare number in the API and has no
+    surfaced id in the seller UI — shipping profiles, return policies, eBay's policies.
+    `id` is a string because the two marketplaces disagree on whether these are numeric."""
+
+    id: str
+    label: str
+
+
+class TaxonomyNode(BaseModel):
+    # `path` rather than `name` alone because leaf names repeat across the tree — Etsy has
+    # several nodes called "Stands", and only the ancestry tells them apart.
+    id: int
+    name: str
+    path: str
+    level: int

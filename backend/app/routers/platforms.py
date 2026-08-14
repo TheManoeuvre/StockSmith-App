@@ -37,9 +37,11 @@ from app.schemas.platform import (
 from app.schemas.platform_limits import CatalogueCompatibilityReport
 from app.schemas.listing_profile import (
     DraftReadinessReport,
+    NamedOption,
     ProductPlatformSettingsRead,
     ProductPlatformSettingsWrite,
     ReadinessIssue,
+    TaxonomyNode,
 )
 from app.schemas.etsy_backfill import (
     ApplyProfileProposalsRequest,
@@ -109,7 +111,13 @@ _PLATFORM_LABELS: dict[ListingPlatform, str] = {
 # alongside the write scope since it's what build_listing_sku_index was already granted
 # under and there's no confirmation the write scope alone still covers reads.
 _SCOPES: dict[ListingPlatform, list[str]] = {
-    ListingPlatform.etsy: ["listings_r", "listings_w", "transactions_r"],
+    # shops_r was added for the listing-profile pickers: reading the shop's shipping
+    # profiles needs it, and Etsy exposes their ids nowhere in its own UI, so without this
+    # the only way to fill that field is to go and read an API response by hand. A
+    # connection made before this was added keeps working for everything else and 403s on
+    # that one call — see EtsyAdapter.fetch_shipping_profiles, which says so rather than
+    # returning an empty list that would read as "you have no shipping profiles".
+    ListingPlatform.etsy: ["listings_r", "listings_w", "transactions_r", "shops_r"],
     ListingPlatform.ebay: [
         "https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly",
         "https://api.ebay.com/oauth/api_scope/sell.finances",
@@ -750,6 +758,76 @@ def _proposal_schema(proposal) -> ProductBackfillProposal:
             for v in proposal.variant_prices
         ],
     )
+
+
+@router.get("/etsy/taxonomy", response_model=list[TaxonomyNode], dependencies=[Depends(require_auth)])
+async def search_etsy_taxonomy(
+    search: str = Query("", max_length=100),
+    limit: int = Query(30, ge=1, le=100),
+    session: AsyncSession = Depends(get_db),
+) -> list[TaxonomyNode]:
+    """Etsy categories matching a search term.
+
+    Searched server-side over the cached tree rather than shipping thousands of nodes to the
+    browser. Matching is on the full path, so typing "desk" finds "Home & Living > Storage &
+    Organisation > Desk Storage" as readily as a leaf called "Desk".
+
+    Deepest matches first: Etsy wants the most specific category, and a listing assigned a
+    level-0 root is the failure mode this picker exists to prevent."""
+    adapter, connection = await _get_etsy_adapter(session)
+    try:
+        nodes = await adapter.fetch_taxonomy_nodes(session, connection)
+    except PlatformError as e:
+        raise _map_platform_error(e)
+
+    term = search.strip().lower()
+    matches = [n for n in nodes if not term or term in n["path"].lower()]
+    matches.sort(key=lambda n: (-n["level"], n["path"]))
+    return [
+        TaxonomyNode(id=n["id"], name=n["name"], path=n["path"], level=n["level"])
+        for n in matches[:limit]
+        if n["id"] is not None
+    ]
+
+
+@router.get("/etsy/taxonomy/{taxonomy_id}", response_model=TaxonomyNode, dependencies=[Depends(require_auth)])
+async def get_etsy_taxonomy_node(
+    taxonomy_id: int, session: AsyncSession = Depends(get_db)
+) -> TaxonomyNode:
+    """One category by id, so a saved profile can show the name it was chosen by rather than
+    the number it was stored as."""
+    adapter, connection = await _get_etsy_adapter(session)
+    try:
+        nodes = await adapter.fetch_taxonomy_nodes(session, connection)
+    except PlatformError as e:
+        raise _map_platform_error(e)
+    match = next((n for n in nodes if n["id"] == taxonomy_id), None)
+    if match is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Category not found")
+    return TaxonomyNode(id=match["id"], name=match["name"], path=match["path"], level=match["level"])
+
+
+@router.get("/etsy/shipping-profiles", response_model=list[NamedOption], dependencies=[Depends(require_auth)])
+async def list_etsy_shipping_profiles(session: AsyncSession = Depends(get_db)) -> list[NamedOption]:
+    """The shop's own shipping profiles, by name."""
+    adapter, connection = await _get_etsy_adapter(session)
+    try:
+        profiles = await adapter.fetch_shipping_profiles(session, connection)
+    except PlatformError as e:
+        raise _map_platform_error(e)
+    return [NamedOption(id=str(p["id"]), label=p["title"]) for p in profiles if p["id"] is not None]
+
+
+@router.get("/etsy/return-policies", response_model=list[NamedOption], dependencies=[Depends(require_auth)])
+async def list_etsy_return_policies(session: AsyncSession = Depends(get_db)) -> list[NamedOption]:
+    """The shop's return policies, labelled by what they actually do — Etsy's policy object
+    carries no name at all."""
+    adapter, connection = await _get_etsy_adapter(session)
+    try:
+        policies = await adapter.fetch_return_policies(session, connection)
+    except PlatformError as e:
+        raise _map_platform_error(e)
+    return [NamedOption(id=str(p["id"]), label=p["label"]) for p in policies if p["id"] is not None]
 
 
 @router.get("/etsy/profile-proposals", response_model=ProfileProposalsRead, dependencies=[Depends(require_auth)])

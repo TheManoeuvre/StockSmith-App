@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
+from app.config import settings
 from app.routers import (
     assets,
     backups,
@@ -144,7 +145,16 @@ app.include_router(system.router)
 
 @app.get("/healthz")
 async def healthz() -> dict[str, str]:
-    return {"status": "ok"}
+    """Liveness, plus which build is answering.
+
+    The version matters because the desktop shell probes this port on startup and reuses
+    whatever responds. On Windows an installer cannot overwrite a running executable, so an
+    update applied while the old backend is alive replaces the app but leaves the previous
+    sidecar binary on disk — and the new shell then adopts a backend from the old release.
+    Everything looks fine until the new UI calls an endpoint the old build has never heard
+    of, which is exactly how 0.6.2 arrived with a working app and a broken Integrations
+    page. Reporting the version is what lets the shell notice instead of guessing."""
+    return {"status": "ok", "version": settings.app_version}
 
 
 @app.get("/bootstrap-info")
