@@ -19,6 +19,7 @@ from app.routers import (
     material_types,
     materials,
     orders,
+    platform_config,
     platforms,
     products,
     purchases,
@@ -130,6 +131,7 @@ app.include_router(builds.router, prefix="/api/v1")
 app.include_router(orders.router, prefix="/api/v1")
 app.include_router(platforms.router, prefix="/api/v1")
 app.include_router(fee_config.router, prefix="/api/v1")
+app.include_router(platform_config.router, prefix="/api/v1")
 app.include_router(shipping_profiles.router, prefix="/api/v1")
 app.include_router(stock_adjustments.router, prefix="/api/v1")
 app.include_router(backups.router, prefix="/api/v1")

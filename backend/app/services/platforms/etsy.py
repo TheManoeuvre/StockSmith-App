@@ -830,7 +830,9 @@ class EtsyAdapter:
 
         return index
 
-    async def fetch_all_listings(self, session, connection: PlatformConnection) -> list[dict]:
+    async def fetch_all_listings(
+        self, session, connection: PlatformConnection, *, with_images: bool = False
+    ) -> list[dict]:
         """The same paginated crawl build_listing_sku_index performs, returning the raw
         listings instead of folding them into a SKU-keyed dict.
 
@@ -838,11 +840,17 @@ class EtsyAdapter:
         matching SKU — which by definition never appear as keys in that index, so the
         index alone cannot answer the question. Kept as a sibling rather than having
         build_listing_sku_index call this and re-index, so the hot path (sync checking)
-        keeps its single-pass behaviour with no extra allocation."""
+        keeps its single-pass behaviour with no extra allocation.
+
+        with_images adds Etsy's Images association, which carries url_fullxfull for every
+        listing image. Off by default because the callers that only need SKUs and state
+        shouldn't pay for a heavier response on every sync — the backfill flow is the one
+        place that wants it."""
         if connection.external_account_id is None:
             raise PlatformSyncError("Etsy connection has no shop id — reconnect required")
 
-        params: dict[str, str | int] = {"limit": 100, "offset": 0, "includes": "Inventory"}
+        includes = "Images,Inventory" if with_images else "Inventory"
+        params: dict[str, str | int] = {"limit": 100, "offset": 0, "includes": includes}
         listings: list[dict] = []
 
         for _ in range(_MAX_LISTING_PAGES):

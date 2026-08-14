@@ -52,6 +52,16 @@ class Product(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     sku: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
     description: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Listing copy, kept separate from name/description on purpose. `name` is an inventory
+    # label — short, legible, what this is called at the bench — while a listing title is a
+    # different artefact with a character budget and search to satisfy. Overloading one
+    # field to serve both degrades whichever use loses the argument.
+    #
+    # These are the shared defaults; ProductPlatformSettings overrides them per platform,
+    # and both fall back to name/description so nothing breaks for a product whose copy
+    # nobody has written yet. See services/listing_copy.py for the resolution order.
+    listing_title: Mapped[str | None] = mapped_column(String, nullable=True)
+    listing_description: Mapped[str | None] = mapped_column(String, nullable=True)
     barcode: Mapped[str | None] = mapped_column(String, nullable=True)
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
     current_stock: Mapped[int] = mapped_column(default=0, nullable=False)

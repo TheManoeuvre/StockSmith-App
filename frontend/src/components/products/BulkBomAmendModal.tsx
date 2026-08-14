@@ -20,6 +20,10 @@ export function BulkBomAmendModal({ product, onClose }: { product: Product; onCl
     queryFn: () => productsApi.getBom(product.id),
   });
   const { data: materials } = useQuery({ queryKey: ["materials"], queryFn: materialsApi.list });
+  const { data: variants } = useQuery({
+    queryKey: ["products", product.id, "variants"],
+    queryFn: () => productsApi.listVariants(product.id),
+  });
 
   const attributeNames = [
     product.variant_attribute1_name,
@@ -29,6 +33,21 @@ export function BulkBomAmendModal({ product, onClose }: { product: Product; onCl
 
   const [attributeName, setAttributeName] = useState(attributeNames[0] ?? "");
   const [attributeValue, setAttributeValue] = useState("");
+
+  // The values actually present on this product's variants for the chosen attribute.
+  // The backend matches attribute_value literally, so free text meant a typo, a case
+  // difference or a stray space silently matched zero variants and returned an empty
+  // preview — indistinguishable from "no variants use this value". Offering only real
+  // values makes that failure mode unreachable.
+  const attributeSlot = attributeNames.indexOf(attributeName);
+  const attributeValues = Array.from(
+    new Set(
+      (variants ?? [])
+        .filter((v) => v.is_active)
+        .map((v) => [v.attribute1_value, v.attribute2_value, v.attribute3_value][attributeSlot])
+        .filter((value): value is string => !!value && value.trim() !== "")
+    )
+  );
   const [baseMaterialId, setBaseMaterialId] = useState<number | null>(null);
   const [qty, setQty] = useState("");
   const [substituteId, setSubstituteId] = useState<number | null>(null);
@@ -91,6 +110,8 @@ export function BulkBomAmendModal({ product, onClose }: { product: Product; onCl
               value={attributeName}
               onChange={(e) => {
                 setAttributeName(e.target.value);
+                // A value from the previous attribute would match no variants at all.
+                setAttributeValue("");
                 setPreview(null);
               }}
             >
@@ -103,15 +124,24 @@ export function BulkBomAmendModal({ product, onClose }: { product: Product; onCl
           </label>
           <label className="flex flex-col gap-1 text-sm">
             <span>Value</span>
-            <input
-              className="rounded border border-slate-300 px-2 py-1"
-              placeholder="e.g. Large"
+            <select
+              className="rounded border border-slate-300 px-2 py-1 disabled:bg-slate-50"
+              disabled={attributeValues.length === 0}
               value={attributeValue}
               onChange={(e) => {
                 setAttributeValue(e.target.value);
                 setPreview(null);
               }}
-            />
+            >
+              <option value="">
+                {attributeValues.length === 0 ? "No values on this attribute" : "Select a value…"}
+              </option>
+              {attributeValues.map((value) => (
+                <option key={value} value={value}>
+                  {value}
+                </option>
+              ))}
+            </select>
           </label>
           <label className="flex flex-col gap-1 text-sm">
             <span>BOM line</span>

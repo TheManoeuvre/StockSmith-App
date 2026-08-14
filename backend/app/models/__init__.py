@@ -13,6 +13,7 @@ from app.models.kitting import (
     ProductVariantKittingMaterial,
 )
 from app.models.listing import Listing, ListingPlatform
+from app.models.listing_profile import ListingProfile, ProductPlatformSettings
 from app.models.order import Order, OrderLine, OrderStatus
 from app.models.order_return import OrderLineReturn, ReturnDisposition, ReturnScope, ReturnSource
 from app.models.manufacturer import Manufacturer
@@ -23,6 +24,7 @@ from app.models.platform_credential import PlatformAppCredential, PlatformEnviro
 from app.models.platform_listing_push import ListingPushStatus, PlatformListingPush
 from app.models.platform_sync_run import PlatformSyncRun, SyncRunMode, SyncRunStatus
 from app.models.platform_fee import FeeBasis, MarginFeeConfig, MarginFeeSource, PlatformFeeComponent
+from app.models.platform_limits import PlatformFieldLimit
 from app.models.pricing import ProductPriceSnapshot
 from app.models.product import Product, ProductBundleItem, ProductMaterial
 from app.models.product_stock_event import ProductStockEvent, ProductStockEventType
@@ -35,6 +37,9 @@ from app.models.variant import ProductVariant, ProductVariantMaterial
 
 __all__ = [
     "Base",
+    "PlatformFieldLimit",
+    "ListingProfile",
+    "ProductPlatformSettings",
     "BackupSettings",
     "Colour",
     "Material",
