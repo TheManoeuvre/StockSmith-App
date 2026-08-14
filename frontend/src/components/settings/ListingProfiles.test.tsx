@@ -34,7 +34,14 @@ const ETSY_PROFILE = {
   ebay_marketplace_id: null,
 };
 
+const TAXONOMY = [
+  { id: 1234, name: "Desk Storage", path: "Home & Living > Storage & Organisation > Desk Storage", level: 2 },
+];
+const SHIPPING = [{ id: "99", label: "UK Standard" }];
+const RETURNS = [{ id: "7", label: "Returns and exchanges within 30 days" }];
+
 let profiles: unknown[] = [];
+let shipping: unknown = SHIPPING;
 
 function renderPanel(platform: "etsy" | "ebay" = "etsy") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -47,7 +54,12 @@ function renderPanel(platform: "etsy" | "ebay" = "etsy") {
 
 beforeEach(() => {
   profiles = [ETSY_PROFILE];
+  shipping = SHIPPING;
   setRoutes([
+    { method: "GET", path: /\/platforms\/etsy\/taxonomy\/\d+$/, respond: () => TAXONOMY[0] },
+    { method: "GET", path: /\/platforms\/etsy\/taxonomy\?/, respond: () => TAXONOMY },
+    { method: "GET", path: "/platforms/etsy/shipping-profiles", respond: () => shipping },
+    { method: "GET", path: "/platforms/etsy/return-policies", respond: () => RETURNS },
     { method: "GET", path: /\/settings\/listing-profiles\/\w+$/, respond: () => profiles },
     { method: "POST", path: /\/settings\/listing-profiles\/\w+$/, respond: () => ETSY_PROFILE },
     { method: "PATCH", path: /\/settings\/listing-profiles\/\w+\/\d+$/, respond: () => ETSY_PROFILE },
@@ -72,7 +84,7 @@ it("asks Etsy's questions on Etsy and eBay's on eBay", async () => {
   // fields the platform has no use for and omit the ones it refuses the call without.
   renderPanel("etsy");
   await userEvent.click(await screen.findByText("New profile"));
-  expect(screen.getByRole("spinbutton", { name: /Category \(taxonomy id\)/ })).toBeTruthy();
+  expect(screen.getByPlaceholderText(/Search Etsy categories/)).toBeTruthy();
   expect(screen.getByRole("combobox", { name: /Who made it/ })).toBeTruthy();
   expect(screen.queryByRole("textbox", { name: /Postage policy id/ })).toBeNull();
 });
@@ -84,6 +96,76 @@ it("asks for eBay's policies on eBay", async () => {
   expect(screen.getByRole("textbox", { name: /Postage policy id/ })).toBeTruthy();
   expect(screen.getByRole("textbox", { name: /Location key/ })).toBeTruthy();
   expect(screen.queryByRole("combobox", { name: /Who made it/ })).toBeNull();
+});
+
+it("shows option values as readable text, not the marketplace's codes", async () => {
+  // A form offering "i_did" and "made_to_order" is asking the user to read an API.
+  renderPanel("etsy");
+  await userEvent.click(await screen.findByText("New profile"));
+
+  const whoMade = screen.getByRole("combobox", { name: /Who made it/ }) as HTMLSelectElement;
+  const labels = [...whoMade.options].map((o) => o.textContent);
+  expect(labels).toContain("I did");
+  expect(labels).not.toContain("i_did");
+  // The value sent to Etsy is still Etsy's own vocabulary — only the label is ours.
+  expect([...whoMade.options].map((o) => o.value)).toContain("i_did");
+});
+
+it("picks a category by name and stores its id", async () => {
+  renderPanel("etsy");
+  await userEvent.click(await screen.findByText("New profile"));
+
+  await userEvent.type(screen.getByPlaceholderText(/Search Etsy categories/), "desk");
+  // The path is shown because leaf names repeat across Etsy's tree.
+  const option = await screen.findByText("Home & Living > Storage & Organisation > Desk Storage");
+  await userEvent.click(option);
+
+  await userEvent.type(screen.getByRole("textbox", { name: /Profile name/ }), "Handmade");
+  await userEvent.click(screen.getByText("Save"));
+
+  await waitFor(() => {
+    const post = calls.find((c) => c.method === "POST");
+    expect(post).toBeTruthy();
+    expect((post!.body as Record<string, unknown>).etsy_taxonomy_id).toBe(1234);
+  });
+});
+
+it("offers shipping profiles and return policies by name", async () => {
+  renderPanel("etsy");
+  await userEvent.click(await screen.findByText("New profile"));
+
+  const shippingSelect = (await screen.findByRole("combobox", {
+    name: /Shipping profile/,
+  })) as HTMLSelectElement;
+  expect([...shippingSelect.options].map((o) => o.textContent)).toContain("UK Standard");
+
+  // Etsy's return policy object carries no name at all, so the label describes what it does.
+  const returns = screen.getByRole("combobox", { name: /Return policy/ }) as HTMLSelectElement;
+  expect([...returns.options].map((o) => o.textContent)).toContain(
+    "Returns and exchanges within 30 days"
+  );
+});
+
+it("distinguishes 'you have none' from 'we could not ask'", async () => {
+  // The two look identical in the data and need completely different actions: one means set
+  // one up on Etsy, the other means reconnect to grant a permission.
+  shipping = [];
+  renderPanel("etsy");
+  await userEvent.click(await screen.findByText("New profile"));
+  expect(await screen.findByText(/No shipping profiles on this Etsy shop/)).toBeTruthy();
+});
+
+it("offers eBay conditions as a list rather than free text", async () => {
+  profiles = [];
+  renderPanel("ebay");
+  await userEvent.click(await screen.findByText("New profile"));
+
+  const condition = screen.getByRole("combobox", { name: /Condition/ }) as HTMLSelectElement;
+  const labels = [...condition.options].map((o) => o.textContent);
+  expect(labels).toContain("New");
+  // "Seconds" is not an eBay value — it maps onto NEW_WITH_DEFECTS, which is what it means.
+  expect(labels).toContain("Seconds (new, with a flaw)");
+  expect([...condition.options].map((o) => o.value)).toContain("NEW_WITH_DEFECTS");
 });
 
 it("won't save a profile with no name", async () => {
@@ -100,7 +182,6 @@ it("sends the fields it was given and leaves the rest null", async () => {
   await userEvent.click(await screen.findByText("New profile"));
 
   await userEvent.type(screen.getByRole("textbox", { name: /Profile name/ }), "Handmade");
-  await userEvent.type(screen.getByRole("spinbutton", { name: /Category \(taxonomy id\)/ }), "1234");
   await userEvent.selectOptions(screen.getByRole("combobox", { name: /Who made it/ }), "i_did");
   await userEvent.click(screen.getByText("Save"));
 
@@ -109,7 +190,6 @@ it("sends the fields it was given and leaves the rest null", async () => {
     expect(post).toBeTruthy();
     const body = post!.body as Record<string, unknown>;
     expect(body.name).toBe("Handmade");
-    expect(body.etsy_taxonomy_id).toBe(1234);
     expect(body.etsy_who_made).toBe("i_did");
     // Untouched fields go as null rather than "" — an empty string would be stored as a
     // real value and would then satisfy a required-field check it shouldn't.

@@ -99,4 +99,20 @@ describe("useTauriCloseGuard", () => {
     discard!();
     expect(destroy).toHaveBeenCalledTimes(1);
   });
+
+  it("closes the window anyway if the prompt cannot be shown", async () => {
+    // Vetoing the close without showing anything is indistinguishable from a dead X button
+    // and leaves Task Manager as the only way out. Losing unsaved work is bad; trapping
+    // someone in a window they cannot close is worse, and gives them nowhere to go.
+    pretendTauri();
+    const handler = await mount(true, () => {
+      throw new Error("dialog unavailable");
+    });
+
+    const preventDefault = vi.fn();
+    handler({ preventDefault });
+
+    expect(preventDefault).toHaveBeenCalled();
+    expect(destroy).toHaveBeenCalledTimes(1);
+  });
 });

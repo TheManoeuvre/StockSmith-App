@@ -38,7 +38,17 @@ export function useTauriCloseGuard(onConfirmClose: (destroy: () => void) => void
       const stop = await appWindow.onCloseRequested((event) => {
         if (!registry.isDirtyUnder("")) return; // nothing unsaved — let it close
         event.preventDefault();
-        handlerRef.current(() => void appWindow.destroy());
+        // Cancelling the close is only defensible if something then appears to explain it.
+        // If the prompt throws — a crashed render tree, a guard in a bad state — the window
+        // has been stopped from closing with nothing on screen, which is indistinguishable
+        // from a dead title-bar button and leaves no way out but Task Manager. Losing
+        // unsaved work is bad; trapping someone in a window they cannot close is worse, and
+        // unlike lost work it gives them nowhere to go. So: fail open.
+        try {
+          handlerRef.current(() => void appWindow.destroy());
+        } catch {
+          void appWindow.destroy();
+        }
       });
       if (cancelled) stop();
       else unlisten = stop;

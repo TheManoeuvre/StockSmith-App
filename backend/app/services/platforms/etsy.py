@@ -88,6 +88,10 @@ _MAX_RATE_LIMIT_RETRIES = 3
 # method's docstring. A flat short delay rather than exponential backoff since this is a
 # lock, not a rate limit: it clears as soon as whatever's holding it finishes, typically
 # within a couple of seconds, not progressively longer.
+# Etsy's taxonomy is identical for every shop and changes on Etsy's schedule; caching it
+# for the process avoids re-downloading thousands of nodes for every keystroke.
+_TAXONOMY_CACHE: list[dict] | None = None
+
 _MAX_LISTING_CONFLICT_RETRIES = 3
 _LISTING_CONFLICT_RETRY_DELAY = 2.0
 
@@ -966,6 +970,119 @@ class EtsyAdapter:
             raise PlatformSyncError(
                 f"Failed to write SKUs to Etsy listing {listing_id}: {put_response.status_code} {put_response.text}"
             )
+
+    # --- Reference data for the listing-profile pickers -------------------------------
+    #
+    # Etsy identifies a category, a shipping profile and a return policy by numeric id, and
+    # exposes none of those ids anywhere in the seller UI. Asking someone to type one is
+    # asking them to go and find it in an API response, so these three calls exist purely to
+    # turn ids into things a human recognises.
+
+    async def fetch_taxonomy_nodes(self, session, connection: PlatformConnection) -> list[dict]:
+        """Etsy's full seller taxonomy, as a flat list of {id, name, path, level}.
+
+        The API returns a nested tree; flattening it here means the search endpoint and the
+        picker both work on one shape. `path` is the ancestry joined for display, because a
+        bare leaf name is frequently ambiguous — Etsy has several nodes called "Stands", and
+        only the path distinguishes them.
+
+        Cached at module level for the process: this is a large response (thousands of nodes)
+        that is identical for every shop and changes on Etsy's schedule, not ours."""
+        global _TAXONOMY_CACHE
+        if _TAXONOMY_CACHE is not None:
+            return _TAXONOMY_CACHE
+
+        response = await self._authed_request(session, connection, "GET", "/seller-taxonomy/nodes")
+        if response.status_code != 200:
+            raise PlatformSyncError(
+                f"Failed to fetch Etsy categories: {response.status_code} {response.text}"
+            )
+
+        flat: list[dict] = []
+
+        def walk(node: dict, ancestry: list[str]) -> None:
+            name = node.get("name") or ""
+            trail = ancestry + [name]
+            flat.append(
+                {
+                    "id": node.get("id"),
+                    "name": name,
+                    "path": " > ".join(trail),
+                    "level": node.get("level", len(trail) - 1),
+                }
+            )
+            for child in node.get("children") or []:
+                walk(child, trail)
+
+        for root in response.json().get("results", []):
+            walk(root, [])
+
+        _TAXONOMY_CACHE = flat
+        return flat
+
+    async def fetch_shipping_profiles(self, session, connection: PlatformConnection) -> list[dict]:
+        """The shop's shipping profiles as {id, title}.
+
+        Requires the `shops_r` scope, which StockSmith did not originally request — a
+        connection made before it was added returns 403 here and needs reconnecting. That is
+        reported as a blocker rather than swallowed, because a silent empty list would look
+        like "you have no shipping profiles" when the real answer is "we were not allowed to
+        ask"."""
+        if connection.external_account_id is None:
+            raise PlatformSyncError("Etsy connection has no shop id — reconnect required")
+
+        response = await self._authed_request(
+            session, connection, "GET", f"/shops/{connection.external_account_id}/shipping-profiles"
+        )
+        if response.status_code == 403:
+            raise PlatformSyncError(
+                "Etsy did not allow reading your shipping profiles. Reconnect Etsy in "
+                "Settings to grant the newer permission."
+            )
+        if response.status_code != 200:
+            raise PlatformSyncError(
+                f"Failed to fetch Etsy shipping profiles: {response.status_code} {response.text}"
+            )
+        return [
+            {"id": p.get("shipping_profile_id"), "title": p.get("title") or "Untitled profile"}
+            for p in response.json().get("results", [])
+            if not p.get("is_deleted")
+        ]
+
+    async def fetch_return_policies(self, session, connection: PlatformConnection) -> list[dict]:
+        """The shop's return policies as {id, label}.
+
+        Etsy's return policy has no name — the object carries only accepts_returns,
+        accepts_exchanges and a deadline in days. So the label is composed from what it
+        actually does, which is more use than a name would have been anyway: "Returns and
+        exchanges within 30 days" tells you which one to pick; "Policy 2" does not."""
+        if connection.external_account_id is None:
+            raise PlatformSyncError("Etsy connection has no shop id — reconnect required")
+
+        response = await self._authed_request(
+            session, connection, "GET", f"/shops/{connection.external_account_id}/policies/return"
+        )
+        if response.status_code != 200:
+            raise PlatformSyncError(
+                f"Failed to fetch Etsy return policies: {response.status_code} {response.text}"
+            )
+        return [
+            {"id": p.get("return_policy_id"), "label": EtsyAdapter._return_policy_label(p)}
+            for p in response.json().get("results", [])
+        ]
+
+    @staticmethod
+    def _return_policy_label(policy: dict) -> str:
+        returns = policy.get("accepts_returns")
+        exchanges = policy.get("accepts_exchanges")
+        deadline = policy.get("return_deadline")
+        if not returns and not exchanges:
+            return "No returns or exchanges"
+        accepted = " and ".join(
+            part for part, on in (("returns", returns), ("exchanges", exchanges)) if on
+        )
+        label = accepted.capitalize()
+        return f"{label} within {deadline} days" if deadline else label
 
     @staticmethod
     def _index_listing_skus(listing: dict, index: dict[str, ExternalListingRef]) -> None:

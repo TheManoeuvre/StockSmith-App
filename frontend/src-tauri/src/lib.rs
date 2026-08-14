@@ -57,6 +57,37 @@ async fn is_backend_healthy() -> bool {
     matches!(client.get(BACKEND_HEALTH_URL).send().await, Ok(resp) if resp.status().is_success())
 }
 
+/// The version the backend on the port reports, if it will tell us.
+///
+/// `None` means it answered but named no version, which identifies a build from before
+/// /healthz carried one — i.e. an old release, which is precisely the case worth catching.
+async fn backend_reported_version() -> Option<String> {
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(2)).build().ok()?;
+    let response = client.get(BACKEND_HEALTH_URL).send().await.ok()?;
+    let body = response.json::<serde_json::Value>().await.ok()?;
+    body.get("version")?.as_str().map(|v| v.to_string())
+}
+
+/// Whether the backend on the port is the same build as this shell.
+///
+/// Windows cannot overwrite a running executable, so an update applied while the old
+/// backend is alive replaces the app and silently leaves the previous sidecar binary in
+/// place. The new shell then finds a healthy backend on 8000 and adopts it, and the user
+/// runs a new UI against an old API — which looks like nothing at all until a page calls an
+/// endpoint that release never had. That is exactly how 0.6.2 shipped a working app with a
+/// broken Integrations page.
+///
+/// A backend reporting "dev" is always accepted: that is a developer's own process, started
+/// by hand, and refusing it would break the reuse-if-running convenience for no safety gain.
+fn version_matches(reported: Option<&str>, own: &str) -> bool {
+    match reported {
+        Some("dev") => true,
+        Some(v) => v == own,
+        // Answered, but named no version: a build from before /healthz carried one.
+        None => false,
+    }
+}
+
 /// Whether the backend answering on the port is one we should reuse.
 ///
 /// Healthy is not sufficient. A backend that reports a maintenance `phase` is the *outgoing*
@@ -120,7 +151,20 @@ async fn spawn_sidecar_if_needed(app: &tauri::AppHandle) -> Result<(), String> {
         // reuse it instead of spawning a second instance, matching the "reuse if already
         // running" convenience the old dev scripts had. Unless it's mid-restore: see
         // is_backend_adoptable.
-        return Ok(());
+        //
+        // But only if it is the same build. Adopting an older backend is silent and
+        // indistinguishable from working, so this refuses rather than guesses — see
+        // version_matches.
+        let own = app.package_info().version.to_string();
+        let reported = backend_reported_version().await;
+        if version_matches(reported.as_deref(), &own) {
+            return Ok(());
+        }
+        return Err(format!(
+            "A different version of the StockSmith backend is already running on port 8000              (it reports {}, this app is {}). This usually means an update could not replace              the backend because it was still running. Close StockSmith completely, then run              the installer again.",
+            reported.as_deref().unwrap_or("an older build"),
+            own
+        ));
     }
 
     // Hand the shell's own version to the backend rather than keeping a second copy of it in
@@ -287,6 +331,33 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
+    use super::version_matches;
+
+    #[test]
+    fn adopts_a_backend_of_the_same_version() {
+        assert!(version_matches(Some("0.6.3"), "0.6.3"));
+    }
+
+    #[test]
+    fn refuses_a_backend_from_a_different_release() {
+        // The 0.6.2 failure: a new shell finding the previous release's backend still alive
+        // because the installer could not overwrite a running executable.
+        assert!(!version_matches(Some("0.6.1"), "0.6.2"));
+    }
+
+    #[test]
+    fn refuses_a_backend_that_reports_no_version() {
+        // Answering without a version identifies a build from before /healthz carried one,
+        // which is by definition older than any shell performing this check.
+        assert!(!version_matches(None, "0.6.3"));
+    }
+
+    #[test]
+    fn always_adopts_a_developers_own_backend() {
+        // Started by hand from source; refusing it would break reuse-if-running for no gain.
+        assert!(version_matches(Some("dev"), "0.6.3"));
+    }
+
     use super::{truncate_notes, MAX_NOTES_CHARS};
 
     #[test]

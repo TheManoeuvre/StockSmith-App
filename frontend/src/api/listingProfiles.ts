@@ -66,16 +66,19 @@ export interface DraftReadinessReport {
   issues: ReadinessIssue[];
 }
 
-// Etsy's own vocabulary, sent as-is. Not modelled as a local enum: these are Etsy's
-// values, they change on Etsy's schedule, and a new one shouldn't need a release here.
-export const ETSY_WHO_MADE = ["i_did", "someone_else", "collective"];
-export const ETSY_WHEN_MADE = [
-  "made_to_order",
-  "2020_2026",
-  "2010_2019",
-  "2007_2009",
-  "before_2007",
-];
+export interface NamedOption {
+  id: string;
+  label: string;
+}
+
+export interface TaxonomyNode {
+  id: number;
+  name: string;
+  // Leaf names repeat across Etsy's tree — several nodes are called "Stands", and only the
+  // ancestry tells them apart.
+  path: string;
+  level: number;
+}
 
 export const listingProfilesApi = {
   list: (platform: ListingPlatform) =>
@@ -96,4 +99,12 @@ export const listingProfilesApi = {
   ) => api.put<ProductPlatformSettings>(`/platforms/${platform}/products/${productId}/settings`, payload),
   draftReadiness: (platform: ListingPlatform, productId: number) =>
     api.get<DraftReadinessReport>(`/platforms/${platform}/products/${productId}/draft-readiness`),
+
+  // Etsy identifies these by numeric id and surfaces none of those ids in its own seller
+  // UI, so the only alternative to these lookups is asking the user to read an API response.
+  searchEtsyTaxonomy: (search: string) =>
+    api.get<TaxonomyNode[]>(`/platforms/etsy/taxonomy?search=${encodeURIComponent(search)}`),
+  etsyTaxonomyNode: (id: number) => api.get<TaxonomyNode>(`/platforms/etsy/taxonomy/${id}`),
+  etsyShippingProfiles: () => api.get<NamedOption[]>(`/platforms/etsy/shipping-profiles`),
+  etsyReturnPolicies: () => api.get<NamedOption[]>(`/platforms/etsy/return-policies`),
 };
