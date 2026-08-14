@@ -971,6 +971,101 @@ class EtsyAdapter:
                 f"Failed to write SKUs to Etsy listing {listing_id}: {put_response.status_code} {put_response.text}"
             )
 
+    async def create_draft_listing(self, session, connection: PlatformConnection, draft) -> "DraftListingResult":
+        """Creates a real Etsy draft: not publicly visible, and publishing it is a separate
+        deliberate act in Etsy's own editor.
+
+        Two calls. The listing itself is form-urlencoded — Etsy's createDraftListing does
+        not take JSON — and the image goes up afterwards as multipart, because a listing id
+        has to exist before an image can be attached to it.
+
+        The image is deliberately not fatal. Etsy documents image_ids as optional on create
+        and only requires one to publish, so a failed upload leaves a usable draft with a
+        publish blocker rather than throwing away a listing that was created successfully
+        and cannot be deleted from here.
+        """
+        from app.services.platforms.base import DraftListingResult
+
+        if connection.external_account_id is None:
+            raise PlatformSyncError("Etsy connection has no shop id — reconnect required")
+
+        # Etsy takes the listing-level price as "the minimum possible price"; per-unit
+        # prices arrive with the inventory call once variations are supported.
+        prices = [float(u.price) for u in draft.units if u.price]
+        quantity = sum(max(u.quantity, 0) for u in draft.units)
+
+        form = {
+            "quantity": max(quantity, 1),
+            "title": draft.title,
+            "description": draft.description,
+            "price": min(prices) if prices else 0,
+            "who_made": draft.metadata.get("etsy.who_made"),
+            "when_made": draft.metadata.get("etsy.when_made"),
+            "taxonomy_id": draft.metadata.get("etsy.taxonomy_id"),
+            "shipping_profile_id": draft.metadata.get("etsy.shipping_profile_id"),
+            "type": "physical",
+        }
+        for optional in ("etsy.is_supply", "etsy.return_policy_id", "etsy.shop_section_id"):
+            value = draft.metadata.get(optional)
+            if value is not None:
+                form[optional.split(".", 1)[1]] = value
+        # Anything still unset is omitted rather than sent empty: Etsy treats "" as a value
+        # and rejects it, where an absent key simply means "not specified".
+        form = {k: v for k, v in form.items() if v is not None}
+
+        response = await self._authed_request(
+            session, connection, "POST", f"/shops/{connection.external_account_id}/listings", data=form
+        )
+        if response.status_code not in (200, 201):
+            raise PlatformSyncError(
+                f"Etsy refused to create the draft: {response.status_code} {response.text}"
+            )
+
+        body = response.json()
+        listing_id = str(body.get("listing_id"))
+        warnings: list[str] = []
+        publish_blockers: list[str] = []
+
+        hero = next((i for i in draft.images if i.rank == 1), None) or (
+            draft.images[0] if draft.images else None
+        )
+        if hero is None:
+            publish_blockers.append("Etsy needs at least one image before this can be published.")
+        else:
+            try:
+                image_response = await self._authed_request(
+                    session,
+                    connection,
+                    "POST",
+                    f"/shops/{connection.external_account_id}/listings/{listing_id}/images",
+                    files={"image": (hero.filename, hero.data)},
+                    data={"rank": 1},
+                )
+                if image_response.status_code not in (200, 201):
+                    warnings.append(
+                        f"The draft was created but the image was rejected "
+                        f"({image_response.status_code}). Add one in Etsy before publishing."
+                    )
+                    publish_blockers.append("Etsy needs at least one image before this can be published.")
+            except PlatformError as e:
+                # The listing exists and cannot be deleted from here, so losing it over a
+                # failed image would be the worse outcome.
+                warnings.append(f"The draft was created but the image failed to upload: {e}")
+                publish_blockers.append("Etsy needs at least one image before this can be published.")
+
+        # On Etsy the listing id is what belongs in Listing.external_listing_id — see
+        # _index_listing_skus, which is the reader this has to agree with.
+        unit_refs = {str(u.variant_id) if u.variant_id is not None else "": listing_id for u in draft.units}
+
+        return DraftListingResult(
+            external_listing_id=listing_id,
+            state=body.get("state") or "draft",
+            unit_refs=unit_refs,
+            warnings=warnings,
+            publish_blockers=publish_blockers,
+        )
+
+
     # --- Reference data for the listing-profile pickers -------------------------------
     #
     # Etsy identifies a category, a shipping profile and a return policy by numeric id, and

@@ -196,6 +196,78 @@ class MigrationResult:
     raw: dict = field(default_factory=dict)
 
 
+@dataclass
+class DraftImage:
+    """An image to attach to a new listing, as bytes.
+
+    Bytes rather than a path or URL because StockSmith is a desktop app with local file
+    storage — there is no publicly reachable URL for an asset, and a marketplace that wants
+    one (eBay) has to be handed the bytes and given somewhere to put them first.
+    """
+
+    data: bytes
+    filename: str
+    rank: int = 1
+
+
+@dataclass
+class DraftUnit:
+    """One sellable thing within a draft — a variant, or the product itself when it has
+    none. Mirrors how listing_sync partitions a product into checkable units, so the two
+    can't disagree about what a unit is."""
+
+    sku: str | None
+    price: str
+    quantity: int
+    # Attribute name -> value, e.g. {"Colour": "Teal"}. Empty for a product with no variants.
+    attributes: dict[str, str] = field(default_factory=dict)
+    # Round-trips so the caller can write Listing rows without re-deriving which unit is which.
+    variant_id: int | None = None
+
+
+@dataclass
+class DraftListing:
+    """Everything needed to create one draft listing, in marketplace-neutral terms.
+
+    One object per product rather than per unit: both marketplaces model a multi-variation
+    listing as a single listing covering all of them.
+
+    `metadata` is deliberately an opaque bag keyed by well-known names ("etsy.taxonomy_id",
+    "ebay.category_id") rather than typed fields. It keeps this module free of either
+    marketplace's vocabulary — the same reasoning that keeps OAuth scope policy out of the
+    adapters. An adapter reads the keys it needs and ignores the rest; a missing required
+    key is caught by the readiness check before the call, never by the adapter.
+    """
+
+    title: str
+    description: str
+    currency: str
+    units: list[DraftUnit] = field(default_factory=list)
+    images: list[DraftImage] = field(default_factory=list)
+    metadata: dict[str, str | int | bool] = field(default_factory=dict)
+
+
+@dataclass
+class DraftListingResult:
+    """What a marketplace gave back after creating a draft.
+
+    `unit_refs` maps variant id (as a string, None for the product itself) to whatever
+    belongs in Listing.external_listing_id for that unit. The adapter decides, because the
+    two marketplaces mean different things by that column — Etsy the listing id, eBay the
+    SKU — and having each adapter state it removes the caller's need to know, which is
+    where that overloading currently causes trouble.
+
+    `publish_blockers` are things the marketplace will refuse at publish time but tolerated
+    at create time, e.g. an Etsy draft with no image.
+    """
+
+    external_listing_id: str | None
+    state: str
+    unit_refs: dict[str, str] = field(default_factory=dict)
+    warnings: list[str] = field(default_factory=list)
+    publish_blockers: list[str] = field(default_factory=list)
+
+
 class PlatformAdapter(Protocol):
     """Everything the allocation/sync/push services need from a marketplace, kept
     Etsy-agnostic so eBay/Shopify can be added later without touching core logic —
@@ -216,6 +288,20 @@ class PlatformAdapter(Protocol):
     async def push_listing_quantity(
         self, session, connection: PlatformConnection, listing_ref: ExternalListingRef, sku: str | None, qty: int
     ) -> None: ...
+
+    async def create_draft_listing(
+        self, session, connection: PlatformConnection, draft: DraftListing
+    ) -> DraftListingResult: ...
+    """Creates an unpublished listing from StockSmith's own data.
+
+    On the Protocol rather than adapter-specific for the same reason push_listing_quantity
+    is: a genuinely shared capability with different mechanics behind it. (migrate_listing
+    and fetch_classic_listings live off-Protocol because they are eBay-only *concepts* —
+    Etsy has no migration.)
+
+    Must never publish. Etsy has a real draft state; eBay does not, and simulates one with
+    an inventory item plus an unpublished offer. Either way the seller finishes and
+    publishes in the marketplace's own editor, so nothing here can put an item on sale."""
 
     async def build_listing_sku_index(
         self,
