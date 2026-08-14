@@ -12,6 +12,42 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-08-14
+
+Groundwork for creating listings from StockSmith, plus the tool that makes it possible:
+your Etsy listings already hold descriptions, prices and photos that StockSmith never
+stored, and it can now read them back.
+
+### Added
+- **Fill in missing descriptions, prices and photos from Etsy.** Settings > Integrations >
+  Check Etsy. It reads the listings your products are already linked to and offers what
+  they hold: the description, the price of each variation, and the main photo. Tick what
+  you want and it fills them in. It never overwrites anything you've already typed, so
+  it's safe to run again later — the second time it simply finds less to do.
+- **See which products won't fit Etsy's or eBay's rules before you try to list them.** The
+  two stores cap things differently — a SKU can be 50 characters on eBay but only 32 on
+  Etsy, a title 140 on Etsy and 80 on eBay — and StockSmith now checks your products
+  against both and says which ones would be rejected, and by which store. It only appears
+  when something needs attention.
+- **Listing profiles.** Etsy and eBay both need details an inventory system never cared
+  about: a category, who made the item, which postage policy applies. Most products answer
+  these the same way, so a profile answers them once and products use it. StockSmith can
+  suggest profiles by reading the listings you already have. On its own this doesn't do
+  anything visible yet — it's the setup that lets StockSmith create a listing for you in a
+  future update.
+- **Separate listing titles from product names.** A product name is what you call it; a
+  listing title is written for search and has a length limit. You can now keep both, and
+  set a different one per store when Etsy's longer limit is worth using.
+- **Correct a store's limits yourself.** If Etsy or eBay changes one — or one of
+  StockSmith's built-in values turns out to be wrong — you can change it in Settings
+  without waiting for an update.
+
+### Fixed
+- **Bulk-editing BOM overrides no longer quietly does nothing.** The "Value" box was free
+  text, so a typo, a capital letter in the wrong place or a stray space matched no
+  variants at all and the preview came back empty — which looked identical to there being
+  nothing to change. It's now a list of the values actually in use.
+
 ## [0.6.1] - 2026-08-09
 
 **Back up your data before updating.** This release changes the database and the app
