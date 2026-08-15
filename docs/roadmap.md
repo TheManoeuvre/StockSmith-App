@@ -27,7 +27,7 @@ Written 2026-08-15, against 0.6.3.
 | Draft listing creation (new product → marketplace) | **In flight** — PR #22 (stages 4, 5, 7) | PR #22 |
 | Stock take & ABC classification | **In flight** — Phase A built on `claude/stock-take-planning-ycowuy`, Phase B ahead | `plan-stock-take.md` (on that branch) |
 | Backlog quick wins (CI, line endings, Build-now link) | **In flight** — PR #23 | `backlog.md` |
-| Always-on sync | Planned, unbuilt (step 1 of 5 shipped in 0.6.3) | `plan-background-sync.md`, `plan-always-on-sync.md` |
+| Always-on sync | **Next up** — tray chosen as first step; `plan-background-sync.md` now carries the build plan and the Windows 11 uptime design | `plan-background-sync.md` §6-8, `plan-always-on-sync.md` |
 | **New-user onboarding** | **Unplanned — this document is where it enters** | below |
 | Print-queue management | Never started, never planned | `plan-phase0-phase1.md` names it as a later phase |
 | Shipping automation | Parked deliberately, not deferred | `plan-marketplace-integrations.md` §2 |
