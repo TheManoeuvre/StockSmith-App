@@ -12,6 +12,27 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **StockSmith now tells you what needs counting.** Stock drifts from what the app thinks
+  you have — a dropped print, a miscount, something used and never recorded — and until now
+  the only way to find out was to check everything. You can now say how often each thing is
+  worth counting, and the dashboard lists what's come round. Nothing is blocked or nagged
+  about; it's a list to work from.
+- **Set how often by group, not one item at a time.** Give a whole category a tier — resin
+  every month, packaging every three — and everything in it follows. Anything unusual can be
+  set on its own and overrides the group. Each item's page says which of the two it's
+  currently getting, so it's clear where to go and change it.
+- **Products can have a type.** Keyring, coaster, whatever you sell — products had no way of
+  being grouped before, only a name and a SKU. Set one on the product page or manage the list
+  under Settings > Reference data; the Products list gains a column and a filter for it.
+  Types are also what lets products be scheduled for counting by group.
+- Sensible counting intervals are set up already (30, 60 and 90 days by tier) so this is
+  useful without configuring anything first. Change any of them under Settings > General.
+
+This is the groundwork for stock takes proper — scoping a count, entering it in the app or
+from a spreadsheet, and reviewing the differences before anything is adjusted — which is
+coming next. Nothing here changes any stock quantity on its own.
+
 ## [0.6.3] - 2026-08-14
 
 Fixes an update that could apply itself only halfway, and makes setting up listing profiles
