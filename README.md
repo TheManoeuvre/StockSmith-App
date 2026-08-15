@@ -5,7 +5,8 @@ Windows desktop inventory & BOM tracker for a small maker business (3D printing/
 - `backend/` — FastAPI + SQLite API, bundled into the desktop app as a sidecar process.
 - `frontend/` — Tauri (React + TypeScript) desktop client.
 
-See [docs/plan-phase0-phase1.md](docs/plan-phase0-phase1.md) for the original build plan.
+See [docs/plan-phase0-phase1.md](docs/plan-phase0-phase1.md) for the original build plan, and
+[docs/roadmap.md](docs/roadmap.md) for where things stand now and what's planned to 1.0.
 
 ## Running the app
 
