@@ -3,8 +3,10 @@ from decimal import Decimal
 from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.schemas.abc import DueForCountItemRead
 from app.schemas.dashboard import BuildableProduct, DashboardSummary, LowStockMaterial, MarginAlert, OrderAwaitingInventory
 from app.schemas.variant import VariantBomLine
+from app.services.abc import compute_due_for_count
 
 _ORDERS_AWAITING_INVENTORY_SQL = text(
     """
@@ -382,6 +384,12 @@ async def compute_dashboard_summary(session: AsyncSession) -> DashboardSummary:
     orders_awaiting_inventory = await get_orders_awaiting_inventory(session)
     orders_awaiting_packaging = await get_orders_awaiting_packaging(session)
 
+    # Capped like lowest_buildable_products. On a database that has never had a stock take
+    # this is the entire catalogue, and the dashboard wants the worst offenders, not a
+    # thousand-row dump — items_due_for_count_total carries the real size so the section
+    # can say "showing 10 of 412" rather than implying there are only ten.
+    items_due_for_count = await compute_due_for_count(session)
+
     return DashboardSummary(
         total_inventory_value=Decimal(inventory_value_row.total),
         active_product_count=active_product_count,
@@ -390,4 +398,6 @@ async def compute_dashboard_summary(session: AsyncSession) -> DashboardSummary:
         margin_alerts=margin_alerts,
         orders_awaiting_inventory=orders_awaiting_inventory,
         orders_awaiting_packaging=orders_awaiting_packaging,
+        items_due_for_count=[DueForCountItemRead.model_validate(item) for item in items_due_for_count[:10]],
+        items_due_for_count_total=len(items_due_for_count),
     )

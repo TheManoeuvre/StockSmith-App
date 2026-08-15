@@ -3,6 +3,8 @@ from decimal import Decimal
 
 from pydantic import BaseModel
 
+from app.schemas.abc import DueForCountItemRead
+
 
 class LowStockMaterial(BaseModel):
     id: int
@@ -66,3 +68,8 @@ class DashboardSummary(BaseModel):
     margin_alerts: list[MarginAlert]
     orders_awaiting_inventory: list[OrderAwaitingInventory]
     orders_awaiting_packaging: list[OrderAwaitingPackaging] = []
+    # Capped at 10; items_due_for_count_total is the uncapped count, so the dashboard can
+    # say how many it isn't showing. Both default so an older client parsing this payload
+    # doesn't break on the new fields.
+    items_due_for_count: list[DueForCountItemRead] = []
+    items_due_for_count_total: int = 0

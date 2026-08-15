@@ -23,13 +23,20 @@ because their quantity is derived from their components rather than held.
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.abc_classification import ABCClass, ABCScope, ABCTierSetting, ProductTypeABC
 from app.models.material import Material, MaterialCategory, MaterialCategoryABC
 from app.models.product import Product
 from app.models.variant import ProductVariant
+from app.schemas.abc import (
+    CategoryTier,
+    ProductTypeTier,
+    StockCountSettingsRead,
+    StockCountSettingsUpdate,
+    TierInterval,
+)
 from app.services.general_settings import get_general_settings
 from app.services.platforms.base import ensure_utc
 
@@ -127,6 +134,82 @@ async def load_rules(session: AsyncSession) -> Rules:
         product_type_tiers={row.product_type_id: row.abc_class for row in product_type_rows},
         tier_intervals={(row.scope, row.tier): row.interval_days for row in tier_rows},
     )
+
+
+async def read_settings(session: AsyncSession) -> StockCountSettingsRead:
+    """The whole configuration, with the shipped defaults filled in where nothing is stored.
+
+    Every tier appears in the intervals lists whether or not it has an override row, each
+    flagged with `is_override`. A settings screen has to show a number for all six
+    regardless, and computing "what would this be if I don't touch it" belongs here next to
+    the defaults rather than being duplicated in the UI.
+    """
+    rules = await load_rules(session)
+    return StockCountSettingsRead(
+        default_material_abc_class=rules.baselines[ABCScope.material],
+        default_product_abc_class=rules.baselines[ABCScope.product],
+        material_tier_intervals=_tier_intervals(rules, ABCScope.material),
+        product_tier_intervals=_tier_intervals(rules, ABCScope.product),
+        category_tiers=[
+            CategoryTier(category=category, abc_class=abc_class)
+            for category, abc_class in sorted(rules.category_tiers.items(), key=lambda kv: kv[0].value)
+        ],
+        product_type_tiers=[
+            ProductTypeTier(product_type_id=type_id, abc_class=abc_class)
+            for type_id, abc_class in sorted(rules.product_type_tiers.items())
+        ],
+    )
+
+
+def _tier_intervals(rules: Rules, scope: ABCScope) -> list[TierInterval]:
+    out = []
+    for tier in ABCClass:
+        override = rules.tier_intervals.get((scope, tier))
+        out.append(
+            TierInterval(
+                tier=tier,
+                interval_days=override if override is not None else _DEFAULT_INTERVAL_DAYS[tier],
+                is_override=override is not None,
+            )
+        )
+    return out
+
+
+async def write_settings(session: AsyncSession, payload: StockCountSettingsUpdate) -> StockCountSettingsRead:
+    """Replace the configuration wholesale.
+
+    Delete-then-insert for the three sparse tables rather than a diff: they hold at most a
+    couple of dozen rows between them, and "absent from the payload means cleared" is the
+    only reading under which un-assigning a category's tier is expressible at all.
+
+    An interval equal to the shipped default is still stored when the client marks it an
+    override, and dropped when it doesn't. That keeps "I chose 90" distinguishable from "I
+    left it alone" — the first should survive a later change to the defaults, the second
+    should follow it.
+    """
+    settings = await get_general_settings(session)
+    settings.default_material_abc_class = payload.default_material_abc_class
+    settings.default_product_abc_class = payload.default_product_abc_class
+
+    await session.execute(delete(ABCTierSetting))
+    await session.execute(delete(MaterialCategoryABC))
+    await session.execute(delete(ProductTypeABC))
+
+    for scope, intervals in (
+        (ABCScope.material, payload.material_tier_intervals),
+        (ABCScope.product, payload.product_tier_intervals),
+    ):
+        for entry in intervals:
+            if entry.is_override:
+                session.add(ABCTierSetting(scope=scope, tier=entry.tier, interval_days=entry.interval_days))
+
+    for category_tier in payload.category_tiers:
+        session.add(MaterialCategoryABC(category=category_tier.category, abc_class=category_tier.abc_class))
+    for type_tier in payload.product_type_tiers:
+        session.add(ProductTypeABC(product_type_id=type_tier.product_type_id, abc_class=type_tier.abc_class))
+
+    await session.commit()
+    return await read_settings(session)
 
 
 @dataclass(frozen=True)

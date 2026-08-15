@@ -9,12 +9,16 @@ bundle look identical from the products table alone.
 
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import select
+
 from app.models.abc_classification import ABCClass, ABCScope, ABCTierSetting, ProductTypeABC
 from app.models.general_settings import GeneralSettings
 from app.models.material import Material, MaterialCategory, MaterialCategoryABC, MaterialUnit
 from app.models.product import Product, ProductBundleItem
 from app.models.product_type import ProductType
 from app.models.variant import ProductVariant
+from app.schemas.abc import CategoryTier, StockCountSettingsUpdate
+from app.services import abc
 from app.services.abc import (
     _DEFAULT_INTERVAL_DAYS,
     compute_due_for_count,
@@ -279,6 +283,72 @@ async def test_variants_inherit_the_products_tier_and_cadence_but_own_their_date
     assert due[0].abc_class == ABCClass.A
     assert due[0].interval_days == 10
     assert due[0].days_overdue == 30
+
+
+# --- settings round-trip ---------------------------------------------------------------
+
+
+async def test_settings_report_every_tier_including_the_unstored_ones(session):
+    """A settings screen has to show a number for all six tier/scope pairs, whether or not
+    one is stored — is_override is what tells the two apart."""
+    await _settings(session)
+    await session.commit()
+
+    read = await abc.read_settings(session)
+
+    assert [t.tier for t in read.material_tier_intervals] == [ABCClass.A, ABCClass.B, ABCClass.C]
+    assert [t.interval_days for t in read.material_tier_intervals] == [30, 60, 90]
+    assert all(t.is_override is False for t in read.material_tier_intervals)
+
+
+async def test_writing_settings_stores_only_the_flagged_overrides(session):
+    """An interval left alone must not be written back as an override, or a later change
+    to the shipped defaults would never reach it."""
+    await _settings(session)
+    await session.commit()
+    read = await abc.read_settings(session)
+    read.material_tier_intervals[0].interval_days = 14
+    read.material_tier_intervals[0].is_override = True
+
+    written = await abc.write_settings(session, StockCountSettingsUpdate(**read.model_dump()))
+
+    stored = (await session.execute(select(ABCTierSetting))).scalars().all()
+    assert [(s.scope, s.tier, s.interval_days) for s in stored] == [(ABCScope.material, ABCClass.A, 14)]
+    assert written.material_tier_intervals[0].is_override is True
+    assert written.material_tier_intervals[1].is_override is False
+
+
+async def test_writing_settings_clears_assignments_absent_from_the_payload(session):
+    """Replace-in-full, not patch — otherwise un-assigning a category's tier would be
+    inexpressible."""
+    await _settings(session)
+    session.add(MaterialCategoryABC(category=MaterialCategory.resin, abc_class=ABCClass.A))
+    await session.commit()
+    read = await abc.read_settings(session)
+    assert len(read.category_tiers) == 1
+    read.category_tiers = []
+
+    written = await abc.write_settings(session, StockCountSettingsUpdate(**read.model_dump()))
+
+    assert written.category_tiers == []
+    material = await _material(session)
+    await session.commit()
+    assert (await load_rules(session)).for_material(material).class_source == "default"
+
+
+async def test_written_settings_take_effect_on_the_next_resolution(session):
+    await _settings(session)
+    material = await _material(session, category=MaterialCategory.packaging)
+    await session.commit()
+    read = await abc.read_settings(session)
+    read.default_material_abc_class = ABCClass.B
+    read.category_tiers = [CategoryTier(category=MaterialCategory.packaging, abc_class=ABCClass.A)]
+
+    await abc.write_settings(session, StockCountSettingsUpdate(**read.model_dump()))
+
+    resolved = (await load_rules(session)).for_material(material)
+    assert resolved.abc_class == ABCClass.A
+    assert resolved.interval_days == _DEFAULT_INTERVAL_DAYS[ABCClass.A]
 
 
 async def test_materials_and_products_appear_together_ranked_by_lateness(session):
