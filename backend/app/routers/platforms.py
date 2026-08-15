@@ -29,6 +29,7 @@ from app.schemas.platform import (
     PlatformStatus,
     PlatformSyncSummary,
     SyncCommitResult,
+    SyncHealth,
     SyncPreviewResult,
     SyncRunPage,
     SyncSettingsUpdate,
@@ -388,6 +389,20 @@ async def get_sync_summary(session: AsyncSession = Depends(get_db)) -> list[Plat
     Local reads only — unlike /{platform}/status this never touches a marketplace, which
     is what makes it safe for the UI to poll on a timer."""
     return await sync_status.get_sync_summary(session)
+
+
+# Same single-segment reasoning as /sync-summary above, and declared beside it for the same
+# reason: both must be matched before /{platform}.
+@router.get("/sync-health", response_model=SyncHealth, dependencies=[Depends(require_auth)])
+async def get_sync_health(
+    window_days: int = Query(default=7, ge=1, le=90),
+    session: AsyncSession = Depends(get_db),
+) -> SyncHealth:
+    """Stretches where nothing synced at all — i.e. StockSmith wasn't running.
+
+    Answers "has it actually been up?", which nothing did before: a night with no sync and
+    a night with no orders looked identical. Local reads only, like /sync-summary."""
+    return await sync_status.get_sync_health(session, window_days=window_days)
 
 
 @router.post("/{platform}/connect", response_model=PlatformConnectResponse, dependencies=[Depends(require_auth)])

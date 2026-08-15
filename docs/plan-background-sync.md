@@ -413,20 +413,33 @@ them. They belong in the README once the tray ships:
 
 ## Suggested build order
 
-**Tier 1 — build this now.**
+**Tier 1 — built, unreleased. Every item below is code-complete; what none of it has had is
+an installed build on the OptiPlex, which is where the verification pass comes in.**
 
-1. **PID-file reaping** (§2b). The half of step 1 that 0.6.3 didn't ship: write the
-   sidecar's PID on spawn, reap a live process recorded there before probing the port.
-   Independent of everything else and a prerequisite for the rest being safe.
-2. **Single-instance plugin** (§2c). Small, and required before autostart.
-3. **Tray icon, hide-on-close, real Quit** (§1), including the "stay down" marker Quit
-   writes (§6d) — cheap now, and awkward to retrofit once a watchdog exists.
-4. **Sidecar supervision in the shell** — restart it with a backoff if it dies while the
-   app is running (row 6). Small, and the only row Tier 1 currently fails outright.
-5. **Autostart toggle in Settings** (§3), plus the two-reboot check for
-   plugins-workspace#771.
-6. **Sync-health visibility** (§7), derived from `platform_sync_runs`. Deliberately before
-   Tier 2, because it is what tells you whether Tier 2 is worth building.
+1. ✅ **PID-file reaping** (§2b). `backend.pid` written on spawn, and a recorded process
+   that is still alive is killed before spawning — but only once the port has been found
+   silent, so a healthy backend is never what gets reaped. Adopting one of our own orphans
+   now also takes ownership of it, which is what stops it outliving the shell a second time.
+2. ✅ **Single-instance plugin** (§2c), registered before every other plugin. A second
+   launch surfaces the existing window rather than doing nothing, which matters most when
+   the first one is hidden and therefore indistinguishable from not running.
+3. ✅ **Tray icon, hide-on-close, real Quit** (§1). Close hides; the tray menu is Open and
+   Quit; Quit confirms, writes the §6d stay-down marker and exits. The one-time "still
+   running" notice is in (§5). Handled in Rust rather than the frontend so a wedged webview
+   can't produce an X that does nothing.
+4. ✅ **Sidecar supervision in the shell** — probes every 30s, tolerates one missed probe,
+   restarts with a 30s→5min backoff, and only ever supervises a backend this shell owns so
+   it can't fight a developer restarting their own.
+5. ✅ **Autostart toggle in Settings** (§3). Reads the registry live and reports back what
+   Windows actually kept, so plugins-workspace#771 shows up as a warning rather than a
+   silent lie. **The two-reboot check itself is still outstanding** — it needs an install.
+6. ✅ **Sync-health visibility** (§7), derived from `platform_sync_runs` with no new schema,
+   surfaced as "sync coverage, last 7 days" beside the toggle.
+
+**Deliberately not built:** "Sync now" in the tray menu (§5). It needs the shared password
+in the Rust shell, which today only the frontend holds — a real design question for a menu
+item that saves one click over opening the window, so it waits rather than being rushed in
+beside work that doesn't depend on it.
 
 **Then stop and look at the data.**
 

@@ -4,7 +4,6 @@ import { MaintenanceOverlay } from "../components/common/MaintenanceOverlay";
 import { UnsavedChangesDialog } from "../components/common/UnsavedChangesDialog";
 import { DirtyRegistryProvider } from "../hooks/useDirtyRegistry";
 import { GuardProvider, useUnsavedChangesGuard } from "../hooks/useUnsavedChangesGuard";
-import { useTauriCloseGuard } from "../hooks/useTauriCloseGuard";
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -13,11 +12,10 @@ export const Route = createRootRoute({
 /**
  * The unsaved-changes registry lives at the root, not on any one page.
  *
- * Two things need it to be app-wide: the router blocker has to fire when you navigate from
- * one page to another (not just between tabs of the same one), and the desktop window-close
- * prompt has to know about unsaved work wherever it is. Individual editors register
- * themselves wherever they happen to be mounted; pages only reach for useGuard() when they
- * have their own destructive controls to veto.
+ * It has to be app-wide because the router blocker fires when you navigate from one page to
+ * another, not just between tabs of the same one. Individual editors register themselves
+ * wherever they happen to be mounted; pages only reach for useGuard() when they have their
+ * own destructive controls to veto.
  */
 function RootLayout() {
   return (
@@ -29,9 +27,12 @@ function RootLayout() {
 
 function RootShell() {
   const guard = useUnsavedChangesGuard();
-  // Tauri never fires beforeunload for a window close, so the desktop app needs its own
-  // hook into the same dialog. `destroy` is what actually closes the window on discard.
-  useTauriCloseGuard((destroy) => guard.attempt(destroy));
+  // No window-close prompt any more, deliberately. Closing the window now hides it to the
+  // tray (see src-tauri/lib.rs's on_window_event), so unsaved work isn't going anywhere —
+  // the window is still there, with the form still in it. Asking "discard your changes?"
+  // for something that discards nothing trains people to click through the dialog that
+  // does matter. Quitting from the tray is the only path that can now lose work, and it
+  // carries its own confirmation.
   return (
     <GuardProvider guard={guard}>
       <RootChrome />

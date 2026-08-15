@@ -23,6 +23,7 @@ import { manufacturersApi } from "../api/manufacturers";
 import { suppliersApi } from "../api/suppliers";
 import { materialTypesApi } from "../api/materialTypes";
 import { coloursApi } from "../api/colours";
+import { BackgroundSyncSettings } from "../components/settings/BackgroundSyncSettings";
 import { CurrencySettings } from "../components/settings/CurrencySettings";
 import { ForecastSettings } from "../components/settings/ForecastSettings";
 import { DefaultKittingBomSettings } from "../components/settings/DefaultKittingBomSettings";
@@ -208,6 +209,7 @@ function Settings() {
 
       {activeTab === "general" && (
         <div className="max-w-2xl flex flex-col gap-4">
+          <BackgroundSyncSettings />
           <CurrencySettings />
           <ForecastSettings />
           <DefaultKittingBomSettings />

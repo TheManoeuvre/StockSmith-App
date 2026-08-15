@@ -7,6 +7,8 @@ UI polls on a timer. Everything here is local DB reads only — no marketplace I
 price — precisely so the indicator can refresh often without spending API budget.
 """
 
+from datetime import datetime, timedelta, timezone
+
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,7 +16,7 @@ from app.models.listing import ListingPlatform
 from app.models.platform_connection import PlatformConnection
 from app.models.platform_listing_push import ListingPushStatus, PlatformListingPush
 from app.models.platform_sync_run import PlatformSyncRun, SyncRunMode, SyncRunStatus
-from app.schemas.platform import PlatformSyncSummary
+from app.schemas.platform import PlatformSyncSummary, SyncGap, SyncHealth
 from app.services.platforms.base import ensure_utc
 
 # Mirrors the frontend's CONNECTABLE_PLATFORMS — platforms with a real adapter. Shopify is
@@ -86,6 +88,111 @@ async def _failing_push_counts(session: AsyncSession) -> dict[ListingPlatform, i
         .group_by(ranked.c.platform)
     )
     return {platform: count for platform, count in result.all()}
+
+
+# A gap only counts as downtime once it is wider than this many sync intervals. One missed
+# tick is ordinary — the scheduler skips a tick whose platform lock is already held, a sync
+# can overrun its own interval, and a laptop resuming from sleep starts its next sleep late.
+# Two is the smallest multiple that doesn't turn any of those into a reported outage.
+_GAP_INTERVAL_MULTIPLE = 2
+
+# Ignore stretches shorter than this even if the interval maths says otherwise. With a
+# 1-minute interval every ordinary pause would otherwise be an "outage", and nothing here is
+# precise enough to be worth reporting at that resolution.
+_MIN_REPORTABLE_GAP_MINUTES = 20
+
+
+async def get_sync_health(
+    session: AsyncSession, window_days: int = 7, now: datetime | None = None
+) -> SyncHealth:
+    """How much of the last `window_days` StockSmith was running for.
+
+    This is the "did it actually stay up?" reading behind the tray work
+    (docs/plan-background-sync.md §7). It adds no schema: the scheduler already writes a
+    `platform_sync_runs` row per tick — on failure as well as success, which is what makes
+    it a liveness signal rather than a success signal — so an absence of rows across hours
+    means the process wasn't there.
+
+    `now` is injectable so tests can place runs relative to a fixed point rather than
+    sleeping.
+    """
+    now = now or datetime.now(timezone.utc)
+    window_start = now - timedelta(days=window_days)
+
+    connections = {c.platform: c for c in (await session.execute(select(PlatformConnection))).scalars()}
+    scheduled = [
+        c
+        for platform, c in connections.items()
+        if platform in _SUMMARISED_PLATFORMS and c.is_connected and c.auto_sync_enabled
+    ]
+
+    empty = {
+        "window_days": window_days,
+        "expected_interval_minutes": None,
+        "gap_threshold_minutes": None,
+        "gaps": [],
+        "total_gap_minutes": 0,
+        "longest_gap_minutes": 0,
+    }
+    if not scheduled:
+        # Silence with nothing scheduled says nothing about uptime, and reporting zero gaps
+        # would read as a perfect week. Say why instead.
+        return SyncHealth(
+            measurable=False,
+            reason="No marketplace has auto-sync turned on, so there are no regular syncs to measure uptime by.",
+            **empty,
+        )
+
+    # The shortest interval across scheduled platforms: whichever ticks most often is the
+    # finest-grained proof of life available, and a gap has to be silent on *all* of them.
+    interval_minutes = min(c.sync_interval_minutes for c in scheduled)
+    threshold_minutes = max(interval_minutes * _GAP_INTERVAL_MULTIPLE, _MIN_REPORTABLE_GAP_MINUTES)
+
+    result = await session.execute(
+        select(PlatformSyncRun.started_at)
+        .where(
+            PlatformSyncRun.mode == SyncRunMode.commit,
+            PlatformSyncRun.started_at >= window_start,
+        )
+        .order_by(PlatformSyncRun.started_at)
+    )
+    # Preview runs are excluded deliberately, matching _latest_commit_runs: a preview is a
+    # human clicking a button, so counting them would credit uptime to someone being sat
+    # there — the opposite of what this measures.
+    ticks = [ensure_utc(started_at) for started_at in result.scalars()]
+
+    if not ticks:
+        return SyncHealth(
+            measurable=False,
+            reason="No syncs have run in this window yet, so there's nothing to measure against.",
+            **{**empty, "expected_interval_minutes": interval_minutes, "gap_threshold_minutes": threshold_minutes},
+        )
+
+    # Bookended by the window start and now, so a stretch of downtime at either edge counts.
+    # Leaving them out would hide the most interesting case of all: the app being off right
+    # now, which produces no trailing rows at all.
+    boundaries = [window_start, *ticks, now]
+
+    gaps: list[SyncGap] = []
+    for earlier, later in zip(boundaries, boundaries[1:]):
+        minutes = int((later - earlier).total_seconds() // 60)
+        # Strictly greater, not >=. A single missed tick lands *exactly* on two intervals,
+        # which is the commonest benign case there is — the scheduler skipping a tick whose
+        # lock is held produces precisely this shape, and counting it would report a nightly
+        # outage on a machine that never went down.
+        if minutes > threshold_minutes:
+            gaps.append(SyncGap(started_at=earlier, ended_at=later, minutes=minutes))
+
+    return SyncHealth(
+        window_days=window_days,
+        measurable=True,
+        reason=None,
+        expected_interval_minutes=interval_minutes,
+        gap_threshold_minutes=threshold_minutes,
+        gaps=gaps,
+        total_gap_minutes=sum(gap.minutes for gap in gaps),
+        longest_gap_minutes=max((gap.minutes for gap in gaps), default=0),
+    )
 
 
 async def get_sync_summary(session: AsyncSession) -> list[PlatformSyncSummary]:

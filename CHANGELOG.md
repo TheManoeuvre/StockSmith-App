@@ -12,6 +12,41 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **StockSmith keeps syncing when you close the window.** Closing it now tucks it into the
+  notification area at the right-hand end of the taskbar rather than shutting it down, so
+  orders keep importing and stock keeps going out to Etsy and eBay while you get on with
+  something else. Click its icon there to open it again, or use Quit on it to close
+  StockSmith properly. The first time the window disappears you'll get a note explaining
+  where it went, so it doesn't look like a crash.
+- **It can start with Windows.** Settings → General → Background syncing. It starts straight
+  into the notification area without opening a window. One thing worth knowing: this happens
+  when you *sign in*, not when the PC powers on — so after an overnight Windows Update
+  restart it only starts once somebody signs in, unless Windows is set to sign you back in
+  automatically. The README explains how to turn that on.
+- **You can see whether it actually stayed running.** The same panel lists any stretches in
+  the last week where nothing synced at all — which is what a night the PC was off, or
+  asleep, looks like. Before this, a quiet night and a night StockSmith wasn't running were
+  impossible to tell apart.
+- **It restarts its own engine if that stops.** The part of StockSmith that does the actual
+  work used to be started once and never checked on again, so if it stopped, the app sat
+  there looking fine and syncing nothing until somebody restarted it. It's now checked every
+  half-minute and restarted if it has gone, backing off if it can't start.
+
+### Changed
+- **Closing the window no longer asks about unsaved work.** It doesn't need to — the window
+  is still there with your half-finished form in it, waiting for you. Quitting from the
+  notification area is the only thing that can lose anything now, and that asks first.
+
+### Fixed
+- **An engine left behind by a crash is cleared up instead of being left running.** If
+  StockSmith was killed off — Task Manager, a power cut mid-shutdown — its engine could
+  survive without it and quietly hold on to your database. The next launch now finds it and
+  clears it away rather than starting a second one beside it.
+- **Only one copy of StockSmith can run at a time.** Opening it again when it was already
+  running in the notification area now brings the existing window back instead of starting a
+  second copy competing for the same database.
+
 ## [0.6.3] - 2026-08-14
 
 Fixes an update that could apply itself only halfway, and makes setting up listing profiles
