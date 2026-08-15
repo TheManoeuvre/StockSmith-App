@@ -27,6 +27,11 @@ export interface Material {
   created_at: string;
   updated_at: string;
   on_order_qty: string | null;
+  abc_class: ABCClass | null;
+  stock_take_interval_days: number | null;
+  last_stock_take_at: string | null;
+  /** Null on a mutation response; the list and single-get paths populate it. */
+  classification: ResolvedClassification | null;
 }
 
 export interface Manufacturer {
@@ -62,6 +67,66 @@ export interface MaterialType {
   /** How many records reference this. Computed per request — see the backend's list_with_usage. */
   usage_count: number;
   created_at: string;
+}
+
+export interface ProductType {
+  id: number;
+  name: string;
+  /** How many records reference this. Computed per request — see the backend's list_with_usage. */
+  usage_count: number;
+  created_at: string;
+}
+
+export type ABCClass = "A" | "B" | "C";
+
+/**
+ * An item's effective stock-take tier and cadence, with where each came from.
+ *
+ * `class_source`/`interval_source` are "item" (set on this item), "group" (from its
+ * category or product type) or "default" (the shop-wide baseline / shipped cadence).
+ * Resolved server-side deliberately — see the backend's services/abc.py, which is the only
+ * place the fallback order lives.
+ */
+export interface ResolvedClassification {
+  abc_class: ABCClass;
+  interval_days: number;
+  class_source: "item" | "group" | "default";
+  interval_source: "item" | "tier" | "default";
+  last_stock_take_at: string | null;
+  next_due_at: string | null;
+  /** null means never counted — a different state from "0 days late". */
+  days_overdue: number | null;
+  is_due: boolean;
+}
+
+export interface DueForCountItem {
+  scope: "material" | "product";
+  material_id: number | null;
+  product_id: number | null;
+  variant_id: number | null;
+  name: string;
+  abc_class: ABCClass;
+  interval_days: number;
+  last_stock_take_at: string | null;
+  days_overdue: number | null;
+}
+
+export interface TierInterval {
+  tier: ABCClass;
+  interval_days: number;
+  /** False means this is the shipped default rather than a stored value. Writing it back
+   * with is_override false deletes the override, so a tier left alone keeps following the
+   * defaults if they ever change. */
+  is_override: boolean;
+}
+
+export interface StockCountSettings {
+  default_material_abc_class: ABCClass;
+  default_product_abc_class: ABCClass;
+  material_tier_intervals: TierInterval[];
+  product_tier_intervals: TierInterval[];
+  category_tiers: { category: MaterialCategory; abc_class: ABCClass }[];
+  product_type_tiers: { product_type_id: number; abc_class: ABCClass }[];
 }
 
 export type PurchaseStatus = "ordered" | "received";
@@ -141,6 +206,13 @@ export interface Product {
   effective_platform_fee_percent: string | null;
   pricing_mode: PricingMode;
   pricing_variable_attribute: number | null;
+  product_type_id: number | null;
+  product_type_name: string | null;
+  abc_class: ABCClass | null;
+  stock_take_interval_days: number | null;
+  last_stock_take_at: string | null;
+  /** Null for a bundle (nothing to count) and on a mutation response. */
+  classification: ResolvedClassification | null;
 }
 
 export interface ProductPage {
@@ -397,6 +469,10 @@ export interface DashboardSummary {
   margin_alerts: MarginAlert[];
   orders_awaiting_inventory: OrderAwaitingInventory[];
   orders_awaiting_packaging: OrderAwaitingPackaging[];
+  /** Capped at 10 by the backend; the _total is the uncapped figure, so the section can say
+   * how many it isn't showing. */
+  items_due_for_count: DueForCountItem[];
+  items_due_for_count_total: number;
 }
 
 export type ListingPlatform = "etsy" | "ebay" | "shopify";

@@ -1,6 +1,6 @@
 import { api, downloadCsv, materialImageUploadUrl, uploadCsv, type CsvImportResult } from "./client";
 import { getSettings, uploadFile } from "../lib/tauri";
-import type { Material, MaterialCategory, MaterialStockHistoryEntry, MaterialUnit, Purchase } from "./types";
+import type { ABCClass, Material, MaterialCategory, MaterialStockHistoryEntry, MaterialUnit, Purchase } from "./types";
 
 export interface MaterialInput {
   name: string;
@@ -14,6 +14,10 @@ export interface MaterialInput {
   default_supplier_id?: number | null;
   typical_reorder_qty?: string | null;
   product_url?: string | null;
+  /** Null means "inherit" for both — the backend resolves through category then the
+   * shop-wide default (services/abc.py). */
+  abc_class?: ABCClass | null;
+  stock_take_interval_days?: number | null;
 }
 
 export const materialsApi = {

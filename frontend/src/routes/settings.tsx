@@ -22,9 +22,11 @@ import { ReferenceDataTable } from "../components/reference/ReferenceDataTable";
 import { manufacturersApi } from "../api/manufacturers";
 import { suppliersApi } from "../api/suppliers";
 import { materialTypesApi } from "../api/materialTypes";
+import { productTypesApi } from "../api/productTypes";
 import { coloursApi } from "../api/colours";
 import { CurrencySettings } from "../components/settings/CurrencySettings";
 import { ForecastSettings } from "../components/settings/ForecastSettings";
+import { StockCountSettings } from "../components/settings/StockCountSettings";
 import { DefaultKittingBomSettings } from "../components/settings/DefaultKittingBomSettings";
 import { BackupSettings } from "../components/settings/BackupSettings";
 import { Tabs, type TabDef } from "../components/common/Tabs";
@@ -210,6 +212,7 @@ function Settings() {
         <div className="max-w-2xl flex flex-col gap-4">
           <CurrencySettings />
           <ForecastSettings />
+          <StockCountSettings />
           <DefaultKittingBomSettings />
         </div>
       )}
@@ -266,6 +269,21 @@ function Settings() {
             }}
             fields={[{ key: "name", label: "Name" }]}
             usageLabel={(n) => `${n} material${n === 1 ? "" : "s"}`}
+          />
+          <ReferenceDataTable
+            title="Product types"
+            description="What kind of thing a product is. Groups products for stock-count scheduling and for scoping a stock take. Renaming one updates every product that uses it."
+            segment="product-types"
+            queryKey={["product-types"]}
+            api={{
+              list: productTypesApi.list,
+              create: productTypesApi.findOrCreate,
+              update: productTypesApi.update,
+              remove: productTypesApi.remove,
+              merge: productTypesApi.merge,
+            }}
+            fields={[{ key: "name", label: "Name" }]}
+            usageLabel={(n) => `${n} product${n === 1 ? "" : "s"}`}
           />
           <ReferenceDataTable
             title="Colours"

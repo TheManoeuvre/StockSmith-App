@@ -24,6 +24,10 @@ import { useGuard } from "../../hooks/useUnsavedChangesGuard";
 import { useAssetUrl } from "../../hooks/useAssetUrl";
 import { pickFile } from "../../lib/tauri";
 import { sellableSummary } from "../../lib/format";
+import { productTypesApi } from "../../api/productTypes";
+import { CreatableSelect } from "../../components/common/CreatableSelect";
+import { StockCountFields } from "../../components/common/StockCountFields";
+import type { ABCClass } from "../../api/types";
 
 interface DetailsForm {
   name: string;
@@ -31,9 +35,23 @@ interface DetailsForm {
   description: string;
   barcode: string;
   platformCeilingQty: string;
+  productType: string;
+  productTypeId: number | null;
+  abcClass: ABCClass | null;
+  stockTakeIntervalDays: string;
 }
 
-const EMPTY_DETAILS: DetailsForm = { name: "", sku: "", description: "", barcode: "", platformCeilingQty: "" };
+const EMPTY_DETAILS: DetailsForm = {
+  name: "",
+  sku: "",
+  description: "",
+  barcode: "",
+  platformCeilingQty: "",
+  productType: "",
+  productTypeId: null,
+  abcClass: null,
+  stockTakeIntervalDays: "",
+};
 
 const TAB_IDS = ["details", "bom", "pricing", "variants", "platform-sync", "stock", "assets"] as const;
 type TabId = (typeof TAB_IDS)[number];
@@ -69,6 +87,7 @@ function ProductDetail() {
     queryKey: ["products", id, "variants"],
     queryFn: () => productsApi.listVariants(id),
   });
+  const { data: productTypes } = useQuery({ queryKey: ["product-types"], queryFn: productTypesApi.list });
 
   const [isDragOver, setIsDragOver] = useState(false);
 
@@ -81,6 +100,11 @@ function ProductDetail() {
             description: product.description ?? "",
             barcode: product.barcode ?? "",
             platformCeilingQty: product.platform_ceiling_qty != null ? String(product.platform_ceiling_qty) : "",
+            productType: product.product_type_name ?? "",
+            productTypeId: product.product_type_id,
+            abcClass: product.abc_class,
+            stockTakeIntervalDays:
+              product.stock_take_interval_days === null ? "" : String(product.stock_take_interval_days),
           }
         : undefined,
     [product]
@@ -97,7 +121,8 @@ function ProductDetail() {
     seed: detailsSeed,
     seedKey: id,
   });
-  const { name, sku, description, barcode, platformCeilingQty } = details;
+  const { name, sku, description, barcode, platformCeilingQty, productType, productTypeId, abcClass, stockTakeIntervalDays } =
+    details;
   const setDetailsField = <K extends keyof DetailsForm>(field: K, next: DetailsForm[K]) =>
     setDetails((prev) => ({ ...prev, [field]: next }));
   const setName = (v: string) => setDetailsField("name", v);
@@ -107,18 +132,30 @@ function ProductDetail() {
   const setPlatformCeilingQty = (v: string) => setDetailsField("platformCeilingQty", v);
 
   const saveDetailsMutation = useMutation({
-    mutationFn: () =>
-      productsApi.update(id, {
+    mutationFn: async () => {
+      // Same find-or-create-on-save shape the materials page uses for manufacturers and
+      // types: the field accepts a typed name, and only a name with no resolved id needs
+      // a row creating first.
+      let resolvedProductTypeId = productTypeId;
+      if (!resolvedProductTypeId && productType.trim()) {
+        resolvedProductTypeId = (await productTypesApi.findOrCreate(productType.trim())).id;
+      }
+      return productsApi.update(id, {
         name,
         sku: sku || null,
         description: description || null,
         barcode: barcode || null,
         platform_ceiling_qty: platformCeilingQty.trim() ? Number(platformCeilingQty) : null,
-      }),
+        product_type_id: productType.trim() ? resolvedProductTypeId : null,
+        abc_class: abcClass,
+        stock_take_interval_days: stockTakeIntervalDays === "" ? null : Number(stockTakeIntervalDays),
+      });
+    },
     onSuccess: () => {
       markDetailsSaved();
       queryClient.invalidateQueries({ queryKey: ["products", id] });
       queryClient.invalidateQueries({ queryKey: ["products"] });
+      queryClient.invalidateQueries({ queryKey: ["product-types"] });
     },
   });
 
@@ -423,6 +460,31 @@ function ProductDetail() {
                 onChange={(e) => setPlatformCeilingQty(e.target.value)}
               />
             </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-sm">Product type</span>
+              <CreatableSelect
+                className="rounded border border-slate-300 px-2 py-1"
+                options={productTypes ?? []}
+                value={productType}
+                onChange={(v) => setDetailsField("productType", v)}
+                onResolved={(v) => setDetailsField("productTypeId", v)}
+                placeholder="Keyring, Coaster…"
+              />
+            </label>
+            {/* Bundles hold no stock of their own, so there is nothing to count for one and
+                the backend sends no classification. */}
+            {!product.is_bundle && (
+              <div className="basis-full">
+                <StockCountFields
+                  abcClass={abcClass}
+                  intervalDays={stockTakeIntervalDays}
+                  classification={product.classification}
+                  groupLabel={product.product_type_name ? `the ${product.product_type_name} type` : null}
+                  onAbcClassChange={(next) => setDetailsField("abcClass", next)}
+                  onIntervalDaysChange={(next) => setDetailsField("stockTakeIntervalDays", next)}
+                />
+              </div>
+            )}
             <SaveButton
               type="submit"
               isDirty={detailsDirty}

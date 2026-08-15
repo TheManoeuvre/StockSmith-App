@@ -218,18 +218,21 @@ async def list_products(
     # precedent in routers/materials.py's stock-history `limit` param.
     limit: int = Query(50, ge=1, le=10000),
     offset: int = Query(0, ge=0),
+    # Filtering server-side rather than in the client, because this list is paginated: a
+    # client-side filter would only ever narrow the current page, and the total under it
+    # would be wrong. Mirrors materials' ?material_type_id=.
+    product_type_id: int | None = None,
     session: AsyncSession = Depends(get_db),
 ) -> ProductPage:
-    total = await session.scalar(select(func.count()).select_from(Product))
+    count_query = select(func.count()).select_from(Product)
+    query = select(Product).options(selectinload(Product.product_type))
+    if product_type_id is not None:
+        count_query = count_query.where(Product.product_type_id == product_type_id)
+        query = query.where(Product.product_type_id == product_type_id)
+    total = await session.scalar(count_query)
     # selectinload rather than letting product_type_name touch the relationship lazily —
     # a lazy load in async raises MissingGreenlet (services/allocation.py:19-24).
-    result = await session.execute(
-        select(Product)
-        .options(selectinload(Product.product_type))
-        .order_by(Product.name)
-        .limit(limit)
-        .offset(offset)
-    )
+    result = await session.execute(query.order_by(Product.name).limit(limit).offset(offset))
     products = list(result.scalars())
     # The bulk lookups below (get_max_buildable_by_product etc.) each run a single
     # aggregate query over the whole products table regardless of how many rows this page

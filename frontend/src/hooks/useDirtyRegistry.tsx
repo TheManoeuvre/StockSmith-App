@@ -33,6 +33,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalS
  * Settings:
  *   connection                                        backend URL + shared password
  *   general/forecast                                  forecasting thresholds
+ *   general/stock-count                               ABC tiers and count cadences
  *   default-kitting-bom                               default packaging BOM
  *   integrations/${platform}/credentials              developer app credentials
  *   integrations/${platform}/fee-components/new       add-a-fee-component form
