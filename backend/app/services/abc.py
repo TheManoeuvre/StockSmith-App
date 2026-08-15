@@ -33,6 +33,7 @@ from app.models.variant import ProductVariant
 from app.schemas.abc import (
     CategoryTier,
     ProductTypeTier,
+    ResolvedClassificationRead,
     StockCountSettingsRead,
     StockCountSettingsUpdate,
     TierInterval,
@@ -233,6 +234,26 @@ def due_state(last_stock_take_at: datetime | None, interval_days: int, now: date
     next_due = last + timedelta(days=interval_days)
     days_overdue = (now - next_due).days
     return DueState(last, next_due, max(days_overdue, 0), is_due=now >= next_due)
+
+
+def describe(resolved: Resolved, last_stock_take_at: datetime | None, now: datetime | None = None):
+    """Fold a resolution and a count date into the shape a detail page renders.
+
+    Here rather than in the routers so the two callers (materials, products) can't drift
+    on what "due" means, and so the UI never has to reimplement the fallback order in
+    TypeScript to work out where a value came from.
+    """
+    state = due_state(last_stock_take_at, resolved.interval_days, now or datetime.now(timezone.utc))
+    return ResolvedClassificationRead(
+        abc_class=resolved.abc_class,
+        interval_days=resolved.interval_days,
+        class_source=resolved.class_source,
+        interval_source=resolved.interval_source,
+        last_stock_take_at=state.last_stock_take_at,
+        next_due_at=state.next_due_at,
+        days_overdue=state.days_overdue,
+        is_due=state.is_due,
+    )
 
 
 @dataclass(frozen=True)

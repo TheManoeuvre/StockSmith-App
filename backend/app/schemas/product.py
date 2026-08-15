@@ -1,9 +1,11 @@
 from datetime import datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
+from app.models.abc_classification import ABCClass
 from app.models.product import PricingMode
+from app.schemas.abc import ResolvedClassificationRead
 
 
 class ProductBase(BaseModel):
@@ -17,6 +19,12 @@ class ProductBase(BaseModel):
     platform_fee_percent: Decimal | None = None
     platform_ceiling_qty: int | None = None
     push_buildable_capacity: bool = True
+    product_type_id: int | None = None
+    # NULL means "inherit" for both — see services/abc.py. A product's tier and cadence
+    # cover all of its variants; last_stock_take_at is per stock-holding row and is written
+    # only by an approved stock take, never by editing the product.
+    abc_class: ABCClass | None = None
+    stock_take_interval_days: int | None = Field(default=None, gt=0)
 
 
 class ProductCreate(ProductBase):
@@ -37,6 +45,9 @@ class ProductUpdate(BaseModel):
     push_buildable_capacity: bool | None = None
     pricing_mode: PricingMode | None = None
     pricing_variable_attribute: int | None = None
+    product_type_id: int | None = None
+    abc_class: ABCClass | None = None
+    stock_take_interval_days: int | None = Field(default=None, gt=0)
 
 
 class ProductRead(ProductBase):
@@ -69,6 +80,10 @@ class ProductRead(ProductBase):
     main_image_asset_id: int | None = None
     ready_to_ship: int | None = None
     effective_platform_fee_percent: Decimal | None = None
+    product_type_name: str | None = None
+    last_stock_take_at: datetime | None = None
+    # See MaterialRead.classification — same reasoning, same population rule.
+    classification: ResolvedClassificationRead | None = None
 
 
 class ProductPage(BaseModel):

@@ -17,7 +17,10 @@ from app.models.material import Material, MaterialCategory, MaterialCategoryABC,
 from app.models.product import Product, ProductBundleItem
 from app.models.product_type import ProductType
 from app.models.variant import ProductVariant
+from app.routers.materials import list_materials
+from app.routers.products import create_product, get_product, update_product
 from app.schemas.abc import CategoryTier, StockCountSettingsUpdate
+from app.schemas.product import ProductCreate, ProductRead, ProductUpdate
 from app.services import abc
 from app.services.abc import (
     _DEFAULT_INTERVAL_DAYS,
@@ -283,6 +286,53 @@ async def test_variants_inherit_the_products_tier_and_cadence_but_own_their_date
     assert due[0].abc_class == ABCClass.A
     assert due[0].interval_days == 10
     assert due[0].days_overdue == 30
+
+
+# --- response serialization ------------------------------------------------------------
+
+
+async def test_creating_and_updating_a_product_returns_a_serializable_read(session, session_factory):
+    """ProductRead exposes product_type_name, which reads through a relationship. If the
+    handler hands back a product without it loaded, serialization raises MissingGreenlet
+    instead of lazy-loading — a failure that only shows up over HTTP, which is how it got
+    past a green suite the first time.
+
+    Each handler runs on its own fresh session, the way a request does. That detail is the
+    test: reusing the session that created the ProductType lets the lazy load be answered
+    from the identity map with no IO, so the bug hides and the test passes either way.
+    """
+    await _settings(session)
+    ptype = ProductType(name="Coaster")
+    session.add(ptype)
+    await session.commit()
+    await session.refresh(ptype)
+
+    async with session_factory() as fresh:
+        created = await create_product(ProductCreate(name="Oak", sku="OAK-1", product_type_id=ptype.id), fresh)
+        assert ProductRead.model_validate(created).product_type_name == "Coaster"
+        product_id = created.id
+
+    async with session_factory() as fresh:
+        updated = await update_product(product_id, ProductUpdate(name="Oak Coaster"), fresh)
+        assert ProductRead.model_validate(updated).product_type_name == "Coaster"
+
+    async with session_factory() as fresh:
+        read = await get_product(product_id, fresh)
+        assert read.product_type_name == "Coaster"
+        assert read.classification is not None
+
+
+async def test_material_read_carries_the_resolved_classification(session):
+    await _settings(session, default_material_abc_class=ABCClass.C)
+    session.add(MaterialCategoryABC(category=MaterialCategory.resin, abc_class=ABCClass.A))
+    await _material(session, "Grey Resin")
+    await session.commit()
+
+    reads = await list_materials(session=session)
+
+    assert [(r.name, r.classification.abc_class, r.classification.class_source) for r in reads] == [
+        ("Grey Resin", ABCClass.A, "group")
+    ]
 
 
 # --- settings round-trip ---------------------------------------------------------------

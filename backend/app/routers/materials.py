@@ -14,6 +14,7 @@ from app.models.purchase import MaterialPurchase, Purchase
 from app.schemas.material import DraftPurchaseCreate, MaterialAdjustmentCreate, MaterialCreate, MaterialRead, MaterialUpdate
 from app.services.colours import resolve_updates as resolve_colour_updates
 from app.schemas.purchase import MaterialStockHistoryRead, PurchaseRead
+from app.services import abc
 from app.services.costing import create_adjustment, get_on_order_qty_by_material
 from app.services.csv_io import export_materials_csv, import_materials_csv
 from app.services.file_storage import delete_asset_file, resolve_asset_path, save_material_image, thumbnail_path_for
@@ -54,9 +55,12 @@ _STOCK_HISTORY_SQL = text(
 )
 
 
-def _to_material_read(material: Material, on_order_qty_by_material: dict) -> MaterialRead:
+def _to_material_read(material: Material, on_order_qty_by_material: dict, rules: abc.Rules) -> MaterialRead:
     return MaterialRead.model_validate(material).model_copy(
-        update={"on_order_qty": on_order_qty_by_material.get(material.id)}
+        update={
+            "on_order_qty": on_order_qty_by_material.get(material.id),
+            "classification": abc.describe(rules.for_material(material), material.last_stock_take_at),
+        }
     )
 
 
@@ -97,7 +101,10 @@ async def list_materials(
     result = await session.execute(query)
     materials = list(result.scalars())
     on_order_qty_by_material = await get_on_order_qty_by_material(session)
-    return [_to_material_read(m, on_order_qty_by_material) for m in materials]
+    # Loaded once for the whole list — resolution itself is pure Python, so this stays
+    # four queries regardless of how many materials come back.
+    rules = await abc.load_rules(session)
+    return [_to_material_read(m, on_order_qty_by_material, rules) for m in materials]
 
 
 @router.get("/colours", response_model=list[str])
@@ -145,7 +152,7 @@ async def create_material(payload: MaterialCreate, session: AsyncSession = Depen
 async def get_material(material_id: int, session: AsyncSession = Depends(get_db)) -> MaterialRead:
     material = await _get_material_with_manufacturer(session, material_id)
     on_order_qty_by_material = await get_on_order_qty_by_material(session)
-    return _to_material_read(material, on_order_qty_by_material)
+    return _to_material_read(material, on_order_qty_by_material, await abc.load_rules(session))
 
 
 @router.patch("/{material_id}", response_model=MaterialRead)
