@@ -26,6 +26,7 @@ from app.models.colour import Colour
 from app.models.material_type import MaterialType
 from app.models.order import Order
 from app.models.product import Product
+from app.models.product_type import ProductType
 from app.models.purchase import Purchase
 from app.models.shipping_profile import ShippingProfile
 from app.models.supplier import Supplier
@@ -73,6 +74,12 @@ REFERENCES: dict[type[Base], Sequence[Reference]] = {
         Reference(Purchase.supplier_id, "purchase", "purchases"),
     ),
     MaterialType: (Reference(Material.material_type_id, "material", "materials"),),
+    # product_type_abc.product_type_id is a second FK into product_types and is
+    # deliberately not listed. It holds that type's ABC tier, which is an attribute of the
+    # type rather than a use of it — counting it here would refuse to delete an unused
+    # type purely because someone had once set its tier. The FK is ON DELETE CASCADE, so
+    # the assignment goes with the type rather than being left dangling.
+    ProductType: (Reference(Product.product_type_id, "product", "products"),),
     Colour: (Reference(Material.colour_id, "material", "materials"),),
     ShippingProfile: (
         Reference(Product.shipping_profile_id, "product", "products"),

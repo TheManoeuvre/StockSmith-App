@@ -4,6 +4,7 @@ from datetime import datetime
 from sqlalchemy import DateTime, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
+from app.models.abc_classification import ABCClass
 from app.models.base import Base, portable_enum
 
 
@@ -45,6 +46,17 @@ class GeneralSettings(Base):
     forecast_critical_weeks: Mapped[float] = mapped_column(Numeric(6, 2), nullable=False, default=2)
     forecast_lookback_weeks: Mapped[int] = mapped_column(default=8, nullable=False)
     default_lead_time_weeks: Mapped[float] = mapped_column(Numeric(6, 2), nullable=False, default=4)
+    # The bottom of ABC's three levels: the tier an item gets when neither it nor its
+    # category/type says otherwise. Two of them rather than one shared value because the
+    # two catalogues differ in shape — see ABCScope. Both default to C, the
+    # count-least tier, so switching this feature on doesn't declare the whole catalogue
+    # due for counting every 30 days.
+    default_material_abc_class: Mapped["ABCClass"] = mapped_column(
+        portable_enum(ABCClass, name="abc_class"), nullable=False, default=ABCClass.C
+    )
+    default_product_abc_class: Mapped["ABCClass"] = mapped_column(
+        portable_enum(ABCClass, name="abc_class"), nullable=False, default=ABCClass.C
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

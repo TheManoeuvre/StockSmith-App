@@ -1,3 +1,4 @@
+from app.models.abc_classification import ABCClass, ABCScope, ABCTierSetting, ProductTypeABC
 from app.models.allocation_event import AllocationEvent, AllocationEventType
 from app.models.asset import AssetType, ProductAsset
 from app.models.backup_settings import BackupSettings
@@ -17,7 +18,14 @@ from app.models.listing_profile import ListingProfile, ProductPlatformSettings
 from app.models.order import Order, OrderLine, OrderStatus
 from app.models.order_return import OrderLineReturn, ReturnDisposition, ReturnScope, ReturnSource
 from app.models.manufacturer import Manufacturer
-from app.models.material import Material, MaterialAdjustment, MaterialAdjustmentMode, MaterialCategory, MaterialUnit
+from app.models.material import (
+    Material,
+    MaterialAdjustment,
+    MaterialAdjustmentMode,
+    MaterialCategory,
+    MaterialCategoryABC,
+    MaterialUnit,
+)
 from app.models.material_type import MaterialType
 from app.models.platform_connection import PlatformConnection
 from app.models.platform_credential import PlatformAppCredential, PlatformEnvironment
@@ -28,6 +36,7 @@ from app.models.platform_limits import PlatformFieldLimit
 from app.models.pricing import ProductPriceSnapshot
 from app.models.product import Product, ProductBundleItem, ProductMaterial
 from app.models.product_stock_event import ProductStockEvent, ProductStockEventType
+from app.models.product_type import ProductType
 from app.models.purchase import MaterialPurchase, Purchase, PurchaseStatus
 from app.models.shipping_profile import ShippingProfile
 from app.models.sku_alias import SkuAlias
@@ -48,6 +57,12 @@ __all__ = [
     "MaterialAdjustment",
     "MaterialAdjustmentMode",
     "MaterialType",
+    "MaterialCategoryABC",
+    "ProductType",
+    "ProductTypeABC",
+    "ABCClass",
+    "ABCScope",
+    "ABCTierSetting",
     "Manufacturer",
     "Supplier",
     "Purchase",

@@ -45,6 +45,11 @@ class ProductVariant(Base):
         ForeignKey("shipping_profiles.id", ondelete="SET NULL"), nullable=True
     )
     platform_fee_percent: Mapped[float | None] = mapped_column(Numeric(5, 2), nullable=True)
+    # A variant is counted in its own right — it holds its own current_stock, and builds
+    # target the variant row rather than the product — so it needs its own count date.
+    # It does *not* get its own abc_class or interval: those are resolved from the parent
+    # product (see services/abc.py).
+    last_stock_take_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     bom_overrides: Mapped[list["ProductVariantMaterial"]] = relationship(
