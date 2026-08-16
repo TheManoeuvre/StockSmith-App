@@ -5,6 +5,8 @@ import type { ListingPlatform } from "../../api/types";
 import { ApiError } from "../../api/client";
 import { PLATFORM_LABELS } from "../../lib/platforms";
 import { ErrorBanner } from "../common/ErrorBanner";
+import { listingProfilesApi } from "../../api/listingProfiles";
+import { DraftListingModal } from "./DraftListingModal";
 import { EtsyListingPickerModal } from "./EtsyListingPickerModal";
 import { ListingPickerModal } from "./ListingPickerModal";
 import { PlatformSyncBadge } from "./PlatformSyncBadge";
@@ -16,6 +18,7 @@ export function PlatformSyncSection({ productId, platform }: { productId: number
   const queryClient = useQueryClient();
   const [showAllUnits, setShowAllUnits] = useState(false);
   const [showPicker, setShowPicker] = useState(false);
+  const [showDraft, setShowDraft] = useState(false);
   const { data, error } = useQuery({
     queryKey: ["platforms", platform, "products", productId, "sync-status"],
     queryFn: () => platformsApi.getProductSyncStatus(platform, productId),
@@ -35,6 +38,13 @@ export function PlatformSyncSection({ productId, platform }: { productId: number
     },
   });
 
+  // Local-only, so it costs nothing to know whether a draft is possible before offering it
+  // — the button is never shown in a state where pressing it would fail.
+  const { data: readiness } = useQuery({
+    queryKey: ["platforms", platform, "products", productId, "draft-readiness"],
+    queryFn: () => listingProfilesApi.draftReadiness(platform, productId),
+  });
+
   const notConnected = error instanceof ApiError && error.status === 400;
   const mismatchedUnits = data?.units.filter((u) => u.quantity_mismatch) ?? [];
   // Both platforms offer a picker when the SKU check comes up short, but for different
@@ -52,6 +62,23 @@ export function PlatformSyncSection({ productId, platform }: { productId: number
           {data && <PlatformSyncBadge platform={platform} status={data.product_status} />}
         </div>
         <div className="flex items-center gap-2">
+          {/* Offered on the same unresolved state as the pickers, but for the opposite
+              case: those adopt a listing that already exists, this creates one that
+              doesn't. Etsy only for now — eBay's draft path is a later stage. */}
+          {unresolved && platform === "etsy" && (
+            <button
+              onClick={() => setShowDraft(true)}
+              disabled={!readiness?.can_create}
+              title={
+                readiness?.can_create
+                  ? undefined
+                  : "Something is still missing — open the listing setup above to see what."
+              }
+              className="rounded border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50"
+            >
+              Create {label} draft
+            </button>
+          )}
           {(canFindUnmigrated || canFindUnadopted) && (
             <button
               onClick={() => setShowPicker(true)}
@@ -69,6 +96,18 @@ export function PlatformSyncSection({ productId, platform }: { productId: number
           </button>
         </div>
       </div>
+      {showDraft && (
+        <DraftListingModal
+          productId={productId}
+          platform={platform}
+          onClose={() => {
+            setShowDraft(false);
+            queryClient.invalidateQueries({
+              queryKey: ["platforms", platform, "products", productId, "sync-status"],
+            });
+          }}
+        />
+      )}
       {showPicker &&
         (platform === "ebay" ? (
           <ListingPickerModal

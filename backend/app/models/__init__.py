@@ -1,5 +1,6 @@
 from app.models.allocation_event import AllocationEvent, AllocationEventType
 from app.models.asset import AssetType, ProductAsset
+from app.models.attribute_value_code import ProductAttributeValueCode
 from app.models.backup_settings import BackupSettings
 from app.models.base import Base
 from app.models.build import Build, BuildFailedConsumption
@@ -38,6 +39,7 @@ from app.models.variant import ProductVariant, ProductVariantMaterial
 __all__ = [
     "Base",
     "PlatformFieldLimit",
+    "ProductAttributeValueCode",
     "ListingProfile",
     "ProductPlatformSettings",
     "BackupSettings",

@@ -1,0 +1,29 @@
+# One line-ending convention, enforced rather than hoped for.
+#
+# Until this file existed, which ending a file got depended on whichever tool last wrote
+# it: core.autocrlf is false, so nothing normalised on the way in, and 17 committed text
+# files had drifted to CRLF while the rest of the tree stayed LF.
+#
+# The drift is not cosmetic. When a tool rewrites a whole file — Python's write_text emits
+# os.linesep, i.e. CRLF on Windows — every line changes, so a three-line edit arrives as a
+# whole-file diff. During 0.6.0 one ~110-line change reported 663 added / 552 removed; in
+# 0.6.3 a three-line edit reported 1,994. That makes review impossible and destroys git
+# blame lineage. It happened four times between 0.6.0 and 0.6.3 and every one was caught by
+# chance, which is the argument for a rule: the tools reintroduce the problem faster than
+# review catches it.
+#
+# text=auto lets git decide what is text and stores all of it with LF; eol=lf checks it
+# back out as LF, so the working tree matches the repository on every platform.
+* text=auto eol=lf
+
+# cmd.exe is the one consumer that genuinely wants CRLF. Still stored as LF like everything
+# else — only the checkout differs — so this rule adds no diff today. The .bat files here
+# are three-line launchers that work either way; pinning it makes the guarantee explicit
+# rather than dependent on them staying that simple.
+*.bat text eol=crlf
+
+# Never convert these. Git's auto-detection already classifies them correctly, but stating
+# it means a corrupted icon can never be the result of line-ending conversion.
+*.png binary
+*.ico binary
+*.icns binary

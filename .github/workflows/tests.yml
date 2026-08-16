@@ -48,9 +48,16 @@ jobs:
       ASSET_ROOT: ci-assets
       SHARED_PASSWORD_HASH: not-a-real-hash-ci-does-not-authenticate
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v3
+      # Pinned to a full version where the other actions use a bare major, because setup-uv
+      # stopped publishing major tags at v8 — `astral-sh/setup-uv@v10` does not resolve. This
+      # line has to be bumped deliberately; nothing upstream will carry it forward.
+      #
+      # v9 also flipped `prune-cache` to default false, so the cache this saves is larger
+      # than it was under v3. That is the intended trade (less load on PyPI, faster installs);
+      # if the Actions cache allowance ever becomes the constraint, set prune-cache: true here.
+      - uses: astral-sh/setup-uv@v10.0.1
         with:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
@@ -86,9 +93,9 @@ jobs:
   frontend:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: lts/*
           cache: npm
@@ -110,7 +117,7 @@ jobs:
   tauri:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -149,7 +156,7 @@ jobs:
   release-notes:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Test release-notes extraction
         shell: pwsh

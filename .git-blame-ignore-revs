@@ -1,0 +1,13 @@
+# Commits that changed formatting only, and should be skipped when working out who last
+# touched a line. GitHub's blame view reads this file automatically. Locally it has to be
+# opted into once per clone:
+#
+#     git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# Only add a commit here if it changed no behaviour whatsoever — the point is that skipping
+# it can never hide the change that actually explains a line.
+
+# Enforce one line-ending convention with .gitattributes
+# Renormalised 17 CRLF text files to LF. Verified content-free at the time:
+# `git diff --ignore-cr-at-eol` reported .gitattributes as the only change.
+743c7241b2ac08d260afcd4f9bdddf2629ac304d
