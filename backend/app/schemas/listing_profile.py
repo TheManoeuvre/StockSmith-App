@@ -135,3 +135,14 @@ class TaxonomyNode(BaseModel):
     name: str
     path: str
     level: int
+
+
+class DraftPushResult(BaseModel):
+    external_listing_id: str | None
+    state: str
+    units_linked: int
+    warnings: list[str]
+    # Things the marketplace tolerates on create but will refuse at publish — an Etsy draft
+    # with no image, for instance. Reported so the draft isn't a dead end the user
+    # discovers only when they try to make it live.
+    publish_blockers: list[str]

@@ -238,6 +238,11 @@ async def apply_adoption(
 
         listing = await listing_sync._get_or_create_listing(session, product.id, variant_id, platform)
         listing.external_listing_id = external_listing_id if external_listing_id is not None else expected_sku
+        # A human has just confirmed this SKU belongs to this listing, which is the
+        # strongest confirmation there is — stronger than a scan match, which only says
+        # the marketplace happened to hold the same string.
+        if actual_sku or expected_sku:
+            listing.published_sku = actual_sku or expected_sku
         listing.external_title = listing_title
         listing.external_state = "active"
         listing.last_checked_at = now

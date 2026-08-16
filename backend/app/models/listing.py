@@ -45,6 +45,12 @@ class Listing(Base):
         portable_enum(ListingPlatform, name="listing_platform"), nullable=False
     )
     external_listing_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # The SKU this marketplace has actually acknowledged, as distinct from the one
+    # StockSmith would compute today. Needed because external_listing_id means the
+    # listing id on Etsy and the SKU on eBay, and because re-deriving the SKU to ask
+    # "what is live?" asks the wrong question — the derived value is the thing about to
+    # change. Written wherever a marketplace confirms a SKU; see sku_generation.
+    published_sku: Mapped[str | None] = mapped_column(String, nullable=True)
     ceiling_qty: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_synced_qty: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
