@@ -80,6 +80,16 @@ export interface TaxonomyNode {
   level: number;
 }
 
+export interface DraftPushResult {
+  external_listing_id: string | null;
+  state: string;
+  units_linked: number;
+  warnings: string[];
+  // Things the marketplace tolerates on create but refuses at publish — an Etsy draft with
+  // no image, for instance. Surfaced so the draft isn't a dead end discovered later.
+  publish_blockers: string[];
+}
+
 export const listingProfilesApi = {
   list: (platform: ListingPlatform) =>
     api.get<ListingProfile[]>(`/settings/listing-profiles/${platform}`),
@@ -105,6 +115,8 @@ export const listingProfilesApi = {
   searchEtsyTaxonomy: (search: string) =>
     api.get<TaxonomyNode[]>(`/platforms/etsy/taxonomy?search=${encodeURIComponent(search)}`),
   etsyTaxonomyNode: (id: number) => api.get<TaxonomyNode>(`/platforms/etsy/taxonomy/${id}`),
+  createDraft: (platform: ListingPlatform, productId: number) =>
+    api.post<DraftPushResult>(`/platforms/${platform}/products/${productId}/draft-listing`),
   etsyShippingProfiles: () => api.get<NamedOption[]>(`/platforms/etsy/shipping-profiles`),
   etsyReturnPolicies: () => api.get<NamedOption[]>(`/platforms/etsy/return-policies`),
 };

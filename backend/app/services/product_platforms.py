@@ -18,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.listing import Listing, ListingPlatform
+from app.models.listing_profile import ProductPlatformSettings
 from app.models.platform_connection import PlatformConnection
 from app.services.listing_push import _PUSH_ENABLED_PLATFORMS
 
@@ -62,11 +63,29 @@ async def target_platforms(session: AsyncSession, product_id: int) -> set[Listin
     then discovering Etsy is connected and having it rejected at push time — with the
     value already written somewhere else. The asymmetry is not close.
 
-    A later stage narrows this with a per-product opt-out (`product_platform_settings.
-    is_target`). Callers only ever see this function, so that lands without touching a
-    single call site.
+    A per-product `is_target` narrows it: an explicit false excludes a platform even
+    though it is connected, which is how a product that cannot satisfy one marketplace's
+    limits stops being constrained by them. Null means "decide from connections and live
+    listings", which is every product until someone says otherwise.
+
+    A platform the product is already live on is never excluded, whatever the flag says.
+    The listing exists; pretending otherwise would let a value be generated that breaks it.
     """
-    return await connected_platforms(session) | await live_platforms(session, product_id)
+    derived = await connected_platforms(session) | await live_platforms(session, product_id)
+
+    excluded = {
+        row.platform
+        for row in (
+            await session.execute(
+                select(ProductPlatformSettings).where(
+                    ProductPlatformSettings.product_id == product_id,
+                    ProductPlatformSettings.is_target.is_(False),
+                )
+            )
+        ).scalars()
+    }
+    live = await live_platforms(session, product_id)
+    return (derived - excluded) | live
 
 
 async def catalogue_target_platforms(session: AsyncSession) -> set[ListingPlatform]:

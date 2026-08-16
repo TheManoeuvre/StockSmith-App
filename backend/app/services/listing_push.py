@@ -349,6 +349,10 @@ async def _push_one(session: AsyncSession, listing: Listing, qty: int) -> None:
 
     listing.last_synced_qty = qty
     listing.last_synced_at = datetime.now(timezone.utc)
+    # A push the marketplace accepted is confirmation it holds this SKU — the same fact a
+    # sync-check match establishes, arriving by a different route.
+    if sku:
+        listing.published_sku = sku
     session.add(
         PlatformListingPush(
             product_id=listing.product_id,
