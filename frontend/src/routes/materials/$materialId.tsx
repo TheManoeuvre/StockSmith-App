@@ -586,6 +586,12 @@ function MaterialDetail() {
             Save
           </button>
         </form>
+        {adjustMode === "set" && (
+          <p className="text-xs text-slate-500">
+            Setting an exact amount records a physical count, so this stops showing as due and its
+            count date moves to today. Adjusting by an amount doesn't — a known change isn't a count.
+          </p>
+        )}
         <ErrorBanner error={adjustStockMutation.error} />
 
         <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">

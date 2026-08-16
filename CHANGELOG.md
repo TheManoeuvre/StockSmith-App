@@ -28,6 +28,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Types are also what lets products be scheduled for counting by group.
 - Sensible counting intervals are set up already (30, 60 and 90 days by tier) so this is
   useful without configuring anything first. Change any of them under Settings > General.
+- **Counting something by hand already counts.** Use "Set exact amount" on a material or
+  product and StockSmith takes that as a physical count — it stops being listed as due and
+  its count date moves to today, so you're not asked to do the same job twice. Adjusting
+  by an amount doesn't do this: knowing two got broken isn't the same as having checked
+  what's left.
+- **Your existing counts are recognised.** Anything you've previously set an exact amount
+  for starts out dated from when you did it, rather than the list arriving with your whole
+  catalogue on it. Items you've never counted still say so.
 
 This is the groundwork for stock takes proper — scoping a count, entering it in the app or
 from a spreadsheet, and reviewing the differences before anything is adjusted — which is
