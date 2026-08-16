@@ -37,9 +37,31 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   for starts out dated from when you did it, rather than the list arriving with your whole
   catalogue on it. Items you've never counted still say so.
 
-This is the groundwork for stock takes proper — scoping a count, entering it in the app or
-from a spreadsheet, and reviewing the differences before anything is adjusted — which is
-coming next. Nothing here changes any stock quantity on its own.
+- **Stock takes.** Pick what to count — materials, finished stock, or both, narrowed to a
+  category or type, or just what's due — and StockSmith builds a count sheet and notes what
+  it currently thinks you have. Fill it in on screen or export it, count with the sheet in
+  your hand, and upload it back. Then it shows you every difference before anything is
+  changed.
+- **Differences it can't safely decide are handed to you, not applied.** Two cases: stock
+  that moved while you were counting, and stock that's been picked for an order. The second
+  matters more than it sounds — units boxed up ready to post have left the shelf but are
+  still counted as stock until the order ships, so counting the shelf comes up short by
+  exactly that much. Applying that would quietly write off goods sitting by the door.
+  StockSmith flags them instead and tells you why, with three choices: use what you
+  counted, keep the figure it has, or clear it and count again later. The count sheet also
+  shows how many are already picked, so you can go and find the boxes and avoid the
+  question.
+- **A stock take can close with questions outstanding.** They don't hold it open — they
+  move to an "unresolved variances" list, linked from the dashboard, so you can settle them
+  whenever without having to remember which count they came from.
+- **Uploads are shown to you first.** A spreadsheet with a typo in it doesn't half-apply:
+  you see what read cleanly, what didn't and why, and choose between applying the good rows
+  or fixing the file and starting again. Nothing is saved until you say so.
+- **Rows left blank are left alone.** Not counted isn't the same as counted zero — a blank
+  changes no quantity and doesn't mark the item as counted, so it stays on your list.
+
+Counting is saved as you go, on the machine rather than in the window, so a stock take
+survives closing StockSmith and picks up where you left it.
 
 ## [0.6.3] - 2026-08-14
 
