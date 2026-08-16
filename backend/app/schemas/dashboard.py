@@ -60,6 +60,14 @@ class OrderAwaitingPackaging(BaseModel):
     order_placed_at: datetime
 
 
+class OpenStockTake(BaseModel):
+    id: int
+    started_at: datetime
+    open_days: int
+    line_count: int
+    counted_count: int
+
+
 class DashboardSummary(BaseModel):
     total_inventory_value: Decimal
     active_product_count: int
@@ -73,3 +81,11 @@ class DashboardSummary(BaseModel):
     # doesn't break on the new fields.
     items_due_for_count: list[DueForCountItemRead] = []
     items_due_for_count_total: int = 0
+    # Flagged lines on takes that have since closed. A count rather than the rows: the
+    # dashboard's job is to say follow-up is outstanding and send you to the view that
+    # lists it, not to reproduce that view.
+    unresolved_variance_count: int = 0
+    # The take currently in progress, if any, with how long it has been open. Visibility
+    # only — nothing expires a take; the longer one runs the more lines land in manual
+    # review, and noticing that is the whole point.
+    open_stock_take: OpenStockTake | None = None
