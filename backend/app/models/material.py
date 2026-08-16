@@ -94,6 +94,12 @@ class Material(Base):
     # same as having counted it, and must not reset the clock. NULL reads as "never
     # counted" and sorts first in the due-for-counting list.
     last_stock_take_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # NULL means "counted outside a take" — a hand-made Set adjustment sets the date above
+    # but belongs to no take — as well as "never counted". The date is what the cadence
+    # reads; this only says where it came from.
+    last_stock_take_id: Mapped[int | None] = mapped_column(
+        ForeignKey("stock_takes.id", ondelete="SET NULL"), nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

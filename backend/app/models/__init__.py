@@ -41,6 +41,7 @@ from app.models.purchase import MaterialPurchase, Purchase, PurchaseStatus
 from app.models.shipping_profile import ShippingProfile
 from app.models.sku_alias import SkuAlias
 from app.models.stock_adjustment import StockAdjustment, StockAdjustmentMode
+from app.models.stock_take import StockTake, StockTakeLine, StockTakeLineStatus, StockTakeStatus
 from app.models.supplier import Supplier
 from app.models.variant import ProductVariant, ProductVariantMaterial
 
@@ -107,6 +108,10 @@ __all__ = [
     "SkuAlias",
     "StockAdjustment",
     "StockAdjustmentMode",
+    "StockTake",
+    "StockTakeLine",
+    "StockTakeStatus",
+    "StockTakeLineStatus",
     "PlatformFeeComponent",
     "FeeBasis",
     "MarginFeeConfig",

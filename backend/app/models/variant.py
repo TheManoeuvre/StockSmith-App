@@ -50,6 +50,9 @@ class ProductVariant(Base):
     # It does *not* get its own abc_class or interval: those are resolved from the parent
     # product (see services/abc.py).
     last_stock_take_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_stock_take_id: Mapped[int | None] = mapped_column(
+        ForeignKey("stock_takes.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     bom_overrides: Mapped[list["ProductVariantMaterial"]] = relationship(

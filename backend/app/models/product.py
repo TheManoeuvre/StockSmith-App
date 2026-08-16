@@ -112,6 +112,11 @@ class Product(Base):
     # product whose variants hold the stock keeps this NULL and its variants carry their
     # own dates instead.
     last_stock_take_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # See Material.last_stock_take_id — NULL covers both "never counted" and "counted by
+    # hand rather than in a take".
+    last_stock_take_id: Mapped[int | None] = mapped_column(
+        ForeignKey("stock_takes.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
