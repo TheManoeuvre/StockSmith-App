@@ -9,7 +9,8 @@ and solves it the same way.
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -27,12 +28,14 @@ from app.schemas.stock_take import (
     ScopePreview,
     StockTakeCreated,
     StockTakeDetail,
+    StockTakeImportResult,
     StockTakeLineRead,
     StockTakeRead,
     StockTakeScope,
     UnresolvedVariance,
 )
 from app.services import abc, stock_takes
+from app.services.csv_io import export_stock_take_csv, import_stock_take_csv
 
 router = APIRouter(prefix="/stock-takes", tags=["stock-takes"], dependencies=[Depends(require_auth)])
 
@@ -260,6 +263,40 @@ async def resolve_line(
 ) -> StockTakeDetail:
     await stock_takes.resolve_line(session, stock_take_id, line_id, payload.action)
     return await _read_take(session, await stock_takes.get_take_or_404(session, stock_take_id))
+
+
+@router.get("/{stock_take_id}/export")
+async def export_stock_take(stock_take_id: int, session: AsyncSession = Depends(get_db)) -> Response:
+    await stock_takes.get_take_or_404(session, stock_take_id)
+    csv_text = await export_stock_take_csv(session, stock_take_id)
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=stock-take-{stock_take_id}.csv"},
+    )
+
+
+@router.post("/{stock_take_id}/import", response_model=StockTakeImportResult)
+async def import_stock_take(
+    stock_take_id: int,
+    file: UploadFile,
+    dry_run: bool = True,
+    on_error: str = "skip",
+    session: AsyncSession = Depends(get_db),
+) -> StockTakeImportResult:
+    """Read counts off a filled-in sheet.
+
+    Called twice by design: once with dry_run=true to produce the preview the user
+    confirms, then again with the same file and dry_run=false. Nothing is written on the
+    first call, so a file with problems can be reported without half-applying it.
+    """
+    if on_error not in ("skip", "fail"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="on_error must be 'skip' or 'fail'"
+        )
+    content = await file.read()
+    result = await import_stock_take_csv(session, stock_take_id, content, dry_run=dry_run, on_error=on_error)
+    return StockTakeImportResult(**result)
 
 
 @router.post("/{stock_take_id}/approve", response_model=ApproveResult)
