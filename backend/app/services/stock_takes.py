@@ -347,6 +347,18 @@ async def _validate_count(session: AsyncSession, line: StockTakeLine, counted_qt
         )
 
 
+def _qty(value: Decimal) -> str:
+    """A quantity as someone would write it: 10 rather than 10.0000, 2.5 rather than 2.5000.
+
+    Decimal keeps the scale it was stored with, and format spec "g" preserves it too, so
+    these reasons otherwise read "counted 5.0000 against 10.0000 expected" in a sentence
+    meant for a person.
+    """
+    normalized = value.normalize()
+    # normalize() turns 10 into 1E+1, which is worse than what it fixed.
+    return f"{normalized:f}" if normalized == normalized.to_integral_value() else str(normalized)
+
+
 @dataclass
 class _LineOutcome:
     status: StockTakeLineStatus
@@ -390,7 +402,7 @@ def _decide(line: StockTakeLine, current_qty: Decimal, allocated: Decimal) -> _L
     if current_qty != expected:
         return _LineOutcome(
             StockTakeLineStatus.conflict,
-            f"Stock moved since this take started — was {expected:g}, now {current_qty:g}",
+            f"Stock moved since this take started — was {_qty(expected)}, now {_qty(current_qty)}",
             current_qty,
         )
 
@@ -398,10 +410,11 @@ def _decide(line: StockTakeLine, current_qty: Decimal, allocated: Decimal) -> _L
     # loose units on a line with allocations lands at or above the floor the adjustment
     # service checks, so nothing refuses it and the boxed units are written off.
     if allocated > 0 and counted < expected:
+        units = "unit is" if allocated == 1 else "units are"
         return _LineOutcome(
             StockTakeLineStatus.conflict,
-            f"{allocated:g} unit(s) are allocated to open orders and may be picked and boxed "
-            f"rather than on the shelf — counted {counted:g} against {expected:g} expected",
+            f"{_qty(allocated)} {units} allocated to open orders and may be picked and boxed "
+            f"rather than on the shelf — counted {_qty(counted)} against {_qty(expected)} expected",
             current_qty,
         )
 

@@ -111,6 +111,106 @@ export interface DueForCountItem {
   days_overdue: number | null;
 }
 
+export type StockTakeStatus = "open" | "closed";
+export type StockTakeLineStatus =
+  | "pending"
+  | "counted"
+  | "applied"
+  | "conflict"
+  | "accepted_system"
+  | "skipped";
+
+export interface StockTakeLine {
+  id: number;
+  material_id: number | null;
+  product_id: number | null;
+  variant_id: number | null;
+  name: string;
+  unit: string;
+  expected_qty: string;
+  /** Finished stock only: how much of expected_qty is picked for open orders, and so
+   * probably boxed rather than on the shelf. Null for materials. */
+  allocated_qty_at_start: string | null;
+  /** Null means not counted, which is a different thing from a count of zero. */
+  counted_qty: string | null;
+  notes: string | null;
+  status: StockTakeLineStatus;
+  system_qty_at_approval: string | null;
+  conflict_reason: string | null;
+  delta: string | null;
+}
+
+export interface StockTake {
+  id: number;
+  status: StockTakeStatus;
+  includes_materials: boolean;
+  includes_products: boolean;
+  overdue_only: boolean;
+  scope_description: string;
+  started_at: string;
+  closed_at: string | null;
+  notes: string | null;
+  /** Visibility only — nothing expires a take. The longer one runs the more lines land in
+   * manual review, which is what this is for noticing. */
+  open_days: number;
+  line_count: number;
+  counted_count: number;
+  pending_count: number;
+  conflict_count: number;
+}
+
+export interface StockTakeDetail extends StockTake {
+  lines: StockTakeLine[];
+}
+
+export interface ScopeWarning {
+  name: string;
+  other_stock_take_id: number;
+  other_started_at: string;
+}
+
+export interface StockTakeScope {
+  include_materials: boolean;
+  include_products: boolean;
+  material_categories: MaterialCategory[];
+  product_type_ids: number[];
+  overdue_only: boolean;
+}
+
+export interface ScopePreview {
+  candidate_count: number;
+  material_count: number;
+  product_count: number;
+  scope_description: string;
+  warnings: ScopeWarning[];
+}
+
+export interface StockTakeCreated {
+  stock_take: StockTakeDetail;
+  warnings: ScopeWarning[];
+}
+
+export interface ApproveResult {
+  stock_take: StockTakeDetail;
+  applied_count: number;
+  conflict_count: number;
+  skipped_count: number;
+}
+
+export interface UnresolvedVariance {
+  line: StockTakeLine;
+  stock_take_id: number;
+  stock_take_closed_at: string | null;
+}
+
+export interface StockTakeImportResult {
+  matched: number;
+  skipped_blank: number;
+  failed: { row: number; error: string }[];
+  /** False for a dry run, and false when on_error="fail" refused the file. */
+  applied: boolean;
+}
+
 export interface TierInterval {
   tier: ABCClass;
   interval_days: number;
@@ -473,6 +573,16 @@ export interface DashboardSummary {
    * how many it isn't showing. */
   items_due_for_count: DueForCountItem[];
   items_due_for_count_total: number;
+  /** A count, not the rows: the dashboard says follow-up is outstanding and links to the
+   * view that lists it. */
+  unresolved_variance_count: number;
+  open_stock_take: {
+    id: number;
+    started_at: string;
+    open_days: number;
+    line_count: number;
+    counted_count: number;
+  } | null;
 }
 
 export type ListingPlatform = "etsy" | "ebay" | "shopify";

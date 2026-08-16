@@ -153,6 +153,34 @@ function Dashboard() {
         </section>
       )}
 
+      {(data.unresolved_variance_count > 0 || data.open_stock_take) && (
+        <section className="flex flex-wrap gap-3">
+          {data.open_stock_take && (
+            <Link
+              to="/stock-takes/$stockTakeId"
+              params={{ stockTakeId: String(data.open_stock_take.id) }}
+              className="rounded border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+            >
+              <strong>Stock take in progress</strong> — {data.open_stock_take.counted_count} of{" "}
+              {data.open_stock_take.line_count} counted, open {data.open_stock_take.open_days} day
+              {data.open_stock_take.open_days === 1 ? "" : "s"}
+            </Link>
+          )}
+          {data.unresolved_variance_count > 0 && (
+            <Link
+              to="/stock-takes/unresolved"
+              className="rounded border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+            >
+              <strong>
+                {data.unresolved_variance_count} unresolved variance
+                {data.unresolved_variance_count === 1 ? "" : "s"}
+              </strong>{" "}
+              — counted differences still waiting on a decision
+            </Link>
+          )}
+        </section>
+      )}
+
       {data.items_due_for_count.length > 0 && (
         <section>
           <h2 className="mb-2 text-lg font-semibold">Due for counting</h2>

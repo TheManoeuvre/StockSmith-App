@@ -26,6 +26,9 @@ import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalS
  *   variant-${id}/bom-overrides              build BOM overrides
  *   variant-${id}/kitting-bom-overrides      kitting BOM overrides
  *
+ * Stock takes:
+ *   count-sheet                              the count sheet's per-line quantity inputs
+ *
  * Materials:
  *   material-details, material-adjust, material-image-url
  *   new-material                             the list page's create form

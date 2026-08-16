@@ -276,6 +276,10 @@ async def test_a_short_count_on_an_allocated_line_is_flagged(session, pushes):
     await session.refresh(line)
     assert line.status is StockTakeLineStatus.conflict
     assert "allocated to open orders" in line.conflict_reason
+    # Written for a person to read, so quantities lose the Decimal scale they're stored
+    # with. Without _qty this says "counted 5.0000 against 10.0000 expected".
+    assert "counted 5 against 10 expected" in line.conflict_reason
+    assert "5 units are" in line.conflict_reason
 
 
 async def test_a_short_count_with_no_allocation_still_applies(session, pushes):
@@ -495,3 +499,16 @@ async def test_an_open_take_can_be_abandoned_but_a_closed_one_cannot(session, pu
     await stock_takes.approve_stock_take(session, second.id)
     with pytest.raises(HTTPException):
         await stock_takes.delete_stock_take(session, second.id)
+
+
+def test_quantities_in_conflict_reasons_read_as_people_write_them():
+    """Decimal keeps the scale it was stored with, and so does format spec "g", so these
+    sentences otherwise carry "10.0000" where someone wrote "10". normalize() alone is not
+    the fix — it turns 10 into 1E+1."""
+    from app.services.stock_takes import _qty
+
+    assert _qty(Decimal("10.0000")) == "10"
+    assert _qty(Decimal("2.5000")) == "2.5"
+    assert _qty(Decimal("0.0000")) == "0"
+    assert _qty(Decimal("12.3400")) == "12.34"
+    assert _qty(Decimal("1E+1")) == "10"
