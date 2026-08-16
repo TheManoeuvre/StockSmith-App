@@ -2,13 +2,15 @@
 
 Informal list of improvements not yet scheduled into a plan doc.
 
-## Backend adoption has no identity check
+## Orphaned sidecars are detected but not reaped
 
-**Problem:** Found during the background-sync spike. `spawn_sidecar_if_needed` (`frontend/src-tauri/src/lib.rs:70-99`) probes `GET /healthz` and reuses *whatever* answers on port 8000, and `/healthz` returns only `{"status": "ok"}`. So the app will silently adopt a backend from a different build — a stale sidecar orphaned by an update, or a dev instance — and run a new frontend against it with no indication anything is wrong.
+**Problem:** The identity half of this is done — `/healthz` carries the build version and the shell refuses to adopt a backend that reports a different one (`backend/app/main.py:146`, `frontend/src-tauri/src/lib.rs:82`, shipped in 0.6.3). What it does on a mismatch is *stop and tell the user to close StockSmith and re-run the installer*, which is honest but is still a dead end the user has to clear by hand.
 
-This exists today, independently of the tray work, but the tray makes it much more likely to fire (see `docs/plan-background-sync.md` §2a).
+The rest of the original ask is outstanding: there's no PID file, so a sidecar orphaned by a crash or an installer is neither reaped nor distinguishable from a dev instance someone is deliberately running on port 8000.
 
-**Ask:** Include the build version in `/healthz` and have the shell refuse to adopt a mismatched backend — kill it and spawn its own. Pair with a PID file so a sidecar orphaned by a crash or an installer is reaped rather than adopted.
+This exists independently of the tray work, but the tray makes it much more likely to fire (see `docs/plan-background-sync.md` §2a).
+
+**Ask:** Write a PID file alongside the sidecar so the shell can tell *its own* orphan from a foreign process, and kill-and-respawn in that case rather than refusing. Leave the refusal in place for anything it didn't start — that case is genuinely not the shell's to kill.
 
 ## Periodic reconciliation for failed listing pushes
 
@@ -49,29 +51,3 @@ Phase 4 of the backlog-burndown plan rejects this configuration at generation ti
 **Problem:** `ProductVariantMaterial` has no column distinguishing a rule-generated override from a hand-edited one. The bulk-amend feature therefore can't preserve manual edits automatically — it has to show a preview and make the human consent to each overwrite.
 
 **Ask:** Add a `source` column (`"rule" | "manual"`) so bulk operations can leave hand-edited rows alone by default.
-
-## Dashboard "Build now" should land on the build form, not the product page
-
-**Problem:** The "Build now" button on a dashboard order awaiting inventory (`frontend/src/routes/index.tsx:105-113`) links to `/products/$productId` and nothing more, dropping the user on the Details tab to go and find the Stock tab themselves — and then to re-select the variant they were already looking at on the dashboard.
-
-**Ask:** Link straight to the product's build form with the variant preselected. Purely frontend: `variant_id` is already on the dashboard payload (`OrderAwaitingInventory`, `frontend/src/api/types.ts:362`), so nothing is needed server-side. `StockSection`'s build form already has a `variantId` field to seed.
-
-Depends on the product page's tab being addressable — it became a URL search param (`?tab=stock`) as part of the merged Bill of Materials work, so this is now mostly a link change plus seeding the variant select from a second search param.
-
-## Line endings are mixed across the repo
-
-**Problem:** 32 committed files use CRLF while the rest of the tree uses LF, and there's no `.gitattributes` — so which one a file gets depends on whatever tool last wrote it. `core.autocrlf` is `false`, so nothing normalises on the way in. The CRLF set includes source that's actively edited: `backend/app/routers/platforms.py`, `backend/app/services/platforms/ebay.py`, `frontend/package.json`, `frontend/package-lock.json` and `frontend/.gitignore`.
-
-This bites when a tool rewrites a whole file. During the 0.6.0 work, edit scripts run through Python (whose `write_text` emits `os.linesep`, i.e. CRLF on Windows) silently converted 15 LF files to CRLF. Every one then showed as a whole-file diff — `frontend/src/routes/materials/$materialId.tsx` reported 663 added / 552 removed for a ~110-line change — which makes review impossible and destroys `git blame` lineage. Caught in the pre-release audit and reverted, but only because someone looked; nothing in the tooling would have flagged it. It happened again during 0.6.2 and 0.6.3 — six files that time, one of which reported 1,994 changed lines for a three-line edit. Four occurrences now, each caught by chance — the fourth while appending the CI entry below to this very file, which flipped it LF to CRLF and reported 77 changed lines for a 9-line addition. That is the argument for the fix: the convention cannot be held by care, because the tools reintroduce the problem faster than review catches it.
-
-**Ask:** Add `.gitattributes` with `* text=auto eol=lf` (or per-extension rules) so the convention is enforced rather than incidental.
-
-Deliberately **not** done as part of 0.6.0: the rule renormalises all 32 existing CRLF files the next time each is committed, which would have meant a large unrelated diff landing inside a release audit. It wants its own commit, done deliberately, ideally as a single `git add --renormalize .` with nothing else in it — and worth adding to `.git-blame-ignore-revs` afterwards so the reformat doesn't pollute blame.
-
-## CI actions are pinned to a deprecated Node runtime
-
-**Problem:** Every workflow run ends with an annotation: `actions/checkout@v4`, `actions/setup-node@v4` and `astral-sh/setup-uv@v3` all target Node.js 20, which GitHub deprecated, and the runners are currently forcing them onto Node.js 24 instead. Nothing fails today — but the compatibility shim is what's keeping them working, and it won't be there forever. When it goes, all four jobs stop, and they stop on a release tag as readily as on a pull request.
-
-Visible on every run in `.github/workflows/tests.yml` and `.github/workflows/release.yml` since roughly the 0.6.2 release.
-
-**Ask:** Bump to `actions/checkout@v5`, `actions/setup-node@v5` and `astral-sh/setup-uv@v5` (or whichever majors target a supported runtime at the time). Low risk and quick, but worth doing on its own so a green run proves the bump rather than being confused with whatever else was in flight — and worth doing *before* it becomes urgent, since the failure mode is a release that can't build.

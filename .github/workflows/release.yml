@@ -23,17 +23,19 @@ jobs:
   release:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: lts/*
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - uses: astral-sh/setup-uv@v3
+      # Full version rather than a bare major on purpose — setup-uv stopped publishing major
+      # tags at v8. Keep this in step with the same pin in tests.yml, which explains it.
+      - uses: astral-sh/setup-uv@v10.0.1
 
       - name: Install frontend dependencies
         run: npm ci

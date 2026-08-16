@@ -105,10 +105,10 @@ function withVariants(variants: ReturnType<typeof variant>[], product: Record<st
   ];
 }
 
-async function renderProductPage() {
+async function renderProductPage(initialEntry = "/products/1") {
   const router = createRouter({
     routeTree,
-    history: createMemoryHistory({ initialEntries: ["/products/1"] }),
+    history: createMemoryHistory({ initialEntries: [initialEntry] }),
   });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
@@ -490,5 +490,46 @@ describe("bundle toggle", () => {
 
     await user.click(within(dialog).getByRole("button", { name: /keep editing/i }));
     expect(calls.some((c) => c.method === "PATCH" && c.path === "/products/1")).toBe(false);
+  });
+});
+
+describe("arriving from the dashboard's Build now", () => {
+  // Both the build form and the stock-adjustment form label a select "Variant"; the build
+  // form is the first one rendered.
+  const buildVariantSelect = async () => (await screen.findAllByLabelText("Variant"))[0];
+
+  it("opens the Stock tab with the ordered variant already chosen", async () => {
+    setRoutes(withVariants([variant(2, "Red"), variant(3, "Blue")]));
+    await renderProductPage("/products/1?tab=stock&variantId=3");
+
+    expect(await screen.findByRole("heading", { name: "Record a build" })).toBeInTheDocument();
+    expect(await buildVariantSelect()).toHaveValue("3");
+  });
+
+  it("leaves the variant unchosen when the id isn't one of this product's", async () => {
+    // A stale link, or a hand-edited URL. Falling back to the empty form is right: the
+    // select is `required`, so the user is asked rather than silently given the wrong one.
+    setRoutes(withVariants([variant(2, "Red")]));
+    await renderProductPage("/products/1?tab=stock&variantId=999");
+
+    expect(await buildVariantSelect()).toHaveValue("");
+  });
+
+  it("leaves the variant unchosen when the link carries none", async () => {
+    setRoutes(withVariants([variant(2, "Red")]));
+    await renderProductPage("/products/1?tab=stock");
+
+    expect(await buildVariantSelect()).toHaveValue("");
+  });
+
+  it("falls back to Details when the product turns out to be a bundle", async () => {
+    // get_orders_awaiting_inventory doesn't exclude bundles, so the dashboard can aim
+    // ?tab=stock at one — and a bundle has no Stock tab to land on.
+    setRoutes(baseRoutes({ ...PRODUCT, is_bundle: true }));
+    await renderProductPage("/products/1?tab=stock&variantId=3");
+
+    expect(await screen.findByLabelText("SKU")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Stock" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Record a build" })).not.toBeInTheDocument();
   });
 });
