@@ -420,24 +420,52 @@ class EtsyAdapter:
 
         payment_fees = payment_net = payment_status = None
         if enrich:
-            payment_fees, payment_net, payment_status, payment_id = await self._fetch_payment(
-                session, connection, receipt.get("receipt_id")
-            )
-
-            # The Payments endpoint's own amount_fees is documented by Etsy as "the
-            # original card processing fee" only — it excludes the marketplace transaction
-            # fee, regulatory operating fee, and VAT on all of those, so it understates
-            # what the seller actually sees as "You earned" on the order page. The full
-            # total is only obtainable from the payment-account ledger, and only once the
-            # order has actually shipped (that's when the fee/VAT/shipping-label entries
-            # post) — see _fetch_platform_fees_total. Falls back to the narrow amount_fees
-            # if the ledger fetch comes back empty (e.g. fees haven't posted yet).
-            if is_shipped:
-                ledger_fees_total = await self._fetch_platform_fees_total(
-                    session, connection, receipt, transactions, payment_id
+            # A transport-level failure here (timeout, DNS, dropped connection) must not
+            # take the whole sync down with it. These calls are already best-effort on a
+            # non-200 response — they return None and let the sync carry on — but that
+            # only covers a request that completed. Until this caught them, one timed-out
+            # enrichment call aborted the entire commit_sync, which meant the watermark
+            # never advanced and the next run re-fetched the same batch and hit the same
+            # wall: a sync that can never complete on its own.
+            #
+            # That is not hypothetical. Every fresh connection starts with no watermark,
+            # so the enrich gate above is open for every receipt back to sync_start_date
+            # — hundreds of sequential calls in one run, where a single timeout anywhere
+            # is near-certain. Degrading to "no payment breakdown this round" keeps the
+            # orders themselves importing; financials_enriched=False then stops
+            # order_sync._apply_financials blanking a breakdown an earlier sync stored.
+            try:
+                payment_fees, payment_net, payment_status, payment_id = await self._fetch_payment(
+                    session, connection, receipt.get("receipt_id")
                 )
-                if ledger_fees_total is not None:
-                    payment_fees = ledger_fees_total
+
+                # The Payments endpoint's own amount_fees is documented by Etsy as "the
+                # original card processing fee" only — it excludes the marketplace transaction
+                # fee, regulatory operating fee, and VAT on all of those, so it understates
+                # what the seller actually sees as "You earned" on the order page. The full
+                # total is only obtainable from the payment-account ledger, and only once the
+                # order has actually shipped (that's when the fee/VAT/shipping-label entries
+                # post) — see _fetch_platform_fees_total. Falls back to the narrow amount_fees
+                # if the ledger fetch comes back empty (e.g. fees haven't posted yet).
+                if is_shipped:
+                    ledger_fees_total = await self._fetch_platform_fees_total(
+                        session, connection, receipt, transactions, payment_id
+                    )
+                    if ledger_fees_total is not None:
+                        payment_fees = ledger_fees_total
+            except httpx.HTTPError as e:
+                # PlatformRateLimitError is deliberately NOT caught: being rate limited
+                # means the remaining receipts would fail too, and burning the rest of
+                # the daily budget to collect a batch of blank breakdowns is worse than
+                # stopping. A timeout is a one-off; a quota is not.
+                logger.warning(
+                    "Skipping Etsy financial enrichment for receipt %s — %s: %s",
+                    receipt.get("receipt_id"),
+                    type(e).__name__,
+                    e,
+                )
+                enrich = False
+                payment_fees = payment_net = payment_status = None
 
         return ExternalOrder(
             external_order_id=str(receipt.get("receipt_id")),
