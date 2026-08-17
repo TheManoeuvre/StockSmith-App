@@ -83,6 +83,13 @@ async def _tick(platform: ListingPlatform) -> None:
         # A manual sync (or, in principle, a still-running previous tick) is already in
         # flight — skip this cycle rather than queuing up behind it; the next tick will
         # pick up wherever the watermark ends up.
+        #
+        # Logged rather than skipped silently: a sync that never returns holds this lock
+        # forever, and every later tick then no-ops. That state is otherwise completely
+        # invisible — no runs, no errors, auto-sync still showing as on — which is
+        # indistinguishable from "the shop simply had no new orders" right up until
+        # someone notices days of missing ones.
+        logger.warning("Skipping %s auto-sync tick — a sync is already in flight", platform.value)
         return
 
     async with lock:
@@ -105,23 +112,61 @@ async def _tick(platform: ListingPlatform) -> None:
 
 
 async def _loop(platform: ListingPlatform) -> None:
+    """Runs until cancelled at shutdown, and must never exit for any other reason.
+
+    Everything the loop body does is inside the try, including reading the interval back
+    out of the DB. That reload used to sit outside it, one statement past the handler —
+    so a single transient failure there (a locked SQLite file mid-backup, a pool timeout)
+    propagated out of the task and ended auto-sync for that platform until the app was
+    next restarted. Nothing surfaced it either: _tasks holds a strong reference to the
+    task forever, so asyncio's "Task exception was never retrieved" warning — the one
+    thing that would have printed a traceback — never fires. The user-visible result is
+    a platform that quietly stops syncing while still reporting itself as connected with
+    auto-sync on — a failure with no symptom until someone notices missing orders.
+    """
     while True:
+        interval_minutes = 15
         try:
             await _tick(platform)
+
+            connection = await _load_connection(platform)
+            if connection is not None:
+                interval_minutes = connection.sync_interval_minutes
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("Unexpected error in %s auto-sync loop", platform.value)
+            # Falls through to the sleep below on the default interval rather than
+            # retrying immediately — whatever failed is unlikely to be fixed microseconds
+            # later, and a tight retry loop against a marketplace API is worse than a
+            # missed cycle.
+            logger.exception("Unexpected error in %s auto-sync loop — retrying next cycle", platform.value)
 
-        connection = await _load_connection(platform)
-        interval_minutes = connection.sync_interval_minutes if connection is not None else 15
         await asyncio.sleep(max(interval_minutes, 1) * 60)
+
+
+def _log_if_loop_ended(platform: ListingPlatform, task: asyncio.Task) -> None:
+    """Last line of defence: _loop is written never to return, so if it ever does, that
+    is a bug worth a log line rather than a platform that silently stops syncing.
+
+    Needed because _tasks keeps a strong reference to every task, which suppresses
+    asyncio's own "Task exception was never retrieved" warning — without this, a dead
+    loop leaves no trace anywhere.
+    """
+    if task.cancelled():
+        return
+    error = task.exception()
+    if error is not None:
+        logger.error("%s auto-sync loop died — no further syncs until restart", platform.value, exc_info=error)
+    else:
+        logger.error("%s auto-sync loop returned unexpectedly — no further syncs until restart", platform.value)
 
 
 def start() -> None:
     for platform in (ListingPlatform.etsy, ListingPlatform.ebay):
         if platform not in _tasks:
-            _tasks[platform] = asyncio.create_task(_loop(platform))
+            task = asyncio.create_task(_loop(platform))
+            task.add_done_callback(lambda t, p=platform: _log_if_loop_ended(p, t))
+            _tasks[platform] = task
 
 
 def stop() -> None:
