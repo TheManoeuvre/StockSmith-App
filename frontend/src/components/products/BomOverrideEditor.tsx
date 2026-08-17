@@ -8,6 +8,19 @@ import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { normalizeQtyForUnit, wholeNumberStepFor } from "../../lib/format";
 
+/**
+ * Whether two materials are in the same category, which is the rule the backend enforces on
+ * substitutions (routers/variants.py).
+ *
+ * Compares ids where both have one — names are user-editable now, so the id is the identity —
+ * and falls back to the name for a material written before categories became rows.
+ */
+function sameCategory(a: Material | undefined, b: Material | undefined): boolean {
+  if (!a || !b) return false;
+  if (a.category_id !== null && b.category_id !== null) return a.category_id === b.category_id;
+  return a.category === b.category;
+}
+
 type OverrideMode = "inherit" | "qty" | "substitute";
 interface OverrideRow {
   mode: OverrideMode;
@@ -134,7 +147,7 @@ export function BomOverrideEditor({
       const defaultQty = existing?.qty_required || base?.qty_required || "0";
       if (mode === "substitute") {
         const baseMaterial = materials.find((m) => m.id === materialId);
-        const firstOther = materials.find((m) => m.id !== materialId && m.category === baseMaterial?.category);
+        const firstOther = materials.find((m) => m.id !== materialId && sameCategory(m, baseMaterial));
         return {
           ...prev,
           [materialId]: {
@@ -236,7 +249,7 @@ export function BomOverrideEditor({
                   {o.mode === "substitute" && (
                     <div className="flex items-center gap-1">
                       <MaterialSelect
-                        materials={materials.filter((m) => m.id !== base.material_id && m.category === material?.category)}
+                        materials={materials.filter((m) => m.id !== base.material_id && sameCategory(m, material))}
                         value={o.substitute_material_id ?? base.material_id}
                         onChange={(id) => updateSubstituteMaterial(base.material_id, id)}
                       />

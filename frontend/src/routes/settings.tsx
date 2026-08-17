@@ -21,6 +21,7 @@ import { ShippingProfileSettings } from "../components/settings/ShippingProfileS
 import { ReferenceDataTable } from "../components/reference/ReferenceDataTable";
 import { manufacturersApi } from "../api/manufacturers";
 import { suppliersApi } from "../api/suppliers";
+import { materialCategoriesApi } from "../api/materialCategories";
 import { materialTypesApi } from "../api/materialTypes";
 import { coloursApi } from "../api/colours";
 import { BackgroundSyncSettings } from "../components/settings/BackgroundSyncSettings";
@@ -267,6 +268,40 @@ function Settings() {
               merge: materialTypesApi.merge,
             }}
             fields={[{ key: "name", label: "Name" }]}
+            usageLabel={(n) => `${n} material${n === 1 ? "" : "s"}`}
+          />
+          <ReferenceDataTable
+            title="Material categories"
+            description="What kind of thing a material is. The checkboxes are the behaviour that used to be hardcoded to filament and packaging — set them on any category, including ones you add. Order decides how the materials list groups and sorts."
+            segment="material-categories"
+            queryKey={["material-categories"]}
+            api={{
+              list: materialCategoriesApi.list,
+              create: materialCategoriesApi.findOrCreate,
+              update: materialCategoriesApi.update,
+              remove: materialCategoriesApi.remove,
+              merge: materialCategoriesApi.merge,
+              reorder: materialCategoriesApi.reorder,
+            }}
+            fields={[
+              { key: "name", label: "Name" },
+              {
+                key: "default_unit",
+                label: "Default unit",
+                type: "select",
+                placeholder: "Leave unchanged",
+                options: [
+                  { value: "g", label: "g" },
+                  { value: "ml", label: "ml" },
+                  { value: "each", label: "each" },
+                ],
+              },
+              { key: "tracks_colour", label: "Has a colour", type: "checkbox" },
+              { key: "tracks_material_type", label: "Has a material type", type: "checkbox" },
+              { key: "cost_per_kg_display", label: "Show cost per kg", type: "checkbox" },
+              { key: "consumed_on_failed_build", label: "Consumed by failed builds", type: "checkbox" },
+              { key: "auto_kitting_per_order", label: "Kitting: one per order, not per unit", type: "checkbox" },
+            ]}
             usageLabel={(n) => `${n} material${n === 1 ? "" : "s"}`}
           />
           <ReferenceDataTable

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
+import { useMaterialCategories } from "../../hooks/useMaterialCategories";
 import { buildsApi, productsApi, stockAdjustmentsApi } from "../../api/products";
 import { materialsApi } from "../../api/materials";
 import type { ProductStockEvent } from "../../api/types";
@@ -110,10 +111,20 @@ export function StockSection({
   const selectedVariant = variants?.find((v) => v.id === variantId);
   const resolvedBom = hasActiveVariants ? selectedVariant?.effective_bom ?? [] : bom ?? [];
   const materialById = useMemo(() => new Map((materials ?? []).map((m) => [m.id, m])), [materials]);
+  const { categories, byName: categoriesByName } = useMaterialCategories();
   const qtyFailedNum = Number(qtyFailed) || 0;
 
-  const consumptionFor = (materialId: number) =>
-    consumption[materialId] ?? materialById.get(materialId)?.category === "filament";
+  const consumptionFor = (materialId: number) => {
+    const material = materialById.get(materialId);
+    return (
+      consumption[materialId] ??
+      (material ? categoriesByName.get(material.category)?.consumed_on_failed_build ?? false : false)
+    );
+  };
+
+  // The categories that actually carry the flag, for the sentence below the checkboxes. Naming
+  // filament there stopped being true the moment the flag became editable.
+  const consumedByDefault = categories.filter((c) => c.consumed_on_failed_build).map((c) => c.name);
 
   const buildMutation = useMutation({
     mutationFn: () =>
@@ -268,7 +279,12 @@ export function StockSection({
         {qtyFailedNum > 0 && resolvedBom.length > 0 && (
           <div className="rounded bg-white p-4 text-sm shadow-sm">
             <p className="mb-2 text-slate-500">
-              Which materials were consumed for the {qtyFailedNum} failed unit(s)? Filament is checked by default —
+              Which materials were consumed for the {qtyFailedNum} failed unit(s)?{" "}
+              {consumedByDefault.length > 0 && (
+                <span className="capitalize">{consumedByDefault.join(", ")}</span>
+              )}
+              {consumedByDefault.length > 0 && " is checked by default — "}
+              {consumedByDefault.length === 0 && "Nothing is checked by default — "}
               uncheck anything the failed run never reached.
             </p>
             <div className="flex flex-wrap gap-4">
