@@ -8,7 +8,7 @@ from decimal import Decimal
 
 from sqlalchemy import select
 
-from app.models.material import Material, MaterialCategory, MaterialUnit
+from app.models.material import Material, LegacyMaterialCategory, MaterialUnit
 from app.models.order import Order, OrderLine
 from app.models.product import Product, ProductMaterial
 from app.routers.orders import (
@@ -25,7 +25,7 @@ from app.services import allocation
 async def _costed_product(
     session, current_stock: int, unit_cost: Decimal = Decimal("5"), qty_required: Decimal = Decimal("2")
 ) -> Product:
-    material = Material(name="Filament", category=MaterialCategory.filament, unit=MaterialUnit.g, avg_unit_cost=unit_cost)
+    material = Material(name="Filament", category=LegacyMaterialCategory.filament, unit=MaterialUnit.g, avg_unit_cost=unit_cost)
     session.add(material)
     await session.flush()
     product = Product(name="Widget", sku="SKU-COST", current_stock=current_stock, allocated_qty=0)

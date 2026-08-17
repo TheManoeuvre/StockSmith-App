@@ -9,7 +9,7 @@ import pytest
 
 from app.models.colour import Colour
 from app.models.manufacturer import Manufacturer
-from app.models.material import Material, MaterialCategory, MaterialUnit
+from app.models.material import Material, LegacyMaterialCategory, MaterialUnit
 from app.models.material_type import MaterialType
 from app.models.purchase import Purchase
 from app.models.supplier import Supplier
@@ -20,7 +20,7 @@ from app.services.reference_data import InUseError, NameConflictError, Reference
 async def _material(session, name: str, **fks) -> Material:
     material = Material(
         name=name,
-        category=MaterialCategory.filament,
+        category=LegacyMaterialCategory.filament,
         unit=MaterialUnit.g,
         current_qty=100,
         **fks,

@@ -13,7 +13,7 @@ from app.models.kitting import (
     ProductKittingMaterial,
 )
 from app.models.listing import Listing, ListingPlatform
-from app.models.material import Material, MaterialAdjustment, MaterialCategory
+from app.models.material import Material, MaterialAdjustment, LegacyMaterialCategory
 from app.models.order import Order, OrderLine, OrderStatus
 from app.models.variant import ProductVariant
 from app.schemas.dashboard import OrderAwaitingPackaging
@@ -581,7 +581,7 @@ async def auto_apply_multiunit_kitting_override(session: AsyncSession, order: Or
     )
     for material_id in auto:
         material = materials.get(material_id)
-        if material is None or material.category != MaterialCategory.packaging:
+        if material is None or material.category != LegacyMaterialCategory.packaging:
             continue
         if material_id in existing_material_ids:
             continue

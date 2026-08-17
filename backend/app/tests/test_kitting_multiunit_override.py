@@ -11,7 +11,7 @@ from sqlalchemy import select
 
 from app.models.kitting import OrderKittingOverride, ProductKittingMaterial
 from app.models.listing import ListingPlatform
-from app.models.material import Material, MaterialCategory, MaterialUnit
+from app.models.material import Material, LegacyMaterialCategory, MaterialUnit
 from app.models.order import Order, OrderLine
 from app.models.product import Product
 from app.services import listing_push, order_sync
@@ -38,7 +38,7 @@ def _async_material_push(monkeypatch, pushes):
 
 
 async def _packaging_material(session, name: str = "Box") -> Material:
-    material = Material(name=name, category=MaterialCategory.packaging, unit=MaterialUnit.each, current_qty=100)
+    material = Material(name=name, category=LegacyMaterialCategory.packaging, unit=MaterialUnit.each, current_qty=100)
     session.add(material)
     await session.commit()
     return material
@@ -154,7 +154,7 @@ async def test_non_packaging_kitting_material_is_not_auto_overridden(
 ):
     """Only packaging-category kitting materials get the one-box-either-way default —
     anything else on the kitting BOM keeps scaling with qty as before."""
-    material = Material(name="Poly bag", category=MaterialCategory.other, unit=MaterialUnit.each, current_qty=100)
+    material = Material(name="Poly bag", category=LegacyMaterialCategory.other, unit=MaterialUnit.each, current_qty=100)
     session.add(material)
     await session.commit()
     await _product_with_kitting(session, material, "SKU-A")

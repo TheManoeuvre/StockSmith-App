@@ -15,7 +15,7 @@ from fastapi import HTTPException
 from sqlalchemy import select
 
 import app.routers.products as products_router
-from app.models.material import Material, MaterialCategory, MaterialUnit
+from app.models.material import Material, LegacyMaterialCategory, MaterialUnit
 from app.models.material_type import MaterialType
 from app.models.product import Product, ProductMaterial
 from app.models.variant import ProductVariant, ProductVariantMaterial
@@ -30,13 +30,13 @@ async def product(session):
     Filament 10g + Glue 1."""
     session.add(MaterialType(id=1, name="PLA"))
     session.add_all([
-        Material(id=FILAMENT, name="Filament", category=MaterialCategory.filament,
+        Material(id=FILAMENT, name="Filament", category=LegacyMaterialCategory.filament,
                  unit=MaterialUnit.g, material_type_id=1),
-        Material(id=IVORY, name="Ivory White", category=MaterialCategory.filament,
+        Material(id=IVORY, name="Ivory White", category=LegacyMaterialCategory.filament,
                  unit=MaterialUnit.g, material_type_id=1),
-        Material(id=OAK, name="Oak", category=MaterialCategory.filament,
+        Material(id=OAK, name="Oak", category=LegacyMaterialCategory.filament,
                  unit=MaterialUnit.g, material_type_id=1),
-        Material(id=GLUE, name="Glue", category=MaterialCategory.other, unit=MaterialUnit.each),
+        Material(id=GLUE, name="Glue", category=LegacyMaterialCategory.other, unit=MaterialUnit.each),
     ])
     p = Product(
         id=1, name="Widget", sku="SKU-1",

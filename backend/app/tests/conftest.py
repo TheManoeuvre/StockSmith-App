@@ -23,6 +23,7 @@ from app.db import configure_sqlite_pragmas, enforce_sqlite_foreign_keys
 from app.models.base import Base
 from app.models.listing import ListingPlatform
 from app.models.platform_connection import PlatformConnection
+from app.seed import _ensure_material_categories
 from app.services import listing_push, order_sync, platform_limits
 from app.services.platforms.base import ExternalOrder, ExternalOrderLine, PaymentState
 
@@ -67,6 +68,13 @@ async def session_factory(engine, monkeypatch):
 @pytest_asyncio.fixture
 async def session(session_factory):
     async with session_factory() as s:
+        # The seven default categories, which in the real app arrive from the migration that
+        # created the table. This schema is built with create_all, so without this every
+        # material a test creates would have category_id NULL and quietly exercise the legacy
+        # fallback instead of the reference row — the new code path would look covered and be
+        # untested.
+        await _ensure_material_categories(s)
+        await s.commit()
         yield s
 
 

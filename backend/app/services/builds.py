@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.build import Build, BuildFailedConsumption
-from app.models.material import Material, MaterialAdjustment, MaterialCategory
+from app.models.material import Material, MaterialAdjustment, LegacyMaterialCategory
 from app.models.product import Product, ProductMaterial
 from app.models.product_stock_event import ProductStockEventType
 from app.models.variant import ProductVariant
@@ -92,7 +92,7 @@ async def create_build(
 
     if qty_failed > 0 and failed_consumption is None:
         failed_consumption = {
-            line.material_id: materials_by_id[line.material_id].category == MaterialCategory.filament for line in bom
+            line.material_id: materials_by_id[line.material_id].category == LegacyMaterialCategory.filament for line in bom
         }
 
     build = Build(product_id=product_id, variant_id=variant_id, qty_built=qty_built, qty_failed=qty_failed, notes=notes)

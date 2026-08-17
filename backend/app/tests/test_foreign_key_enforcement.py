@@ -28,7 +28,7 @@ from app.db import enforce_sqlite_foreign_keys
 from app.models.allocation_event import AllocationEvent, AllocationEventType
 from app.models.base import Base
 from app.models.kitting import OrderKittingAllocation, OrderKittingOverride
-from app.models.material import Material, MaterialAdjustment, MaterialCategory, MaterialUnit
+from app.models.material import Material, MaterialAdjustment, LegacyMaterialCategory, MaterialUnit
 from app.models.order import Order, OrderLine
 from app.models.order_return import OrderLineReturn, ReturnDisposition, ReturnScope, ReturnSource
 from app.models.product import Product
@@ -86,7 +86,7 @@ async def _seed_order_with_every_child(session) -> tuple[Order, OrderLine]:
     """
     product = Product(name="Test Product", sku="SKU-TEST-1", current_stock=5)
     material = Material(
-        name="Test Box", category=MaterialCategory.packaging, unit=MaterialUnit.each, current_qty=Decimal(10)
+        name="Test Box", category=LegacyMaterialCategory.packaging, unit=MaterialUnit.each, current_qty=Decimal(10)
     )
     session.add_all([product, material])
     await session.flush()

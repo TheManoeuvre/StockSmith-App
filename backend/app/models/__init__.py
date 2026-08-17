@@ -18,7 +18,8 @@ from app.models.listing_profile import ListingProfile, ProductPlatformSettings
 from app.models.order import Order, OrderLine, OrderStatus
 from app.models.order_return import OrderLineReturn, ReturnDisposition, ReturnScope, ReturnSource
 from app.models.manufacturer import Manufacturer
-from app.models.material import Material, MaterialAdjustment, MaterialAdjustmentMode, MaterialCategory, MaterialUnit
+from app.models.material import Material, MaterialAdjustment, MaterialAdjustmentMode, LegacyMaterialCategory, MaterialUnit
+from app.models.material_category import MaterialCategory
 from app.models.material_type import MaterialType
 from app.models.platform_connection import PlatformConnection
 from app.models.platform_credential import PlatformAppCredential, PlatformEnvironment
@@ -45,6 +46,7 @@ __all__ = [
     "BackupSettings",
     "Colour",
     "Material",
+    "LegacyMaterialCategory",
     "MaterialCategory",
     "MaterialUnit",
     "MaterialAdjustment",

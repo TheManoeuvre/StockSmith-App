@@ -8,7 +8,7 @@ from decimal import Decimal
 
 from sqlalchemy import select
 
-from app.models.material import Material, MaterialAdjustment, MaterialCategory, MaterialUnit
+from app.models.material import Material, MaterialAdjustment, LegacyMaterialCategory, MaterialUnit
 from app.models.product import Product, ProductMaterial
 from app.models.product_stock_event import ProductStockEvent, ProductStockEventType
 from app.services.builds import create_build
@@ -18,8 +18,8 @@ from app.models.stock_adjustment import StockAdjustmentMode
 
 
 async def _product_with_bom(session, filament_qty: Decimal = Decimal("1"), hardware_qty: Decimal = Decimal("1")) -> tuple[Product, Material, Material]:
-    filament = Material(name="PLA Black", category=MaterialCategory.filament, unit=MaterialUnit.g)
-    hardware = Material(name="M3 Insert", category=MaterialCategory.hardware, unit=MaterialUnit.each)
+    filament = Material(name="PLA Black", category=LegacyMaterialCategory.filament, unit=MaterialUnit.g)
+    hardware = Material(name="M3 Insert", category=LegacyMaterialCategory.hardware, unit=MaterialUnit.each)
     session.add_all([filament, hardware])
     await session.flush()
     # current_qty is a derived/replayed column (see costing.recompute_material) — stock

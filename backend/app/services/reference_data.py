@@ -23,6 +23,7 @@ from app.models.base import Base
 from app.models.manufacturer import Manufacturer
 from app.models.material import Material
 from app.models.colour import Colour
+from app.models.material_category import MaterialCategory
 from app.models.material_type import MaterialType
 from app.models.order import Order
 from app.models.product import Product
@@ -64,8 +65,10 @@ class Reference:
 
 # Every FK into each reference table. Keep this current when a new referencing column is added —
 # a missing entry means usage counts under-report and `delete_if_unused` deletes something that
-# was in use, which the database will happily accept (all these FKs are ON DELETE SET NULL, so
-# it fails silently rather than loudly).
+# was in use. Most of these FKs are ON DELETE SET NULL, so the database accepts that happily and
+# it fails silently rather than loudly. Material.category_id is the exception: it is RESTRICT,
+# because a material with no category isn't a state the app models, so there the database
+# refuses instead.
 REFERENCES: dict[type[Base], Sequence[Reference]] = {
     Manufacturer: (Reference(Material.manufacturer_id, "material", "materials"),),
     Supplier: (
@@ -73,6 +76,7 @@ REFERENCES: dict[type[Base], Sequence[Reference]] = {
         Reference(Purchase.supplier_id, "purchase", "purchases"),
     ),
     MaterialType: (Reference(Material.material_type_id, "material", "materials"),),
+    MaterialCategory: (Reference(Material.category_id, "material", "materials"),),
     Colour: (Reference(Material.colour_id, "material", "materials"),),
     ShippingProfile: (
         Reference(Product.shipping_profile_id, "product", "products"),
@@ -129,7 +133,7 @@ async def describe_usage(session: AsyncSession, model: type[Base], row_id: int) 
 # exact-match conflict check here would let a rename create the very duplicate that
 # `find-or-create` refuses to. "Black" and "black" would then both resolve on the next
 # case-insensitive lookup and raise MultipleResultsFound.
-_CASE_INSENSITIVE_NAMES: frozenset[type[Base]] = frozenset({Colour})
+_CASE_INSENSITIVE_NAMES: frozenset[type[Base]] = frozenset({Colour, MaterialCategory})
 
 
 async def _find_by_name(session: AsyncSession, model: type[Base], name: str):
