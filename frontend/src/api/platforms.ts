@@ -121,6 +121,26 @@ export interface PlatformSyncSummary {
   failing_push_count: number;
 }
 
+export interface SyncGap {
+  started_at: string;
+  ended_at: string;
+  minutes: number;
+}
+
+export interface SyncHealth {
+  window_days: number;
+  // False when the reading would be meaningless rather than empty — see
+  // services/sync_status.get_sync_health. Zero gaps and "can't tell" are different answers
+  // and must not render the same.
+  measurable: boolean;
+  reason: string | null;
+  expected_interval_minutes: number | null;
+  gap_threshold_minutes: number | null;
+  gaps: SyncGap[];
+  total_gap_minutes: number;
+  longest_gap_minutes: number;
+}
+
 export interface SyncRunPage {
   items: SyncRunRead[];
   total: number;
@@ -296,6 +316,7 @@ export const platformsApi = {
   syncOrders: (platform: ListingPlatform) => api.post<SyncCommitResult>(`/platforms/${platform}/sync-orders`),
   // Cross-platform and local-reads-only, unlike status() — safe to poll on a timer.
   syncSummary: () => api.get<PlatformSyncSummary[]>(`/platforms/sync-summary`),
+  syncHealth: (windowDays: number) => api.get<SyncHealth>(`/platforms/sync-health?window_days=${windowDays}`),
   syncLog: (platform: ListingPlatform, limit: number, offset: number) =>
     api.get<SyncRunPage>(`/platforms/${platform}/sync-log?limit=${limit}&offset=${offset}`),
   pushCorrections: (platform: ListingPlatform, productId: number) =>

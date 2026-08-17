@@ -177,6 +177,37 @@ class PlatformSyncSummary(BaseModel):
     failing_push_count: int
 
 
+class SyncGap(BaseModel):
+    """A stretch where no sync ran at all — i.e. StockSmith wasn't running."""
+
+    started_at: datetime
+    ended_at: datetime
+    minutes: int
+
+
+class SyncHealth(BaseModel):
+    """How much of the recent past StockSmith was actually up for.
+
+    Derived from `platform_sync_runs` rather than from a heartbeat of its own: the
+    scheduler already writes a row per tick, on failure as well as success, so a run row is
+    proof the process was alive at that moment and a long stretch without one is proof it
+    wasn't. See docs/plan-background-sync.md §7 for why this is worth deriving before
+    adding schema for it.
+    """
+
+    window_days: int
+    # False when the reading would be meaningless rather than merely empty — nothing is
+    # scheduled to run, so silence says nothing about uptime. Reported instead of quietly
+    # returning zero gaps, which would read as perfect uptime.
+    measurable: bool
+    reason: str | None
+    expected_interval_minutes: int | None
+    gap_threshold_minutes: int | None
+    gaps: list[SyncGap]
+    total_gap_minutes: int
+    longest_gap_minutes: int
+
+
 class ListingPushRead(BaseModel):
     id: int
     product_id: int | None
