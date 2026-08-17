@@ -124,8 +124,18 @@ async def describe_usage(session: AsyncSession, model: type[Base], row_id: int) 
     return f"{', '.join(parts[:-1])} and {parts[-1]}"
 
 
+# Tables whose names are matched without regard to case. The rule follows the data, not the
+# table: these are the ones whose `find-or-create` is already case-insensitive, so an
+# exact-match conflict check here would let a rename create the very duplicate that
+# `find-or-create` refuses to. "Black" and "black" would then both resolve on the next
+# case-insensitive lookup and raise MultipleResultsFound.
+_CASE_INSENSITIVE_NAMES: frozenset[type[Base]] = frozenset({Colour})
+
+
 async def _find_by_name(session: AsyncSession, model: type[Base], name: str):
-    return (await session.execute(select(model).where(model.name == name))).scalar_one_or_none()
+    column = func.lower(model.name) if model in _CASE_INSENSITIVE_NAMES else model.name
+    target = name.lower() if model in _CASE_INSENSITIVE_NAMES else name
+    return (await session.execute(select(model).where(column == target))).scalar_one_or_none()
 
 
 async def get_or_404(session: AsyncSession, model: type[Base], row_id: int):
@@ -151,9 +161,13 @@ async def rename(session: AsyncSession, model: type[Base], row_id: int, name: st
             raise NameConflictError(f'Another entry is already called "{name}".', existing_id=clash.id)
     row.name = name
 
+    # Set unconditionally. `None` is a real value here — it is how a website URL or a hex code
+    # gets cleared — so it cannot double as "the caller didn't mention this field". That
+    # distinction is `patch_row`'s job, which passes only the keys actually present in the
+    # request body (see _reference_crud.patch_row). Skipping None here instead made those
+    # fields impossible to empty once set, and would silently swallow a boolean set to False.
     for key, value in fields.items():
-        if value is not None:
-            setattr(row, key, value)
+        setattr(row, key, value)
 
     await session.commit()
     await session.refresh(row)

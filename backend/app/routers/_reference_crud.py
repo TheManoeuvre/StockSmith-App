@@ -50,13 +50,21 @@ async def list_with_usage(session: AsyncSession, model: type[Base]) -> list:
 
 
 async def patch_row(session: AsyncSession, model: type[Base], row_id: int, payload) -> object:
+    """PATCH one row.
+
+    `exclude_unset=True` is what makes "not mentioned" and "explicitly set to null/false"
+    different requests. Without it every optional field on the Update schema arrives with its
+    default, so a request naming only `name` would blank every other column — and `rename`
+    can no longer defend against that by skipping `None`, because clearing a field is exactly
+    what sending `None` is supposed to mean.
+    """
     try:
         row = await reference_data.rename(
             session,
             model,
             row_id,
             payload.name,
-            **{k: v for k, v in payload.model_dump(exclude={"name"}).items()},
+            **payload.model_dump(exclude={"name"}, exclude_unset=True),
         )
     except ReferenceDataError as exc:
         raise _http_error(exc) from exc
