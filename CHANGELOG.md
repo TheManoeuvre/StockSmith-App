@@ -12,6 +12,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-17
+
+StockSmith now keeps syncing after you close the window, and can start with Windows —
+so orders keep importing and stock keeps going out while you're doing something else.
+Also fixes Etsy order syncing giving up when Etsy was slow to answer, which could leave
+a shop unsynced for days.
+
 ### Added
 - **StockSmith keeps syncing when you close the window.** Closing it now tucks it into the
   notification area at the right-hand end of the taskbar rather than shutting it down, so
@@ -46,6 +53,19 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Only one copy of StockSmith can run at a time.** Opening it again when it was already
   running in the notification area now brings the existing window back instead of starting a
   second copy competing for the same database.
+- **Etsy order syncing no longer gives up when Etsy is slow to answer.** Part of each sync
+  fetches the fee breakdown for an order. If Etsy didn't respond to one of those in time,
+  the whole sync stopped — and because it stopped before recording its progress, the next
+  attempt started from the same place and hit the same wall. A shop could sit like that for
+  days. Now a slow fee lookup just means that order arrives without its fee breakdown yet,
+  and everything else imports normally.
+- **A failed sync now tells you why.** Some failures were recorded with no reason attached,
+  so Settings → Integrations showed a sync marked as failed with nothing next to it. There
+  is always a reason there now.
+- **Automatic syncing can no longer stop without saying so.** A brief hiccup reading the
+  database could switch off the background sync for a platform until the app was restarted,
+  with nothing shown anywhere — it carried on reporting itself as connected while syncing
+  nothing. It now rides out the hiccup and carries on with the next cycle.
 
 ## [0.6.3] - 2026-08-14
 
