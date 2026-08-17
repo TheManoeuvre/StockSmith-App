@@ -8,6 +8,8 @@ The behaviour tests are the ones that prove the point of the exercise: they use 
 category, not one of the seven, so they fail if any of the old `== filament` checks survived.
 """
 
+import csv
+import io
 import sqlite3
 from pathlib import Path
 
@@ -15,7 +17,8 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 
 from app.models.material import LegacyMaterialCategory, Material, MaterialUnit
 from app.models.material_category import MaterialCategory
@@ -23,6 +26,7 @@ from app.routers import material_categories as material_categories_router
 from app.routers._reference_crud import MergeRequest
 from app.schemas.material_category import MaterialCategoryReorder, MaterialCategoryUpdate
 from app.services import material_categories
+from app.services.csv_io import export_materials_csv, import_materials_csv
 
 
 def _alembic_config(db_path: Path) -> Config:
@@ -336,3 +340,86 @@ class TestRouterGuards:
             session,
         )
         assert updated.consumed_on_failed_build is False
+
+
+class TestForeignKey:
+    async def test_deleting_a_category_in_use_is_refused_by_the_database(self, session):
+        """The backstop under delete_if_unused. Every other reference FK is SET NULL, where a
+        bad delete quietly blanks a column; here it has to fail loudly, because there is no
+        such thing as a material with no category."""
+        category = await material_categories.find_or_create(session, "Cardstock")
+        await session.flush()
+        session.add(
+            Material(
+                name="Card A6",
+                category=LegacyMaterialCategory.other,
+                category_id=category.id,
+                unit=MaterialUnit.each,
+            )
+        )
+        await session.commit()
+
+        # SQLite enforces immediately rather than at commit, so the statement itself raises.
+        with pytest.raises(IntegrityError):
+            await session.execute(delete(MaterialCategory).where(MaterialCategory.id == category.id))
+        await session.rollback()
+
+
+class TestCsv:
+    async def _material(self, session, name: str, category: str) -> Material:
+        row = await material_categories.find_or_create(session, category)
+        material = Material(
+            name=name,
+            category=material_categories.legacy_value_for(row.name),
+            category_id=row.id,
+            unit=MaterialUnit.each,
+        )
+        session.add(material)
+        await session.commit()
+        return material
+
+    async def test_export_writes_the_category_name_not_the_legacy_value(self, session):
+        """A material in a user-created category stores 'other' in the legacy column. Exporting
+        that would be exporting the workaround rather than the data."""
+        await self._material(session, "Card A6", "Cardstock")
+        rows = list(csv.DictReader(io.StringIO(await export_materials_csv(session))))
+        assert [row["category"] for row in rows] == ["Cardstock"]
+
+    async def test_import_matches_an_existing_category_ignoring_case(self, session):
+        """The case that would silently split a category in two under exact matching."""
+        before = len((await session.execute(select(MaterialCategory))).scalars().all())
+        content = (
+            "name,category,unit,current_qty,reorder_threshold\n" "Box large,PACKAGING,each,0,0\n"
+        ).encode()
+        result = await import_materials_csv(session, content)
+        assert result["failed"] == []
+
+        after = (await session.execute(select(MaterialCategory))).scalars().all()
+        assert len(after) == before
+        material = (
+            await session.execute(select(Material).where(Material.name == "Box large"))
+        ).scalar_one()
+        assert material.category_name == "packaging"
+
+    async def test_import_creates_an_unknown_category_at_the_end(self, session):
+        content = (
+            "name,category,unit,current_qty,reorder_threshold\n" "Card A6,Cardstock,each,0,0\n"
+        ).encode()
+        result = await import_materials_csv(session, content)
+        assert result["failed"] == []
+
+        created = (
+            await session.execute(select(MaterialCategory).where(MaterialCategory.name == "Cardstock"))
+        ).scalar_one()
+        assert created.sort_order == 80
+        material = (await session.execute(select(Material).where(Material.name == "Card A6"))).scalar_one()
+        # The legacy column can't hold "Cardstock", so it holds the only thing it can.
+        assert material.category is LegacyMaterialCategory.other
+        assert material.category_name == "Cardstock"
+
+    async def test_export_import_export_is_stable(self, session):
+        await self._material(session, "Card A6", "Cardstock")
+        await self._material(session, "Box", "packaging")
+        first = await export_materials_csv(session)
+        await import_materials_csv(session, first.encode())
+        assert await export_materials_csv(session) == first

@@ -11,7 +11,8 @@ from sqlalchemy import select
 
 from app.models.kitting import OrderKittingOverride, ProductKittingMaterial
 from app.models.listing import ListingPlatform
-from app.models.material import Material, LegacyMaterialCategory, MaterialUnit
+from app.models.material import Material, MaterialUnit
+from app.services import material_categories
 from app.models.order import Order, OrderLine
 from app.models.product import Product
 from app.services import listing_push, order_sync
@@ -37,11 +38,27 @@ def _async_material_push(monkeypatch, pushes):
     monkeypatch.setattr(listing_push, "enqueue_for_material", _noop)
 
 
-async def _packaging_material(session, name: str = "Box") -> Material:
-    material = Material(name=name, category=LegacyMaterialCategory.packaging, unit=MaterialUnit.each, current_qty=100)
+async def _material_in(session, category_name: str, name: str) -> Material:
+    """A material in a real category row, not just the legacy enum value.
+
+    Setting category_id matters: with it NULL the behaviour flag falls back to how the category
+    behaved as an enum, so these tests would pass without ever reading the reference row.
+    """
+    category = await material_categories.find_or_create(session, category_name)
+    material = Material(
+        name=name,
+        category=material_categories.legacy_value_for(category.name),
+        category_id=category.id,
+        unit=MaterialUnit.each,
+        current_qty=100,
+    )
     session.add(material)
     await session.commit()
     return material
+
+
+async def _packaging_material(session, name: str = "Box") -> Material:
+    return await _material_in(session, "packaging", name)
 
 
 async def _product_with_kitting(session, material: Material, sku: str, qty_required: int = 1) -> Product:
@@ -152,14 +169,73 @@ async def test_manual_override_survives_a_later_reallocation(
 async def test_non_packaging_kitting_material_is_not_auto_overridden(
     session, session_factory, connection, use_adapter, pushes
 ):
-    """Only packaging-category kitting materials get the one-box-either-way default —
+    """Only categories carrying auto_kitting_per_order get the one-box-either-way default —
     anything else on the kitting BOM keeps scaling with qty as before."""
-    material = Material(name="Poly bag", category=LegacyMaterialCategory.other, unit=MaterialUnit.each, current_qty=100)
+    material = await _material_in(session, "other", "Poly bag")
+    await _product_with_kitting(session, material, "SKU-A")
+    await _product_with_kitting(session, material, "SKU-B")
+    use_adapter([_multiline_order("R-OTHER", ["SKU-A", "SKU-B"])])
+
+    await order_sync.commit_sync(ListingPlatform.etsy)
+
+    order = (await session.execute(select(Order))).scalar_one()
+    overrides = list(
+        (await session.execute(select(OrderKittingOverride).where(OrderKittingOverride.order_id == order.id)))
+        .scalars()
+    )
+    assert overrides == []
+
+
+async def test_a_user_created_category_can_carry_the_kitting_default(
+    session, session_factory, connection, use_adapter, pushes
+):
+    """The test that proves the hardcode is gone.
+
+    "Mailers" is not one of the original seven, so nothing in the codebase can special-case it.
+    It gets the one-box-either-way default purely because the flag on its category row says so.
+    """
+    category = await material_categories.find_or_create(session, "Mailers")
+    category.auto_kitting_per_order = True
+    await session.commit()
+
+    material = Material(
+        name="Padded mailer",
+        category=material_categories.legacy_value_for(category.name),
+        category_id=category.id,
+        unit=MaterialUnit.each,
+        current_qty=100,
+    )
     session.add(material)
     await session.commit()
     await _product_with_kitting(session, material, "SKU-A")
     await _product_with_kitting(session, material, "SKU-B")
-    use_adapter([_multiline_order("R-OTHER", ["SKU-A", "SKU-B"])])
+    use_adapter([_multiline_order("R-MAILER", ["SKU-A", "SKU-B"])])
+
+    await order_sync.commit_sync(ListingPlatform.etsy)
+
+    order = (await session.execute(select(Order))).scalar_one()
+    override = (
+        await session.execute(
+            select(OrderKittingOverride).where(OrderKittingOverride.order_id == order.id)
+        )
+    ).scalar_one()
+    assert override.material_id == material.id
+    assert Decimal(override.qty_required) == Decimal(1)
+
+
+async def test_packaging_stops_getting_the_default_once_the_flag_is_cleared(
+    session, session_factory, connection, use_adapter, pushes
+):
+    """The other direction, and the reason the flag is editable rather than merely present:
+    someone who genuinely ships one box per unit can turn it off."""
+    packaging = await material_categories.find_or_create(session, "packaging")
+    packaging.auto_kitting_per_order = False
+    await session.commit()
+
+    material = await _packaging_material(session)
+    await _product_with_kitting(session, material, "SKU-A")
+    await _product_with_kitting(session, material, "SKU-B")
+    use_adapter([_multiline_order("R-NOFLAG", ["SKU-A", "SKU-B"])])
 
     await order_sync.commit_sync(ListingPlatform.etsy)
 
