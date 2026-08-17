@@ -2,6 +2,26 @@
 
 Informal list of improvements not yet scheduled into a plan doc.
 
+## Drop the superseded `materials.colour` and `materials.category` columns
+
+**Problem:** Two reference-table migrations deliberately left their old column in place for a
+release rather than dropping it, because SQLite needs a full table rebuild to drop a column and
+restoring an older backup and migrating it forward is routine. `materials.colour` was left by
+`e6b21d84f309` (0.6.x) and is now several releases overdue; `materials.category` was left by
+`f2a91c4d7b08` and is due next release.
+
+Category is the one with a visible cost while it stays. The column is NOT NULL with a CHECK
+accepting exactly the original seven values, so a material filed under a user-created category
+has to store `'other'` there (`services/material_categories.legacy_value_for`). On the current
+release nothing reads it, so nothing is wrong — but a rollback, or a backup restored into an
+older build, shows those materials as "other".
+
+**Ask:** One migration per column: drop the column and its CHECK, drop the now-unused
+`LegacyMaterialCategory` enum, make `materials.category_id` NOT NULL, and delete
+`legacy_value_for` along with the calls that keep the column in step (materials create/patch, CSV
+import, and the rename/merge wrappers in `routers/material_categories.py`). The category-name
+fallbacks in `Material.category_name` / `Material.colour_name` go at the same time.
+
 ## Orphaned sidecars are detected but not reaped
 
 **Problem:** The identity half of this is done — `/healthz` carries the build version and the shell refuses to adopt a backend that reports a different one (`backend/app/main.py:146`, `frontend/src-tauri/src/lib.rs:82`, shipped in 0.6.3). What it does on a mismatch is *stop and tell the user to close StockSmith and re-run the installer*, which is honest but is still a dead end the user has to clear by hand.
