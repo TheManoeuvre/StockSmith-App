@@ -24,8 +24,29 @@ function fieldValue(row: ReferenceRow, key: string): string {
 export interface ReferenceField {
   key: string;
   label: string;
-  type?: "text" | "url" | "money";
+  type?: "text" | "url" | "money" | "checkbox" | "select";
   placeholder?: string;
+  /** For type "select". The empty option means "not set" and is sent as null. */
+  options?: { value: string; label: string }[];
+}
+
+/**
+ * Turn the form's all-strings state back into what the API expects.
+ *
+ * Form state stays Record<string, string> even for booleans — see the comment on `seed` in
+ * ExpandedRow. That's harmless going in, because fieldValue() stringifies anyway, but it must
+ * not leak back out: the backend would receive the string "false", and leaning on Pydantic to
+ * coerce that is the kind of accident that works until it doesn't.
+ */
+function serialize(fields: ReferenceField[], form: Record<string, string>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const field of fields) {
+    const raw = form[field.key] ?? "";
+    if (field.type === "checkbox") out[field.key] = raw === "true";
+    else if (field.type === "select") out[field.key] = raw || null;
+    else out[field.key] = raw;
+  }
+  return out;
 }
 
 export interface ReferenceDataApi<T extends ReferenceRow> {
@@ -34,6 +55,9 @@ export interface ReferenceDataApi<T extends ReferenceRow> {
   update: (id: number, input: Record<string, unknown>) => Promise<T>;
   remove?: (id: number) => Promise<void>;
   merge?: (id: number, targetId: number) => Promise<T>;
+  /** Only supplied by tables whose order is meaningful. Its presence is what renders the
+   *  up/down controls, so the tables without it are unaffected. */
+  reorder?: (ids: number[]) => Promise<unknown>;
 }
 
 /**
@@ -75,6 +99,7 @@ export function ReferenceDataTable<T extends ReferenceRow>({
   const { data: rows } = useQuery({ queryKey, queryFn: api.list });
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const guard = useGuard();
+  const queryClient = useQueryClient();
 
   const toggle = (id: number) => {
     const next = expandedId === id ? null : id;
@@ -84,6 +109,28 @@ export function ReferenceDataTable<T extends ReferenceRow>({
     }
     // The prefix is the row about to unmount, not the one being clicked.
     guard.attempt(() => setExpandedId(next), { prefix: `${segment}/row-${expandedId}/` });
+  };
+
+  const reorderMutation = useMutation({
+    mutationFn: (ids: number[]) => api.reorder!(ids),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey }),
+  });
+
+  /**
+   * Swap a row with its neighbour and send the whole order.
+   *
+   * Deliberately not routed through `guard.attempt`, even though it looks like it should be.
+   * Reordering changes the order of the list, not which row is expanded, and useEditableCopy is
+   * seeded by row.id — so the refetch that follows re-renders the open editor with the same
+   * seedKey and cannot clobber what's being typed into it.
+   */
+  const move = (index: number, delta: number) => {
+    if (!rows) return;
+    const ids = rows.map((row) => row.id);
+    const target = index + delta;
+    if (target < 0 || target >= ids.length) return;
+    [ids[index], ids[target]] = [ids[target], ids[index]];
+    reorderMutation.mutate(ids);
   };
 
   return (
@@ -100,19 +147,46 @@ export function ReferenceDataTable<T extends ReferenceRow>({
 
         {rows && rows.length > 0 && (
           <ul className="flex flex-col divide-y divide-slate-100 rounded border border-slate-200 bg-white">
-            {rows.map((row) => (
+            {rows.map((row, index) => (
               <li key={row.id}>
-                <button
-                  type="button"
-                  aria-expanded={expandedId === row.id}
-                  onClick={() => toggle(row.id)}
-                  className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-slate-50"
-                >
-                  <span className="font-medium">{row.name}</span>
-                  <span className="text-xs text-slate-400">
-                    {row.usage_count > 0 ? usageLabel(row.usage_count) : "unused"}
-                  </span>
-                </button>
+                {/* The arrows sit beside the expand control, not inside it: a button nested in a
+                    button is invalid HTML and silently breaks getByRole queries. Keeping them
+                    siblings also means no stopPropagation. */}
+                <div className="flex items-center">
+                  <button
+                    type="button"
+                    aria-expanded={expandedId === row.id}
+                    onClick={() => toggle(row.id)}
+                    className="flex flex-1 items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-slate-50"
+                  >
+                    <span className="font-medium">{row.name}</span>
+                    <span className="text-xs text-slate-400">
+                      {row.usage_count > 0 ? usageLabel(row.usage_count) : "unused"}
+                    </span>
+                  </button>
+                  {api.reorder && (
+                    <span className="flex shrink-0 items-center pr-2">
+                      <button
+                        type="button"
+                        aria-label={`Move ${row.name} up`}
+                        disabled={index === 0 || reorderMutation.isPending}
+                        onClick={() => move(index, -1)}
+                        className="px-1 text-xs text-slate-400 hover:text-slate-700 disabled:opacity-30"
+                      >
+                        ▲
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Move ${row.name} down`}
+                        disabled={index === rows.length - 1 || reorderMutation.isPending}
+                        onClick={() => move(index, 1)}
+                        className="px-1 text-xs text-slate-400 hover:text-slate-700 disabled:opacity-30"
+                      >
+                        ▼
+                      </button>
+                    </span>
+                  )}
+                </div>
                 {expandedId === row.id && (
                   <DirtyPath segment={`row-${row.id}`}>
                     <ExpandedRow
@@ -232,6 +306,12 @@ function ExpandedRow<T extends ReferenceRow>({
   const [mergeTargetId, setMergeTargetId] = useState<number | null>(null);
   const [confirmingMerge, setConfirmingMerge] = useState(false);
 
+  // Every field lives in the form as a string, booleans included ("true"/"false"). That's
+  // deliberate: useEditableCopy's dirty check is a deepEqual against this same shape, and
+  // fieldValue() already stringifies whatever the row holds, so the baseline and the working
+  // copy compare correctly with no special cases. Widening this to string | boolean would ripple
+  // through fieldValue, markSaved and the 409 conflict check below for nothing visible. The
+  // conversion back happens once, in serialize(), on the way to the API.
   const seed = useMemo(
     () => Object.fromEntries(fields.map((f) => [f.key, fieldValue(row, f.key)])),
     [row, fields]
@@ -260,7 +340,7 @@ function ExpandedRow<T extends ReferenceRow>({
   };
 
   const saveMutation = useMutation({
-    mutationFn: () => api.update(row.id, form),
+    mutationFn: () => api.update(row.id, serialize(fields, form)),
     onSuccess: (saved) => {
       // Baseline from what was stored, not what was sent — the server trims names, and a
       // trimmed value coming back would otherwise leave the row looking dirty immediately.
@@ -300,20 +380,60 @@ function ExpandedRow<T extends ReferenceRow>({
   return (
     <div className="flex flex-col gap-3 border-t border-slate-100 bg-slate-50 px-3 py-3">
       <div className="grid gap-3 sm:grid-cols-2">
-        {fields.map((field) => (
-          <label key={field.key} className="flex flex-col gap-1 text-sm">
-            {field.label}
-            <input
-              aria-label={`${row.name} ${field.label}`}
-              type={field.type === "money" ? "number" : "text"}
-              step={field.type === "money" ? "0.01" : undefined}
-              placeholder={field.placeholder}
-              className="rounded border border-slate-300 px-2 py-1"
-              value={form[field.key] ?? ""}
-              onChange={(e) => setForm((prev) => ({ ...prev, [field.key]: e.target.value }))}
-            />
-          </label>
-        ))}
+        {fields.map((field) => {
+          if (field.type === "checkbox") {
+            // Label after the control, not above it — the flex-col layout the text inputs use
+            // puts a tick box under its own caption, which reads as a different question.
+            return (
+              <label key={field.key} className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  aria-label={`${row.name} ${field.label}`}
+                  className="rounded border-slate-300"
+                  checked={form[field.key] === "true"}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, [field.key]: e.target.checked ? "true" : "false" }))
+                  }
+                />
+                {field.label}
+              </label>
+            );
+          }
+          if (field.type === "select") {
+            return (
+              <label key={field.key} className="flex flex-col gap-1 text-sm">
+                {field.label}
+                <select
+                  aria-label={`${row.name} ${field.label}`}
+                  className="rounded border border-slate-300 px-2 py-1"
+                  value={form[field.key] ?? ""}
+                  onChange={(e) => setForm((prev) => ({ ...prev, [field.key]: e.target.value }))}
+                >
+                  <option value="">{field.placeholder ?? "Not set"}</option>
+                  {(field.options ?? []).map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            );
+          }
+          return (
+            <label key={field.key} className="flex flex-col gap-1 text-sm">
+              {field.label}
+              <input
+                aria-label={`${row.name} ${field.label}`}
+                type={field.type === "money" ? "number" : "text"}
+                step={field.type === "money" ? "0.01" : undefined}
+                placeholder={field.placeholder}
+                className="rounded border border-slate-300 px-2 py-1"
+                value={form[field.key] ?? ""}
+                onChange={(e) => setForm((prev) => ({ ...prev, [field.key]: e.target.value }))}
+              />
+            </label>
+          );
+        })}
       </div>
 
       {conflictRow && api.merge && (

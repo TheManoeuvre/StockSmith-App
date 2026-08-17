@@ -7,8 +7,9 @@ construction, because these are foreign keys and the name was never copied anywh
 
 import pytest
 
+from app.models.colour import Colour
 from app.models.manufacturer import Manufacturer
-from app.models.material import Material, MaterialCategory, MaterialUnit
+from app.models.material import Material, LegacyMaterialCategory, MaterialUnit
 from app.models.material_type import MaterialType
 from app.models.purchase import Purchase
 from app.models.supplier import Supplier
@@ -19,7 +20,7 @@ from app.services.reference_data import InUseError, NameConflictError, Reference
 async def _material(session, name: str, **fks) -> Material:
     material = Material(
         name=name,
-        category=MaterialCategory.filament,
+        category=LegacyMaterialCategory.filament,
         unit=MaterialUnit.g,
         current_qty=100,
         **fks,
@@ -86,6 +87,42 @@ class TestRenameCascades:
             session, Manufacturer, maker.id, "Prusa", website_url="https://prusa3d.com"
         )
         assert renamed.website_url == "https://prusa3d.com"
+
+    async def test_a_column_can_be_cleared_by_passing_none(self, session):
+        """Passing None means "empty this", not "leave it alone".
+
+        It used to mean the latter, which made a website URL impossible to remove once typed —
+        the only way back was editing the database. Whether a field was mentioned at all is
+        decided one layer up, by patch_row's exclude_unset.
+        """
+        maker = await _manufacturer(session, "Prusa")
+        await reference_data.rename(session, Manufacturer, maker.id, "Prusa", website_url="https://prusa3d.com")
+        cleared = await reference_data.rename(session, Manufacturer, maker.id, "Prusa", website_url=None)
+        assert cleared.website_url is None
+
+
+class TestCaseInsensitiveNames:
+    async def test_renaming_a_colour_to_a_different_casing_of_an_existing_one_conflicts(self, session):
+        """Colour's find-or-create already folds case, so its conflict check has to as well.
+
+        Without this the two halves disagree: the rename is allowed, "Black" and "black" both
+        exist, and the next case-insensitive lookup matches two rows and raises
+        MultipleResultsFound — the exact duplication the colours migration was written to undo.
+        """
+        session.add_all([Colour(name="black"), Colour(name="red")])
+        await session.commit()
+        red = (await reference_data._find_by_name(session, Colour, "red"))
+
+        with pytest.raises(NameConflictError):
+            await reference_data.rename(session, Colour, red.id, "BLACK")
+
+    async def test_exact_matching_still_applies_to_the_other_tables(self, session):
+        """Manufacturers were always chosen from a list, so case is a real distinction there
+        and folding it would refuse a legitimate rename."""
+        await _manufacturer(session, "prusa")
+        other = await _manufacturer(session, "Bambu Lab")
+        renamed = await reference_data.rename(session, Manufacturer, other.id, "Prusa")
+        assert renamed.name == "Prusa"
 
 
 class TestUsageCounts:

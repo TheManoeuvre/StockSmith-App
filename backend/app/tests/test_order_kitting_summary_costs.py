@@ -10,7 +10,7 @@ from decimal import Decimal
 import pytest
 
 from app.models.kitting import ProductKittingMaterial
-from app.models.material import Material, MaterialCategory, MaterialUnit
+from app.models.material import Material, LegacyMaterialCategory, MaterialUnit
 from app.models.order import Order
 from app.models.product import Product
 from app.models.purchase import MaterialPurchase, Purchase, PurchaseStatus
@@ -33,7 +33,7 @@ def _async_material_push(monkeypatch, pushes):
 
 
 async def _order_with_kitting(session, qty: int, unit_cost: Decimal = Decimal("2.00")) -> tuple[Order, Material]:
-    box = Material(name="Box", category=MaterialCategory.packaging, unit=MaterialUnit.each)
+    box = Material(name="Box", category=LegacyMaterialCategory.packaging, unit=MaterialUnit.each)
     session.add(box)
     await session.flush()
     purchase = Purchase(status=PurchaseStatus.received, received_at=_STOCKED_AT)

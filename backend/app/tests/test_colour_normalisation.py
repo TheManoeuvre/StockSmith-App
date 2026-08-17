@@ -15,7 +15,7 @@ from alembic import command
 from alembic.config import Config
 
 from app.models.colour import Colour
-from app.models.material import Material, MaterialCategory, MaterialUnit
+from app.models.material import Material, LegacyMaterialCategory, MaterialUnit
 from app.services import colours
 from app.services.csv_io import export_materials_csv, import_materials_csv
 
@@ -145,7 +145,7 @@ class TestCsvRoundTrip:
         session.add(
             Material(
                 name=name,
-                category=MaterialCategory.filament,
+                category=LegacyMaterialCategory.filament,
                 unit=MaterialUnit.g,
                 colour=colour.name if colour else None,
                 colour_id=colour.id if colour else None,

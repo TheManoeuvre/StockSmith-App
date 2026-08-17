@@ -6,7 +6,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.build import Build, BuildFailedConsumption
-from app.models.material import Material, MaterialAdjustment, MaterialCategory
+from app.models.material import Material, MaterialAdjustment
 from app.models.product import Product, ProductMaterial
 from app.models.product_stock_event import ProductStockEventType
 from app.models.variant import ProductVariant
@@ -15,6 +15,7 @@ from app.services import listing_push
 from app.services.allocation import auto_allocate_after_build
 from app.services.buildability import get_resolved_variant_bom
 from app.services.costing import recompute_materials
+from app.services.material_categories import category_flag
 from app.services.stock_events import record_stock_event
 
 
@@ -91,8 +92,12 @@ async def create_build(
     }
 
     if qty_failed > 0 and failed_consumption is None:
+        # Which materials a failed print still burns is a property of the category now, not a
+        # hardcoded "filament". A user-created category can carry the same flag, and filament
+        # can have it taken away.
         failed_consumption = {
-            line.material_id: materials_by_id[line.material_id].category == MaterialCategory.filament for line in bom
+            line.material_id: category_flag(materials_by_id[line.material_id], "consumed_on_failed_build")
+            for line in bom
         }
 
     build = Build(product_id=product_id, variant_id=variant_id, qty_built=qty_built, qty_failed=qty_failed, notes=notes)

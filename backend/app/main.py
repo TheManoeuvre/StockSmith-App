@@ -17,6 +17,7 @@ from app.routers import (
     dashboard,
     fee_config,
     manufacturers,
+    material_categories,
     material_types,
     materials,
     orders,
@@ -119,6 +120,7 @@ app.add_middleware(
 )
 
 app.include_router(materials.router, prefix="/api/v1")
+app.include_router(material_categories.router, prefix="/api/v1")
 app.include_router(material_types.router, prefix="/api/v1")
 app.include_router(colours.router, prefix="/api/v1")
 app.include_router(products.router, prefix="/api/v1")

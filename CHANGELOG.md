@@ -12,6 +12,22 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Material categories are yours to set up.** Settings → Reference data → Material categories
+  lets you add, rename, reorder, merge and delete them, instead of being stuck with the seven
+  that were built in. Your existing categories carry over exactly as they were, in the order
+  they were already in.
+- **Categories now carry their own behaviour.** The things StockSmith used to assume about
+  filament and packaging are checkboxes on each category: whether a failed build still uses the
+  material up, whether kitting counts it once per order rather than once per item, whether it
+  has a colour and a material type, whether its cost reads per kilo, and which unit to default
+  to. Set them on any category, including ones you add — so a new "Vinyl" can behave like
+  filament, and resin can have a colour, which it never could before.
+
+### Fixed
+- **Clearing a field on a manufacturer, supplier or colour now sticks.** Emptying a website
+  address or a hex code appeared to save and then came back the next time the row was opened.
+
 ## [0.7.0] - 2026-08-17
 
 StockSmith now keeps syncing after you close the window, and can start with Windows —
