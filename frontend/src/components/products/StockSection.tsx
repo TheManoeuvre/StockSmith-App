@@ -33,7 +33,15 @@ const EVENT_LABELS: Record<ProductStockEvent["event_type"], string> = {
   order_fulfillment: "Order shipped",
 };
 
-export function StockSection({ productId }: { productId: number }) {
+export function StockSection({
+  productId,
+  initialVariantId,
+}: {
+  productId: number;
+  /** Preselects the build form's variant, from ?variantId on the product route — how the
+   *  dashboard's "Build now" carries the variant the order is short of. */
+  initialVariantId?: number;
+}) {
   const queryClient = useQueryClient();
   const { data: variants } = useQuery({
     queryKey: ["products", productId, "variants"],
@@ -57,10 +65,27 @@ export function StockSection({ productId }: { productId: number }) {
   const hasActiveVariants = activeVariants.length > 0;
   const hasAnyVariants = (variants?.length ?? 0) > 0;
 
+  // Normally the defaults, but an inbound ?variantId preselects the variant. Returning
+  // undefined holds the seed back until the variant list has loaded, which is what stops the
+  // form seeding empty and then never re-seeding — useEditableCopy seeds once per seedKey and
+  // ignores a later seed under the same one. The membership test means a stale or hand-edited
+  // id lands on the ordinary empty form rather than selecting something that isn't offered.
+  const buildSeed = useMemo(() => {
+    if (initialVariantId == null) return EMPTY_BUILD_FORM;
+    if (!variants) return undefined;
+    return variants.some((v) => v.id === initialVariantId && v.is_active)
+      ? { ...EMPTY_BUILD_FORM, variantId: initialVariantId }
+      : EMPTY_BUILD_FORM;
+  }, [initialVariantId, variants]);
+
   // A command form, not an editor of stored state — so it diffs against its own defaults
   // rather than server data. That still makes "dirty" meaningful (a typed note or a changed
   // qty warns on navigate-away), but the Record button is gated on validity instead: the qty
   // defaults to 1 precisely so recording one build is a single click.
+  //
+  // seedKey stays constant despite the seed now varying: switching tabs unmounts this, so a
+  // fresh arrival re-seeds anyway, and keying on the variant would instead let the tab
+  // switcher (which drops the search params) wipe a half-filled form.
   const {
     value: buildForm,
     setValue: setBuildForm,
@@ -69,7 +94,7 @@ export function StockSection({ productId }: { productId: number }) {
     key: "build",
     label: "Record a build",
     initial: EMPTY_BUILD_FORM,
-    seed: EMPTY_BUILD_FORM,
+    seed: buildSeed,
     seedKey: "const",
   });
   const { variantId, qtyBuilt, qtyFailed, notes, consumption } = buildForm;

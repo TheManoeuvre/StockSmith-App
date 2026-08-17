@@ -24,6 +24,7 @@ import { suppliersApi } from "../api/suppliers";
 import { materialTypesApi } from "../api/materialTypes";
 import { productTypesApi } from "../api/productTypes";
 import { coloursApi } from "../api/colours";
+import { BackgroundSyncSettings } from "../components/settings/BackgroundSyncSettings";
 import { CurrencySettings } from "../components/settings/CurrencySettings";
 import { ForecastSettings } from "../components/settings/ForecastSettings";
 import { StockCountSettings } from "../components/settings/StockCountSettings";
@@ -210,6 +211,7 @@ function Settings() {
 
       {activeTab === "general" && (
         <div className="max-w-2xl flex flex-col gap-4">
+          <BackgroundSyncSettings />
           <CurrencySettings />
           <ForecastSettings />
           <StockCountSettings />

@@ -106,6 +106,10 @@ function Dashboard() {
                       <Link
                         to="/products/$productId"
                         params={{ productId: String(o.product_id) }}
+                        // Straight to the build form with the variant already chosen, rather
+                        // than dropping the user on Details to find the Stock tab and
+                        // re-pick the variant they were just looking at here.
+                        search={{ tab: "stock", ...(o.variant_id != null ? { variantId: o.variant_id } : {}) }}
                         className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800"
                       >
                         Build now

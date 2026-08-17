@@ -155,6 +155,38 @@ export async function restartApp(): Promise<void> {
   await invoke("restart_app");
 }
 
+/** Whether this is the packaged desktop app at all — the autostart controls below are
+ * meaningless in a browser preview, and a toggle that silently does nothing is worse than
+ * one that isn't there. */
+export function isDesktopApp(): boolean {
+  return isTauri;
+}
+
+/**
+ * Whether Windows is set to start StockSmith at sign-in.
+ *
+ * Always read from the registry rather than remembered anywhere, because it can change
+ * without the app being told: Windows' own Startup Apps settings can turn it off, and there
+ * is a standing report of the plugin's entry vanishing after the first boot
+ * (plugins-workspace#771, see docs/plan-background-sync.md §3). A cached answer would keep
+ * insisting autostart was on in exactly the cases worth catching.
+ */
+export async function getAutostartEnabled(): Promise<boolean> {
+  if (!isTauri) return false;
+  const { invoke } = await import("@tauri-apps/api/core");
+  return await invoke<boolean>("autostart_enabled");
+}
+
+/** Returns the state read back from Windows afterwards, which is not always the state
+ * asked for — see getAutostartEnabled. */
+export async function setAutostartEnabled(enabled: boolean): Promise<boolean> {
+  if (!isTauri) {
+    throw new Error("Starting with Windows requires the StockSmith desktop app.");
+  }
+  const { invoke } = await import("@tauri-apps/api/core");
+  return await invoke<boolean>("set_autostart", { enabled });
+}
+
 export async function pickDirectory(): Promise<string | null> {
   if (!isTauri) {
     throw new Error("Folder picking requires the Tauri desktop app (not available in browser preview).");

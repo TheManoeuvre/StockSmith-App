@@ -2,6 +2,7 @@ import logging
 from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 
+import httpx
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -631,12 +632,35 @@ async def _reconcile_status(session: AsyncSession, order: Order, ext_order: Exte
     return False
 
 
+def _describe_error(error: Exception) -> str:
+    """A never-empty, human-readable one-liner for the sync log's error_message.
+
+    str() on an exception is not reliably non-empty: httpx's transport errors
+    (ConnectTimeout, ReadTimeout) carry their meaning entirely in the class name and
+    stringify to "". Storing that verbatim gave the sync panel a run marked "failed" with
+    nothing beside it — indistinguishable from a bug in the panel, and leaving the user
+    no thread to pull. What it hid most recently was a run of Etsy syncs aborting on a
+    connect timeout partway through the per-receipt financial enrichment.
+
+    Deliberately does NOT prefix the class name onto errors that already have a message:
+    those are written to be read by the user in the sync panel (PlatformAuthError's
+    "reconnect required", the adapters' HTTP-status messages), and "PlatformAuthError: "
+    in front of one makes it worse, not clearer.
+    """
+    message = str(error).strip()
+    if message:
+        return message[:2000]
+    if isinstance(error, httpx.TimeoutException):
+        return f"Timed out waiting for the marketplace API ({type(error).__name__})"
+    return type(error).__name__
+
+
 async def _record_failure(session: AsyncSession, platform: ListingPlatform, mode: SyncRunMode, error: Exception) -> None:
     run = PlatformSyncRun(
         platform=platform,
         mode=mode,
         status=SyncRunStatus.error,
-        error_message=str(error)[:2000],
+        error_message=_describe_error(error),
         finished_at=datetime.now(timezone.utc),
     )
     session.add(run)

@@ -19,6 +19,11 @@ vi.mock("../lib/tauri", () => ({
   isHostDevice: () => Promise.resolve(true),
   backendHostname: () => Promise.resolve("127.0.0.1"),
   restartApp: () => Promise.resolve(),
+  // Not the desktop app here, so the General tab's autostart toggle stays out of the way —
+  // it is covered directly in BackgroundSyncSettings.test.tsx.
+  isDesktopApp: () => false,
+  getAutostartEnabled: () => Promise.resolve(false),
+  setAutostartEnabled: () => Promise.resolve(false),
 }));
 
 const { setRoutes } = await import("../test/fakeBackend");
@@ -94,6 +99,20 @@ function baseRoutes() {
       respond: () => ({ connected: false, has_shop_icon: false, connected_at: null }),
     },
     { method: "GET" as const, path: /^\/platforms\/\w+\/credentials/, respond: () => ({}) },
+    {
+      method: "GET" as const,
+      path: /^\/platforms\/sync-health/,
+      respond: () => ({
+        window_days: 7,
+        measurable: false,
+        reason: "No marketplace has auto-sync turned on.",
+        expected_interval_minutes: null,
+        gap_threshold_minutes: null,
+        gaps: [],
+        total_gap_minutes: 0,
+        longest_gap_minutes: 0,
+      }),
+    },
     { method: "GET" as const, path: /^\/platforms\/ebay\/signing-key/, respond: () => ({}) },
     { method: "GET" as const, path: "/restore/pending", respond: () => ({ staged: false }) },
     {

@@ -29,6 +29,7 @@ from app.schemas.platform import (
     PlatformStatus,
     PlatformSyncSummary,
     SyncCommitResult,
+    SyncHealth,
     SyncPreviewResult,
     SyncRunPage,
     SyncSettingsUpdate,
@@ -36,6 +37,7 @@ from app.schemas.platform import (
 )
 from app.schemas.platform_limits import CatalogueCompatibilityReport
 from app.schemas.listing_profile import (
+    DraftPushResult,
     DraftReadinessReport,
     NamedOption,
     ProductPlatformSettingsRead,
@@ -67,6 +69,7 @@ from app.schemas.listing_adoption import (
 )
 from app.services import (
     catalogue_compatibility,
+    draft_listing,
     draft_readiness,
     etsy_backfill,
     listing_adoption,
@@ -388,6 +391,20 @@ async def get_sync_summary(session: AsyncSession = Depends(get_db)) -> list[Plat
     Local reads only — unlike /{platform}/status this never touches a marketplace, which
     is what makes it safe for the UI to poll on a timer."""
     return await sync_status.get_sync_summary(session)
+
+
+# Same single-segment reasoning as /sync-summary above, and declared beside it for the same
+# reason: both must be matched before /{platform}.
+@router.get("/sync-health", response_model=SyncHealth, dependencies=[Depends(require_auth)])
+async def get_sync_health(
+    window_days: int = Query(default=7, ge=1, le=90),
+    session: AsyncSession = Depends(get_db),
+) -> SyncHealth:
+    """Stretches where nothing synced at all — i.e. StockSmith wasn't running.
+
+    Answers "has it actually been up?", which nothing did before: a night with no sync and
+    a night with no orders looked identical. Local reads only, like /sync-summary."""
+    return await sync_status.get_sync_health(session, window_days=window_days)
 
 
 @router.post("/{platform}/connect", response_model=PlatformConnectResponse, dependencies=[Depends(require_auth)])
@@ -996,6 +1013,42 @@ async def update_product_platform_settings(
     settings.listing_description = (payload.listing_description or "").strip() or None
     await session.commit()
     return await _settings_schema(session, product_id, platform)
+
+
+@router.post(
+    "/{platform}/products/{product_id}/draft-listing",
+    response_model=DraftPushResult,
+    dependencies=[Depends(require_auth)],
+)
+async def create_draft_listing(
+    platform: ListingPlatform, product_id: int, session: AsyncSession = Depends(get_db)
+) -> DraftPushResult:
+    """Creates an unpublished draft listing from this product.
+
+    Takes nothing but the product id: everything is re-derived server-side. The preview the
+    user consented to may be minutes old, and creating a listing from a stale client payload
+    is worse than recomputing — the same reasoning push_product_corrections applies to its
+    quantities.
+
+    Never publishes. On Etsy the result is a real draft; making it live is a separate act in
+    Etsy's own editor.
+    """
+    connection = await _require_connection(session, platform)
+    adapter = await get_adapter(session, platform)
+    try:
+        result = await draft_listing.push_draft(session, adapter, connection, product_id, platform)
+    except draft_listing.DraftPushError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except PlatformError as e:
+        raise _map_platform_error(e)
+
+    return DraftPushResult(
+        external_listing_id=result.external_listing_id,
+        state=result.state,
+        units_linked=result.units_linked,
+        warnings=result.warnings,
+        publish_blockers=result.publish_blockers,
+    )
 
 
 @router.get(

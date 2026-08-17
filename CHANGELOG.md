@@ -63,6 +63,61 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Counting is saved as you go, on the machine rather than in the window, so a stock take
 survives closing StockSmith and picks up where you left it.
 
+## [0.7.0] - 2026-08-17
+
+StockSmith now keeps syncing after you close the window, and can start with Windows —
+so orders keep importing and stock keeps going out while you're doing something else.
+Also fixes Etsy order syncing giving up when Etsy was slow to answer, which could leave
+a shop unsynced for days.
+
+### Added
+- **StockSmith keeps syncing when you close the window.** Closing it now tucks it into the
+  notification area at the right-hand end of the taskbar rather than shutting it down, so
+  orders keep importing and stock keeps going out to Etsy and eBay while you get on with
+  something else. Click its icon there to open it again, or use Quit on it to close
+  StockSmith properly. The first time the window disappears you'll get a note explaining
+  where it went, so it doesn't look like a crash.
+- **It can start with Windows.** Settings → General → Background syncing. It starts straight
+  into the notification area without opening a window. One thing worth knowing: this happens
+  when you *sign in*, not when the PC powers on — so after an overnight Windows Update
+  restart it only starts once somebody signs in, unless Windows is set to sign you back in
+  automatically. The README explains how to turn that on.
+- **You can see whether it actually stayed running.** The same panel lists any stretches in
+  the last week where nothing synced at all — which is what a night the PC was off, or
+  asleep, looks like. Before this, a quiet night and a night StockSmith wasn't running were
+  impossible to tell apart.
+- **It restarts its own engine if that stops.** The part of StockSmith that does the actual
+  work used to be started once and never checked on again, so if it stopped, the app sat
+  there looking fine and syncing nothing until somebody restarted it. It's now checked every
+  half-minute and restarted if it has gone, backing off if it can't start.
+
+### Changed
+- **Closing the window no longer asks about unsaved work.** It doesn't need to — the window
+  is still there with your half-finished form in it, waiting for you. Quitting from the
+  notification area is the only thing that can lose anything now, and that asks first.
+
+### Fixed
+- **An engine left behind by a crash is cleared up instead of being left running.** If
+  StockSmith was killed off — Task Manager, a power cut mid-shutdown — its engine could
+  survive without it and quietly hold on to your database. The next launch now finds it and
+  clears it away rather than starting a second one beside it.
+- **Only one copy of StockSmith can run at a time.** Opening it again when it was already
+  running in the notification area now brings the existing window back instead of starting a
+  second copy competing for the same database.
+- **Etsy order syncing no longer gives up when Etsy is slow to answer.** Part of each sync
+  fetches the fee breakdown for an order. If Etsy didn't respond to one of those in time,
+  the whole sync stopped — and because it stopped before recording its progress, the next
+  attempt started from the same place and hit the same wall. A shop could sit like that for
+  days. Now a slow fee lookup just means that order arrives without its fee breakdown yet,
+  and everything else imports normally.
+- **A failed sync now tells you why.** Some failures were recorded with no reason attached,
+  so Settings → Integrations showed a sync marked as failed with nothing next to it. There
+  is always a reason there now.
+- **Automatic syncing can no longer stop without saying so.** A brief hiccup reading the
+  database could switch off the background sync for a platform until the app was restarted,
+  with nothing shown anywhere — it carried on reporting itself as connected while syncing
+  nothing. It now rides out the hiccup and carries on with the next cycle.
+
 ## [0.6.3] - 2026-08-14
 
 Fixes an update that could apply itself only halfway, and makes setting up listing profiles

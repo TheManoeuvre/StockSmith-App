@@ -64,9 +64,18 @@ export const Route = createFileRoute("/products/$productId")({
   // can send you straight to ?tab=stock.
   // Optional, so a plain link to a product still works and doesn't have to carry
   // "?tab=details". An unrecognised value falls back to the default rather than 404ing.
-  validateSearch: (search: Record<string, unknown>): { tab?: TabId } => {
+  //
+  // variantId seeds the Stock tab's build form, so the dashboard's "Build now" can land on
+  // the form with the variant the order is short of already chosen. Same leniency as `tab`:
+  // anything that isn't a positive integer is dropped rather than rejected, and the Stock
+  // tab checks that whatever survives is actually a variant of this product before using it.
+  validateSearch: (search: Record<string, unknown>): { tab?: TabId; variantId?: number } => {
     const tab = search.tab;
-    return TAB_IDS.includes(tab as TabId) ? { tab: tab as TabId } : {};
+    const variantId = Number(search.variantId);
+    return {
+      ...(TAB_IDS.includes(tab as TabId) ? { tab: tab as TabId } : {}),
+      ...(Number.isInteger(variantId) && variantId > 0 ? { variantId } : {}),
+    };
   },
 });
 
@@ -74,7 +83,7 @@ function ProductDetail() {
   // Registry, blocker and dialog all live at the root (see __root.tsx) — this page only
   // needs the guard handle for its own controls that would unmount a dirty editor.
   const guard = useGuard();
-  const activeTab = Route.useSearch().tab ?? "details";
+  const { tab: requestedTab, variantId: preselectedVariantId } = Route.useSearch();
   const navigate = Route.useNavigate();
   // No guard call here: this navigates, and the blocker inside useUnsavedChangesGuard
   // intercepts it.
@@ -232,6 +241,13 @@ function ProductDetail() {
   }, [variants, product]);
 
   if (!product) return <p>Loading…</p>;
+
+  // A bundle offers neither a Variants nor a Stock tab (see `tabs` below), so a link to one
+  // would draw the tab bar above an empty pane. That is reachable in practice: the dashboard
+  // aims "Build now" at ?tab=stock, and get_orders_awaiting_inventory doesn't exclude
+  // bundles. Fall back to the default, the same way an unrecognised tab value does.
+  const requested = requestedTab ?? "details";
+  const activeTab = product.is_bundle && (requested === "stock" || requested === "variants") ? "details" : requested;
 
   const sellable = sellableSummary(product, {
     pushBuildableCapacity: product.push_buildable_capacity,
@@ -569,7 +585,7 @@ function ProductDetail() {
 
       {activeTab === "stock" && !product.is_bundle && (
         <section className="flex flex-col gap-6">
-          <StockSection productId={id} />
+          <StockSection productId={id} initialVariantId={preselectedVariantId} />
         </section>
       )}
 

@@ -413,8 +413,9 @@ async def generate_variants(
     # touched here (see this function's docstring), so a latent conflict in one must not
     # block adding a new value to an attribute.
     result = await session.execute(select(ProductVariant).where(ProductVariant.product_id == product_id))
+    existing_variants = list(result.scalars())
     existing_combos = {
-        (v.attribute1_value, v.attribute2_value, v.attribute3_value) for v in result.scalars()
+        (v.attribute1_value, v.attribute2_value, v.attribute3_value) for v in existing_variants
     }
     combos_to_create = [
         combo
@@ -450,13 +451,21 @@ async def generate_variants(
     names = [spec.name for spec in attributes] + [None] * (3 - len(attributes))
     product.variant_attribute1_name, product.variant_attribute2_name, product.variant_attribute3_name = names
 
+    # Suffixes are built for the whole batch at once so code allocation happens in one
+    # pass — see services/sku_generation for why a product never mixes the two schemes.
+    from app.services import sku_generation
+
+    suffixes = await sku_generation.build_suffixes(
+        session, product_id, existing_variants, [combo for combo, _ in resolved_by_combo]
+    )
+
     created: list[ProductVariant] = []
     for combo, rows in resolved_by_combo:
         padded = list(combo) + [None] * (3 - len(combo))
         variant = ProductVariant(
             product_id=product_id,
             variant_name=" / ".join(combo),
-            sku_suffix="-".join(slugify(v) for v in combo),
+            sku_suffix=suffixes[combo],
             attribute1_value=padded[0],
             attribute2_value=padded[1],
             attribute3_value=padded[2],

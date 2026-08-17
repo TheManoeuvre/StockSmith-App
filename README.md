@@ -5,7 +5,8 @@ Windows desktop inventory & BOM tracker for a small maker business (3D printing/
 - `backend/` — FastAPI + SQLite API, bundled into the desktop app as a sidecar process.
 - `frontend/` — Tauri (React + TypeScript) desktop client.
 
-See [docs/plan-phase0-phase1.md](docs/plan-phase0-phase1.md) for the original build plan.
+See [docs/plan-phase0-phase1.md](docs/plan-phase0-phase1.md) for the original build plan, and
+[docs/roadmap.md](docs/roadmap.md) for where things stand now and what's planned to 1.0.
 
 ## Running the app
 
@@ -21,6 +22,31 @@ The app checks for updates automatically on startup. If a newer published releas
 it'll ask before downloading/installing (installing always restarts the app). No update
 check happens if there's no internet connection or no release has been published yet —
 that's not an error, it just means you're already on the latest version.
+
+### Keeping it syncing on an always-on PC
+
+Closing the window leaves StockSmith running in the notification area, and Settings →
+General → Background syncing can start it when you sign in. That covers the app being
+closed. It does **not**, on its own, cover the PC restarting — and a few Windows settings
+decide whether it does. None of these are changed by StockSmith; they're yours to set.
+
+- **Sign back in automatically after an update.** Settings → Accounts → Sign-in options →
+  "Use my sign-in info to automatically finish setting up after an update". Autostart runs
+  when you sign in, so without this an overnight Windows Update restart leaves the PC at the
+  lock screen and StockSmith not running until somebody signs in. With it, Windows signs you
+  back in, locks the screen, and StockSmith starts. Note it applies to update restarts only —
+  a power cut or a manual shutdown still needs a real sign-in.
+- **Sleep.** A sleeping PC isn't syncing. On a mains-powered desktop, Settings → System →
+  Power → Screen and sleep → "make my device sleep after" = Never is what matches the goal.
+  Turning the screen off is unrelated and fine to keep.
+- **Windows Update active hours**, so restarts land overnight rather than mid-afternoon.
+- **Antivirus.** The installer isn't signed and the backend is an unsigned executable that
+  opens a local port. If something quarantines it, StockSmith stops working entirely — worth
+  an exclusion for `%LOCALAPPDATA%\StockSmith\`, and worth checking first if the app is
+  mysteriously dead.
+
+Settings → General → Background syncing lists any stretches in the last week where nothing
+synced, which is how to check whether any of the above is actually working.
 
 ### Where your data lives
 
