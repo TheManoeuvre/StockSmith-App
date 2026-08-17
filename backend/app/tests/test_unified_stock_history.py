@@ -8,9 +8,10 @@ from decimal import Decimal
 
 from sqlalchemy import select
 
-from app.models.material import Material, MaterialAdjustment, MaterialCategory, MaterialUnit
+from app.models.material import Material, MaterialAdjustment, LegacyMaterialCategory, MaterialUnit
 from app.models.product import Product, ProductMaterial
 from app.models.product_stock_event import ProductStockEvent, ProductStockEventType
+from app.services import material_categories
 from app.services.builds import create_build
 from app.services.costing import recompute_material
 from app.services.stock_adjustments import create_stock_adjustment
@@ -18,8 +19,23 @@ from app.models.stock_adjustment import StockAdjustmentMode
 
 
 async def _product_with_bom(session, filament_qty: Decimal = Decimal("1"), hardware_qty: Decimal = Decimal("1")) -> tuple[Product, Material, Material]:
-    filament = Material(name="PLA Black", category=MaterialCategory.filament, unit=MaterialUnit.g)
-    hardware = Material(name="M3 Insert", category=MaterialCategory.hardware, unit=MaterialUnit.each)
+    # category_id, not just the legacy enum: with it NULL the failed-build default falls back
+    # to how the category behaved before it was a row, so this would pass without ever reading
+    # the flag it is meant to be testing.
+    filament_category = await material_categories.find_or_create(session, "filament")
+    hardware_category = await material_categories.find_or_create(session, "hardware")
+    filament = Material(
+        name="PLA Black",
+        category=LegacyMaterialCategory.filament,
+        category_id=filament_category.id,
+        unit=MaterialUnit.g,
+    )
+    hardware = Material(
+        name="M3 Insert",
+        category=LegacyMaterialCategory.hardware,
+        category_id=hardware_category.id,
+        unit=MaterialUnit.each,
+    )
     session.add_all([filament, hardware])
     await session.flush()
     # current_qty is a derived/replayed column (see costing.recompute_material) — stock
@@ -193,3 +209,50 @@ async def test_ship_line_creates_order_fulfillment_stock_event(session):
     assert event.qty_delta == -2
     assert event.running_balance == 8
     assert event.source_order_line_id == line.id
+
+
+async def test_a_user_created_category_can_be_consumed_by_a_failed_build(session):
+    """The test that proves the hardcode is gone.
+
+    "Cardstock" is not one of the original seven, so nothing can special-case it. It defaults to
+    consumed on a failed build purely because the flag on its category row says so.
+    """
+    category = await material_categories.find_or_create(session, "Cardstock")
+    category.consumed_on_failed_build = True
+    await session.commit()
+
+    card = Material(
+        name="A6 card",
+        category=material_categories.legacy_value_for(category.name),
+        category_id=category.id,
+        unit=MaterialUnit.each,
+    )
+    session.add(card)
+    await session.flush()
+    session.add(MaterialAdjustment(material_id=card.id, qty_delta=Decimal("100"), reason="seed"))
+    await recompute_material(session, card.id)
+    product = Product(name="Card widget", sku="SKU-CARD", current_stock=0, allocated_qty=0)
+    session.add(product)
+    await session.flush()
+    session.add(ProductMaterial(product_id=product.id, material_id=card.id, qty_required=Decimal("1")))
+    await session.commit()
+
+    await create_build(session, product.id, None, qty_built=0, notes=None, qty_failed=2)
+    await session.commit()
+
+    await session.refresh(card)
+    assert Decimal(card.current_qty) == Decimal("98")
+
+
+async def test_filament_stops_being_consumed_once_the_flag_is_cleared(session):
+    """The other direction — the flag is editable, not merely present."""
+    filament_category = await material_categories.find_or_create(session, "filament")
+    filament_category.consumed_on_failed_build = False
+    await session.commit()
+
+    product, filament, hardware = await _product_with_bom(session)
+    await create_build(session, product.id, None, qty_built=0, notes=None, qty_failed=3)
+    await session.commit()
+
+    await session.refresh(filament)
+    assert Decimal(filament.current_qty) == Decimal("1000")

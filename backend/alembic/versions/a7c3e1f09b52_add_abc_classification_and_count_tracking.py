@@ -42,17 +42,12 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = 'a7c3e1f09b52'
-down_revision: Union[str, Sequence[str], None] = 'd4e8b1c73f92'
+down_revision: Union[str, Sequence[str], None] = 'f2a91c4d7b08'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 _ABC_CLASS = sa.Enum('A', 'B', 'C', name='abc_class', native_enum=False)
 _ABC_SCOPE = sa.Enum('material', 'product', name='abc_scope', native_enum=False)
-_MATERIAL_CATEGORY = sa.Enum(
-    'filament', 'resin', 'pigment', 'hardware', 'packaging', 'blanks', 'other',
-    name='material_category',
-    native_enum=False,
-)
 
 
 def upgrade() -> None:
@@ -90,9 +85,10 @@ def upgrade() -> None:
     # where a tier was actually chosen.
     op.create_table(
         'material_category_abc',
-        sa.Column('category', _MATERIAL_CATEGORY, nullable=False),
+        sa.Column('category_id', sa.Integer(), nullable=False),
         sa.Column('abc_class', _ABC_CLASS, nullable=False),
-        sa.PrimaryKeyConstraint('category'),
+        sa.ForeignKeyConstraint(['category_id'], ['material_categories.id'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('category_id'),
     )
     op.create_table(
         'product_type_abc',

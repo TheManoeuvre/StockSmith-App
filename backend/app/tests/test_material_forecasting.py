@@ -12,7 +12,7 @@ from decimal import Decimal
 from app.models.build import Build, BuildFailedConsumption
 from app.models.general_settings import GeneralSettings
 from app.models.kitting import ProductKittingMaterial
-from app.models.material import Material, MaterialCategory, MaterialUnit
+from app.models.material import Material, LegacyMaterialCategory, MaterialUnit
 from app.models.order import Order, OrderLine, OrderStatus
 from app.models.product import Product, ProductMaterial
 from app.models.purchase import MaterialPurchase, Purchase, PurchaseStatus
@@ -21,7 +21,7 @@ from app.services.forecasting import compute_material_forecasts
 NOW = datetime.now(timezone.utc)
 
 
-async def _material(session, name="Filament", category=MaterialCategory.filament, **kwargs) -> Material:
+async def _material(session, name="Filament", category=LegacyMaterialCategory.filament, **kwargs) -> Material:
     m = Material(name=name, category=category, unit=MaterialUnit.g, **kwargs)
     session.add(m)
     await session.flush()
@@ -105,7 +105,7 @@ async def test_scrap_is_per_material_not_a_blanket_yield_ratio(session):
     the demand-rate calculation, which reads Build/BuildFailedConsumption directly."""
     await _settings(session)
     filament = await _material(session, name="Filament", current_qty=Decimal(10))
-    hardware = await _material(session, name="Hardware", category=MaterialCategory.hardware, current_qty=Decimal(10))
+    hardware = await _material(session, name="Hardware", category=LegacyMaterialCategory.hardware, current_qty=Decimal(10))
     product = await _product(session, "Widget", "SKU-3", current_stock=0)
     session.add(ProductMaterial(product_id=product.id, material_id=filament.id, qty_required=Decimal(1)))
     session.add(ProductMaterial(product_id=product.id, material_id=hardware.id, qty_required=Decimal(1)))
@@ -138,7 +138,7 @@ async def test_kitting_material_has_no_scrap_term_or_fg_buffer(session):
     adjustment (a shipment doesn't "fail" the way a print does) and no finished-goods
     buffer delay (packaging is consumed at ship time)."""
     await _settings(session)
-    label = await _material(session, name="Label", category=MaterialCategory.packaging, current_qty=Decimal(10))
+    label = await _material(session, name="Label", category=LegacyMaterialCategory.packaging, current_qty=Decimal(10))
     product = await _product(session, "Widget", "SKU-4", current_stock=5)  # FG stock present but irrelevant here
     session.add(ProductKittingMaterial(product_id=product.id, material_id=label.id, qty_required=Decimal(1)))
     await session.commit()

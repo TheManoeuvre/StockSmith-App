@@ -10,7 +10,7 @@ from decimal import Decimal
 from sqlalchemy import func, select
 
 from app.models.kitting import DefaultKittingMaterial, ProductKittingMaterial
-from app.models.material import Material, MaterialCategory, MaterialUnit
+from app.models.material import Material, LegacyMaterialCategory, MaterialUnit
 from app.models.product import Product
 from app.routers.products import create_product
 from app.schemas.product import ProductCreate
@@ -23,7 +23,7 @@ async def _count(session, model) -> int:
 
 
 async def _real_material(session, name: str = "Real Label", qty: Decimal = Decimal("500")) -> Material:
-    material = Material(name=name, category=MaterialCategory.packaging, unit=MaterialUnit.each, current_qty=qty)
+    material = Material(name=name, category=LegacyMaterialCategory.packaging, unit=MaterialUnit.each, current_qty=qty)
     session.add(material)
     await session.commit()
     return material

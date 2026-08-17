@@ -14,7 +14,7 @@ import pytest
 from sqlalchemy import select
 
 from app.models.kitting import OrderKittingAllocation, ProductKittingMaterial
-from app.models.material import Material, MaterialAdjustment, MaterialCategory, MaterialUnit
+from app.models.material import Material, MaterialAdjustment, LegacyMaterialCategory, MaterialUnit
 from app.models.order import Order, OrderLine
 from app.models.order_return import ReturnDisposition
 from app.models.product import Product
@@ -38,7 +38,7 @@ def _async_material_push(monkeypatch, pushes):
 
 
 async def _box(session) -> Material:
-    box = Material(name="Box", category=MaterialCategory.packaging, unit=MaterialUnit.each)
+    box = Material(name="Box", category=LegacyMaterialCategory.packaging, unit=MaterialUnit.each)
     session.add(box)
     await session.flush()
     purchase = Purchase(status=PurchaseStatus.received, received_at=_STOCKED_AT)

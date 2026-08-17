@@ -6,7 +6,8 @@ import { manufacturersApi } from "../../api/manufacturers";
 import { suppliersApi } from "../../api/suppliers";
 import { materialTypesApi } from "../../api/materialTypes";
 import { coloursApi } from "../../api/colours";
-import type { Material, MaterialCategory, MaterialUnit } from "../../api/types";
+import type { Material, MaterialUnit } from "../../api/types";
+import { useMaterialCategories } from "../../hooks/useMaterialCategories";
 import { useMaterialImageUrl } from "../../hooks/useMaterialImageUrl";
 import { useLazyVisible } from "../../hooks/useLazyVisible";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
@@ -21,9 +22,7 @@ export const Route = createFileRoute("/materials/")({
   component: MaterialsList,
 });
 
-const CATEGORIES: MaterialCategory[] = ["filament", "resin", "pigment", "hardware", "packaging", "blanks", "other"];
 const UNITS: MaterialUnit[] = ["g", "ml", "each"];
-const AUTO_EACH_CATEGORIES: MaterialCategory[] = ["hardware", "packaging", "blanks"];
 
 type SortKey = "name" | "current_qty" | "on_order_qty" | "reorder_threshold" | "avg_unit_cost";
 
@@ -39,10 +38,13 @@ function MaterialsList() {
   const { data: suppliers } = useQuery({ queryKey: ["suppliers"], queryFn: suppliersApi.list });
   const { data: materialTypes } = useQuery({ queryKey: ["material-types"], queryFn: materialTypesApi.list });
   const { data: colourOptions } = useQuery({ queryKey: ["colours"], queryFn: coloursApi.list });
+  const { categories, byName: categoriesByName } = useMaterialCategories();
 
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
-  const [category, setCategory] = useState<MaterialCategory>("filament");
+  // Empty until the list loads, then the first by sort order. There is no sensible hardcoded
+  // default any more — "filament" might not exist.
+  const [category, setCategory] = useState<string>("");
   const [unit, setUnit] = useState<MaterialUnit>("g");
   const [unitTouchedByUser, setUnitTouchedByUser] = useState(false);
   const [reorderThreshold, setReorderThreshold] = useState("0");
@@ -59,8 +61,14 @@ function MaterialsList() {
   const [search, setSearch] = useState("");
   const [lowStockOnly, setLowStockOnly] = useState(false);
   const [showInactive, setShowInactive] = useState(false);
-  const [categoryFilter, setCategoryFilter] = useState<Set<MaterialCategory>>(new Set());
+  const [categoryFilter, setCategoryFilter] = useState<Set<string>>(new Set());
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({ key: "name", dir: "asc" });
+
+  // The selected category's row, and the two flags that decide which fields the form offers.
+  // Defaults to the first category so a freshly-loaded form is never on an empty selection.
+  const selectedCategory = categoriesByName.get(category) ?? categories[0];
+  const tracksColour = selectedCategory?.tracks_colour ?? false;
+  const tracksMaterialType = selectedCategory?.tracks_material_type ?? false;
 
   const createMutation = useMutation({
     mutationFn: async () => {
@@ -73,16 +81,16 @@ function MaterialsList() {
         resolvedDefaultSupplierId = (await suppliersApi.findOrCreate(defaultSupplier.trim())).id;
       }
       let resolvedMaterialTypeId = materialTypeId;
-      if (category === "filament" && !resolvedMaterialTypeId && materialType.trim()) {
+      if (tracksMaterialType && !resolvedMaterialTypeId && materialType.trim()) {
         resolvedMaterialTypeId = (await materialTypesApi.findOrCreate(materialType.trim())).id;
       }
       return materialsApi.create({
         name,
-        category,
+        category: selectedCategory?.name ?? category,
         unit,
         reorder_threshold: reorderThreshold,
-        colour: category === "filament" ? colour || null : null,
-        material_type_id: category === "filament" ? resolvedMaterialTypeId : null,
+        colour: tracksColour ? colour || null : null,
+        material_type_id: tracksMaterialType ? resolvedMaterialTypeId : null,
         barcode: barcode || null,
         manufacturer_id: resolvedManufacturerId,
         default_supplier_id: resolvedDefaultSupplierId,
@@ -126,7 +134,7 @@ function MaterialsList() {
       reorderThreshold !== "0");
   useDirtyRegistration("new-material", "New material", createFormDirty);
 
-  const toggleCategoryFilter = (c: MaterialCategory) => {
+  const toggleCategoryFilter = (c: string) => {
     setCategoryFilter((prev) => {
       const next = new Set(prev);
       if (next.has(c)) next.delete(c);
@@ -140,7 +148,7 @@ function MaterialsList() {
   };
 
   const { grouped, inactiveCount } = useMemo(() => {
-    if (!data) return { grouped: [] as (readonly [MaterialCategory, Material[]])[], inactiveCount: 0 };
+    if (!data) return { grouped: [] as (readonly [string, Material[]])[], inactiveCount: 0 };
     const needle = search.trim().toLowerCase();
     const preFiltered = data.filter((m) => {
       if (categoryFilter.size > 0 && !categoryFilter.has(m.category)) return false;
@@ -160,15 +168,21 @@ function MaterialsList() {
       return (Number(a[sort.key] ?? 0) - Number(b[sort.key] ?? 0)) * dir;
     });
 
-    const byCategory = new Map<MaterialCategory, Material[]>();
+    const byCategory = new Map<string, Material[]>();
     for (const m of filtered) {
       const list = byCategory.get(m.category) ?? [];
       list.push(m);
       byCategory.set(m.category, list);
     }
-    const grouped = CATEGORIES.filter((c) => byCategory.has(c)).map((c) => [c, byCategory.get(c)!] as const);
+    // Configured order first, then anything left over. The leftovers used to be dropped
+    // silently, which was unreachable while the list was hardcoded and is not any more — a
+    // category renamed in Settings while this page is open would have made its materials
+    // disappear from the table entirely.
+    const known = categories.map((c) => c.name).filter((name) => byCategory.has(name));
+    const unknown = Array.from(byCategory.keys()).filter((name) => !categoriesByName.has(name));
+    const grouped = [...known, ...unknown].map((name) => [name, byCategory.get(name)!] as const);
     return { grouped, inactiveCount };
-  }, [data, search, lowStockOnly, showInactive, categoryFilter, sort]);
+  }, [data, search, lowStockOnly, showInactive, categoryFilter, sort, categories, categoriesByName]);
 
   if (isLoading) return <p>Loading materials…</p>;
   if (error) return <p className="text-red-600">{(error as Error).message}</p>;
@@ -218,18 +232,19 @@ function MaterialsList() {
             <span className="text-sm">Category</span>
             <select
               className="rounded border border-slate-300 px-2 py-1"
-              value={category}
+              value={selectedCategory?.name ?? ""}
               onChange={(e) => {
-                const nextCategory = e.target.value as MaterialCategory;
+                const nextCategory = e.target.value;
                 setCategory(nextCategory);
-                if (!unitTouchedByUser) {
-                  setUnit(AUTO_EACH_CATEGORIES.includes(nextCategory) ? "each" : "g");
-                }
+                // A category with no default unit leaves whatever is selected alone — which is
+                // the right answer for one the user just created and hasn't configured.
+                const nextUnit = categoriesByName.get(nextCategory)?.default_unit;
+                if (!unitTouchedByUser && nextUnit) setUnit(nextUnit);
               }}
             >
-              {CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
+              {categories.map((c) => (
+                <option key={c.id} value={c.name}>
+                  {c.name}
                 </option>
               ))}
             </select>
@@ -261,7 +276,7 @@ function MaterialsList() {
               onBlur={(e) => setReorderThreshold(normalizeQtyForUnit(e.target.value, unit))}
             />
           </label>
-          {category === "filament" && (
+          {tracksColour && (
             <>
               <label className="flex flex-col gap-1">
                 <span className="text-sm">Colour / hex</span>
@@ -351,10 +366,14 @@ function MaterialsList() {
           </label>
         )}
         <div className="flex flex-wrap gap-2">
-          {CATEGORIES.map((c) => (
-            <label key={c} className="flex items-center gap-1">
-              <input type="checkbox" checked={categoryFilter.has(c)} onChange={() => toggleCategoryFilter(c)} />
-              {c}
+          {categories.map((c) => (
+            <label key={c.id} className="flex items-center gap-1">
+              <input
+                type="checkbox"
+                checked={categoryFilter.has(c.name)}
+                onChange={() => toggleCategoryFilter(c.name)}
+              />
+              {c.name}
             </label>
           ))}
         </div>
@@ -379,7 +398,7 @@ function MaterialsList() {
               </td>
             </tr>
             {materials.map((m) => (
-              <MaterialRow key={m.id} material={m} />
+              <MaterialRow key={m.id} material={m} costPerKg={categoriesByName.get(cat)?.cost_per_kg_display ?? false} />
             ))}
           </tbody>
         ))}
@@ -388,7 +407,9 @@ function MaterialsList() {
   );
 }
 
-function MaterialRow({ material: m }: { material: Material }) {
+// costPerKg arrives resolved rather than the row consuming the hook itself: it renders once per
+// material, and the grouping loop already knows the category.
+function MaterialRow({ material: m, costPerKg }: { material: Material; costPerKg: boolean }) {
   const rowRef = useRef<HTMLTableRowElement>(null);
   const isVisible = useLazyVisible(rowRef);
   const imageUrl = useMaterialImageUrl(
@@ -416,7 +437,7 @@ function MaterialRow({ material: m }: { material: Material }) {
       <td className="p-2">{m.on_order_qty ? formatQty(m.on_order_qty, m.unit) : "—"}</td>
       <td className="p-2">{formatQty(m.reorder_threshold, m.unit)}</td>
       <td className="p-2">
-        {m.category === "filament"
+        {costPerKg
           ? `${formatUnitCost(Number(m.avg_unit_cost) * 1000)}/kg`
           : formatUnitCost(m.avg_unit_cost)}
       </td>

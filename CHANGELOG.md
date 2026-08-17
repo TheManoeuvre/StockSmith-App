@@ -13,14 +13,25 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Material categories are yours to set up.** Settings → Reference data → Material categories
+  lets you add, rename, reorder, merge and delete them, instead of being stuck with the seven
+  that were built in. Your existing categories carry over exactly as they were, in the order
+  they were already in.
+- **Categories now carry their own behaviour.** The things StockSmith used to assume about
+  filament and packaging are checkboxes on each category: whether a failed build still uses the
+  material up, whether kitting counts it once per order rather than once per item, whether it
+  has a colour and a material type, whether its cost reads per kilo, and which unit to default
+  to. Set them on any category, including ones you add — so a new "Vinyl" can behave like
+  filament, and resin can have a colour, which it never could before.
+
 - **StockSmith now tells you what needs counting.** Stock drifts from what the app thinks
   you have — a dropped print, a miscount, something used and never recorded — and until now
   the only way to find out was to check everything. You can now say how often each thing is
   worth counting, and the dashboard lists what's come round. Nothing is blocked or nagged
   about; it's a list to work from.
 - **Set how often by group, not one item at a time.** Give a whole category a tier — resin
-  every month, packaging every three — and everything in it follows. Anything unusual can be
-  set on its own and overrides the group. Each item's page says which of the two it's
+  every month, packaging every three — and everything in it follows, including any category
+  you've added yourself. Anything unusual can be set on its own and overrides the group. Each item's page says which of the two it's
   currently getting, so it's clear where to go and change it.
 - **Products can have a type.** Keyring, coaster, whatever you sell — products had no way of
   being grouped before, only a name and a SKU. Set one on the product page or manage the list
@@ -62,6 +73,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Counting is saved as you go, on the machine rather than in the window, so a stock take
 survives closing StockSmith and picks up where you left it.
+
+### Fixed
+- **Clearing a field on a manufacturer, supplier or colour now sticks.** Emptying a website
+  address or a hex code appeared to save and then came back the next time the row was opened.
 
 ## [0.7.0] - 2026-08-17
 

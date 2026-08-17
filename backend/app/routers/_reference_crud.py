@@ -6,10 +6,13 @@ types), and just delegates the bodies here. That keeps the per-resource files sh
 hiding their routes behind a layer of generation.
 """
 
+from typing import Sequence
+
 from fastapi import HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import InstrumentedAttribute
 
 from app.models.base import Base
 from app.services import reference_data
@@ -34,13 +37,21 @@ def _http_error(exc: ReferenceDataError) -> HTTPException:
     return HTTPException(status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
-async def list_with_usage(session: AsyncSession, model: type[Base]) -> list:
+async def list_with_usage(
+    session: AsyncSession,
+    model: type[Base],
+    order_by: Sequence[InstrumentedAttribute] | None = None,
+) -> list:
     """Every row, each carrying how many things reference it.
 
     The count rides along on the list rather than sitting behind a separate endpoint: it decides
     whether the delete button is even offered, so a list without it can't render correctly.
+
+    `order_by` defaults to the name, which is what every table wanted until material categories
+    arrived with a deliberate non-alphabetical order. Passed explicitly rather than sniffed for
+    a `sort_order` attribute, so the one caller that cares says so and the others are untouched.
     """
-    rows = list((await session.execute(select(model).order_by(model.name))).scalars())
+    rows = list((await session.execute(select(model).order_by(*(order_by or (model.name,))))).scalars())
     counts = await reference_data.usage_counts(session, model)
     for row in rows:
         # Set on the ORM instance so Pydantic's from_attributes picks it up — the column doesn't
@@ -50,13 +61,21 @@ async def list_with_usage(session: AsyncSession, model: type[Base]) -> list:
 
 
 async def patch_row(session: AsyncSession, model: type[Base], row_id: int, payload) -> object:
+    """PATCH one row.
+
+    `exclude_unset=True` is what makes "not mentioned" and "explicitly set to null/false"
+    different requests. Without it every optional field on the Update schema arrives with its
+    default, so a request naming only `name` would blank every other column — and `rename`
+    can no longer defend against that by skipping `None`, because clearing a field is exactly
+    what sending `None` is supposed to mean.
+    """
     try:
         row = await reference_data.rename(
             session,
             model,
             row_id,
             payload.name,
-            **{k: v for k, v in payload.model_dump(exclude={"name"}).items()},
+            **payload.model_dump(exclude={"name"}, exclude_unset=True),
         )
     except ReferenceDataError as exc:
         raise _http_error(exc) from exc

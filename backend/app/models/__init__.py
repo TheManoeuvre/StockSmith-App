@@ -1,4 +1,10 @@
-from app.models.abc_classification import ABCClass, ABCScope, ABCTierSetting, ProductTypeABC
+from app.models.abc_classification import (
+    ABCClass,
+    ABCScope,
+    ABCTierSetting,
+    MaterialCategoryABC,
+    ProductTypeABC,
+)
 from app.models.allocation_event import AllocationEvent, AllocationEventType
 from app.models.asset import AssetType, ProductAsset
 from app.models.attribute_value_code import ProductAttributeValueCode
@@ -20,13 +26,13 @@ from app.models.order import Order, OrderLine, OrderStatus
 from app.models.order_return import OrderLineReturn, ReturnDisposition, ReturnScope, ReturnSource
 from app.models.manufacturer import Manufacturer
 from app.models.material import (
+    LegacyMaterialCategory,
     Material,
     MaterialAdjustment,
     MaterialAdjustmentMode,
-    MaterialCategory,
-    MaterialCategoryABC,
     MaterialUnit,
 )
+from app.models.material_category import MaterialCategory
 from app.models.material_type import MaterialType
 from app.models.platform_connection import PlatformConnection
 from app.models.platform_credential import PlatformAppCredential, PlatformEnvironment
@@ -55,6 +61,7 @@ __all__ = [
     "BackupSettings",
     "Colour",
     "Material",
+    "LegacyMaterialCategory",
     "MaterialCategory",
     "MaterialUnit",
     "MaterialAdjustment",

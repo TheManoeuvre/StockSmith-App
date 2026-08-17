@@ -23,6 +23,7 @@ from app.models.base import Base
 from app.models.manufacturer import Manufacturer
 from app.models.material import Material
 from app.models.colour import Colour
+from app.models.material_category import MaterialCategory
 from app.models.material_type import MaterialType
 from app.models.order import Order
 from app.models.product import Product
@@ -65,8 +66,10 @@ class Reference:
 
 # Every FK into each reference table. Keep this current when a new referencing column is added —
 # a missing entry means usage counts under-report and `delete_if_unused` deletes something that
-# was in use, which the database will happily accept (all these FKs are ON DELETE SET NULL, so
-# it fails silently rather than loudly).
+# was in use. Most of these FKs are ON DELETE SET NULL, so the database accepts that happily and
+# it fails silently rather than loudly. Material.category_id is the exception: it is RESTRICT,
+# because a material with no category isn't a state the app models, so there the database
+# refuses instead.
 REFERENCES: dict[type[Base], Sequence[Reference]] = {
     Manufacturer: (Reference(Material.manufacturer_id, "material", "materials"),),
     Supplier: (
@@ -74,12 +77,14 @@ REFERENCES: dict[type[Base], Sequence[Reference]] = {
         Reference(Purchase.supplier_id, "purchase", "purchases"),
     ),
     MaterialType: (Reference(Material.material_type_id, "material", "materials"),),
-    # product_type_abc.product_type_id is a second FK into product_types and is
-    # deliberately not listed. It holds that type's ABC tier, which is an attribute of the
-    # type rather than a use of it — counting it here would refuse to delete an unused
-    # type purely because someone had once set its tier. The FK is ON DELETE CASCADE, so
-    # the assignment goes with the type rather than being left dangling.
+    # product_type_abc.product_type_id and material_category_abc.category_id are second
+    # FKs into product_types and material_categories, and are deliberately not listed.
+    # Each holds that row's ABC tier, which is an attribute of the type or category rather
+    # than a use of it — counting them here would refuse to delete an unused one purely
+    # because someone had once set its tier. Both FKs are ON DELETE CASCADE, so the
+    # assignment goes with the row rather than being left dangling.
     ProductType: (Reference(Product.product_type_id, "product", "products"),),
+    MaterialCategory: (Reference(Material.category_id, "material", "materials"),),
     Colour: (Reference(Material.colour_id, "material", "materials"),),
     ShippingProfile: (
         Reference(Product.shipping_profile_id, "product", "products"),
@@ -131,8 +136,18 @@ async def describe_usage(session: AsyncSession, model: type[Base], row_id: int) 
     return f"{', '.join(parts[:-1])} and {parts[-1]}"
 
 
+# Tables whose names are matched without regard to case. The rule follows the data, not the
+# table: these are the ones whose `find-or-create` is already case-insensitive, so an
+# exact-match conflict check here would let a rename create the very duplicate that
+# `find-or-create` refuses to. "Black" and "black" would then both resolve on the next
+# case-insensitive lookup and raise MultipleResultsFound.
+_CASE_INSENSITIVE_NAMES: frozenset[type[Base]] = frozenset({Colour, MaterialCategory})
+
+
 async def _find_by_name(session: AsyncSession, model: type[Base], name: str):
-    return (await session.execute(select(model).where(model.name == name))).scalar_one_or_none()
+    column = func.lower(model.name) if model in _CASE_INSENSITIVE_NAMES else model.name
+    target = name.lower() if model in _CASE_INSENSITIVE_NAMES else name
+    return (await session.execute(select(model).where(column == target))).scalar_one_or_none()
 
 
 async def get_or_404(session: AsyncSession, model: type[Base], row_id: int):
@@ -158,9 +173,13 @@ async def rename(session: AsyncSession, model: type[Base], row_id: int, name: st
             raise NameConflictError(f'Another entry is already called "{name}".', existing_id=clash.id)
     row.name = name
 
+    # Set unconditionally. `None` is a real value here — it is how a website URL or a hex code
+    # gets cleared — so it cannot double as "the caller didn't mention this field". That
+    # distinction is `patch_row`'s job, which passes only the keys actually present in the
+    # request body (see _reference_crud.patch_row). Skipping None here instead made those
+    # fields impossible to empty once set, and would silently swallow a boolean set to False.
     for key, value in fields.items():
-        if value is not None:
-            setattr(row, key, value)
+        setattr(row, key, value)
 
     await session.commit()
     await session.refresh(row)

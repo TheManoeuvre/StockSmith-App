@@ -7,10 +7,11 @@ import { suppliersApi } from "../../api/suppliers";
 import { materialTypesApi } from "../../api/materialTypes";
 import { coloursApi } from "../../api/colours";
 import { pickFile } from "../../lib/tauri";
+import { useMaterialCategories } from "../../hooks/useMaterialCategories";
 import { useMaterialImageUrl } from "../../hooks/useMaterialImageUrl";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { CreatableSelect } from "../../components/common/CreatableSelect";
-import type { ABCClass, MaterialCategory, MaterialUnit } from "../../api/types";
+import type { ABCClass, MaterialUnit } from "../../api/types";
 import { StockCountFields } from "../../components/common/StockCountFields";
 import { isLowStock, normalizeQtyForUnit, roundQty, wholeNumberStepFor } from "../../lib/format";
 import { formatUnitCost } from "../../lib/money";
@@ -24,7 +25,7 @@ export const Route = createFileRoute("/materials/$materialId")({
 
 interface MaterialDetailsForm {
   name: string;
-  category: MaterialCategory;
+  category: string;
   unit: MaterialUnit;
   colour: string;
   materialType: string;
@@ -43,7 +44,7 @@ interface MaterialDetailsForm {
 
 const EMPTY_MATERIAL_DETAILS: MaterialDetailsForm = {
   name: "",
-  category: "filament",
+  category: "",
   unit: "g",
   colour: "",
   materialType: "",
@@ -68,7 +69,6 @@ interface AdjustForm {
 
 const EMPTY_ADJUST: AdjustForm = { adjustMode: "adjust", adjustValue: "", adjustReason: "" };
 
-const CATEGORIES: MaterialCategory[] = ["filament", "resin", "pigment", "hardware", "packaging", "blanks", "other"];
 const UNITS: MaterialUnit[] = ["g", "ml", "each"];
 
 function MaterialDetail() {
@@ -162,10 +162,15 @@ function MaterialDetail() {
     abcClass,
     stockTakeIntervalDays,
   } = details;
+  const { categories, byName: categoriesByName } = useMaterialCategories();
+  // Two different categories are in play: the saved one, which decides how the stats above read,
+  // and the one currently selected in the form, which decides which fields the form offers.
+  const editedCategory = categoriesByName.get(category);
+
   const setField = <K extends keyof MaterialDetailsForm>(field: K, next: MaterialDetailsForm[K]) =>
     setDetails((prev) => ({ ...prev, [field]: next }));
   const setName = (v: string) => setField("name", v);
-  const setCategory = (v: MaterialCategory) => setField("category", v);
+  const setCategory = (v: string) => setField("category", v);
   const setUnit = (v: MaterialUnit) => setField("unit", v);
   const setColour = (v: string) => setField("colour", v);
   const setMaterialType = (v: string) => setField("materialType", v);
@@ -352,7 +357,7 @@ function MaterialDetail() {
         <div className="grid grid-cols-3 gap-4">
           <Stat label="On hand" value={roundQty(material.current_qty)} />
           <Stat label="On order" value={roundQty(material.on_order_qty)} />
-          {material.category === "filament" ? (
+          {categoriesByName.get(material.category)?.cost_per_kg_display ? (
             <Stat label="Avg cost/kg" value={formatUnitCost(Number(material.avg_unit_cost) * 1000)} />
           ) : (
             <Stat label="Avg unit cost" value={formatUnitCost(material.avg_unit_cost)} />
@@ -384,11 +389,11 @@ function MaterialDetail() {
             <select
               className="rounded border border-slate-300 px-2 py-1"
               value={category}
-              onChange={(e) => setCategory(e.target.value as MaterialCategory)}
+              onChange={(e) => setCategory(e.target.value)}
             >
-              {CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
+              {categories.map((c) => (
+                <option key={c.id} value={c.name}>
+                  {c.name}
                 </option>
               ))}
             </select>
@@ -407,7 +412,7 @@ function MaterialDetail() {
               ))}
             </select>
           </label>
-          {category === "filament" && (
+          {editedCategory?.tracks_colour && (
             <>
               <label className="flex flex-col gap-1">
                 <span className="text-sm">Colour / hex</span>

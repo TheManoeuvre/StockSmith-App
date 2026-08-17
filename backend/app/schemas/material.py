@@ -4,13 +4,18 @@ from decimal import Decimal
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from app.models.abc_classification import ABCClass
-from app.models.material import MaterialAdjustmentMode, MaterialCategory, MaterialUnit
+from app.models.material import MaterialAdjustmentMode, MaterialUnit
 from app.schemas.abc import ResolvedClassificationRead
 
 
 class MaterialBase(BaseModel):
     name: str
-    category: MaterialCategory
+    # A category *name*, not the legacy enum, and accepted alongside category_id exactly as
+    # colour/colour_id below: a client can send an id it picked from the list, or just a name
+    # to be found-or-created. Keeping it a plain string on the wire is what lets the frontend
+    # and the CSV importer carry on unchanged now that the set of valid names is open.
+    category: str
+    category_id: int | None = None
     unit: MaterialUnit
     reorder_threshold: Decimal = Decimal(0)
     # Both accepted, mirroring how material_type_name/material_type_id already behave: a client
@@ -45,7 +50,8 @@ class MaterialCreate(MaterialBase):
 
 class MaterialUpdate(BaseModel):
     name: str | None = None
-    category: MaterialCategory | None = None
+    category: str | None = None
+    category_id: int | None = None
     unit: MaterialUnit | None = None
     reorder_threshold: Decimal | None = None
     is_active: bool | None = None
@@ -70,6 +76,10 @@ class MaterialRead(MaterialBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    # Reads through the relationship, falling back to the legacy column — see
+    # Material.category_name. Aliased rather than renamed so every existing consumer of
+    # `category` (the CSV export, the materials list, the test fixtures) is unaffected.
+    category: str | None = Field(default=None, validation_alias=AliasChoices("category_name", "category"))
     current_qty: Decimal
     allocated_qty: Decimal
     avg_unit_cost: Decimal

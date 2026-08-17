@@ -3,7 +3,6 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.models.material import MaterialCategory
 from app.models.stock_take import StockTakeLineStatus, StockTakeStatus
 
 
@@ -13,7 +12,7 @@ class StockTakeScope(BaseModel):
 
     include_materials: bool = False
     include_products: bool = False
-    material_categories: list[MaterialCategory] = []
+    material_category_ids: list[int] = []
     product_type_ids: list[int] = []
     # Narrows to items whose cadence says they're due (services/abc.py). Combines with the
     # category/type filters rather than replacing them.

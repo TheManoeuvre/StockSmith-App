@@ -15,6 +15,7 @@ vi.mock("@tanstack/react-router", () => ({
 
 const { setRoutes, calls, FakeApiError } = await import("../../test/fakeBackend");
 const { manufacturersApi } = await import("../../api/manufacturers");
+const { materialCategoriesApi } = await import("../../api/materialCategories");
 const { ReferenceDataTable } = await import("./ReferenceDataTable");
 const { DirtyRegistryProvider } = await import("../../hooks/useDirtyRegistry");
 const { GuardProvider, useUnsavedChangesGuard } = await import("../../hooks/useUnsavedChangesGuard");
@@ -265,5 +266,192 @@ describe("ReferenceDataTable", () => {
         expect(calls.some((c) => c.path === "/manufacturers/find-or-create")).toBe(true)
       );
     });
+  });
+});
+
+/**
+ * A table with the field types and reordering that material categories need. Kept separate from
+ * the manufacturers harness above so those tests keep proving the additions are opt-in — a table
+ * that passes no `reorder` and no checkbox fields must render exactly as it did before.
+ */
+const FLAG_ROWS = [
+  {
+    id: 1,
+    name: "filament",
+    sort_order: 10,
+    default_unit: "g",
+    consumed_on_failed_build: true,
+    usage_count: 4,
+    created_at: "2026-01-01T00:00:00Z",
+  },
+  {
+    id: 2,
+    name: "packaging",
+    sort_order: 20,
+    default_unit: "each",
+    consumed_on_failed_build: false,
+    usage_count: 0,
+    created_at: "2026-01-01T00:00:00Z",
+  },
+];
+
+function flagRoutes(rows = FLAG_ROWS) {
+  return [
+    { method: "GET" as const, path: "/material-categories", respond: () => rows },
+    {
+      method: "PATCH" as const,
+      path: /^\/material-categories\/\d+$/,
+      respond: (body: unknown) => ({ ...rows[0], ...(body as object) }),
+    },
+    { method: "POST" as const, path: "/material-categories/reorder", respond: () => rows },
+    { method: "POST" as const, path: "/material-categories/find-or-create", respond: (b: unknown) => b },
+    { method: "GET" as const, path: /.*/, respond: () => [] },
+  ] as never[];
+}
+
+function FlagHarness({ withReorder = true }: { withReorder?: boolean }) {
+  const guard = useUnsavedChangesGuard();
+  return (
+    <GuardProvider guard={guard}>
+      <ReferenceDataTable
+        title="Material categories"
+        segment="material-categories"
+        queryKey={["material-categories"]}
+        api={{
+          list: materialCategoriesApi.list,
+          create: materialCategoriesApi.findOrCreate,
+          update: materialCategoriesApi.update,
+          ...(withReorder ? { reorder: materialCategoriesApi.reorder } : {}),
+        }}
+        fields={[
+          { key: "name", label: "Name" },
+          { key: "consumed_on_failed_build", label: "Consumed by failed builds", type: "checkbox" },
+          {
+            key: "default_unit",
+            label: "Default unit",
+            type: "select",
+            options: [
+              { value: "g", label: "g" },
+              { value: "each", label: "each" },
+            ],
+          },
+        ]}
+        usageLabel={(n) => `${n} material${n === 1 ? "" : "s"}`}
+      />
+      <UnsavedChangesDialog {...guard.dialogProps} />
+    </GuardProvider>
+  );
+}
+
+function renderFlagTable(withReorder = true) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <DirtyRegistryProvider>
+        <FlagHarness withReorder={withReorder} />
+      </DirtyRegistryProvider>
+    </QueryClientProvider>
+  );
+}
+
+describe("ReferenceDataTable field types", () => {
+  beforeEach(() => setRoutes(flagRoutes()));
+
+  it("sends a real boolean rather than the string it holds in form state", async () => {
+    const user = userEvent.setup();
+    renderFlagTable();
+
+    await user.click(await screen.findByRole("button", { name: /^filament/ }));
+    const flag = screen.getByLabelText("filament Consumed by failed builds");
+    expect(flag).toBeChecked();
+
+    await user.click(flag);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      const patch = calls.find((c) => c.method === "PATCH");
+      expect(patch).toBeTruthy();
+      // The regression this guards: form state is all strings, so an unconverted send would
+      // arrive as "false" — truthy, and silently the opposite of what was ticked.
+      expect((patch!.body as Record<string, unknown>).consumed_on_failed_build).toBe(false);
+    });
+  });
+
+  it("sends an unset select as null, not an empty string", async () => {
+    const user = userEvent.setup();
+    renderFlagTable();
+
+    await user.click(await screen.findByRole("button", { name: /^filament/ }));
+    await user.selectOptions(screen.getByLabelText("filament Default unit"), "");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => {
+      const patch = calls.find((c) => c.method === "PATCH");
+      expect((patch!.body as Record<string, unknown>).default_unit).toBeNull();
+    });
+  });
+
+  it("marks the row dirty when a checkbox is toggled", async () => {
+    const user = userEvent.setup();
+    renderFlagTable();
+
+    await user.click(await screen.findByRole("button", { name: /^filament/ }));
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+
+    await user.click(screen.getByLabelText("filament Consumed by failed builds"));
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+  });
+});
+
+describe("ReferenceDataTable reordering", () => {
+  beforeEach(() => setRoutes(flagRoutes()));
+
+  it("posts the swapped order", async () => {
+    const user = userEvent.setup();
+    renderFlagTable();
+
+    await user.click(await screen.findByRole("button", { name: "Move filament down" }));
+
+    await waitFor(() => {
+      const post = calls.find((c) => c.path === "/material-categories/reorder");
+      expect(post).toBeTruthy();
+      expect((post!.body as { ids: number[] }).ids).toEqual([2, 1]);
+    });
+  });
+
+  it("disables the arrows at each end of the list", async () => {
+    renderFlagTable();
+
+    expect(await screen.findByRole("button", { name: "Move filament up" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Move packaging down" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Move filament down" })).toBeEnabled();
+  });
+
+  it("renders no arrows for a table that passes no reorder", async () => {
+    renderFlagTable(false);
+
+    await screen.findByRole("button", { name: /^filament/ });
+    expect(screen.queryByRole("button", { name: /^Move / })).toBeNull();
+  });
+
+  it("does not disturb an open row with unsaved edits", async () => {
+    // Reordering changes list order, not which row is expanded, and useEditableCopy is seeded
+    // by row.id — so no guard prompt, and the half-typed value survives the refetch. It looks
+    // like it should be a problem, which is why it's worth asserting.
+    const user = userEvent.setup();
+    renderFlagTable();
+
+    await user.click(await screen.findByRole("button", { name: /^filament/ }));
+    const name = screen.getByLabelText("filament Name");
+    await user.clear(name);
+    await user.type(name, "Filament PLA");
+
+    await user.click(screen.getByRole("button", { name: "Move filament down" }));
+
+    await waitFor(() =>
+      expect(calls.some((c) => c.path === "/material-categories/reorder")).toBe(true)
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByLabelText("filament Name")).toHaveValue("Filament PLA");
   });
 });

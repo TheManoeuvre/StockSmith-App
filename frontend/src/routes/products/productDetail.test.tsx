@@ -37,8 +37,40 @@ const PRODUCT = {
 };
 
 const MATERIALS = [
-  { id: 1, name: "Filament", unit: "g", category: "filament", current_qty: "100", allocated_qty: "0", avg_unit_cost: "0.50" },
-  { id: 2, name: "Box", unit: "each", category: "packaging", current_qty: "50", allocated_qty: "0", avg_unit_cost: "0.30" },
+  { id: 1, name: "Filament", unit: "g", category: "filament", category_id: 1, current_qty: "100", allocated_qty: "0", avg_unit_cost: "0.50" },
+  { id: 2, name: "Box", unit: "each", category: "packaging", category_id: 2, current_qty: "50", allocated_qty: "0", avg_unit_cost: "0.30" },
+];
+
+// The categories the pages read behaviour off. Without these the catch-all below answers with
+// an empty list, and every category-gated field silently disappears rather than failing — so
+// these tests would keep passing while testing nothing.
+const CATEGORIES = [
+  {
+    id: 1,
+    name: "filament",
+    sort_order: 10,
+    default_unit: "g",
+    consumed_on_failed_build: true,
+    auto_kitting_per_order: false,
+    tracks_colour: true,
+    tracks_material_type: true,
+    cost_per_kg_display: true,
+    usage_count: 1,
+    created_at: "2026-01-01T00:00:00Z",
+  },
+  {
+    id: 2,
+    name: "packaging",
+    sort_order: 20,
+    default_unit: "each",
+    consumed_on_failed_build: false,
+    auto_kitting_per_order: true,
+    tracks_colour: false,
+    tracks_material_type: false,
+    cost_per_kg_display: false,
+    usage_count: 1,
+    created_at: "2026-01-01T00:00:00Z",
+  },
 ];
 
 function baseRoutes(product: Record<string, unknown> = PRODUCT) {
@@ -49,6 +81,7 @@ function baseRoutes(product: Record<string, unknown> = PRODUCT) {
     { method: "GET" as const, path: "/products/1/kitting-bom", respond: () => [{ id: 2, product_id: 1, material_id: 2, qty_required: "1" }] },
     { method: "GET" as const, path: "/products/1/bundle-items", respond: () => [] },
     { method: "GET" as const, path: "/materials", respond: () => MATERIALS },
+    { method: "GET" as const, path: "/material-categories", respond: () => CATEGORIES },
     { method: "PUT" as const, path: "/products/1/bom", respond: (body: unknown) => body },
     { method: "PUT" as const, path: "/products/1/kitting-bom", respond: (body: unknown) => body },
     // Anything else the page or root layout reaches for (assets, sync status, price history…)

@@ -8,7 +8,15 @@ from app.models.abc_classification import ABCClass
 from app.models.base import Base, portable_enum
 
 
-class MaterialCategory(str, enum.Enum):
+class LegacyMaterialCategory(str, enum.Enum):
+    """The original fixed category list, superseded by the `material_categories` table.
+
+    Kept only because `materials.category` is still written and still carries a CHECK
+    constraint listing exactly these seven values — see the column's comment below. Read
+    categories through `Material.category_name`; the only code that should touch this enum is
+    the code keeping the legacy column legal.
+    """
+
     filament = "filament"
     resin = "resin"
     pigment = "pigment"
@@ -42,8 +50,20 @@ class Material(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
-    category: Mapped[MaterialCategory] = mapped_column(
-        portable_enum(MaterialCategory, name="material_category"), nullable=False
+    # The legacy category column, kept in step with category_id during the transition and
+    # deliberately not dropped yet — same reasoning as `colour` below. Its CHECK constraint is
+    # why a material in a user-created category has to store 'other' here for now; see
+    # services/material_categories.legacy_value_for. Read through `category_name`; write both.
+    category: Mapped[LegacyMaterialCategory] = mapped_column(
+        portable_enum(LegacyMaterialCategory, name="material_category"), nullable=False
+    )
+    # RESTRICT rather than the SET NULL every other reference FK uses. A material with no
+    # manufacturer is untidy; a material with no category is a state the app does not model —
+    # the list groups by it, the substitution validator compares it, the create form requires
+    # it. Better for the database to refuse than to quietly blank it. Merge is unaffected: it
+    # repoints before it deletes.
+    category_id: Mapped[int | None] = mapped_column(
+        ForeignKey("material_categories.id", ondelete="RESTRICT"), nullable=True
     )
     unit: Mapped[MaterialUnit] = mapped_column(
         portable_enum(MaterialUnit, name="material_unit"), nullable=False
@@ -112,6 +132,22 @@ class Material(Base):
     default_supplier: Mapped["Supplier | None"] = relationship()
     material_type: Mapped["MaterialType | None"] = relationship()
     colour_ref: Mapped["Colour | None"] = relationship()
+    # Eagerly loaded, unlike its siblings. Several services select materials with no options at
+    # all and then read the category to decide behaviour; under the async session a lazy load
+    # there raises MissingGreenlet at runtime while passing in tests that happen to have the row
+    # in the identity map. The table holds a handful of rows, so the extra query is noise.
+    category_ref: Mapped["MaterialCategory | None"] = relationship(lazy="selectin")
+
+    @property
+    def category_name(self) -> str | None:
+        """Prefers the reference row, falling back to the legacy column.
+
+        The fallback covers rows written by an older release during the transition, and the
+        test suite, which builds its schema with create_all rather than running migrations.
+        """
+        if self.category_ref is not None:
+            return self.category_ref.name
+        return self.category.value if self.category is not None else None
 
     @property
     def colour_name(self) -> str | None:
@@ -135,30 +171,6 @@ class Material(Base):
     @property
     def material_type_name(self) -> str | None:
         return self.material_type.name if self.material_type else None
-
-
-class MaterialCategoryABC(Base):
-    """Tier for every material in one category — the middle of ABC's three levels.
-
-    Keyed on the `category` enum rather than on `material_types.id`, which is the other
-    candidate and the one the word "type" would suggest. The reason is coverage: the UI
-    only ever sets material_type_id for filament (routes/materials/index.tsx), so
-    hardware, packaging and blanks all have it NULL. Keying the tier there would mean it
-    silently did nothing for exactly the bulk, count-rarely items C tier exists to serve.
-    `category` is non-nullable on every material, so this always resolves.
-
-    Lives here rather than in models/abc_classification.py to keep that module free of
-    imports from the rest of the model package — see its docstring.
-
-    Sparse: no row means "fall through to the shop-wide material baseline".
-    """
-
-    __tablename__ = "material_category_abc"
-
-    category: Mapped[MaterialCategory] = mapped_column(
-        portable_enum(MaterialCategory, name="material_category"), primary_key=True
-    )
-    abc_class: Mapped[ABCClass] = mapped_column(portable_enum(ABCClass, name="abc_class"), nullable=False)
 
 
 class MaterialAdjustment(Base):

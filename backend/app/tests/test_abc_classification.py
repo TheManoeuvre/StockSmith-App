@@ -11,9 +11,16 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
-from app.models.abc_classification import ABCClass, ABCScope, ABCTierSetting, ProductTypeABC
+from app.models.abc_classification import (
+    ABCClass,
+    ABCScope,
+    ABCTierSetting,
+    MaterialCategoryABC,
+    ProductTypeABC,
+)
 from app.models.general_settings import GeneralSettings
-from app.models.material import Material, MaterialCategory, MaterialCategoryABC, MaterialUnit
+from app.models.material import Material, MaterialUnit
+from app.models.material_category import MaterialCategory
 from app.models.product import Product, ProductBundleItem
 from app.models.product_type import ProductType
 from app.models.variant import ProductVariant
@@ -22,6 +29,7 @@ from app.routers.products import create_product, get_product, update_product
 from app.schemas.abc import CategoryTier, StockCountSettingsUpdate
 from app.schemas.product import ProductCreate, ProductRead, ProductUpdate
 from app.services import abc
+from app.services.material_categories import legacy_value_for
 from app.services.abc import (
     _DEFAULT_INTERVAL_DAYS,
     compute_due_for_count,
@@ -39,8 +47,23 @@ async def _settings(session, **overrides) -> GeneralSettings:
     return settings
 
 
-async def _material(session, name="Resin", category=MaterialCategory.resin, **kwargs) -> Material:
-    m = Material(name=name, category=category, unit=MaterialUnit.ml, **kwargs)
+
+async def _category(session, name: str) -> MaterialCategory:
+    """The seeded category row of that name — conftest puts the original seven in place.
+
+    Tests key tiers on the row, not on the legacy `materials.category` enum beside it,
+    because that is what the app now does: everything a user adds stores 'other' there.
+    """
+    return (
+        await session.execute(select(MaterialCategory).where(MaterialCategory.name == name))
+    ).scalar_one()
+
+
+async def _material(session, name="Resin", category="resin", **kwargs) -> Material:
+    row = await _category(session, category)
+    m = Material(
+        name=name, category=legacy_value_for(category), category_id=row.id, unit=MaterialUnit.ml, **kwargs
+    )
     session.add(m)
     await session.flush()
     return m
@@ -58,10 +81,10 @@ async def _product(session, name="Keyring", sku=None, **kwargs) -> Product:
 
 async def test_material_tier_falls_through_all_three_levels(session):
     await _settings(session, default_material_abc_class=ABCClass.C)
-    session.add(MaterialCategoryABC(category=MaterialCategory.resin, abc_class=ABCClass.B))
+    session.add(MaterialCategoryABC(category_id=(await _category(session, "resin")).id, abc_class=ABCClass.B))
     own = await _material(session, "Own", abc_class=ABCClass.A)
     by_category = await _material(session, "ByCategory")
-    by_default = await _material(session, "ByDefault", category=MaterialCategory.hardware)
+    by_default = await _material(session, "ByDefault", category="hardware")
     await session.commit()
 
     rules = await load_rules(session)
@@ -111,8 +134,8 @@ async def test_material_and_product_baselines_are_independent(session):
 
 async def test_item_override_beats_a_group_tier_that_disagrees(session):
     await _settings(session)
-    session.add(MaterialCategoryABC(category=MaterialCategory.packaging, abc_class=ABCClass.C))
-    material = await _material(session, "Boxes", category=MaterialCategory.packaging, abc_class=ABCClass.A)
+    session.add(MaterialCategoryABC(category_id=(await _category(session, "packaging")).id, abc_class=ABCClass.C))
+    material = await _material(session, "Boxes", category="packaging", abc_class=ABCClass.A)
     await session.commit()
 
     assert (await load_rules(session)).for_material(material).abc_class == ABCClass.A
@@ -324,7 +347,7 @@ async def test_creating_and_updating_a_product_returns_a_serializable_read(sessi
 
 async def test_material_read_carries_the_resolved_classification(session):
     await _settings(session, default_material_abc_class=ABCClass.C)
-    session.add(MaterialCategoryABC(category=MaterialCategory.resin, abc_class=ABCClass.A))
+    session.add(MaterialCategoryABC(category_id=(await _category(session, "resin")).id, abc_class=ABCClass.A))
     await _material(session, "Grey Resin")
     await session.commit()
 
@@ -372,7 +395,7 @@ async def test_writing_settings_clears_assignments_absent_from_the_payload(sessi
     """Replace-in-full, not patch — otherwise un-assigning a category's tier would be
     inexpressible."""
     await _settings(session)
-    session.add(MaterialCategoryABC(category=MaterialCategory.resin, abc_class=ABCClass.A))
+    session.add(MaterialCategoryABC(category_id=(await _category(session, "resin")).id, abc_class=ABCClass.A))
     await session.commit()
     read = await abc.read_settings(session)
     assert len(read.category_tiers) == 1
@@ -388,11 +411,11 @@ async def test_writing_settings_clears_assignments_absent_from_the_payload(sessi
 
 async def test_written_settings_take_effect_on_the_next_resolution(session):
     await _settings(session)
-    material = await _material(session, category=MaterialCategory.packaging)
+    material = await _material(session, category="packaging")
     await session.commit()
     read = await abc.read_settings(session)
     read.default_material_abc_class = ABCClass.B
-    read.category_tiers = [CategoryTier(category=MaterialCategory.packaging, abc_class=ABCClass.A)]
+    read.category_tiers = [CategoryTier(category_id=(await _category(session, "packaging")).id, abc_class=ABCClass.A)]
 
     await abc.write_settings(session, StockCountSettingsUpdate(**read.model_dump()))
 

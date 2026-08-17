@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import async_session_factory
 from app.models.material import Material, MaterialAdjustmentMode
+from app.models.material_category import MaterialCategory
 from app.models.product import Product
 from app.models.product_type import ProductType
 from app.models.stock_adjustment import StockAdjustmentMode
@@ -62,8 +63,8 @@ class _Candidate:
 
 async def _material_candidates(session: AsyncSession, scope: StockTakeScope, due_keys: set | None) -> list[_Candidate]:
     query = select(Material).where(Material.is_active.is_(True)).order_by(Material.name)
-    if scope.material_categories:
-        query = query.where(Material.category.in_(scope.material_categories))
+    if scope.material_category_ids:
+        query = query.where(Material.category_id.in_(scope.material_category_ids))
     out = []
     for m in (await session.execute(query)).scalars():
         if due_keys is not None and (m.id, None, None) not in due_keys:
@@ -166,8 +167,16 @@ async def describe_scope(session: AsyncSession, scope: StockTakeScope) -> str:
     """
     parts = []
     if scope.include_materials:
-        if scope.material_categories:
-            parts.append("materials in " + ", ".join(sorted(c.value for c in scope.material_categories)))
+        if scope.material_category_ids:
+            # Resolved to names for the same reason product types are: the sentence is the
+            # log, and an id in it stops meaning anything the moment the row is renamed.
+            names = (
+                await session.execute(
+                    select(MaterialCategory.name).where(MaterialCategory.id.in_(scope.material_category_ids))
+                )
+            ).scalars()
+            listed = ", ".join(sorted(names))
+            parts.append(f"materials in {listed}" if listed else "materials in a since-deleted category")
         else:
             parts.append("all materials")
     if scope.include_products:

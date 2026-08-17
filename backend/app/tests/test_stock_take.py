@@ -15,12 +15,14 @@ from fastapi import HTTPException
 from sqlalchemy import select
 
 from app.models.general_settings import GeneralSettings
-from app.models.material import Material, MaterialAdjustment, MaterialCategory, MaterialUnit
+from app.models.material import Material, MaterialAdjustment, MaterialUnit
+from app.models.material_category import MaterialCategory
 from app.models.product import Product, ProductBundleItem
 from app.models.stock_take import StockTake, StockTakeLine, StockTakeLineStatus, StockTakeStatus
 from app.models.variant import ProductVariant
 from app.schemas.stock_take import BulkLineCount, StockTakeScope
 from app.services import stock_takes
+from app.services.material_categories import legacy_value_for
 from app.services.abc import compute_due_for_count
 
 MATERIALS_ONLY = StockTakeScope(include_materials=True)
@@ -33,15 +35,32 @@ async def _settings(session) -> None:
     await session.flush()
 
 
+
+
+async def _category(session, name: str) -> MaterialCategory:
+    """The seeded category row of that name — conftest puts the original seven in place."""
+    return (
+        await session.execute(select(MaterialCategory).where(MaterialCategory.name == name))
+    ).scalar_one()
+
+
 async def _material(
     session,
     name="Grey Resin",
     qty=Decimal(0),
-    category=MaterialCategory.resin,
+    category="resin",
     unit=MaterialUnit.ml,
     **kwargs,
 ) -> Material:
-    m = Material(name=name, category=category, unit=unit, current_qty=qty, **kwargs)
+    row = await _category(session, category)
+    m = Material(
+        name=name,
+        category=legacy_value_for(category),
+        category_id=row.id,
+        unit=unit,
+        current_qty=qty,
+        **kwargs,
+    )
     session.add(m)
     await session.flush()
     # current_qty is derived from the adjustment ledger, so seed history to match rather
@@ -137,11 +156,14 @@ async def test_allocated_qty_is_snapshotted_for_products_only(session):
 async def test_scoping_by_category_and_overdue(session):
     await _settings(session)
     await _material(session, "Resin")
-    await _material(session, "Boxes", category=MaterialCategory.packaging)
+    await _material(session, "Boxes", category="packaging")
     await session.commit()
 
     by_category = await stock_takes.preview_scope(
-        session, StockTakeScope(include_materials=True, material_categories=[MaterialCategory.packaging])
+        session,
+        StockTakeScope(
+            include_materials=True, material_category_ids=[(await _category(session, "packaging")).id]
+        ),
     )
     assert by_category.candidate_count == 1
 
@@ -449,7 +471,7 @@ async def test_counts_are_validated_against_the_unit(session):
     """Reuses validate_qty_for_unit, so an `each` material refuses a fraction here for the
     same reason it does anywhere else."""
     await _settings(session)
-    await _material(session, "Screws", category=MaterialCategory.hardware, unit=MaterialUnit.each, qty=Decimal(10))
+    await _material(session, "Screws", category="hardware", unit=MaterialUnit.each, qty=Decimal(10))
     await session.commit()
     take, _ = await stock_takes.create_stock_take(session, MATERIALS_ONLY)
     line = (await _lines(session, take.id))[0]
