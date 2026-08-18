@@ -157,6 +157,105 @@ function Dashboard() {
         </section>
       )}
 
+      {(data.unresolved_variance_count > 0 || data.open_stock_take) && (
+        <section className="flex flex-wrap gap-3">
+          {data.open_stock_take && (
+            <Link
+              to="/stock-takes/$stockTakeId"
+              params={{ stockTakeId: String(data.open_stock_take.id) }}
+              className="rounded border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+            >
+              <strong>Stock take in progress</strong> — {data.open_stock_take.counted_count} of{" "}
+              {data.open_stock_take.line_count} counted, open {data.open_stock_take.open_days} day
+              {data.open_stock_take.open_days === 1 ? "" : "s"}
+            </Link>
+          )}
+          {data.unresolved_variance_count > 0 && (
+            <Link
+              to="/stock-takes/unresolved"
+              className="rounded border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800"
+            >
+              <strong>
+                {data.unresolved_variance_count} unresolved variance
+                {data.unresolved_variance_count === 1 ? "" : "s"}
+              </strong>{" "}
+              — counted differences still waiting on a decision
+            </Link>
+          )}
+        </section>
+      )}
+
+      {data.items_due_for_count.length > 0 && (
+        <section>
+          <h2 className="mb-2 text-lg font-semibold">Due for counting</h2>
+          <p className="mb-2 text-sm text-slate-500">
+            Items whose count cadence has come round. Nothing here blocks any other work — it's a list of what
+            to check next time you do a stock take.
+          </p>
+          <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">
+            <thead>
+              <tr className="border-b border-slate-200">
+                <th className="p-2">Item</th>
+                <th className="p-2">Tier</th>
+                <th className="p-2">Every</th>
+                <th className="p-2">Last counted</th>
+                <th className="p-2">Overdue by</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.items_due_for_count.map((item) => (
+                <tr
+                  key={`${item.scope}-${item.material_id ?? item.product_id}-${item.variant_id ?? "base"}`}
+                  className="border-b border-slate-100"
+                >
+                  <td className="p-2">
+                    {item.scope === "material" ? (
+                      <Link
+                        to="/materials/$materialId"
+                        params={{ materialId: String(item.material_id) }}
+                        className="text-slate-900 underline"
+                      >
+                        {item.name}
+                      </Link>
+                    ) : (
+                      <Link
+                        to="/products/$productId"
+                        params={{ productId: String(item.product_id) }}
+                        className="text-slate-900 underline"
+                      >
+                        {item.name}
+                      </Link>
+                    )}
+                  </td>
+                  <td className="p-2">{item.abc_class}</td>
+                  <td className="p-2">{item.interval_days} days</td>
+                  <td className="p-2">
+                    {item.last_stock_take_at ? new Date(item.last_stock_take_at).toLocaleDateString() : "Never"}
+                  </td>
+                  {/* Never-counted has no overdue figure to show — there is no date to measure
+                      from, and a made-up number would rank it against genuinely overdue items
+                      on a scale it isn't on. */}
+                  <td className="p-2">
+                    {item.days_overdue === null ? (
+                      <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">Never counted</span>
+                    ) : item.days_overdue === 0 ? (
+                      "Due today"
+                    ) : (
+                      <span className="text-amber-800">{item.days_overdue} days</span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {data.items_due_for_count_total > data.items_due_for_count.length && (
+            <p className="mt-1 text-sm text-slate-500">
+              Showing {data.items_due_for_count.length} of {data.items_due_for_count_total} items due.
+            </p>
+          )}
+        </section>
+      )}
+
       <section>
         <h2 className="mb-2 text-lg font-semibold">Materials — time to stockout</h2>
         <p className="mb-2 text-sm text-slate-500">

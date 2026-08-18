@@ -1,3 +1,10 @@
+from app.models.abc_classification import (
+    ABCClass,
+    ABCScope,
+    ABCTierSetting,
+    MaterialCategoryABC,
+    ProductTypeABC,
+)
 from app.models.allocation_event import AllocationEvent, AllocationEventType
 from app.models.asset import AssetType, ProductAsset
 from app.models.attribute_value_code import ProductAttributeValueCode
@@ -18,7 +25,13 @@ from app.models.listing_profile import ListingProfile, ProductPlatformSettings
 from app.models.order import Order, OrderLine, OrderStatus
 from app.models.order_return import OrderLineReturn, ReturnDisposition, ReturnScope, ReturnSource
 from app.models.manufacturer import Manufacturer
-from app.models.material import Material, MaterialAdjustment, MaterialAdjustmentMode, LegacyMaterialCategory, MaterialUnit
+from app.models.material import (
+    LegacyMaterialCategory,
+    Material,
+    MaterialAdjustment,
+    MaterialAdjustmentMode,
+    MaterialUnit,
+)
 from app.models.material_category import MaterialCategory
 from app.models.material_type import MaterialType
 from app.models.platform_connection import PlatformConnection
@@ -30,10 +43,12 @@ from app.models.platform_limits import PlatformFieldLimit
 from app.models.pricing import ProductPriceSnapshot
 from app.models.product import Product, ProductBundleItem, ProductMaterial
 from app.models.product_stock_event import ProductStockEvent, ProductStockEventType
+from app.models.product_type import ProductType
 from app.models.purchase import MaterialPurchase, Purchase, PurchaseStatus
 from app.models.shipping_profile import ShippingProfile
 from app.models.sku_alias import SkuAlias
 from app.models.stock_adjustment import StockAdjustment, StockAdjustmentMode
+from app.models.stock_take import StockTake, StockTakeLine, StockTakeLineStatus, StockTakeStatus
 from app.models.supplier import Supplier
 from app.models.variant import ProductVariant, ProductVariantMaterial
 
@@ -52,6 +67,12 @@ __all__ = [
     "MaterialAdjustment",
     "MaterialAdjustmentMode",
     "MaterialType",
+    "MaterialCategoryABC",
+    "ProductType",
+    "ProductTypeABC",
+    "ABCClass",
+    "ABCScope",
+    "ABCTierSetting",
     "Manufacturer",
     "Supplier",
     "Purchase",
@@ -96,6 +117,10 @@ __all__ = [
     "SkuAlias",
     "StockAdjustment",
     "StockAdjustmentMode",
+    "StockTake",
+    "StockTakeLine",
+    "StockTakeStatus",
+    "StockTakeLineStatus",
     "PlatformFeeComponent",
     "FeeBasis",
     "MarginFeeConfig",

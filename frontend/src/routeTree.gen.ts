@@ -12,12 +12,15 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as SuppliersIndexRouteImport } from './routes/suppliers/index'
+import { Route as StockTakesIndexRouteImport } from './routes/stock-takes/index'
 import { Route as PurchasesIndexRouteImport } from './routes/purchases/index'
 import { Route as ProductsIndexRouteImport } from './routes/products/index'
 import { Route as OrdersIndexRouteImport } from './routes/orders/index'
 import { Route as MaterialsIndexRouteImport } from './routes/materials/index'
 import { Route as MaterialTypesIndexRouteImport } from './routes/material-types/index'
 import { Route as ManufacturersIndexRouteImport } from './routes/manufacturers/index'
+import { Route as StockTakesUnresolvedRouteImport } from './routes/stock-takes/unresolved'
+import { Route as StockTakesStockTakeIdRouteImport } from './routes/stock-takes/$stockTakeId'
 import { Route as PurchasesNewRouteImport } from './routes/purchases/new'
 import { Route as PurchasesPurchaseIdRouteImport } from './routes/purchases/$purchaseId'
 import { Route as ProductsProductIdRouteImport } from './routes/products/$productId'
@@ -41,6 +44,11 @@ const IndexRoute = IndexRouteImport.update({
 const SuppliersIndexRoute = SuppliersIndexRouteImport.update({
   id: '/suppliers/',
   path: '/suppliers/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StockTakesIndexRoute = StockTakesIndexRouteImport.update({
+  id: '/stock-takes/',
+  path: '/stock-takes/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PurchasesIndexRoute = PurchasesIndexRouteImport.update({
@@ -71,6 +79,16 @@ const MaterialTypesIndexRoute = MaterialTypesIndexRouteImport.update({
 const ManufacturersIndexRoute = ManufacturersIndexRouteImport.update({
   id: '/manufacturers/',
   path: '/manufacturers/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StockTakesUnresolvedRoute = StockTakesUnresolvedRouteImport.update({
+  id: '/stock-takes/unresolved',
+  path: '/stock-takes/unresolved',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StockTakesStockTakeIdRoute = StockTakesStockTakeIdRouteImport.update({
+  id: '/stock-takes/$stockTakeId',
+  path: '/stock-takes/$stockTakeId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PurchasesNewRoute = PurchasesNewRouteImport.update({
@@ -131,12 +149,15 @@ export interface FileRoutesByFullPath {
   '/products/$productId': typeof ProductsProductIdRoute
   '/purchases/$purchaseId': typeof PurchasesPurchaseIdRoute
   '/purchases/new': typeof PurchasesNewRoute
+  '/stock-takes/$stockTakeId': typeof StockTakesStockTakeIdRoute
+  '/stock-takes/unresolved': typeof StockTakesUnresolvedRoute
   '/manufacturers/': typeof ManufacturersIndexRoute
   '/material-types/': typeof MaterialTypesIndexRoute
   '/materials/': typeof MaterialsIndexRoute
   '/orders/': typeof OrdersIndexRoute
   '/products/': typeof ProductsIndexRoute
   '/purchases/': typeof PurchasesIndexRoute
+  '/stock-takes/': typeof StockTakesIndexRoute
   '/suppliers/': typeof SuppliersIndexRoute
 }
 export interface FileRoutesByTo {
@@ -151,12 +172,15 @@ export interface FileRoutesByTo {
   '/products/$productId': typeof ProductsProductIdRoute
   '/purchases/$purchaseId': typeof PurchasesPurchaseIdRoute
   '/purchases/new': typeof PurchasesNewRoute
+  '/stock-takes/$stockTakeId': typeof StockTakesStockTakeIdRoute
+  '/stock-takes/unresolved': typeof StockTakesUnresolvedRoute
   '/manufacturers': typeof ManufacturersIndexRoute
   '/material-types': typeof MaterialTypesIndexRoute
   '/materials': typeof MaterialsIndexRoute
   '/orders': typeof OrdersIndexRoute
   '/products': typeof ProductsIndexRoute
   '/purchases': typeof PurchasesIndexRoute
+  '/stock-takes': typeof StockTakesIndexRoute
   '/suppliers': typeof SuppliersIndexRoute
 }
 export interface FileRoutesById {
@@ -172,12 +196,15 @@ export interface FileRoutesById {
   '/products/$productId': typeof ProductsProductIdRoute
   '/purchases/$purchaseId': typeof PurchasesPurchaseIdRoute
   '/purchases/new': typeof PurchasesNewRoute
+  '/stock-takes/$stockTakeId': typeof StockTakesStockTakeIdRoute
+  '/stock-takes/unresolved': typeof StockTakesUnresolvedRoute
   '/manufacturers/': typeof ManufacturersIndexRoute
   '/material-types/': typeof MaterialTypesIndexRoute
   '/materials/': typeof MaterialsIndexRoute
   '/orders/': typeof OrdersIndexRoute
   '/products/': typeof ProductsIndexRoute
   '/purchases/': typeof PurchasesIndexRoute
+  '/stock-takes/': typeof StockTakesIndexRoute
   '/suppliers/': typeof SuppliersIndexRoute
 }
 export interface FileRouteTypes {
@@ -194,12 +221,15 @@ export interface FileRouteTypes {
     | '/products/$productId'
     | '/purchases/$purchaseId'
     | '/purchases/new'
+    | '/stock-takes/$stockTakeId'
+    | '/stock-takes/unresolved'
     | '/manufacturers/'
     | '/material-types/'
     | '/materials/'
     | '/orders/'
     | '/products/'
     | '/purchases/'
+    | '/stock-takes/'
     | '/suppliers/'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -214,12 +244,15 @@ export interface FileRouteTypes {
     | '/products/$productId'
     | '/purchases/$purchaseId'
     | '/purchases/new'
+    | '/stock-takes/$stockTakeId'
+    | '/stock-takes/unresolved'
     | '/manufacturers'
     | '/material-types'
     | '/materials'
     | '/orders'
     | '/products'
     | '/purchases'
+    | '/stock-takes'
     | '/suppliers'
   id:
     | '__root__'
@@ -234,12 +267,15 @@ export interface FileRouteTypes {
     | '/products/$productId'
     | '/purchases/$purchaseId'
     | '/purchases/new'
+    | '/stock-takes/$stockTakeId'
+    | '/stock-takes/unresolved'
     | '/manufacturers/'
     | '/material-types/'
     | '/materials/'
     | '/orders/'
     | '/products/'
     | '/purchases/'
+    | '/stock-takes/'
     | '/suppliers/'
   fileRoutesById: FileRoutesById
 }
@@ -255,12 +291,15 @@ export interface RootRouteChildren {
   ProductsProductIdRoute: typeof ProductsProductIdRoute
   PurchasesPurchaseIdRoute: typeof PurchasesPurchaseIdRoute
   PurchasesNewRoute: typeof PurchasesNewRoute
+  StockTakesStockTakeIdRoute: typeof StockTakesStockTakeIdRoute
+  StockTakesUnresolvedRoute: typeof StockTakesUnresolvedRoute
   ManufacturersIndexRoute: typeof ManufacturersIndexRoute
   MaterialTypesIndexRoute: typeof MaterialTypesIndexRoute
   MaterialsIndexRoute: typeof MaterialsIndexRoute
   OrdersIndexRoute: typeof OrdersIndexRoute
   ProductsIndexRoute: typeof ProductsIndexRoute
   PurchasesIndexRoute: typeof PurchasesIndexRoute
+  StockTakesIndexRoute: typeof StockTakesIndexRoute
   SuppliersIndexRoute: typeof SuppliersIndexRoute
 }
 
@@ -285,6 +324,13 @@ declare module '@tanstack/react-router' {
       path: '/suppliers'
       fullPath: '/suppliers/'
       preLoaderRoute: typeof SuppliersIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/stock-takes/': {
+      id: '/stock-takes/'
+      path: '/stock-takes'
+      fullPath: '/stock-takes/'
+      preLoaderRoute: typeof StockTakesIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/purchases/': {
@@ -327,6 +373,20 @@ declare module '@tanstack/react-router' {
       path: '/manufacturers'
       fullPath: '/manufacturers/'
       preLoaderRoute: typeof ManufacturersIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/stock-takes/unresolved': {
+      id: '/stock-takes/unresolved'
+      path: '/stock-takes/unresolved'
+      fullPath: '/stock-takes/unresolved'
+      preLoaderRoute: typeof StockTakesUnresolvedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/stock-takes/$stockTakeId': {
+      id: '/stock-takes/$stockTakeId'
+      path: '/stock-takes/$stockTakeId'
+      fullPath: '/stock-takes/$stockTakeId'
+      preLoaderRoute: typeof StockTakesStockTakeIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/purchases/new': {
@@ -407,12 +467,15 @@ const rootRouteChildren: RootRouteChildren = {
   ProductsProductIdRoute: ProductsProductIdRoute,
   PurchasesPurchaseIdRoute: PurchasesPurchaseIdRoute,
   PurchasesNewRoute: PurchasesNewRoute,
+  StockTakesStockTakeIdRoute: StockTakesStockTakeIdRoute,
+  StockTakesUnresolvedRoute: StockTakesUnresolvedRoute,
   ManufacturersIndexRoute: ManufacturersIndexRoute,
   MaterialTypesIndexRoute: MaterialTypesIndexRoute,
   MaterialsIndexRoute: MaterialsIndexRoute,
   OrdersIndexRoute: OrdersIndexRoute,
   ProductsIndexRoute: ProductsIndexRoute,
   PurchasesIndexRoute: PurchasesIndexRoute,
+  StockTakesIndexRoute: StockTakesIndexRoute,
   SuppliersIndexRoute: SuppliersIndexRoute,
 }
 export const routeTree = rootRouteImport

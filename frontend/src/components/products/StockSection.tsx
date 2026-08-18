@@ -373,6 +373,12 @@ export function StockSection({
             Save
           </button>
         </form>
+        {adjMode === "set" && (
+          <p className="text-xs text-slate-500">
+            Setting an exact amount records a physical count, so this stops showing as due and its
+            count date moves to today. Adjusting by an amount doesn't — a known change isn't a count.
+          </p>
+        )}
         <ErrorBanner error={adjustMutation.error} />
       </div>
 

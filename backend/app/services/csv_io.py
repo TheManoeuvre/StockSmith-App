@@ -37,6 +37,25 @@ MATERIALS_CSV_FIELDS = [
 
 PRODUCTS_CSV_FIELDS = ["name", "sku", "description"]
 
+# Keyed on line_id, deviating from the names-not-ids rule the two exports above follow.
+# That rule exists because those files are meant to move between machines; this one is
+# scoped to a single take on a single database and round-trips within hours, so an id is
+# both stable and unambiguous in a way a name isn't (two variants of one product differ
+# only by a suffix). item_type/item_id ride along as a cross-check so a file edited into
+# the wrong shape fails loudly rather than writing a count onto the wrong item.
+STOCK_TAKE_CSV_FIELDS = [
+    "line_id",
+    "item_type",
+    "item_id",
+    "name",
+    "category",
+    "unit",
+    "expected_qty",
+    "allocated_qty",
+    "counted_qty",
+    "notes",
+]
+
 
 def _parse_bool(value: str | None, default: bool = True) -> bool:
     if value is None or value.strip() == "":
@@ -296,3 +315,205 @@ async def import_products_csv(session: AsyncSession, content: bytes) -> dict:
             failed.append({"row": i, "error": str(e)})
 
     return {"created": created, "updated": updated, "failed": failed}
+
+
+async def _stock_take_lookups(session: AsyncSession, lines) -> tuple[dict, dict, dict]:
+    from sqlalchemy.orm import selectinload
+
+    from app.models.variant import ProductVariant
+
+    material_ids = {line.material_id for line in lines if line.material_id}
+    product_ids = {line.product_id for line in lines if line.product_id}
+    variant_ids = {line.variant_id for line in lines if line.variant_id}
+    materials = (
+        {m.id: m for m in (await session.execute(select(Material).where(Material.id.in_(material_ids)))).scalars()}
+        if material_ids
+        else {}
+    )
+    products = (
+        {
+            p.id: p
+            for p in (
+                await session.execute(
+                    # product_type_name reads through a relationship, and a lazy load in
+                    # async raises MissingGreenlet rather than fetching.
+                    select(Product).where(Product.id.in_(product_ids)).options(selectinload(Product.product_type))
+                )
+            ).scalars()
+        }
+        if product_ids
+        else {}
+    )
+    variants = (
+        {
+            v.id: v
+            for v in (
+                await session.execute(select(ProductVariant).where(ProductVariant.id.in_(variant_ids)))
+            ).scalars()
+        }
+        if variant_ids
+        else {}
+    )
+    return materials, products, variants
+
+
+async def export_stock_take_csv(session: AsyncSession, stock_take_id: int) -> str:
+    """The count sheet as a file — to print, or to fill in a spreadsheet away from the PC.
+
+    counted_qty and notes come back pre-filled if counting is already under way, so the
+    file round-trips rather than discarding work when re-exported.
+
+    allocated_qty is included read-only and ignored on import. A printed sheet is exactly
+    where nobody would otherwise know that five of the twelve are picked and boxed by the
+    door rather than on the shelf — which is the difference between a real variance and a
+    count that only looks short.
+    """
+    from app.models.stock_take import StockTakeLine
+    from app.services.stock_takes import line_display_name
+
+    lines = list(
+        (
+            await session.execute(
+                select(StockTakeLine)
+                .where(StockTakeLine.stock_take_id == stock_take_id)
+                .order_by(StockTakeLine.id)
+            )
+        ).scalars()
+    )
+    materials, products, variants = await _stock_take_lookups(session, lines)
+
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=STOCK_TAKE_CSV_FIELDS)
+    writer.writeheader()
+    for line in lines:
+        name, unit = line_display_name(line, materials, products, variants)
+        if line.material_id is not None:
+            material = materials.get(line.material_id)
+            category = material.category.value if material else ""
+        else:
+            product = products.get(line.product_id)
+            category = (product.product_type_name or "") if product else ""
+        writer.writerow(
+            {
+                "line_id": line.id,
+                "item_type": "material" if line.material_id else "product",
+                "item_id": line.material_id or line.product_id,
+                "name": name,
+                "category": category,
+                "unit": unit,
+                "expected_qty": str(line.expected_qty),
+                "allocated_qty": "" if line.allocated_qty_at_start is None else str(line.allocated_qty_at_start),
+                "counted_qty": "" if line.counted_qty is None else str(line.counted_qty),
+                "notes": line.notes or "",
+            }
+        )
+    return buf.getvalue()
+
+
+async def import_stock_take_csv(
+    session: AsyncSession, stock_take_id: int, content: bytes, dry_run: bool = True, on_error: str = "skip"
+) -> dict:
+    """Read counts back off a filled-in sheet.
+
+    Two calls, one endpoint, mirroring BulkBomAmendModal: the client posts with
+    dry_run=True to get the preview it shows the user, then posts the same file again with
+    dry_run=False once they have confirmed. Stateless — no staging table, and no trusting a
+    client-supplied list of "the rows you already approved". Validation is deterministic,
+    so the second pass reaches the same verdict as the first.
+
+    Per-row and independent, following import_materials_csv: one bad row reports its own
+    line number (counted from 2, so it matches what the spreadsheet shows) and leaves the
+    rest alone.
+
+    A blank counted_qty is not a zero — it means that row was not counted, so the line is
+    left exactly as it was. Same rule as leaving the field blank in the app.
+    """
+    from app.models.stock_take import StockTake, StockTakeLine, StockTakeLineStatus, StockTakeStatus
+
+    take = await session.get(StockTake, stock_take_id)
+    if take is None:
+        raise HTTPException(status_code=404, detail="Stock take not found")
+    if take.status is StockTakeStatus.closed:
+        raise HTTPException(status_code=400, detail="This stock take is closed")
+
+    lines_by_id = {
+        line.id: line
+        for line in (
+            await session.execute(select(StockTakeLine).where(StockTakeLine.stock_take_id == stock_take_id))
+        ).scalars()
+    }
+    materials = {
+        m.id: m
+        for m in (
+            await session.execute(
+                select(Material).where(
+                    Material.id.in_({line.material_id for line in lines_by_id.values() if line.material_id})
+                )
+            )
+        ).scalars()
+    }
+
+    reader = csv.DictReader(io.StringIO(content.decode("utf-8-sig")))
+    failed: list[dict] = []
+    staged: list[tuple] = []
+    skipped_blank = 0
+
+    for i, row in enumerate(reader, start=2):  # row 1 is the header
+        try:
+            raw_line_id = (row.get("line_id") or "").strip()
+            if not raw_line_id:
+                raise ValueError("line_id is required")
+            line = lines_by_id.get(int(raw_line_id))
+            if line is None:
+                raise ValueError(f"line_id {raw_line_id} is not on this stock take")
+
+            # Cross-check: catches a file whose rows have been re-sorted, pasted between
+            # sheets, or carried over from a different take — cases where the counts are
+            # real but would land on the wrong items.
+            item_type = (row.get("item_type") or "").strip()
+            expected_type = "material" if line.material_id else "product"
+            if item_type and item_type != expected_type:
+                raise ValueError(f"item_type '{item_type}' doesn't match this line ({expected_type})")
+            raw_item_id = (row.get("item_id") or "").strip()
+            if raw_item_id and int(raw_item_id) != (line.material_id or line.product_id):
+                raise ValueError("item_id doesn't match the item on this line")
+
+            raw_count = (row.get("counted_qty") or "").strip()
+            if not raw_count:
+                skipped_blank += 1
+                continue
+
+            # Parsed explicitly rather than letting InvalidOperation escape: its str() is
+            # "[<class 'decimal.ConversionSyntax'>]", which tells someone staring at a
+            # confirmation screen nothing about which cell to go and fix.
+            try:
+                counted = Decimal(raw_count)
+            except InvalidOperation:
+                raise ValueError(f"'{raw_count}' is not a number") from None
+            if counted < 0:
+                raise ValueError("counted_qty cannot be negative")
+            if line.material_id is not None:
+                material = materials.get(line.material_id)
+                if material is not None:
+                    validate_qty_for_unit(counted, material.unit, "counted_qty")
+            elif counted != counted.to_integral_value():
+                raise ValueError("counted_qty must be a whole number for finished stock")
+
+            staged.append((line, counted, (row.get("notes") or "").strip() or None))
+        except (ValueError, KeyError, InvalidOperation) as e:
+            failed.append({"row": i, "error": str(e)})
+        except HTTPException as e:
+            # validate_qty_for_unit raises HTTPException because it is shared with request
+            # handlers — caught separately so a whole-number violation fails just this row.
+            failed.append({"row": i, "error": str(e.detail)})
+
+    apply = not dry_run and not (failed and on_error == "fail")
+    if apply:
+        for line, counted, notes in staged:
+            line.counted_qty = counted
+            line.notes = notes
+            if line.status in (StockTakeLineStatus.pending, StockTakeLineStatus.counted):
+                line.status = StockTakeLineStatus.counted
+        await session.commit()
+
+    return {"matched": len(staged), "skipped_blank": skipped_blank, "failed": failed, "applied": apply}

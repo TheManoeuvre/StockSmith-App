@@ -23,11 +23,13 @@ from app.routers import (
     orders,
     platform_config,
     platforms,
+    product_types,
     products,
     purchases,
     restore,
     shipping_profiles,
     stock_adjustments,
+    stock_takes,
     suppliers,
     system,
     variants,
@@ -124,6 +126,7 @@ app.include_router(material_categories.router, prefix="/api/v1")
 app.include_router(material_types.router, prefix="/api/v1")
 app.include_router(colours.router, prefix="/api/v1")
 app.include_router(products.router, prefix="/api/v1")
+app.include_router(product_types.router, prefix="/api/v1")
 app.include_router(variants.router, prefix="/api/v1")
 app.include_router(assets.router, prefix="/api/v1")
 app.include_router(purchases.router, prefix="/api/v1")
@@ -137,6 +140,7 @@ app.include_router(fee_config.router, prefix="/api/v1")
 app.include_router(platform_config.router, prefix="/api/v1")
 app.include_router(shipping_profiles.router, prefix="/api/v1")
 app.include_router(stock_adjustments.router, prefix="/api/v1")
+app.include_router(stock_takes.router, prefix="/api/v1")
 app.include_router(backups.router, prefix="/api/v1")
 app.include_router(restore.router, prefix="/api/v1")
 

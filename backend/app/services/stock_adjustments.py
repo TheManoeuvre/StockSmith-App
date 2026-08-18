@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -48,6 +50,12 @@ async def create_stock_adjustment(
         )
 
     owner.current_stock = new_stock
+    # Same rule as the materials side (services/costing.py::create_adjustment): a "set" is a
+    # physical count and restarts the counting clock, an "adjust" is a known delta and does
+    # not. Written onto `owner` rather than the product, so a variant — which holds its own
+    # stock and so is counted in its own right — gets its own date.
+    if mode == StockAdjustmentMode.set:
+        owner.last_stock_take_at = datetime.now(timezone.utc)
     listing_push.enqueue_for_owner(owner)
     adjustment = StockAdjustment(
         product_id=product_id,

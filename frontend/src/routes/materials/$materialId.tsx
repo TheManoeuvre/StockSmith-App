@@ -11,7 +11,8 @@ import { useMaterialCategories } from "../../hooks/useMaterialCategories";
 import { useMaterialImageUrl } from "../../hooks/useMaterialImageUrl";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { CreatableSelect } from "../../components/common/CreatableSelect";
-import type { MaterialUnit } from "../../api/types";
+import type { ABCClass, MaterialUnit } from "../../api/types";
+import { StockCountFields } from "../../components/common/StockCountFields";
 import { isLowStock, normalizeQtyForUnit, roundQty, wholeNumberStepFor } from "../../lib/format";
 import { formatUnitCost } from "../../lib/money";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
@@ -37,6 +38,8 @@ interface MaterialDetailsForm {
   defaultSupplierId: number | null;
   typicalReorderQty: string;
   reorderThreshold: string;
+  abcClass: ABCClass | null;
+  stockTakeIntervalDays: string;
 }
 
 const EMPTY_MATERIAL_DETAILS: MaterialDetailsForm = {
@@ -54,6 +57,8 @@ const EMPTY_MATERIAL_DETAILS: MaterialDetailsForm = {
   defaultSupplierId: null,
   typicalReorderQty: "",
   reorderThreshold: "0",
+  abcClass: null,
+  stockTakeIntervalDays: "",
 };
 
 interface AdjustForm {
@@ -120,6 +125,9 @@ function MaterialDetail() {
             defaultSupplierId: material.default_supplier_id,
             typicalReorderQty: material.typical_reorder_qty ?? "",
             reorderThreshold: material.reorder_threshold,
+            abcClass: material.abc_class,
+            stockTakeIntervalDays:
+              material.stock_take_interval_days === null ? "" : String(material.stock_take_interval_days),
           }
         : undefined,
     [material]
@@ -151,6 +159,8 @@ function MaterialDetail() {
     defaultSupplierId,
     typicalReorderQty,
     reorderThreshold,
+    abcClass,
+    stockTakeIntervalDays,
   } = details;
   const { categories, byName: categoriesByName } = useMaterialCategories();
   // Two different categories are in play: the saved one, which decides how the stats above read,
@@ -200,6 +210,8 @@ function MaterialDetail() {
         default_supplier_id: resolvedSupplierId,
         typical_reorder_qty: typicalReorderQty || null,
         product_url: productUrl || null,
+        abc_class: abcClass,
+        stock_take_interval_days: stockTakeIntervalDays === "" ? null : Number(stockTakeIntervalDays),
       });
     },
     onSuccess: () => {
@@ -481,6 +493,16 @@ function MaterialDetail() {
               onBlur={(e) => setTypicalReorderQty(normalizeQtyForUnit(e.target.value, unit))}
             />
           </label>
+          <div className="basis-full">
+            <StockCountFields
+              abcClass={abcClass}
+              intervalDays={stockTakeIntervalDays}
+              classification={material.classification}
+              groupLabel={`the ${category} category`}
+              onAbcClassChange={(next) => setField("abcClass", next)}
+              onIntervalDaysChange={(next) => setField("stockTakeIntervalDays", next)}
+            />
+          </div>
           <SaveButton
             type="submit"
             isDirty={detailsDirty}
@@ -569,6 +591,12 @@ function MaterialDetail() {
             Save
           </button>
         </form>
+        {adjustMode === "set" && (
+          <p className="text-xs text-slate-500">
+            Setting an exact amount records a physical count, so this stops showing as due and its
+            count date moves to today. Adjusting by an amount doesn't — a known change isn't a count.
+          </p>
+        )}
         <ErrorBanner error={adjustStockMutation.error} />
 
         <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">

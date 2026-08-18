@@ -1,5 +1,6 @@
 import { api, downloadCsv, uploadCsv, type CsvImportResult } from "./client";
 import type {
+  ABCClass,
   BomLine,
   BomLineRead,
   Build,
@@ -32,6 +33,11 @@ export interface ProductInput {
   push_buildable_capacity?: boolean;
   pricing_mode?: PricingMode;
   pricing_variable_attribute?: number | null;
+  product_type_id?: number | null;
+  /** Null means "inherit" for both — the backend resolves through the product type then the
+   * shop-wide default (services/abc.py). */
+  abc_class?: ABCClass | null;
+  stock_take_interval_days?: number | null;
 }
 
 // Several pickers (bundle items, manual order lines, unmapped-SKU mapping) need the
@@ -42,7 +48,12 @@ const ALL_PRODUCTS_LIMIT = 10000;
 
 export const productsApi = {
   list: () => api.get<ProductPage>(`/products?limit=${ALL_PRODUCTS_LIMIT}&offset=0`).then((page) => page.items),
-  listPaged: (limit: number, offset: number) => api.get<ProductPage>(`/products?limit=${limit}&offset=${offset}`),
+  listPaged: (limit: number, offset: number, productTypeId?: number | null) =>
+    api.get<ProductPage>(
+      // Filtered server-side: the list is paginated, so narrowing it client-side would
+      // filter only the current page and leave the total wrong.
+      `/products?limit=${limit}&offset=${offset}${productTypeId != null ? `&product_type_id=${productTypeId}` : ""}`,
+    ),
   get: (id: number) => api.get<Product>(`/products/${id}`),
   create: (input: ProductInput) => api.post<Product>("/products", input),
   update: (id: number, input: Partial<ProductInput> & { is_active?: boolean }) =>

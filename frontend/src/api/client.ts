@@ -20,12 +20,15 @@ export class ApiError extends Error {
   }
 }
 
-async function authHeaders(): Promise<Record<string, string>> {
+// Exported for the few callers that build a request themselves rather than going
+// through `api` — multipart uploads and streamed downloads, which need the URL and
+// headers separately.
+export async function authHeaders(): Promise<Record<string, string>> {
   const { sharedPassword } = await getSettings();
   return sharedPassword ? { Authorization: `Bearer ${sharedPassword}` } : {};
 }
 
-async function baseUrl(): Promise<string> {
+export async function baseUrl(): Promise<string> {
   const { backendUrl } = await getSettings();
   if (!backendUrl) throw new Error("Backend URL is not configured. Set it in Settings.");
   return backendUrl.replace(/\/$/, "");

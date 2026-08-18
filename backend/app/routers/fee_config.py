@@ -5,6 +5,7 @@ from app.deps import get_db, require_auth
 from app.models.kitting import DefaultKittingMaterial
 from app.models.listing import ListingPlatform
 from app.models.platform_fee import PlatformFeeComponent
+from app.schemas.abc import StockCountSettingsRead, StockCountSettingsUpdate
 from app.schemas.kitting import DefaultKittingBomLineRead, KittingBomLine
 from app.schemas.platform_fee import (
     DefaultCurrencyRead,
@@ -17,7 +18,7 @@ from app.schemas.platform_fee import (
     PlatformFeeComponentRead,
     PlatformFeeComponentUpdate,
 )
-from app.services import general_settings, platform_fees
+from app.services import abc, general_settings, platform_fees
 from app.services.kitting import get_default_kitting_bom, replace_default_kitting_bom
 from app.services.validation import validate_lines_against_units
 
@@ -36,6 +37,18 @@ async def update_default_currency(
 ) -> DefaultCurrencyRead:
     settings = await general_settings.set_default_currency(session, payload.default_currency)
     return DefaultCurrencyRead(default_currency=settings.default_currency)
+
+
+@router.get("/stock-count-settings", response_model=StockCountSettingsRead)
+async def get_stock_count_settings(session: AsyncSession = Depends(get_db)) -> StockCountSettingsRead:
+    return await abc.read_settings(session)
+
+
+@router.put("/stock-count-settings", response_model=StockCountSettingsRead)
+async def update_stock_count_settings(
+    payload: StockCountSettingsUpdate, session: AsyncSession = Depends(get_db)
+) -> StockCountSettingsRead:
+    return await abc.write_settings(session, payload)
 
 
 @router.get("/forecast-settings", response_model=ForecastSettingsRead)

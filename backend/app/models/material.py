@@ -4,6 +4,7 @@ from datetime import datetime
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.models.abc_classification import ABCClass
 from app.models.base import Base, portable_enum
 
 
@@ -99,6 +100,26 @@ class Material(Base):
     product_url: Mapped[str | None] = mapped_column(String, nullable=True)
     image_path: Mapped[str | None] = mapped_column(String, nullable=True)
     image_original_filename: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    # Stock-take classification. Both nullable, and NULL means "inherit" rather than
+    # "unset" — abc_class falls through to the category's tier and then the shop-wide
+    # material baseline, stock_take_interval_days to the resolved tier's cadence. See
+    # services/abc.py for the resolution order; nothing else should reimplement it.
+    abc_class: Mapped["ABCClass | None"] = mapped_column(
+        portable_enum(ABCClass, name="abc_class"), nullable=True
+    )
+    stock_take_interval_days: Mapped[int | None] = mapped_column(nullable=True)
+    # Set only when a stock take was approved *and* a count was actually entered for this
+    # material — a line left blank means "assume the system is right", which is not the
+    # same as having counted it, and must not reset the clock. NULL reads as "never
+    # counted" and sorts first in the due-for-counting list.
+    last_stock_take_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # NULL means "counted outside a take" — a hand-made Set adjustment sets the date above
+    # but belongs to no take — as well as "never counted". The date is what the cadence
+    # reads; this only says where it came from.
+    last_stock_take_id: Mapped[int | None] = mapped_column(
+        ForeignKey("stock_takes.id", ondelete="SET NULL"), nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

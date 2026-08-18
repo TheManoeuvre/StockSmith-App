@@ -1,10 +1,21 @@
+from datetime import datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import bindparam, text
+from sqlalchemy import bindparam, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.schemas.dashboard import BuildableProduct, DashboardSummary, LowStockMaterial, MarginAlert, OrderAwaitingInventory
+from app.schemas.abc import DueForCountItemRead
+from app.schemas.dashboard import (
+    BuildableProduct,
+    DashboardSummary,
+    LowStockMaterial,
+    MarginAlert,
+    OpenStockTake,
+    OrderAwaitingInventory,
+)
 from app.schemas.variant import VariantBomLine
+from app.services.abc import compute_due_for_count
+from app.services.platforms.base import ensure_utc
 
 _ORDERS_AWAITING_INVENTORY_SQL = text(
     """
@@ -382,6 +393,51 @@ async def compute_dashboard_summary(session: AsyncSession) -> DashboardSummary:
     orders_awaiting_inventory = await get_orders_awaiting_inventory(session)
     orders_awaiting_packaging = await get_orders_awaiting_packaging(session)
 
+    # Capped like lowest_buildable_products. On a database that has never had a stock take
+    # this is the entire catalogue, and the dashboard wants the worst offenders, not a
+    # thousand-row dump — items_due_for_count_total carries the real size so the section
+    # can say "showing 10 of 412" rather than implying there are only ten.
+    items_due_for_count = await compute_due_for_count(session)
+
+    from app.models.stock_take import StockTake, StockTakeLine, StockTakeLineStatus, StockTakeStatus
+
+    unresolved_variance_count = (
+        await session.execute(
+            select(func.count())
+            .select_from(StockTakeLine)
+            .join(StockTake, StockTakeLine.stock_take_id == StockTake.id)
+            .where(
+                StockTakeLine.status == StockTakeLineStatus.conflict,
+                StockTake.status == StockTakeStatus.closed,
+            )
+        )
+    ).scalar_one()
+
+    # Only one take is normally open; if somehow more are, the oldest is the one whose
+    # accumulated movement is the problem worth surfacing.
+    open_take_row = (
+        await session.execute(
+            select(StockTake).where(StockTake.status == StockTakeStatus.open).order_by(StockTake.started_at).limit(1)
+        )
+    ).scalar_one_or_none()
+    open_stock_take = None
+    if open_take_row is not None:
+        take_lines = list(
+            (
+                await session.execute(
+                    select(StockTakeLine).where(StockTakeLine.stock_take_id == open_take_row.id)
+                )
+            ).scalars()
+        )
+        started = ensure_utc(open_take_row.started_at) or datetime.now(timezone.utc)
+        open_stock_take = OpenStockTake(
+            id=open_take_row.id,
+            started_at=started,
+            open_days=max((datetime.now(timezone.utc) - started).days, 0),
+            line_count=len(take_lines),
+            counted_count=sum(1 for line in take_lines if line.status is StockTakeLineStatus.counted),
+        )
+
     return DashboardSummary(
         total_inventory_value=Decimal(inventory_value_row.total),
         active_product_count=active_product_count,
@@ -390,4 +446,8 @@ async def compute_dashboard_summary(session: AsyncSession) -> DashboardSummary:
         margin_alerts=margin_alerts,
         orders_awaiting_inventory=orders_awaiting_inventory,
         orders_awaiting_packaging=orders_awaiting_packaging,
+        items_due_for_count=[DueForCountItemRead.model_validate(item) for item in items_due_for_count[:10]],
+        items_due_for_count_total=len(items_due_for_count),
+        unresolved_variance_count=unresolved_variance_count,
+        open_stock_take=open_stock_take,
     )

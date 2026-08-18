@@ -54,6 +54,36 @@ function handle(method: FakeRoute["method"], path: string, body?: unknown): Prom
 
 const notImplemented = () => Promise.reject(new Error("not available in tests"));
 
+/**
+ * Raw fetches made through platformFetch, for the few callers that build a request
+ * themselves rather than going through `api` — multipart uploads, chiefly. Recorded so a
+ * test can assert what was sent (a stock-take CSV import goes up twice, and which query
+ * params each pass carries is the behaviour worth pinning).
+ */
+export const fetchCalls: { url: string; method: string }[] = [];
+
+type FetchResponder = (url: string, init?: RequestInit) => unknown;
+let fetchResponder: FetchResponder | null = null;
+
+/** Answer platformFetch calls with `responder`'s return value as the JSON body. */
+export function setFetchResponder(responder: FetchResponder | null): void {
+  fetchResponder = responder;
+  fetchCalls.length = 0;
+}
+
+function fakePlatformFetch(url: string, init?: RequestInit): Promise<Response> {
+  fetchCalls.push({ url, method: init?.method ?? "GET" });
+  if (!fetchResponder) {
+    return Promise.reject(new Error(`fakeBackend: no fetch responder for ${init?.method ?? "GET"} ${url}`));
+  }
+  const body = fetchResponder(url, init);
+  return Promise.resolve({
+    ok: true,
+    status: 200,
+    json: () => Promise.resolve(body),
+  } as Response);
+}
+
 export function clientMock() {
   return {
     api: {
@@ -64,7 +94,9 @@ export function clientMock() {
       delete: (path: string) => handle("DELETE", path),
     },
     ApiError: FakeApiError,
-    platformFetch: notImplemented,
+    platformFetch: fakePlatformFetch,
+    baseUrl: () => Promise.resolve("http://test"),
+    authHeaders: () => Promise.resolve({}),
     healthCheck: () => Promise.resolve(true),
     fetchSystemStatus: () => handle("GET", "/system/status"),
     assetDownloadUrl: notImplemented,

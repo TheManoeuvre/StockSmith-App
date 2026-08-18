@@ -3,6 +3,7 @@ import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } f
 import { useRef, useState } from "react";
 import { platformsApi, type ProductSyncStatus } from "../../api/platforms";
 import { productsApi } from "../../api/products";
+import { productTypesApi } from "../../api/productTypes";
 import type { ListingPlatform, Product } from "../../api/types";
 import { CONNECTABLE_PLATFORMS } from "../../lib/platforms";
 import { useAssetUrl } from "../../hooks/useAssetUrl";
@@ -23,11 +24,13 @@ const PRODUCTS_PAGE_SIZE = 50;
 function ProductsList() {
   const queryClient = useQueryClient();
   const [page, setPage] = useState(0);
+  const [productTypeFilter, setProductTypeFilter] = useState<number | null>(null);
   const { data, isLoading, error } = useQuery({
-    queryKey: ["products", page],
-    queryFn: () => productsApi.listPaged(PRODUCTS_PAGE_SIZE, page * PRODUCTS_PAGE_SIZE),
+    queryKey: ["products", page, productTypeFilter],
+    queryFn: () => productsApi.listPaged(PRODUCTS_PAGE_SIZE, page * PRODUCTS_PAGE_SIZE, productTypeFilter),
     placeholderData: keepPreviousData,
   });
+  const { data: productTypes } = useQuery({ queryKey: ["product-types"], queryFn: productTypesApi.list });
   const products = data?.items;
   const total = data?.total ?? 0;
   // One cheap DB-backed query per connectable platform (no marketplace traffic — this
@@ -75,6 +78,29 @@ function ProductsList() {
 
       <CsvImportExport onExport={productsApi.exportCsv} onImport={productsApi.importCsv} invalidateKey="products" />
 
+      {productTypes && productTypes.length > 0 && (
+        <label className="flex items-center gap-2 text-sm">
+          Product type
+          <select
+            className="rounded border border-slate-300 px-2 py-1"
+            value={productTypeFilter ?? ""}
+            onChange={(e) => {
+              setProductTypeFilter(e.target.value === "" ? null : Number(e.target.value));
+              // Back to the first page: page 3 of the unfiltered list is usually past the
+              // end of the filtered one, which would land on a blank table.
+              setPage(0);
+            }}
+          >
+            <option value="">All</option>
+            {productTypes.map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+
       {showForm && (
         <form
           className="flex flex-wrap items-end gap-2 rounded bg-white p-4 shadow-sm"
@@ -109,6 +135,7 @@ function ProductsList() {
             <th className="p-2"></th>
             <th className="p-2">Name</th>
             <th className="p-2">SKU</th>
+            <th className="p-2">Type</th>
             <th className="p-2">On hand</th>
             <th className="p-2">Sellable</th>
             <th className="p-2">Cost per unit</th>
@@ -186,6 +213,7 @@ function ProductRow({
           "—"
         )}
       </td>
+      <td className="p-2">{p.product_type_name ?? "—"}</td>
       <td className="p-2">{p.is_bundle ? `Ready to ship: ${p.ready_to_ship ?? "—"}` : p.current_stock}</td>
       {/* One column, and it's the figure that reaches the marketplaces — the three it
           replaced (max buildable / expected max buildable / max sellable) were all
