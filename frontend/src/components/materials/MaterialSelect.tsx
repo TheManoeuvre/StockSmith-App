@@ -1,14 +1,5 @@
-import type { Material, MaterialCategory } from "../../api/types";
-
-const CATEGORY_LABELS: Record<MaterialCategory, string> = {
-  filament: "Filament",
-  resin: "Resin",
-  pigment: "Pigment",
-  hardware: "Hardware",
-  packaging: "Packaging",
-  blanks: "Blanks",
-  other: "Other",
-};
+import { useMaterialCategories } from "../../hooks/useMaterialCategories";
+import type { Material } from "../../api/types";
 
 function matchesFilter(material: Material, filterText: string): boolean {
   if (!filterText.trim()) return true;
@@ -35,16 +26,26 @@ export function MaterialSelect({
   className?: string;
   disabled?: boolean;
 }) {
+  const { categories } = useMaterialCategories();
+
   // Never hide the row's own current selection, even if it doesn't match the filter —
   // otherwise typing into the filter box can silently un-select an already-chosen material.
   const visible = materials.filter((m) => matchesFilter(m, filterText) || m.id === value);
 
-  const byCategory = new Map<MaterialCategory, Material[]>();
+  const byCategory = new Map<string, Material[]>();
   for (const m of visible) {
     const list = byCategory.get(m.category) ?? [];
     list.push(m);
     byCategory.set(m.category, list);
   }
+
+  // Configured order, not the order materials happened to arrive in — which is what this used
+  // to do, so the BOM picker grouped categories differently from the materials table for no
+  // reason anyone chose. Any category not in the list still renders, at the end: it can only
+  // mean the list is mid-refetch, and dropping the group would drop the material.
+  const known = categories.map((c) => c.name).filter((name) => byCategory.has(name));
+  const unknown = Array.from(byCategory.keys()).filter((name) => !categories.some((c) => c.name === name));
+  const ordered = [...known, ...unknown];
 
   return (
     <select
@@ -53,9 +54,9 @@ export function MaterialSelect({
       disabled={disabled}
       onChange={(e) => onChange(Number(e.target.value))}
     >
-      {Array.from(byCategory.entries()).map(([category, group]) => (
-        <optgroup key={category} label={CATEGORY_LABELS[category]}>
-          {group.map((m) => (
+      {ordered.map((category) => (
+        <optgroup key={category} label={category} className="capitalize">
+          {(byCategory.get(category) ?? []).map((m) => (
             <option key={m.id} value={m.id}>
               {m.name} ({m.unit})
             </option>

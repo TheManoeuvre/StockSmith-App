@@ -48,6 +48,7 @@ function baseRoutes() {
     { method: "GET" as const, path: "/manufacturers", respond: () => [] },
     { method: "GET" as const, path: "/suppliers", respond: () => [] },
     { method: "GET" as const, path: "/material-types", respond: () => [] },
+    { method: "GET" as const, path: "/material-categories", respond: () => [] },
     { method: "GET" as const, path: "/product-categories", respond: () => [] },
     {
       method: "GET" as const,
@@ -242,6 +243,8 @@ describe("settings page", () => {
       expect(screen.getByRole("heading", { name: "Material types" })).toBeInTheDocument();
       // Colours joined the others once it stopped being free text on each material.
       expect(screen.getByRole("heading", { name: "Colours" })).toBeInTheDocument();
+      // And categories once they stopped being a fixed enum.
+      expect(screen.getByRole("heading", { name: "Material categories" })).toBeInTheDocument();
     });
 
     it("keeps the global fee basis in Pricing and the fee components on each integration", async () => {

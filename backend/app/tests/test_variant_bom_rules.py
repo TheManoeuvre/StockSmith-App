@@ -16,7 +16,7 @@ import pytest
 import pytest_asyncio
 from fastapi import HTTPException
 
-from app.models.material import Material, MaterialCategory, MaterialUnit
+from app.models.material import Material, LegacyMaterialCategory, MaterialUnit
 from app.models.material_type import MaterialType
 from app.models.product import Product, ProductMaterial
 from app.models.variant import ProductVariant, ProductVariantMaterial
@@ -38,15 +38,15 @@ async def product(session):
     filament_type = MaterialType(id=1, name="PLA")
     session.add(filament_type)
     session.add_all([
-        Material(id=LILAC, name="Lilac Purple", category=MaterialCategory.filament,
+        Material(id=LILAC, name="Lilac Purple", category=LegacyMaterialCategory.filament,
                  unit=MaterialUnit.g, material_type_id=1),
-        Material(id=IVORY, name="Ivory White", category=MaterialCategory.filament,
+        Material(id=IVORY, name="Ivory White", category=LegacyMaterialCategory.filament,
                  unit=MaterialUnit.g, material_type_id=1),
-        Material(id=OAK, name="Oak", category=MaterialCategory.filament,
+        Material(id=OAK, name="Oak", category=LegacyMaterialCategory.filament,
                  unit=MaterialUnit.g, material_type_id=1),
-        Material(id=MATTE_LILAC, name="Matte Lilac", category=MaterialCategory.filament,
+        Material(id=MATTE_LILAC, name="Matte Lilac", category=LegacyMaterialCategory.filament,
                  unit=MaterialUnit.g, material_type_id=1),
-        Material(id=GLUE, name="Glue", category=MaterialCategory.other,
+        Material(id=GLUE, name="Glue", category=LegacyMaterialCategory.other,
                  unit=MaterialUnit.each, material_type_id=None),
     ])
     p = Product(id=1, name="Widget", sku="SKU-1")

@@ -10,7 +10,7 @@ from decimal import Decimal
 
 import pytest_asyncio
 
-from app.models.material import Material, MaterialCategory, MaterialUnit
+from app.models.material import Material, LegacyMaterialCategory, MaterialUnit
 from app.models.product import Product, ProductMaterial
 from app.models.variant import ProductVariant
 from app.schemas.variant import VariantBomLine
@@ -20,7 +20,7 @@ import app.routers.variants as variants_router
 @pytest_asyncio.fixture
 async def variant(session):
     session.add(
-        Material(id=1, name="Filament", category=MaterialCategory.filament, unit=MaterialUnit.g)
+        Material(id=1, name="Filament", category=LegacyMaterialCategory.filament, unit=MaterialUnit.g)
     )
     session.add(Product(id=1, name="Widget", sku="SKU-1"))
     await session.flush()

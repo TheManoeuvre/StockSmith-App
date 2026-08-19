@@ -3,7 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { productCategoriesApi } from "../../api/productCategories";
 import { stockTakesApi } from "../../api/stockTakes";
-import type { MaterialCategory, StockTakeScope } from "../../api/types";
+import type { StockTakeScope } from "../../api/types";
+import { useMaterialCategories } from "../../hooks/useMaterialCategories";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 
 export const Route = createFileRoute("/stock-takes/")({
@@ -13,8 +14,6 @@ export const Route = createFileRoute("/stock-takes/")({
   validateSearch: (search: Record<string, unknown>): { overdue?: boolean } =>
     search.overdue ? { overdue: true } : {},
 });
-
-const CATEGORIES: MaterialCategory[] = ["filament", "resin", "pigment", "hardware", "packaging", "blanks", "other"];
 
 function StockTakesList() {
   const navigate = useNavigate();
@@ -27,7 +26,8 @@ function StockTakesList() {
   const [showPicker, setShowPicker] = useState(overdueFromUrl);
   const [includeMaterials, setIncludeMaterials] = useState(true);
   const [includeProducts, setIncludeProducts] = useState(true);
-  const [categories, setCategories] = useState<Set<MaterialCategory>>(new Set());
+  const [categoryIds, setCategoryIds] = useState<Set<number>>(new Set());
+  const { categories } = useMaterialCategories();
   const [typeIds, setTypeIds] = useState<Set<number>>(new Set());
   const [overdueOnly, setOverdueOnly] = useState(overdueFromUrl);
 
@@ -35,11 +35,11 @@ function StockTakesList() {
     () => ({
       include_materials: includeMaterials,
       include_products: includeProducts,
-      material_categories: [...categories],
+      material_category_ids: [...categoryIds],
       product_category_ids: [...typeIds],
       overdue_only: overdueOnly,
     }),
-    [includeMaterials, includeProducts, categories, typeIds, overdueOnly],
+    [includeMaterials, includeProducts, categoryIds, typeIds, overdueOnly],
   );
 
   // Live so the count updates as the scope is edited — starting a take you then have to
@@ -103,10 +103,14 @@ function StockTakesList() {
             <div>
               <p className="mb-1 text-sm">Material categories (all if none ticked)</p>
               <div className="flex flex-wrap gap-3 text-sm">
-                {CATEGORIES.map((c) => (
-                  <label key={c} className="flex items-center gap-1">
-                    <input type="checkbox" checked={categories.has(c)} onChange={() => setCategories(toggle(categories, c))} />
-                    {c}
+                {categories.map((c) => (
+                  <label key={c.id} className="flex items-center gap-1">
+                    <input
+                      type="checkbox"
+                      checked={categoryIds.has(c.id)}
+                      onChange={() => setCategoryIds(toggle(categoryIds, c.id))}
+                    />
+                    {c.name}
                   </label>
                 ))}
               </div>

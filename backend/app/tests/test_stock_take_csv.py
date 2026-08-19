@@ -13,20 +13,35 @@ from fastapi import HTTPException
 from sqlalchemy import select
 
 from app.models.general_settings import GeneralSettings
-from app.models.material import Material, MaterialAdjustment, MaterialCategory, MaterialUnit
+from app.models.material import Material, MaterialAdjustment, MaterialUnit
+from app.models.material_category import MaterialCategory
 from app.models.product import Product
 from app.models.stock_take import StockTakeLine, StockTakeLineStatus
 from app.schemas.stock_take import StockTakeScope
 from app.services import csv_io, stock_takes
+from app.services.material_categories import legacy_value_for
 from app.services.csv_io import export_stock_take_csv, import_stock_take_csv
 
 EVERYTHING = StockTakeScope(include_materials=True, include_products=True)
 
 
+
+
+async def _category(session, name: str) -> MaterialCategory:
+    """The seeded category row of that name — conftest puts the original seven in place."""
+    return (
+        await session.execute(select(MaterialCategory).where(MaterialCategory.name == name))
+    ).scalar_one()
+
+
 async def _fixture_take(session):
     session.add(GeneralSettings(id=1))
     material = Material(
-        name="Grey Resin", category=MaterialCategory.resin, unit=MaterialUnit.ml, current_qty=Decimal(10)
+        name="Grey Resin",
+        category=legacy_value_for("resin"),
+        category_id=(await _category(session, "resin")).id,
+        unit=MaterialUnit.ml,
+        current_qty=Decimal(10),
     )
     session.add(material)
     await session.flush()
@@ -261,7 +276,11 @@ async def test_a_mismatched_item_type_fails_alone(session):
 async def test_a_fractional_count_on_an_each_material_fails_alone(session):
     session.add(GeneralSettings(id=1))
     material = Material(
-        name="Screws", category=MaterialCategory.hardware, unit=MaterialUnit.each, current_qty=Decimal(10)
+        name="Screws",
+        category=legacy_value_for("hardware"),
+        category_id=(await _category(session, "hardware")).id,
+        unit=MaterialUnit.each,
+        current_qty=Decimal(10),
     )
     session.add(material)
     await session.flush()

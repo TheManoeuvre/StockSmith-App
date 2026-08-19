@@ -7,12 +7,14 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.manufacturer import Manufacturer
-from app.models.material import Material, MaterialAdjustment, MaterialAdjustmentMode, MaterialCategory, MaterialUnit
+from app.models.material import Material, MaterialAdjustment, MaterialAdjustmentMode, MaterialUnit
+from app.models.material_category import MaterialCategory
 from app.models.colour import Colour
 from app.models.material_type import MaterialType
 from app.models.product import Product
 from app.models.supplier import Supplier
 from app.services.colours import find_or_create as find_or_create_colour
+from app.services import material_categories
 from app.services.costing import recompute_material
 from app.services.kitting import apply_default_kitting_bom
 from app.services.validation import validate_qty_for_unit
@@ -103,6 +105,14 @@ async def export_materials_csv(session: AsyncSession) -> str:
         rows = await session.execute(select(Colour).where(Colour.id.in_(colour_ids)))
         colour_names = {c.id: c.name for c in rows.scalars()}
 
+    # Names, not ids, for the same reason as colour above — and via a lookup map rather than
+    # m.category_ref, because the query above loads no relationships.
+    category_ids = {m.category_id for m in materials if m.category_id is not None}
+    category_names: dict[int, str] = {}
+    if category_ids:
+        rows = await session.execute(select(MaterialCategory).where(MaterialCategory.id.in_(category_ids)))
+        category_names = {c.id: c.name for c in rows.scalars()}
+
     material_type_ids = {m.material_type_id for m in materials if m.material_type_id is not None}
     material_type_names: dict[int, str] = {}
     if material_type_ids:
@@ -116,7 +126,8 @@ async def export_materials_csv(session: AsyncSession) -> str:
         writer.writerow(
             {
                 "name": m.name,
-                "category": m.category.value,
+                "category": (category_names.get(m.category_id) if m.category_id else None)
+                or (m.category.value if m.category is not None else ""),
                 "unit": m.unit.value,
                 "current_qty": str(m.current_qty),
                 "reorder_threshold": str(m.reorder_threshold),
@@ -144,7 +155,15 @@ async def import_materials_csv(session: AsyncSession, content: bytes) -> dict:
             name = (row.get("name") or "").strip()
             if not name:
                 raise ValueError("name is required")
-            category = MaterialCategory(row["category"].strip())
+            # Matched case-insensitively, unlike the enum lookup this replaces. That used to
+            # fail the row loudly on "Filament", which was a fine way to make someone fix the
+            # file. Now that the set of categories is open, an exact match wouldn't fail — it
+            # would succeed by creating a *second* category beside the first, splitting the
+            # user's materials across two rows that mean one thing.
+            category_row = await material_categories.find_or_create(session, row.get("category"))
+            if category_row is None:
+                raise ValueError("category is required")
+            category = material_categories.legacy_value_for(category_row.name)
             unit = MaterialUnit(row["unit"].strip())
             reorder_threshold = Decimal(row.get("reorder_threshold") or "0")
             target_qty = Decimal(row["current_qty"]) if row.get("current_qty") else None
@@ -184,6 +203,7 @@ async def import_materials_csv(session: AsyncSession, content: bytes) -> dict:
                 material = Material(
                     name=name,
                     category=category,
+                    category_id=category_row.id,
                     unit=unit,
                     reorder_threshold=reorder_threshold,
                     colour=colour_row.name if colour_row else None,
@@ -212,6 +232,7 @@ async def import_materials_csv(session: AsyncSession, content: bytes) -> dict:
                 created += 1
             else:
                 existing.category = category
+                existing.category_id = category_row.id
                 existing.unit = unit
                 existing.reorder_threshold = reorder_threshold
                 existing.colour = colour_row.name if colour_row else None

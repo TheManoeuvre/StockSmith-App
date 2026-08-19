@@ -15,12 +15,14 @@ from fastapi import HTTPException
 from sqlalchemy import select
 
 from app.models.general_settings import GeneralSettings
-from app.models.material import Material, MaterialAdjustment, MaterialCategory, MaterialUnit
+from app.models.material import Material, MaterialAdjustment, MaterialUnit
+from app.models.material_category import MaterialCategory
 from app.models.product import Product, ProductBundleItem
 from app.models.stock_take import StockTake, StockTakeLine, StockTakeLineStatus, StockTakeStatus
 from app.models.variant import ProductVariant
 from app.schemas.stock_take import BulkLineCount, StockTakeScope
 from app.services import stock_takes
+from app.services.material_categories import legacy_value_for
 from app.services.abc import compute_due_for_count
 
 MATERIALS_ONLY = StockTakeScope(include_materials=True)
@@ -33,15 +35,32 @@ async def _settings(session) -> None:
     await session.flush()
 
 
+
+
+async def _category(session, name: str) -> MaterialCategory:
+    """The seeded category row of that name — conftest puts the original seven in place."""
+    return (
+        await session.execute(select(MaterialCategory).where(MaterialCategory.name == name))
+    ).scalar_one()
+
+
 async def _material(
     session,
     name="Grey Resin",
     qty=Decimal(0),
-    category=MaterialCategory.resin,
+    category="resin",
     unit=MaterialUnit.ml,
     **kwargs,
 ) -> Material:
-    m = Material(name=name, category=category, unit=unit, current_qty=qty, **kwargs)
+    row = await _category(session, category)
+    m = Material(
+        name=name,
+        category=legacy_value_for(category),
+        category_id=row.id,
+        unit=unit,
+        current_qty=qty,
+        **kwargs,
+    )
     session.add(m)
     await session.flush()
     # current_qty is derived from the adjustment ledger, so seed history to match rather
@@ -137,11 +156,14 @@ async def test_allocated_qty_is_snapshotted_for_products_only(session):
 async def test_scoping_by_category_and_overdue(session):
     await _settings(session)
     await _material(session, "Resin")
-    await _material(session, "Boxes", category=MaterialCategory.packaging)
+    await _material(session, "Boxes", category="packaging")
     await session.commit()
 
     by_category = await stock_takes.preview_scope(
-        session, StockTakeScope(include_materials=True, material_categories=[MaterialCategory.packaging])
+        session,
+        StockTakeScope(
+            include_materials=True, material_category_ids=[(await _category(session, "packaging")).id]
+        ),
     )
     assert by_category.candidate_count == 1
 
@@ -449,7 +471,7 @@ async def test_counts_are_validated_against_the_unit(session):
     """Reuses validate_qty_for_unit, so an `each` material refuses a fraction here for the
     same reason it does anywhere else."""
     await _settings(session)
-    await _material(session, "Screws", category=MaterialCategory.hardware, unit=MaterialUnit.each, qty=Decimal(10))
+    await _material(session, "Screws", category="hardware", unit=MaterialUnit.each, qty=Decimal(10))
     await session.commit()
     take, _ = await stock_takes.create_stock_take(session, MATERIALS_ONLY)
     line = (await _lines(session, take.id))[0]
@@ -553,7 +575,6 @@ async def test_the_sheet_is_arranged_the_way_the_stock_is(session):
     here because it is the feature — the three read paths (count sheet, CSV, standing
     variances) all come through group_lines precisely so they cannot drift apart.
     """
-    from app.models.material import Material, MaterialCategory, MaterialUnit
     from app.models.material_type import MaterialType
     from app.models.product import Product
     from app.models.product_category import ProductCategory
@@ -571,10 +592,9 @@ async def test_the_sheet_is_arranged_the_way_the_stock_is(session):
 
     # Deliberately created in an order that is neither alphabetical nor grouped, so a pass
     # that leaned on row ids would come out looking like this input rather than the sheet.
-    boxes = Material(name="Boxes", category=MaterialCategory.packaging, unit=MaterialUnit.each)
-    black = Material(name="Black", category=MaterialCategory.filament, unit=MaterialUnit.g, material_type_id=pla.id)
-    clear = Material(name="Clear", category=MaterialCategory.filament, unit=MaterialUnit.g, material_type_id=petg.id)
-    session.add_all([boxes, black, clear])
+    await _material(session, "Boxes", category="packaging", unit=MaterialUnit.each)
+    await _material(session, "Black", category="filament", unit=MaterialUnit.g, material_type_id=pla.id)
+    await _material(session, "Clear", category="filament", unit=MaterialUnit.g, material_type_id=petg.id)
     keyring = Product(name="Round Keyring", sku="KEY-1", product_category_id=keyrings.id, current_stock=0)
     coaster = Product(name="Slate Coaster", sku="COA-1", product_category_id=coasters.id, current_stock=0)
     session.add_all([keyring, coaster])
@@ -601,8 +621,10 @@ async def test_the_sheet_is_arranged_the_way_the_stock_is(session):
         ("Products", "Coaster", "COA-1", "Slate Coaster — Round"),
         ("Products", "Coaster", "COA-1", "Slate Coaster — Square"),
         ("Products", "Keyring", "KEY-1", "Round Keyring"),
-        # Then materials, in the category order the materials list has always used —
-        # filament before packaging, not alphabetical. PETG before PLA within filament.
+        # Then materials, in the configured category order rather than alphabetically:
+        # filament sorts before packaging because that is how the categories are ordered
+        # under Settings, which is the order the materials list shows. PETG before PLA
+        # within filament, on the material type.
         ("Materials", "filament", "PETG", "Clear"),
         ("Materials", "filament", "PLA", "Black"),
         ("Materials", "packaging", "", "Boxes"),

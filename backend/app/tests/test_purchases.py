@@ -13,14 +13,17 @@ from decimal import Decimal
 
 import pytest
 from fastapi import HTTPException
+from sqlalchemy import select
 
-from app.models.material import Material, MaterialAdjustmentMode, MaterialCategory, MaterialUnit
+from app.models.material import Material, MaterialAdjustmentMode, MaterialUnit
+from app.models.material_category import MaterialCategory
 from app.models.product import Product, ProductMaterial
 from app.models.purchase import MaterialPurchase, Purchase, PurchaseStatus
 from app.routers.purchases import delete_purchase, receive_purchase, replace_purchase_lines
 from app.schemas.purchase import PurchaseLineInput
 from app.services import purchase_receipts
 from app.services.costing import create_adjustment, get_on_order_qty_by_material
+from app.services.material_categories import legacy_value_for
 from app.services.platforms.base import ensure_utc
 
 JAN1 = datetime(2026, 1, 1, tzinfo=timezone.utc)
@@ -28,9 +31,18 @@ JAN2 = datetime(2026, 1, 2, tzinfo=timezone.utc)
 JAN3 = datetime(2026, 1, 3, tzinfo=timezone.utc)
 
 
-async def _material(session, name="Filament", unit=MaterialUnit.g, reorder_threshold=0) -> Material:
+async def _material(
+    session, name="Filament", unit=MaterialUnit.g, reorder_threshold=0, category="filament"
+) -> Material:
+    row = (
+        await session.execute(select(MaterialCategory).where(MaterialCategory.name == category))
+    ).scalar_one()
     material = Material(
-        name=name, category=MaterialCategory.filament, unit=unit, reorder_threshold=Decimal(reorder_threshold)
+        name=name,
+        category=legacy_value_for(category),
+        category_id=row.id,
+        unit=unit,
+        reorder_threshold=Decimal(reorder_threshold),
     )
     session.add(material)
     await session.flush()
@@ -179,7 +191,7 @@ async def test_over_receipt_is_rejected_and_changes_nothing(session):
 
 
 async def test_fractional_receipt_rejected_for_each_unit(session):
-    material = await _material(session, name="Box", unit=MaterialUnit.each)
+    material = await _material(session, name="Box", unit=MaterialUnit.each, category="packaging")
     purchase = await _order(session, material.id, 10, "100")
     line_id = await _line_id(session, purchase)
 

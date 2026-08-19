@@ -13,11 +13,15 @@ from decimal import Decimal
 import pytest
 from fastapi import HTTPException
 
+from sqlalchemy import select
+
 from app.models.general_settings import GeneralSettings
-from app.models.material import Material, MaterialAdjustmentMode, MaterialCategory, MaterialUnit
+from app.models.material import Material, MaterialAdjustmentMode, MaterialUnit
+from app.models.material_category import MaterialCategory
 from app.models.product import Product
 from app.models.stock_adjustment import StockAdjustmentMode
 from app.models.variant import ProductVariant
+from app.services.material_categories import legacy_value_for
 from app.services.abc import compute_due_for_count
 from app.services.costing import create_adjustment
 from app.services.stock_adjustments import create_stock_adjustment
@@ -28,8 +32,20 @@ async def _settings(session) -> None:
     await session.flush()
 
 
+
+
+async def _category(session, name: str) -> MaterialCategory:
+    """The seeded category row of that name — conftest puts the original seven in place."""
+    return (
+        await session.execute(select(MaterialCategory).where(MaterialCategory.name == name))
+    ).scalar_one()
+
+
 async def _material(session, name="Grey Resin", **kwargs) -> Material:
-    m = Material(name=name, category=MaterialCategory.resin, unit=MaterialUnit.ml, **kwargs)
+    row = await _category(session, "resin")
+    m = Material(
+        name=name, category=legacy_value_for("resin"), category_id=row.id, unit=MaterialUnit.ml, **kwargs
+    )
     session.add(m)
     await session.flush()
     return m

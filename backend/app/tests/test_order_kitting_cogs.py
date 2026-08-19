@@ -14,7 +14,7 @@ import pytest
 from sqlalchemy import select
 
 from app.models.kitting import OrderKittingAllocation, OrderKittingOverride, ProductKittingMaterial
-from app.models.material import Material, MaterialCategory, MaterialUnit
+from app.models.material import Material, LegacyMaterialCategory, MaterialUnit
 from app.models.order import Order, OrderLine
 from app.models.product import Product, ProductMaterial
 from app.routers.orders import _get_order_with_lines, _serialize_one, create_order
@@ -44,7 +44,7 @@ async def _box(session, unit_cost: Decimal = Decimal("2.00"), qty: int = 100) ->
     are derived columns — costing.recompute_material replays purchase history to rebuild
     them, and shipping consumes kitting through that path, so setting them directly would
     be wiped out (to a CHECK-violating negative) the moment an order ships."""
-    material = Material(name="Box", category=MaterialCategory.packaging, unit=MaterialUnit.each)
+    material = Material(name="Box", category=LegacyMaterialCategory.packaging, unit=MaterialUnit.each)
     session.add(material)
     await session.flush()
     # Dated well in the past so it always replays before the consumption adjustments the
@@ -66,7 +66,7 @@ async def _product(session, box: Material, sku: str = "SKU-K", build_cost: Decim
     if build_cost is not None:
         filament = Material(
             name=f"Filament {sku}",
-            category=MaterialCategory.filament,
+            category=LegacyMaterialCategory.filament,
             unit=MaterialUnit.g,
             avg_unit_cost=build_cost,
         )
@@ -263,7 +263,7 @@ async def test_costs_that_accumulate_float_error_stay_exact(session):
     net_profit and disagreed with get_order_kitting_summary's Decimal arithmetic.
     """
     box = await _box(session, unit_cost=Decimal("0.552442"))
-    label = Material(name="Label", category=MaterialCategory.packaging, unit=MaterialUnit.each)
+    label = Material(name="Label", category=LegacyMaterialCategory.packaging, unit=MaterialUnit.each)
     session.add(label)
     await session.flush()
     await received_purchase(session, label.id, Decimal(100), Decimal("1.099"), received_at=_STOCKED_AT)

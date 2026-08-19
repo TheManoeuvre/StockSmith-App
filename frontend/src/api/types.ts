@@ -1,11 +1,12 @@
-export type MaterialCategory = "filament" | "resin" | "pigment" | "hardware" | "packaging" | "blanks" | "other";
 export type MaterialUnit = "g" | "ml" | "each";
 export type AssetType = "main_image" | "listing_image" | "step" | "threemf" | "gcode";
 
 export interface Material {
   id: number;
   name: string;
-  category: MaterialCategory;
+  /** The category's name. A plain string now that the set of them is user-editable. */
+  category: string;
+  category_id: number | null;
   unit: MaterialUnit;
   current_qty: string;
   allocated_qty: string;
@@ -57,6 +58,30 @@ export interface Colour {
   name: string;
   /** Set when the value parses as a hex colour — the field was historically "Colour / hex". */
   hex_code: string | null;
+  usage_count: number;
+  created_at: string;
+}
+
+/**
+ * A material category. The name is reused from the string union it replaces on purpose — every
+ * place still treating a category as a string becomes a compile error, which is the cheapest
+ * way to find them all.
+ */
+export interface MaterialCategory {
+  id: number;
+  name: string;
+  /** Ascending. Deliberately not alphabetical — filament first, other last. */
+  sort_order: number;
+  /** Imposed on a material when its category is picked. Null means "leave the unit alone". */
+  default_unit: MaterialUnit | null;
+  /** A failed build defaults to consuming this material anyway. Was hardcoded to filament. */
+  consumed_on_failed_build: boolean;
+  /** Auto-added once per order rather than per unit. Was hardcoded to packaging. */
+  auto_kitting_per_order: boolean;
+  tracks_colour: boolean;
+  tracks_material_type: boolean;
+  /** Bought by the kilo, stocked by the gram, so average cost reads x1000. */
+  cost_per_kg_display: boolean;
   usage_count: number;
   created_at: string;
 }
@@ -181,7 +206,7 @@ export interface ScopeWarning {
 export interface StockTakeScope {
   include_materials: boolean;
   include_products: boolean;
-  material_categories: MaterialCategory[];
+  material_category_ids: number[];
   product_category_ids: number[];
   overdue_only: boolean;
 }
@@ -234,7 +259,7 @@ export interface StockCountSettings {
   default_product_abc_class: ABCClass;
   material_tier_intervals: TierInterval[];
   product_tier_intervals: TierInterval[];
-  category_tiers: { category: MaterialCategory; abc_class: ABCClass }[];
+  category_tiers: { category_id: number; abc_class: ABCClass }[];
   product_category_tiers: { product_category_id: number; abc_class: ABCClass }[];
 }
 

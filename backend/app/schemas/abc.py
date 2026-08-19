@@ -3,7 +3,6 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.abc_classification import ABCClass, ABCScope
-from app.models.material import MaterialCategory
 
 
 class TierInterval(BaseModel):
@@ -17,7 +16,7 @@ class TierInterval(BaseModel):
 
 
 class CategoryTier(BaseModel):
-    category: MaterialCategory
+    category_id: int
     abc_class: ABCClass
 
 

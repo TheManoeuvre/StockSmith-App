@@ -1,10 +1,11 @@
 """ABC classification: how often a thing is worth counting, and the cadence per tier.
 
-`MaterialCategoryABC` — the materials Type-level override — deliberately lives in
-models/material.py instead of here. It has to key on the `MaterialCategory` enum, and
-material.py already imports `ABCClass` from this module for `Material.abc_class`, so
-holding both here would make the two modules import each other. This module imports
-nothing from the rest of the model package, which is what keeps that from happening.
+This module imports nothing from the rest of the model package — both group-level
+overrides key on an id via a string FK target, so neither needs the table it points at.
+`MaterialCategoryABC` used to live in models/material.py for exactly that reason: it keyed
+on the `MaterialCategory` enum and importing it here would have made the two modules
+import each other. Categories became a lookup table, so the enum is gone from this path
+and the override sits next to its products twin.
 """
 
 import enum
@@ -38,6 +39,35 @@ class ABCScope(str, enum.Enum):
 
     material = "material"
     product = "product"
+
+
+class MaterialCategoryABC(Base):
+    """Tier for every material in one category — the middle of ABC's three levels.
+
+    Keyed on the category rather than on `material_types.id`, which is the other candidate
+    and the one the word "type" would suggest. The reason is coverage: the UI only ever
+    sets material_type_id for filament, so hardware, packaging and blanks all have it
+    NULL. Keying the tier there would mean it silently did nothing for exactly the bulk,
+    count-rarely items C tier exists to serve.
+
+    Keyed on `category_id`, not on the legacy `materials.category` enum column that still
+    sits beside it. Every material in a user-created category stores 'other' there, so an
+    enum-keyed tier would lump every category anyone added into a single assignment — and
+    the whole point of categories becoming configurable is that there can now be more of
+    them than the original seven.
+
+    CASCADE and the absence from reference_data.REFERENCES both match ProductCategoryABC
+    below, for the same reason: this is an attribute of the category, not a use of it.
+
+    Sparse: no row means "fall through to the shop-wide material baseline".
+    """
+
+    __tablename__ = "material_category_abc"
+
+    category_id: Mapped[int] = mapped_column(
+        ForeignKey("material_categories.id", ondelete="CASCADE"), primary_key=True
+    )
+    abc_class: Mapped[ABCClass] = mapped_column(portable_enum(ABCClass, name="abc_class"), nullable=False)
 
 
 class ProductCategoryABC(Base):

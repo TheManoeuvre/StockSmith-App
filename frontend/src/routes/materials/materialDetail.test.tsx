@@ -13,6 +13,7 @@ const MATERIAL = {
   id: 7,
   name: "PLA+ Filament",
   category: "filament",
+  category_id: 1,
   unit: "g",
   colour: "Black",
   material_type_id: null,
@@ -33,12 +34,45 @@ const MATERIAL = {
   image_asset_id: null,
 };
 
+// The categories the pages read behaviour off. Without these the catch-all below answers with
+// an empty list, and every category-gated field silently disappears rather than failing — so
+// these tests would keep passing while testing nothing.
+const CATEGORIES = [
+  {
+    id: 1,
+    name: "filament",
+    sort_order: 10,
+    default_unit: "g",
+    consumed_on_failed_build: true,
+    auto_kitting_per_order: false,
+    tracks_colour: true,
+    tracks_material_type: true,
+    cost_per_kg_display: true,
+    usage_count: 1,
+    created_at: "2026-01-01T00:00:00Z",
+  },
+  {
+    id: 2,
+    name: "packaging",
+    sort_order: 20,
+    default_unit: "each",
+    consumed_on_failed_build: false,
+    auto_kitting_per_order: true,
+    tracks_colour: false,
+    tracks_material_type: false,
+    cost_per_kg_display: false,
+    usage_count: 1,
+    created_at: "2026-01-01T00:00:00Z",
+  },
+];
+
 function materialRoutes(material: Record<string, unknown> = MATERIAL) {
   return [
     { method: "GET" as const, path: "/materials/7", respond: () => material },
     { method: "PATCH" as const, path: "/materials/7", respond: (body: unknown) => ({ ...material, ...(body as object) }) },
     { method: "GET" as const, path: /^\/materials\/7\/stock-history/, respond: () => [] },
     { method: "GET" as const, path: "/materials", respond: () => [material] },
+    { method: "GET" as const, path: "/material-categories", respond: () => CATEGORIES },
     { method: "GET" as const, path: /.*/, respond: () => [] },
   ];
 }
@@ -159,5 +193,37 @@ describe("materials list", () => {
 
     await user.click(within(dialog).getByRole("button", { name: /keep editing/i }));
     expect(screen.getByDisplayValue("New filament")).toBeInTheDocument();
+  });
+});
+
+describe("category-driven fields", () => {
+  it("offers Colour and Material type when the category tracks them", async () => {
+    setRoutes(materialRoutes());
+    await renderMaterialPage();
+
+    await screen.findByDisplayValue("PLA+ Filament", {}, { timeout: 5000 });
+    expect(screen.getByText("Colour / hex")).toBeInTheDocument();
+    expect(screen.getByText("Material type")).toBeInTheDocument();
+  });
+
+  it("hides them for a category that doesn't, and shows cost per unit", async () => {
+    // Same page, same material, different category row — nothing here names filament, which is
+    // the point: the fields follow the flags, not a hardcoded category.
+    setRoutes(materialRoutes({ ...MATERIAL, category: "packaging", category_id: 2, unit: "each" }));
+    await renderMaterialPage();
+
+    await screen.findByDisplayValue("PLA+ Filament", {}, { timeout: 5000 });
+    expect(screen.queryByText("Colour / hex")).toBeNull();
+    expect(screen.queryByText("Material type")).toBeNull();
+    expect(screen.getByText("Avg unit cost")).toBeInTheDocument();
+    expect(screen.queryByText("Avg cost/kg")).toBeNull();
+  });
+
+  it("shows cost per kg for a category that asks for it", async () => {
+    setRoutes(materialRoutes());
+    await renderMaterialPage();
+
+    await screen.findByDisplayValue("PLA+ Filament", {}, { timeout: 5000 });
+    expect(screen.getByText("Avg cost/kg")).toBeInTheDocument();
   });
 });

@@ -13,6 +13,7 @@ from app.models.material import Material
 from app.models.purchase import MaterialPurchase, Purchase
 from app.schemas.material import DraftPurchaseCreate, MaterialAdjustmentCreate, MaterialCreate, MaterialRead, MaterialUpdate
 from app.services.colours import resolve_updates as resolve_colour_updates
+from app.services.material_categories import resolve_updates as resolve_category_updates
 from app.schemas.purchase import MaterialStockHistoryRead, PurchaseRead
 from app.services import abc
 from app.services.costing import create_adjustment, get_on_order_qty_by_material
@@ -104,6 +105,7 @@ async def _get_material_with_manufacturer(session: AsyncSession, material_id: in
             selectinload(Material.default_supplier),
             selectinload(Material.material_type),
             selectinload(Material.colour_ref),
+            selectinload(Material.category_ref),
         )
         .execution_options(populate_existing=True)
     )
@@ -124,6 +126,7 @@ async def list_materials(
             selectinload(Material.default_supplier),
             selectinload(Material.material_type),
             selectinload(Material.colour_ref),
+            selectinload(Material.category_ref),
         )
         .order_by(Material.name)
     )
@@ -172,7 +175,7 @@ async def create_material(payload: MaterialCreate, session: AsyncSession = Depen
     validate_qty_for_unit(payload.reorder_threshold, payload.unit, "reorder_threshold")
     if payload.typical_reorder_qty is not None:
         validate_qty_for_unit(payload.typical_reorder_qty, payload.unit, "typical_reorder_qty")
-    fields = await resolve_colour_updates(session, payload.model_dump())
+    fields = await resolve_category_updates(session, await resolve_colour_updates(session, payload.model_dump()))
     material = Material(**fields)
     session.add(material)
     await session.commit()
@@ -193,7 +196,9 @@ async def update_material(
     material = await session.get(Material, material_id)
     if material is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Material not found")
-    updates = await resolve_colour_updates(session, payload.model_dump(exclude_unset=True))
+    updates = await resolve_category_updates(
+        session, await resolve_colour_updates(session, payload.model_dump(exclude_unset=True))
+    )
     effective_unit = updates.get("unit", material.unit)
     if "reorder_threshold" in updates:
         validate_qty_for_unit(updates["reorder_threshold"], effective_unit, "reorder_threshold")

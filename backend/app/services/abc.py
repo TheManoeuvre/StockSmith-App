@@ -11,8 +11,8 @@ than one item to resolve should load `Rules` once and reuse it — the rule set 
 small queries and then resolution is pure Python, which is what keeps a catalogue-wide
 overdue sweep from turning into N+1.
 
-Materials take their middle level from the `category` enum rather than from
-material_types; the reason is coverage, and it's written up on MaterialCategoryABC.
+Materials take their middle level from the category rather than from material_types; the
+reason is coverage, and it's written up on MaterialCategoryABC.
 
 Scope of "an item" here follows where stock actually lives (see routers/products.py's
 active_variant_stock_totals_by_product): a product with active variants is counted as its
@@ -26,8 +26,14 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.abc_classification import ABCClass, ABCScope, ABCTierSetting, ProductCategoryABC
-from app.models.material import Material, MaterialCategory, MaterialCategoryABC
+from app.models.abc_classification import (
+    ABCClass,
+    ABCScope,
+    ABCTierSetting,
+    MaterialCategoryABC,
+    ProductCategoryABC,
+)
+from app.models.material import Material
 from app.models.product import Product
 from app.models.variant import ProductVariant
 from app.schemas.abc import (
@@ -75,7 +81,7 @@ class Rules:
     """
 
     baselines: dict[ABCScope, ABCClass]
-    category_tiers: dict[MaterialCategory, ABCClass]
+    category_tiers: dict[int, ABCClass]
     product_category_tiers: dict[int, ABCClass]
     tier_intervals: dict[tuple[ABCScope, ABCClass], int]
 
@@ -103,10 +109,13 @@ class Rules:
         return Resolved(abc_class, interval, class_source, interval_source)
 
     def for_material(self, material: Material) -> Resolved:
+        # category_id is nullable in the schema but set on every material the app creates;
+        # a NULL one simply has no group tier and falls through to the baseline.
+        group = self.category_tiers.get(material.category_id) if material.category_id is not None else None
         return self._resolve(
             ABCScope.material,
             material.abc_class,
-            self.category_tiers.get(material.category),
+            group,
             material.stock_take_interval_days,
         )
 
@@ -131,7 +140,7 @@ async def load_rules(session: AsyncSession) -> Rules:
             ABCScope.material: settings.default_material_abc_class,
             ABCScope.product: settings.default_product_abc_class,
         },
-        category_tiers={row.category: row.abc_class for row in category_rows},
+        category_tiers={row.category_id: row.abc_class for row in category_rows},
         product_category_tiers={row.product_category_id: row.abc_class for row in product_category_rows},
         tier_intervals={(row.scope, row.tier): row.interval_days for row in tier_rows},
     )
@@ -152,8 +161,8 @@ async def read_settings(session: AsyncSession) -> StockCountSettingsRead:
         material_tier_intervals=_tier_intervals(rules, ABCScope.material),
         product_tier_intervals=_tier_intervals(rules, ABCScope.product),
         category_tiers=[
-            CategoryTier(category=category, abc_class=abc_class)
-            for category, abc_class in sorted(rules.category_tiers.items(), key=lambda kv: kv[0].value)
+            CategoryTier(category_id=category_id, abc_class=abc_class)
+            for category_id, abc_class in sorted(rules.category_tiers.items())
         ],
         product_category_tiers=[
             ProductCategoryTier(product_category_id=type_id, abc_class=abc_class)
@@ -205,7 +214,7 @@ async def write_settings(session: AsyncSession, payload: StockCountSettingsUpdat
                 session.add(ABCTierSetting(scope=scope, tier=entry.tier, interval_days=entry.interval_days))
 
     for category_tier in payload.category_tiers:
-        session.add(MaterialCategoryABC(category=category_tier.category, abc_class=category_tier.abc_class))
+        session.add(MaterialCategoryABC(category_id=category_tier.category_id, abc_class=category_tier.abc_class))
     for type_tier in payload.product_category_tiers:
         session.add(ProductCategoryABC(product_category_id=type_tier.product_category_id, abc_class=type_tier.abc_class))
 

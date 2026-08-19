@@ -29,7 +29,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import async_session_factory
-from app.models.material import Material, MaterialAdjustmentMode, MaterialCategory
+from app.models.material import LegacyMaterialCategory, Material, MaterialAdjustmentMode
+from app.models.material_category import MaterialCategory
 from app.models.product import Product
 from app.models.product_category import ProductCategory
 from app.models.stock_adjustment import StockAdjustmentMode
@@ -62,8 +63,8 @@ class _Candidate:
 
 async def _material_candidates(session: AsyncSession, scope: StockTakeScope, due_keys: set | None) -> list[_Candidate]:
     query = select(Material).where(Material.is_active.is_(True)).order_by(Material.name)
-    if scope.material_categories:
-        query = query.where(Material.category.in_(scope.material_categories))
+    if scope.material_category_ids:
+        query = query.where(Material.category_id.in_(scope.material_category_ids))
     out = []
     for m in (await session.execute(query)).scalars():
         if due_keys is not None and (m.id, None, None) not in due_keys:
@@ -172,8 +173,16 @@ async def describe_scope(session: AsyncSession, scope: StockTakeScope) -> str:
     """
     parts = []
     if scope.include_materials:
-        if scope.material_categories:
-            parts.append("materials in " + ", ".join(sorted(c.value for c in scope.material_categories)))
+        if scope.material_category_ids:
+            # Resolved to names for the same reason product categories are: the sentence is the
+            # log, and an id in it stops meaning anything the moment the row is renamed.
+            names = (
+                await session.execute(
+                    select(MaterialCategory.name).where(MaterialCategory.id.in_(scope.material_category_ids))
+                )
+            ).scalars()
+            listed = ", ".join(sorted(names))
+            parts.append(f"materials in {listed}" if listed else "materials in a since-deleted category")
         else:
             parts.append("all materials")
     if scope.include_products:
@@ -699,15 +708,35 @@ def line_display_name(line: StockTakeLine, materials: dict, products: dict, vari
 
 
 
-# The order material categories are walked in. Not alphabetical: it is the order the enum
-# declares and the order the materials list has always shown, and a count sheet that
-# disagrees with the screen someone just came from is worse than either order alone.
-_MATERIAL_CATEGORY_ORDER = {category: i for i, category in enumerate(MaterialCategory)}
-
 # Sorts after every real name. Used for the ungrouped tail — a material with no type, a
 # product with no category — which belongs at the end of its section rather than at the top
 # under an empty heading.
 _LAST = "\uffff"
+
+# Where a material with no category row at all falls. Only reachable for rows written
+# before categories became a table, and for the test suite, which builds its schema with
+# create_all rather than running migrations — see Material.category_name.
+_LEGACY_ORDER = {category.value: i for i, category in enumerate(LegacyMaterialCategory)}
+
+
+def _material_category_sort(material) -> tuple[int, str]:
+    """Where a material's category sits in the walk.
+
+    Reads `material_categories.sort_order`, which exists because the original order —
+    filament first, other last — was a deliberate frequency ordering rather than
+    alphabetical, and is reorderable under Settings. The count sheet honours it so the
+    sheet someone prints matches the materials list they just came from; sorting these
+    alphabetically here would have quietly disagreed with both.
+
+    Ties break on name, matching MaterialCategory.sort_order's own note that nothing in the
+    schema stops two rows sharing a value.
+    """
+    if material is None:
+        return (len(_LEGACY_ORDER) + 1, "")
+    if material.category_ref is not None:
+        return (material.category_ref.sort_order, material.category_ref.name.lower())
+    legacy = material.category.value if material.category is not None else None
+    return (_LEGACY_ORDER.get(legacy, len(_LEGACY_ORDER)), (legacy or "").lower())
 
 
 @dataclass(frozen=True)
@@ -729,7 +758,7 @@ def group_lines(
     """Arrange a take's lines the way the stock itself is arranged.
 
         Products                 Materials
-          Product category         Material category
+          Product category         Material category   (in its configured order)
             Parent SKU               Material type
               Variant
 
@@ -742,20 +771,20 @@ def group_lines(
     moment the take started, so recategorising a product afterwards would leave it filed
     under its old heading for the rest of the take's life.
 
-    Reuses the lookups line_display_name already needs, so this costs no extra queries.
+    Reuses the lookups line_display_name already needs, so this costs no extra queries;
+    Material.category_ref is selectin-loaded, so reading the sort order costs none either.
     """
     out: list[GroupedLine] = []
     for line in lines:
         name, unit = line_display_name(line, materials, products, variants)
         if line.material_id is not None:
             material = materials.get(line.material_id)
-            category = material.category if material else None
-            group = category.value if category else ""
+            group = (material.category_name if material else None) or ""
             subgroup = (material.material_type_name if material else None) or ""
             # Materials sort after products, hence the leading 1.
             sort_key = (
                 1,
-                _MATERIAL_CATEGORY_ORDER.get(category, len(_MATERIAL_CATEGORY_ORDER)),
+                _material_category_sort(material),
                 (subgroup or _LAST).lower(),
                 name.lower(),
                 line.id,
@@ -782,7 +811,7 @@ def group_lines(
         variant = variants.get(line.variant_id) if line.variant_id is not None else None
         sort_key = (
             0,
-            (group or _LAST).lower(),
+            ((0, (group or _LAST).lower()) if group else (1, _LAST)),
             (subgroup or _LAST).lower(),
             (variant.variant_name.lower() if variant else ""),
             line.id,

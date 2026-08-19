@@ -1,10 +1,11 @@
 import { api, downloadCsv, materialImageUploadUrl, uploadCsv, type CsvImportResult } from "./client";
 import { getSettings, uploadFile } from "../lib/tauri";
-import type { ABCClass, Material, MaterialCategory, MaterialStockHistoryEntry, MaterialUnit, Purchase } from "./types";
+import type { ABCClass, Material, MaterialStockHistoryEntry, MaterialUnit, Purchase } from "./types";
 
 export interface MaterialInput {
   name: string;
-  category: MaterialCategory;
+  /** A category name. The backend finds-or-creates it and resolves the id. */
+  category: string;
   unit: MaterialUnit;
   reorder_threshold: string;
   colour?: string | null;

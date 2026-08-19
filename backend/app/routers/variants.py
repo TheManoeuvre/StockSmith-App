@@ -5,6 +5,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.deps import get_db, require_auth
 from app.models.kitting import ProductKittingMaterial, ProductVariantKittingMaterial
 from app.models.material import Material
+from app.models.material_category import MaterialCategory
 from app.models.product import Product, ProductMaterial
 from app.models.variant import ProductVariant, ProductVariantMaterial
 from app.schemas.kitting import VariantKittingBomLine
@@ -25,14 +26,33 @@ async def _validate_substitution_categories(
     """A substitution should only ever swap within the same material category (filament
     for filament, packaging for packaging, etc) — the frontend's substitute dropdown
     already filters to this, but a stale build or a direct API call could still submit a
-    cross-category swap, so it's enforced here too."""
+    cross-category swap, so it's enforced here too.
+
+    "Same category" is the one rule here that could not become a flag on the category row:
+    it is a relation between two categories, not a property of either. So it stays an
+    equality test, now on category_id.
+
+    One consequence worth knowing about, since categories are editable now: splitting a
+    category in two makes any existing substitution across the split illegal. Validation only
+    runs on write, so stored BOMs are not retroactively broken — but the next save of one
+    returns a 400 rather than silently accepting what is now a cross-category swap.
+    """
     material_ids = {l.material_id for l in payload} | {
         l.replaces_material_id for l in payload if l.replaces_material_id is not None
     }
     if not material_ids:
         return
     categories_by_id = dict(
-        (await session.execute(select(Material.id, Material.category).where(Material.id.in_(material_ids)))).all()
+        (await session.execute(select(Material.id, Material.category_id).where(Material.id.in_(material_ids)))).all()
+    )
+    names_by_id = dict(
+        (
+            await session.execute(
+                select(MaterialCategory.id, MaterialCategory.name).where(
+                    MaterialCategory.id.in_({c for c in categories_by_id.values() if c is not None})
+                )
+            )
+        ).all()
     )
     for line in payload:
         if line.replaces_material_id is None:
@@ -43,8 +63,9 @@ async def _validate_substitution_categories(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
-                    f"Material {line.material_id} ({sub_category.value}) cannot substitute material "
-                    f"{line.replaces_material_id} ({base_category.value}) — categories must match"
+                    f"Material {line.material_id} ({names_by_id.get(sub_category, '?')}) cannot substitute "
+                    f"material {line.replaces_material_id} ({names_by_id.get(base_category, '?')}) "
+                    f"— categories must match"
                 ),
             )
 

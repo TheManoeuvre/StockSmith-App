@@ -1,23 +1,14 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { productCategoriesApi } from "../../api/productCategories";
 import { stockCountSettingsApi } from "../../api/stockTakes";
-import type { ABCClass, MaterialCategory, StockCountSettings as Settings } from "../../api/types";
+import type { ABCClass, StockCountSettings as Settings } from "../../api/types";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
+import { useMaterialCategories } from "../../hooks/useMaterialCategories";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { SaveButton } from "../common/SaveButton";
 
 const TIERS: ABCClass[] = ["A", "B", "C"];
-const CATEGORIES: MaterialCategory[] = [
-  "filament",
-  "resin",
-  "pigment",
-  "hardware",
-  "packaging",
-  "blanks",
-  "other",
-];
-
 /** "Inherit" is a real choice here, not an empty one — it means "follow the baseline" and is
  * how a tier assignment gets cleared. Modelled as the empty string because a <select> has no
  * way to hold null. */
@@ -36,6 +27,9 @@ export function StockCountSettings() {
     queryFn: stockCountSettingsApi.get,
   });
   const { data: productCategories } = useQuery({ queryKey: ["product-categories"], queryFn: productCategoriesApi.list });
+  // Categories are configurable now, so the list is whatever the shop has — including any the
+  // user added, which is exactly where a per-category cadence earns its keep.
+  const { categories } = useMaterialCategories();
 
   const {
     value: form,
@@ -89,14 +83,16 @@ export function StockCountSettings() {
       };
     });
 
-  const setCategoryTier = (category: MaterialCategory, value: string) =>
+  const setCategoryTier = (categoryId: number, value: string) =>
     setForm((prev) => {
       if (!prev) return prev;
-      const without = prev.category_tiers.filter((c) => c.category !== category);
+      const without = prev.category_tiers.filter((c) => c.category_id !== categoryId);
       return {
         ...prev,
         category_tiers:
-          value === INHERIT ? without : [...without, { category, abc_class: value as ABCClass }],
+          value === INHERIT
+            ? without
+            : [...without, { category_id: categoryId, abc_class: value as ABCClass }],
       };
     });
 
@@ -191,12 +187,12 @@ export function StockCountSettings() {
         <div>
           <p className="mb-1 text-sm">By category</p>
           <div className="flex flex-wrap gap-3">
-            {CATEGORIES.map((category) => (
-              <label key={category} className="flex items-center gap-1 text-sm">
-                <span className="capitalize">{category}</span>
+            {categories.map((category) => (
+              <label key={category.id} className="flex items-center gap-1 text-sm">
+                <span className="capitalize">{category.name}</span>
                 {tierSelect(
-                  form.category_tiers.find((c) => c.category === category)?.abc_class ?? INHERIT,
-                  (next) => setCategoryTier(category, next),
+                  form.category_tiers.find((c) => c.category_id === category.id)?.abc_class ?? INHERIT,
+                  (next) => setCategoryTier(category.id, next),
                 )}
               </label>
             ))}
