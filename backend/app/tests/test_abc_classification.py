@@ -413,3 +413,28 @@ async def test_materials_and_products_appear_together_ranked_by_lateness(session
         (ABCScope.product, "Keyring"),
         (ABCScope.material, "Resin"),
     ]
+
+
+async def test_made_to_order_products_are_never_due_for_counting(session):
+    """And so never reach the dashboard's due card, which reads through this."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.product import Product
+    from app.services.abc import compute_due_for_count
+
+    long_ago = datetime.now(timezone.utc) - timedelta(days=3650)
+    held = Product(name="Held Product", sku="SKU-DUE-HELD", current_stock=0, allocated_qty=0, last_stock_take_at=long_ago)
+    to_order = Product(
+        name="Bespoke Product",
+        sku="SKU-DUE-MTO",
+        made_to_order=True,
+        current_stock=0,
+        allocated_qty=0,
+        last_stock_take_at=long_ago,
+    )
+    session.add_all([held, to_order])
+    await session.commit()
+
+    due = await compute_due_for_count(session)
+
+    assert [item.name for item in due if item.product_id is not None] == ["Held Product"]

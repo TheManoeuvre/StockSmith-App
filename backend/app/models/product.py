@@ -96,6 +96,15 @@ class Product(Base):
     product_category_id: Mapped[int | None] = mapped_column(
         ForeignKey("product_categories.id", ondelete="SET NULL"), nullable=True
     )
+    # Built against an order and never held, so there is no shelf to count and a count line
+    # for it is noise on somebody's sheet. Excluded from stock take scopes and from the
+    # due-for-counting list (services/stock_takes.py, services/abc.py) — the same two places
+    # is_bundle is excluded, and for the same reason: nothing to count.
+    #
+    # Product-level, so every variant follows. A made-to-order product's variants are made
+    # to order too; a shop that stocks some colourways and builds others on demand is a
+    # different product, not a different variant.
+    made_to_order: Mapped[bool] = mapped_column(default=False, nullable=False)
     # Stock-take classification, mirroring Material's. NULL means "inherit", not "unset":
     # abc_class falls through to the product category's tier and then the shop-wide product
     # baseline, stock_take_interval_days to the resolved tier's cadence. Resolution order

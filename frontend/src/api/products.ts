@@ -31,6 +31,7 @@ export interface ProductInput {
   platform_fee_percent?: string | null;
   platform_ceiling_qty?: number | null;
   push_buildable_capacity?: boolean;
+  made_to_order?: boolean;
   pricing_mode?: PricingMode;
   pricing_variable_attribute?: number | null;
   product_category_id?: number | null;

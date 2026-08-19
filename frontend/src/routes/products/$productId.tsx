@@ -184,6 +184,17 @@ function ProductDetail() {
     },
   });
 
+  const toggleMadeToOrderMutation = useMutation({
+    mutationFn: (made_to_order: boolean) => productsApi.update(id, { made_to_order }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["products", id] });
+      queryClient.invalidateQueries({ queryKey: ["products"] });
+      // It changes what is due for counting, and the dashboard card reads that.
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["stock-takes"] });
+    },
+  });
+
   const toggleActiveMutation = useMutation({
     mutationFn: (is_active: boolean) => productsApi.update(id, { is_active }),
     onSuccess: () => {
@@ -543,6 +554,22 @@ function ProductDetail() {
                 makes that backfill risky.
               </p>
               <ErrorBanner error={togglePushBuildableCapacityMutation.error} />
+
+              <label className="mt-4 flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={product.made_to_order}
+                  onChange={(e) => toggleMadeToOrderMutation.mutate(e.target.checked)}
+                />
+                Made to order — exclude from stock takes
+              </label>
+              <p className="mt-1 text-sm text-slate-500">
+                For products built against an order rather than held on a shelf. They stop appearing
+                on count sheets and on the list of things due for counting, for every variant, because
+                there is nothing to go and count. Everything else — stock, builds, marketplace
+                quantities — is unaffected.
+              </p>
+              <ErrorBanner error={toggleMadeToOrderMutation.error} />
             </>
           )}
           <ErrorBanner error={saveDetailsMutation.error} />

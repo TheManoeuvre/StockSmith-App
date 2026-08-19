@@ -318,6 +318,8 @@ export interface Product {
   theoretical_max_sellable_reason: string | null;
   platform_ceiling_qty: number | null;
   push_buildable_capacity: boolean;
+  /** Built against an order and never held, so it is never counted. Variants follow it. */
+  made_to_order: boolean;
   cost_per_unit: string | null;
   kitting_cost_per_unit: string | null;
   main_image_asset_id: number | null;

@@ -20,6 +20,7 @@ class ProductBase(BaseModel):
     platform_ceiling_qty: int | None = None
     push_buildable_capacity: bool = True
     product_category_id: int | None = None
+    made_to_order: bool = False
     # NULL means "inherit" for both — see services/abc.py. A product's tier and cadence
     # cover all of its variants; last_stock_take_at is per stock-holding row and is written
     # only by an approved stock take, never by editing the product.
@@ -43,6 +44,7 @@ class ProductUpdate(BaseModel):
     platform_fee_percent: Decimal | None = None
     platform_ceiling_qty: int | None = None
     push_buildable_capacity: bool | None = None
+    made_to_order: bool | None = None
     pricing_mode: PricingMode | None = None
     pricing_variable_attribute: int | None = None
     product_category_id: int | None = None

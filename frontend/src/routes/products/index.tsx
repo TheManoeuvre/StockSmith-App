@@ -135,7 +135,7 @@ function ProductsList() {
             <th className="p-2"></th>
             <th className="p-2">Name</th>
             <th className="p-2">SKU</th>
-            <th className="p-2">Type</th>
+            <th className="p-2">Category</th>
             <th className="p-2">On hand</th>
             <th className="p-2">Sellable</th>
             <th className="p-2">Cost per unit</th>
@@ -202,6 +202,14 @@ function ProductRow({
         <Link to="/products/$productId" params={{ productId: String(p.id) }} className="text-slate-900 underline">
           {p.name}
         </Link>
+        {p.made_to_order && (
+          <span
+            title="Built against an order, so it is never counted"
+            className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600"
+          >
+            made to order
+          </span>
+        )}
       </td>
       <td className="p-2">
         {p.sku ? (

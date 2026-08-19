@@ -85,12 +85,18 @@ async def _material_candidates(session: AsyncSession, scope: StockTakeScope, due
 async def _product_candidates(session: AsyncSession, scope: StockTakeScope, due_keys: set | None) -> list[_Candidate]:
     """Products contribute their active variants when they have any, themselves otherwise.
 
-    Bundles contribute nothing: their quantity is derived from their components, so there
-    is no row to count and nothing an adjustment could write to.
+    Two kinds contribute nothing. Bundles hold no quantity of their own — theirs is derived
+    from their components, so there is no row to count and nothing an adjustment could
+    write to. Made-to-order products are built against an order and never held, so a count
+    line for one asks somebody to go and count a shelf that does not exist.
     """
     query = (
         select(Product)
-        .where(Product.is_active.is_(True), Product.is_bundle.is_(False))
+        .where(
+            Product.is_active.is_(True),
+            Product.is_bundle.is_(False),
+            Product.made_to_order.is_(False),
+        )
         .order_by(Product.name)
     )
     if scope.product_category_ids:

@@ -512,3 +512,34 @@ def test_quantities_in_conflict_reasons_read_as_people_write_them():
     assert _qty(Decimal("0.0000")) == "0"
     assert _qty(Decimal("12.3400")) == "12.34"
     assert _qty(Decimal("1E+1")) == "10"
+
+
+async def test_made_to_order_products_are_not_offered_for_counting(session):
+    """Built against an order, never held — so there is no shelf, and no line for one.
+
+    The exclusion is product-level and its variants follow, which is the point: a
+    made-to-order product with eight colourways would otherwise put eight lines on every
+    count sheet asking someone to go and look at a space where nothing is kept.
+    """
+    from app.models.product import Product
+    from app.models.variant import ProductVariant
+    from app.schemas.stock_take import StockTakeScope
+    from app.services.stock_takes import resolve_candidates
+
+    held = Product(name="Held Product", sku="SKU-HELD", current_stock=0, allocated_qty=0)
+    to_order = Product(name="Bespoke Product", sku="SKU-MTO", made_to_order=True, current_stock=0, allocated_qty=0)
+    session.add_all([held, to_order])
+    await session.flush()
+    session.add_all(
+        [
+            ProductVariant(product_id=to_order.id, variant_name="Red", is_active=True),
+            ProductVariant(product_id=to_order.id, variant_name="Blue", is_active=True),
+        ]
+    )
+    await session.commit()
+
+    candidates = await resolve_candidates(
+        session, StockTakeScope(include_materials=False, include_products=True)
+    )
+
+    assert [c.name for c in candidates] == ["Held Product"]

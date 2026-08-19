@@ -307,11 +307,17 @@ async def compute_due_for_count(session: AsyncSession, now: datetime | None = No
 
     # Bundles hold no stock of their own (see ProductBundleItem) so there is nothing to
     # count for them; their ready_to_ship follows from whatever their components have.
+    # Made-to-order products are never held either, so they are never due — and being
+    # excluded here takes them off the dashboard's due list too, which reads through this.
     products = list(
         (
             await session.execute(
                 select(Product)
-                .where(Product.is_active.is_(True), Product.is_bundle.is_(False))
+                .where(
+                    Product.is_active.is_(True),
+                    Product.is_bundle.is_(False),
+                    Product.made_to_order.is_(False),
+                )
                 .order_by(Product.name)
             )
         ).scalars()
