@@ -1,4 +1,4 @@
-"""add product categories, ABC classification, and per-item stock-take tracking
+"""add product types, ABC classification, and per-item stock-take tracking
 
 Groundwork for stock takes. Cycle counting needs to know which items are worth counting
 often and which are not, and nothing in StockSmith expressed that — so this adds the
@@ -11,7 +11,7 @@ are nullable/sparse, which is what makes "inherit" distinguishable from "explici
 to C" — the same reasoning that keeps product_variant_materials a separate override
 table rather than nullable columns.
 
-product_categories is new because products had no grouping axis at all: no category enum, no
+product_types is new because products had no grouping axis at all: no category enum, no
 lookup table, only name/SKU/description. Materials key their middle level on the
 `category` enum instead of material_types, because the UI only populates
 material_type_id for filament, so hardware, packaging and blanks would all have fallen
@@ -58,7 +58,7 @@ _MATERIAL_CATEGORY = sa.Enum(
 def upgrade() -> None:
     """Upgrade schema."""
     op.create_table(
-        'product_categories',
+        'product_types',
         sa.Column('id', sa.Integer(), nullable=False),
         sa.Column('name', sa.String(), nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('CURRENT_TIMESTAMP')),
@@ -79,14 +79,14 @@ def upgrade() -> None:
     with op.batch_alter_table('products') as batch:
         batch.add_column(
             sa.Column(
-                'product_category_id',
+                'product_type_id',
                 sa.Integer(),
-                sa.ForeignKey('product_categories.id', ondelete='SET NULL', name='fk_products_product_category_id'),
+                sa.ForeignKey('product_types.id', ondelete='SET NULL', name='fk_products_product_type_id'),
                 nullable=True,
             )
         )
 
-    # Tier assignment for a whole category / product category. Sparse — a row exists only
+    # Tier assignment for a whole category / product type. Sparse — a row exists only
     # where a tier was actually chosen.
     op.create_table(
         'material_category_abc',
@@ -95,11 +95,11 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint('category'),
     )
     op.create_table(
-        'product_category_abc',
-        sa.Column('product_category_id', sa.Integer(), nullable=False),
+        'product_type_abc',
+        sa.Column('product_type_id', sa.Integer(), nullable=False),
         sa.Column('abc_class', _ABC_CLASS, nullable=False),
-        sa.ForeignKeyConstraint(['product_category_id'], ['product_categories.id'], ondelete='CASCADE'),
-        sa.PrimaryKeyConstraint('product_category_id'),
+        sa.ForeignKeyConstraint(['product_type_id'], ['product_types.id'], ondelete='CASCADE'),
+        sa.PrimaryKeyConstraint('product_type_id'),
     )
 
     op.create_table(
@@ -149,8 +149,8 @@ def downgrade() -> None:
             batch.drop_column('stock_take_interval_days')
             batch.drop_column('abc_class')
     op.drop_table('abc_tier_settings')
-    op.drop_table('product_category_abc')
+    op.drop_table('product_type_abc')
     op.drop_table('material_category_abc')
     with op.batch_alter_table('products') as batch:
-        batch.drop_column('product_category_id')
-    op.drop_table('product_categories')
+        batch.drop_column('product_type_id')
+    op.drop_table('product_types')
