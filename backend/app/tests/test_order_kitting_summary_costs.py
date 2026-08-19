@@ -13,13 +13,13 @@ from app.models.kitting import ProductKittingMaterial
 from app.models.material import Material, MaterialCategory, MaterialUnit
 from app.models.order import Order
 from app.models.product import Product
-from app.models.purchase import MaterialPurchase, Purchase, PurchaseStatus
 from app.routers.orders import _get_order_with_lines, _serialize_one, create_order, replace_kitting_overrides
 from app.schemas.kitting import OrderKittingOverrideLine
 from app.schemas.order import OrderCreate, OrderLineInput
 from app.services import allocation, listing_push
 from app.services.costing import recompute_material
 from app.services.kitting import get_order_kitting_summary
+from .conftest import received_purchase
 
 _STOCKED_AT = datetime(2020, 1, 1, tzinfo=timezone.utc)
 
@@ -36,9 +36,7 @@ async def _order_with_kitting(session, qty: int, unit_cost: Decimal = Decimal("2
     box = Material(name="Box", category=MaterialCategory.packaging, unit=MaterialUnit.each)
     session.add(box)
     await session.flush()
-    purchase = Purchase(status=PurchaseStatus.received, received_at=_STOCKED_AT)
-    purchase.lines = [MaterialPurchase(material_id=box.id, qty=Decimal(100), total_cost=unit_cost * 100)]
-    session.add(purchase)
+    await received_purchase(session, box.id, Decimal(100), unit_cost * 100, received_at=_STOCKED_AT)
     await session.commit()
     await recompute_material(session, box.id)
 

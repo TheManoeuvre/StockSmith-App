@@ -18,12 +18,12 @@ from app.models.material import Material, MaterialAdjustment, MaterialCategory, 
 from app.models.order import Order, OrderLine
 from app.models.order_return import ReturnDisposition
 from app.models.product import Product
-from app.models.purchase import MaterialPurchase, Purchase, PurchaseStatus
 from app.routers.orders import create_order
 from app.schemas.order import OrderCreate, OrderLineInput
 from app.schemas.order_return import LineCancellationDecision
 from app.services import allocation, listing_push, returns
 from app.services.costing import recompute_material
+from .conftest import received_purchase
 
 _STOCKED_AT = datetime(2020, 1, 1, tzinfo=timezone.utc)
 _BOX_QTY = Decimal(100)
@@ -41,9 +41,7 @@ async def _box(session) -> Material:
     box = Material(name="Box", category=MaterialCategory.packaging, unit=MaterialUnit.each)
     session.add(box)
     await session.flush()
-    purchase = Purchase(status=PurchaseStatus.received, received_at=_STOCKED_AT)
-    purchase.lines = [MaterialPurchase(material_id=box.id, qty=_BOX_QTY, total_cost=Decimal("200"))]
-    session.add(purchase)
+    await received_purchase(session, box.id, _BOX_QTY, Decimal("200"), received_at=_STOCKED_AT)
     await session.commit()
     await recompute_material(session, box.id)
     await session.commit()
