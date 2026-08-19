@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.deps import get_db, require_auth
 from app.models.build import Build
@@ -43,7 +44,7 @@ from app.services.buildability import (
     get_max_buildable_by_product,
     get_ready_to_ship_by_bundle,
 )
-from app.services import listing_push, platform_fees
+from app.services import abc, listing_push, platform_fees
 from app.services.csv_io import export_products_csv, import_products_csv
 from app.services.kitting import (
     _clamp_value_to_ceiling,
@@ -84,6 +85,27 @@ _MAIN_IMAGE_ASSET_ID_BY_PRODUCT_SQL = text(
 )
 
 
+async def _get_product_with_type(session: AsyncSession, product_id: int) -> Product:
+    """Re-fetch with product_type loaded, mirroring materials' _get_material_with_manufacturer.
+
+    ProductRead exposes product_type_name, and reading it off an unloaded relationship
+    during response serialization raises MissingGreenlet rather than lazy-loading
+    (services/allocation.py:19-24). A plain session.refresh(product, ["product_type"])
+    isn't enough either: commit expires every attribute, and naming one leaves the rest
+    expired to fail the same way on the next field.
+    """
+    result = await session.execute(
+        select(Product)
+        .where(Product.id == product_id)
+        .options(selectinload(Product.product_type))
+        .execution_options(populate_existing=True)
+    )
+    product = result.scalar_one_or_none()
+    if product is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    return product
+
+
 async def _get_main_image_asset_id_by_product(session: AsyncSession) -> dict[int, int]:
     result = await session.execute(_MAIN_IMAGE_ASSET_ID_BY_PRODUCT_SQL)
     return {row.product_id: row.id for row in result}
@@ -104,6 +126,7 @@ def _read_product(
     fee_source,
     fee_components,
     shipping_profiles_by_id: dict,
+    abc_rules: abc.Rules,
 ) -> ProductRead:
     current_stock = product.current_stock
     allocated_qty = product.allocated_qty
@@ -175,6 +198,13 @@ def _read_product(
             "main_image_asset_id": main_image_asset_id_by_product.get(product.id),
             "ready_to_ship": ready_to_ship,
             "effective_platform_fee_percent": effective_platform_fee_percent,
+            # Bundles are never counted (their quantity is derived from components), so
+            # they carry no classification rather than a meaningless one.
+            "classification": (
+                None
+                if product.is_bundle
+                else abc.describe(abc_rules.for_product(product), product.last_stock_take_at)
+            ),
         }
     )
 
@@ -188,10 +218,21 @@ async def list_products(
     # precedent in routers/materials.py's stock-history `limit` param.
     limit: int = Query(50, ge=1, le=10000),
     offset: int = Query(0, ge=0),
+    # Filtering server-side rather than in the client, because this list is paginated: a
+    # client-side filter would only ever narrow the current page, and the total under it
+    # would be wrong. Mirrors materials' ?material_type_id=.
+    product_type_id: int | None = None,
     session: AsyncSession = Depends(get_db),
 ) -> ProductPage:
-    total = await session.scalar(select(func.count()).select_from(Product))
-    result = await session.execute(select(Product).order_by(Product.name).limit(limit).offset(offset))
+    count_query = select(func.count()).select_from(Product)
+    query = select(Product).options(selectinload(Product.product_type))
+    if product_type_id is not None:
+        count_query = count_query.where(Product.product_type_id == product_type_id)
+        query = query.where(Product.product_type_id == product_type_id)
+    total = await session.scalar(count_query)
+    # selectinload rather than letting product_type_name touch the relationship lazily —
+    # a lazy load in async raises MissingGreenlet (services/allocation.py:19-24).
+    result = await session.execute(query.order_by(Product.name).limit(limit).offset(offset))
     products = list(result.scalars())
     # The bulk lookups below (get_max_buildable_by_product etc.) each run a single
     # aggregate query over the whole products table regardless of how many rows this page
@@ -210,6 +251,7 @@ async def list_products(
     active_variant_stock_totals_by_product = await get_active_variant_stock_totals_by_product(session)
     fee_source, fee_components = await platform_fees.get_resolver_context(session)
     shipping_profiles_by_id = await get_shipping_profiles_by_id(session)
+    abc_rules = await abc.load_rules(session)
     items = [
         _read_product(
             p,
@@ -226,6 +268,7 @@ async def list_products(
             fee_source,
             fee_components,
             shipping_profiles_by_id,
+            abc_rules,
         )
         for p in products
     ]
@@ -258,15 +301,12 @@ async def create_product(payload: ProductCreate, session: AsyncSession = Depends
     product.sku = sku or f"SKU-{product.id:04d}"
     await apply_default_kitting_bom(session, product.id)
     await session.commit()
-    await session.refresh(product)
-    return product
+    return await _get_product_with_type(session, product.id)
 
 
 @router.get("/{product_id}", response_model=ProductRead)
 async def get_product(product_id: int, session: AsyncSession = Depends(get_db)) -> ProductRead:
-    product = await session.get(Product, product_id)
-    if product is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    product = await _get_product_with_type(session, product_id)
     max_buildable_by_product = await get_max_buildable_by_product(session)
     expected_max_buildable_by_product = await get_expected_max_buildable_by_product(session)
     cost_per_unit_by_product = await get_cost_per_unit_by_product(session)
@@ -279,6 +319,7 @@ async def get_product(product_id: int, session: AsyncSession = Depends(get_db)) 
     active_variant_stock_totals_by_product = await get_active_variant_stock_totals_by_product(session)
     fee_source, fee_components = await platform_fees.get_resolver_context(session)
     shipping_profiles_by_id = await get_shipping_profiles_by_id(session)
+    abc_rules = await abc.load_rules(session)
     read = _read_product(
         product,
         max_buildable_by_product,
@@ -294,6 +335,7 @@ async def get_product(product_id: int, session: AsyncSession = Depends(get_db)) 
         fee_source,
         fee_components,
         shipping_profiles_by_id,
+        abc_rules,
     )
     await sync_listing_ceiling_qty(session, product_id, None, read.expected_max_sellable)
     await session.commit()
@@ -340,8 +382,7 @@ async def update_product(product_id: int, payload: ProductUpdate, session: Async
             await snapshot_product_pricing(session, product, cost_per_unit)
 
     await session.commit()
-    await session.refresh(product)
-    return product
+    return await _get_product_with_type(session, product_id)
 
 
 @router.get("/{product_id}/price-history", response_model=list[ProductPriceSnapshotRead])

@@ -48,6 +48,27 @@ function baseRoutes() {
     { method: "GET" as const, path: "/manufacturers", respond: () => [] },
     { method: "GET" as const, path: "/suppliers", respond: () => [] },
     { method: "GET" as const, path: "/material-types", respond: () => [] },
+    { method: "GET" as const, path: "/product-types", respond: () => [] },
+    {
+      method: "GET" as const,
+      path: "/settings/stock-count-settings",
+      respond: () => ({
+        default_material_abc_class: "C",
+        default_product_abc_class: "C",
+        material_tier_intervals: [
+          { tier: "A", interval_days: 30, is_override: false },
+          { tier: "B", interval_days: 60, is_override: false },
+          { tier: "C", interval_days: 90, is_override: false },
+        ],
+        product_tier_intervals: [
+          { tier: "A", interval_days: 30, is_override: false },
+          { tier: "B", interval_days: 60, is_override: false },
+          { tier: "C", interval_days: 90, is_override: false },
+        ],
+        category_tiers: [],
+        product_type_tiers: [],
+      }),
+    },
     { method: "GET" as const, path: "/colours", respond: () => [] },
     { method: "GET" as const, path: "/materials", respond: () => [] },
     {
@@ -324,6 +345,52 @@ describe("settings page", () => {
 
       expect(await screen.findByRole("dialog")).toBeInTheDocument();
       expect(dialog().getByText(/Connection settings/)).toBeInTheDocument();
+    });
+  });
+
+  describe("stock counting", () => {
+    const stockCountCard = () => {
+      const heading = screen.getByRole("heading", { name: "Stock counting" });
+      const card = heading.closest("div.rounded");
+      if (!card) throw new Error("Could not find the stock counting card");
+      return within(card as HTMLElement);
+    };
+
+    it("shows the shipped cadences, marked as defaults", async () => {
+      await renderSettings();
+
+      await screen.findByRole("heading", { name: "Stock counting" });
+      // Every tier gets a number whether or not one is stored — a settings screen that left
+      // unstored tiers blank would imply they have no cadence, which isn't true.
+      expect(stockCountCard().getAllByText("(default)")).toHaveLength(6);
+    });
+
+    it("sends an edited cadence as an override and leaves the others alone", async () => {
+      const user = userEvent.setup();
+      const { calls } = await import("../test/fakeBackend");
+      setRoutes([
+        ...baseRoutes(),
+        { method: "PUT" as const, path: "/settings/stock-count-settings", respond: (body) => body },
+      ]);
+      await renderSettings();
+
+      await screen.findByRole("heading", { name: "Stock counting" });
+      const tierA = stockCountCard().getAllByLabelText(/Tier A/)[0];
+      await user.clear(tierA);
+      await user.type(tierA, "14");
+      await user.click(stockCountCard().getByRole("button", { name: "Save" }));
+
+      await waitFor(() => expect(calls.some((c) => c.method === "PUT")).toBe(true));
+      const sent = calls.find((c) => c.method === "PUT")!.body as {
+        material_tier_intervals: { tier: string; interval_days: number; is_override: boolean }[];
+      };
+      // Editing a cadence is what makes it an override. The tiers left alone must stay
+      // non-overrides, or they'd stop following the shipped defaults if those ever change.
+      expect(sent.material_tier_intervals).toEqual([
+        { tier: "A", interval_days: 14, is_override: true },
+        { tier: "B", interval_days: 60, is_override: false },
+        { tier: "C", interval_days: 90, is_override: false },
+      ]);
     });
   });
 });

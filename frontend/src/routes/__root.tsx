@@ -64,6 +64,9 @@ function RootChrome() {
         <Link to="/orders" className={linkClass}>
           Orders
         </Link>
+        <Link to="/stock-takes" className={linkClass}>
+          Stock Take
+        </Link>
         <Link to="/settings" className={linkClass}>
           Settings
         </Link>

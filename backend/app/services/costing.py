@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from fastapi import HTTPException, status
@@ -134,6 +135,17 @@ async def create_adjustment(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Adjustment would make current_qty negative"
         )
+
+    # A "set" IS a physical count — it's what this mode has always meant (see
+    # MaterialAdjustment's docstring), so it restarts the counting clock and the item stops
+    # showing as due. An "adjust" deliberately does not: a signed delta for breakage says
+    # what changed, not that the resulting total was ever verified, and dating it as a count
+    # would vouch for a figure nobody looked at.
+    #
+    # Set after the negative-qty checks so a rejected adjustment doesn't leave the date
+    # moved, and before the commit so both land in one transaction.
+    if mode == MaterialAdjustmentMode.set:
+        material.last_stock_take_at = datetime.now(timezone.utc)
 
     await session.commit()
     await session.refresh(material)

@@ -12,6 +12,57 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **StockSmith now tells you what needs counting.** Stock drifts from what the app thinks
+  you have — a dropped print, a miscount, something used and never recorded — and until now
+  the only way to find out was to check everything. You can now say how often each thing is
+  worth counting, and the dashboard lists what's come round. Nothing is blocked or nagged
+  about; it's a list to work from.
+- **Set how often by group, not one item at a time.** Give a whole category a tier — resin
+  every month, packaging every three — and everything in it follows. Anything unusual can be
+  set on its own and overrides the group. Each item's page says which of the two it's
+  currently getting, so it's clear where to go and change it.
+- **Products can have a type.** Keyring, coaster, whatever you sell — products had no way of
+  being grouped before, only a name and a SKU. Set one on the product page or manage the list
+  under Settings > Reference data; the Products list gains a column and a filter for it.
+  Types are also what lets products be scheduled for counting by group.
+- Sensible counting intervals are set up already (30, 60 and 90 days by tier) so this is
+  useful without configuring anything first. Change any of them under Settings > General.
+- **Counting something by hand already counts.** Use "Set exact amount" on a material or
+  product and StockSmith takes that as a physical count — it stops being listed as due and
+  its count date moves to today, so you're not asked to do the same job twice. Adjusting
+  by an amount doesn't do this: knowing two got broken isn't the same as having checked
+  what's left.
+- **Your existing counts are recognised.** Anything you've previously set an exact amount
+  for starts out dated from when you did it, rather than the list arriving with your whole
+  catalogue on it. Items you've never counted still say so.
+
+- **Stock takes.** Pick what to count — materials, finished stock, or both, narrowed to a
+  category or type, or just what's due — and StockSmith builds a count sheet and notes what
+  it currently thinks you have. Fill it in on screen or export it, count with the sheet in
+  your hand, and upload it back. Then it shows you every difference before anything is
+  changed.
+- **Differences it can't safely decide are handed to you, not applied.** Two cases: stock
+  that moved while you were counting, and stock that's been picked for an order. The second
+  matters more than it sounds — units boxed up ready to post have left the shelf but are
+  still counted as stock until the order ships, so counting the shelf comes up short by
+  exactly that much. Applying that would quietly write off goods sitting by the door.
+  StockSmith flags them instead and tells you why, with three choices: use what you
+  counted, keep the figure it has, or clear it and count again later. The count sheet also
+  shows how many are already picked, so you can go and find the boxes and avoid the
+  question.
+- **A stock take can close with questions outstanding.** They don't hold it open — they
+  move to an "unresolved variances" list, linked from the dashboard, so you can settle them
+  whenever without having to remember which count they came from.
+- **Uploads are shown to you first.** A spreadsheet with a typo in it doesn't half-apply:
+  you see what read cleanly, what didn't and why, and choose between applying the good rows
+  or fixing the file and starting again. Nothing is saved until you say so.
+- **Rows left blank are left alone.** Not counted isn't the same as counted zero — a blank
+  changes no quantity and doesn't mark the item as counted, so it stays on your list.
+
+Counting is saved as you go, on the machine rather than in the window, so a stock take
+survives closing StockSmith and picks up where you left it.
+
 ## [0.7.0] - 2026-08-17
 
 StockSmith now keeps syncing after you close the window, and can start with Windows —

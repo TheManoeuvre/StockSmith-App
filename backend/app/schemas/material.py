@@ -3,7 +3,9 @@ from decimal import Decimal
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
+from app.models.abc_classification import ABCClass
 from app.models.material import MaterialAdjustmentMode, MaterialCategory, MaterialUnit
+from app.schemas.abc import ResolvedClassificationRead
 
 
 class MaterialBase(BaseModel):
@@ -22,6 +24,11 @@ class MaterialBase(BaseModel):
     default_supplier_id: int | None = None
     typical_reorder_qty: Decimal | None = None
     product_url: str | None = None
+    # NULL means "inherit" for both — see services/abc.py. Deliberately settable on
+    # create/update while last_stock_take_at is not: the count date is written only by an
+    # approved stock take, never by editing the material.
+    abc_class: ABCClass | None = None
+    stock_take_interval_days: int | None = Field(default=None, gt=0)
 
     @field_validator("name")
     @classmethod
@@ -50,6 +57,8 @@ class MaterialUpdate(BaseModel):
     default_supplier_id: int | None = None
     typical_reorder_qty: Decimal | None = None
     product_url: str | None = None
+    abc_class: ABCClass | None = None
+    stock_take_interval_days: int | None = Field(default=None, gt=0)
 
     @field_validator("name")
     @classmethod
@@ -77,6 +86,12 @@ class MaterialRead(MaterialBase):
     created_at: datetime
     updated_at: datetime
     on_order_qty: Decimal | None = None
+    last_stock_take_at: datetime | None = None
+    # The effective tier/cadence with its provenance, so the UI can say "C, from the
+    # Packaging category" rather than a bare "C" that gives no clue which level to edit.
+    # Populated on the list and single-get paths; a mutation response leaves it null and
+    # the client refetches, which is what every mutation here already does.
+    classification: ResolvedClassificationRead | None = None
 
 
 class DraftPurchaseCreate(BaseModel):

@@ -23,7 +23,7 @@ from app.db import configure_sqlite_pragmas, enforce_sqlite_foreign_keys
 from app.models.base import Base
 from app.models.listing import ListingPlatform
 from app.models.platform_connection import PlatformConnection
-from app.services import listing_push, order_sync, platform_limits
+from app.services import listing_push, order_sync, platform_limits, stock_takes
 from app.services.platforms.base import ExternalOrder, ExternalOrderLine, PaymentState
 
 
@@ -61,6 +61,10 @@ async def session_factory(engine, monkeypatch):
     # taking one from the caller, so redirecting it is the only way to keep the test off
     # the real dev database.
     monkeypatch.setattr(order_sync, "async_session_factory", factory)
+    # Same reasoning for stock takes: approve deliberately runs each line in its own
+    # session so a refusal can't poison the rest (see services/stock_takes.py), and those
+    # come from the module-level factory rather than the caller's session.
+    monkeypatch.setattr(stock_takes, "async_session_factory", factory)
     return factory
 
 
@@ -81,9 +85,16 @@ def pushes(monkeypatch):
     """
     recorded: list[tuple] = []
     monkeypatch.setattr(listing_push, "enqueue_for_owner", lambda owner: recorded.append(("owner", owner)))
-    monkeypatch.setattr(
-        listing_push, "enqueue_for_material", lambda session, material_id: recorded.append(("material", material_id))
-    )
+
+    # enqueue_for_material is `async def`, and recompute_material awaits it — so the stub
+    # has to be awaitable too. It was a plain lambda until the stock-take work became the
+    # first thing to combine this fixture with a path through recompute_material, which
+    # failed with "object NoneType can't be used in 'await' expression". The other two
+    # entry points really are synchronous, so they stay lambdas.
+    async def _enqueue_for_material(session, material_id):
+        recorded.append(("material", material_id))
+
+    monkeypatch.setattr(listing_push, "enqueue_for_material", _enqueue_for_material)
     # The product-id entry point was previously unpatched, so nothing could assert on it —
     # which is part of why routers/variants.py never calling it went unnoticed.
     monkeypatch.setattr(

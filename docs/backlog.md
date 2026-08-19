@@ -2,6 +2,52 @@
 
 Informal list of improvements not yet scheduled into a plan doc.
 
+## An async session is unusable after a rolled-back flush error
+
+**Problem:** Found while building the stock-count work. In this dependency set
+(SQLAlchemy 2.0.51, aiosqlite 0.22.1, greenlet 3.5.3) there is a reproducible condition
+where an `AsyncSession` becomes permanently unusable once a flush raises `IntegrityError`
+and the session is rolled back. Every later statement on it — including a bare column
+`SELECT` that touches no ORM object — raises
+`MissingGreenlet: greenlet_spawn has not been called`. An explicit `await session.rollback()`
+by the caller does not recover it; a **new** session on the same engine is fine.
+
+Reproduces on the app's own code via `costing.create_adjustment`'s "would make current_qty
+negative" path, on both the test harness's StaticPool and a production-shaped engine, and
+also with no app code at all:
+
+```python
+m = Material(name="R", category=..., unit=...)
+s.add(m); await s.commit()
+m.current_qty = Decimal(-5)          # violates ck_materials_current_qty_nonneg
+try: await s.flush()
+except IntegrityError: await s.rollback()
+await s.scalar(select(Material.name))  # MissingGreenlet
+```
+
+The trigger is narrow and not fully isolated: a UNIQUE violation on a session that has not
+previously committed recovers cleanly, and so does a CHECK violation on an object loaded
+fresh into its own session. It appears to need a prior commit on the same session. Worth
+pinning down before assuming any particular fix.
+
+**Impact today is nil**, which is why nothing has caught it: every request gets its own
+session and ends at the error, so nothing reuses a poisoned one. `csv_io.py` is the one
+place that catches per row and continues, and its failures are pre-flush validation
+errors (`validate_qty_for_unit`) rather than flush errors, so it stays on the good path —
+but a row that did violate a constraint would take the rest of the import down with a 500
+rather than landing in the `failed` list, which is the shape of the bug this becomes.
+
+**It does block a planned design.** The stock-take approve loop
+(`docs/plan-stock-take.md`, Phase B) was specified to catch a refused adjustment, mark
+that line for manual review, and carry on. It cannot do that on a shared session. Phase B
+works around it two ways — pre-checking allocation and movement in Python so a refusal is
+rare, and giving each line its own session — but the underlying fault stays.
+
+**Ask:** Isolate the exact trigger and decide whether it's an aiosqlite 0.22 regression
+(0.22 is recent and changed the connection/threading model) or a SQLAlchemy dialect
+incompatibility, then pin or bump accordingly. A dependency change wants its own commit
+and its own green run, not to ride along inside a feature.
+
 ## Orphaned sidecars are detected but not reaped
 
 **Problem:** The identity half of this is done — `/healthz` carries the build version and the shell refuses to adopt a backend that reports a different one (`backend/app/main.py:146`, `frontend/src-tauri/src/lib.rs:82`, shipped in 0.6.3). What it does on a mismatch is *stop and tell the user to close StockSmith and re-run the installer*, which is honest but is still a dead end the user has to clear by hand.

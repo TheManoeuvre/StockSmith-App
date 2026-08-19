@@ -4,6 +4,7 @@ from datetime import datetime
 from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, Numeric, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.models.abc_classification import ABCClass
 from app.models.base import Base, portable_enum
 
 
@@ -92,6 +93,30 @@ class Product(Base):
     # toward the pushed number is what this toggles. Per-product because build lead
     # time (and therefore backfill risk) varies by product.
     push_buildable_capacity: Mapped[bool] = mapped_column(default=True, nullable=False)
+    product_type_id: Mapped[int | None] = mapped_column(
+        ForeignKey("product_types.id", ondelete="SET NULL"), nullable=True
+    )
+    # Stock-take classification, mirroring Material's. NULL means "inherit", not "unset":
+    # abc_class falls through to the product type's tier and then the shop-wide product
+    # baseline, stock_take_interval_days to the resolved tier's cadence. Resolution order
+    # lives in services/abc.py and should not be reimplemented anywhere else.
+    #
+    # A product's class and interval apply to all of its variants — variants are counted
+    # separately (they hold their own stock) but are not classified separately, since
+    # tier is a property of the thing, not of one colourway of it.
+    abc_class: Mapped["ABCClass | None"] = mapped_column(
+        portable_enum(ABCClass, name="abc_class"), nullable=True
+    )
+    stock_take_interval_days: Mapped[int | None] = mapped_column(nullable=True)
+    # Set only for a product counted directly — i.e. one with no active variants. A
+    # product whose variants hold the stock keeps this NULL and its variants carry their
+    # own dates instead.
+    last_stock_take_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # See Material.last_stock_take_id — NULL covers both "never counted" and "counted by
+    # hand rather than in a take".
+    last_stock_take_id: Mapped[int | None] = mapped_column(
+        ForeignKey("stock_takes.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -101,6 +126,11 @@ class Product(Base):
     kitting_lines: Mapped[list["ProductKittingMaterial"]] = relationship(
         back_populates="product", cascade="all, delete-orphan"
     )
+    product_type: Mapped["ProductType | None"] = relationship()
+
+    @property
+    def product_type_name(self) -> str | None:
+        return self.product_type.name if self.product_type else None
 
 
 class ProductBundleItem(Base):
