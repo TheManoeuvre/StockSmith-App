@@ -608,23 +608,23 @@ function MaterialDetail() {
           <tbody>
             {history?.map((h) => {
               const unitCost =
-                h.kind === "purchase" && h.total_cost !== null && Number(h.qty) > 0
+                h.kind !== "adjustment" && h.total_cost !== null && Number(h.qty) > 0
                   ? Number(h.total_cost) / Number(h.qty)
                   : null;
               return (
                 <tr key={`${h.kind}-${h.id}`} className="border-b border-slate-100">
                   <td className="p-2">{new Date(h.at).toLocaleDateString()}</td>
                   <td className="p-2">
+                    {/* Three kinds now. A delivery moved stock and is dated when it arrived;
+                        "on order" is on this timeline because that is where people look for
+                        it, but it has moved nothing — only the first two add up to the
+                        quantity shown above. */}
                     {h.kind === "adjustment" ? (
                       <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-700">Adjustment</span>
+                    ) : h.kind === "purchase" ? (
+                      <span className="rounded bg-green-100 px-2 py-0.5 text-xs text-green-800">Delivered</span>
                     ) : (
-                      <span
-                        className={`rounded px-2 py-0.5 text-xs ${
-                          h.status === "received" ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"
-                        }`}
-                      >
-                        {h.status === "received" ? "Received" : "Ordered"}
-                      </span>
+                      <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">On order</span>
                     )}
                   </td>
                   <td className="p-2">
@@ -647,7 +647,7 @@ function MaterialDetail() {
                   <td className="p-2">
                     {unitCost === null
                       ? "—"
-                      : `${formatUnitCost(unitCost)}${h.status === "ordered" ? " (quoted)" : ""}`}
+                      : `${formatUnitCost(unitCost)}${h.kind === "purchase_outstanding" ? " (quoted)" : ""}`}
                   </td>
                   <td className="p-2">
                     {h.kind === "adjustment" ? (

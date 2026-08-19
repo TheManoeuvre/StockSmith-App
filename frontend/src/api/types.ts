@@ -229,15 +229,34 @@ export interface StockCountSettings {
   product_category_tiers: { product_category_id: number; abc_class: ABCClass }[];
 }
 
-export type PurchaseStatus = "ordered" | "received";
+export type PurchaseStatus = "ordered" | "partially_received" | "received";
+
+/** One physical arrival of part (or all) of a purchase line. */
+export interface PurchaseReceipt {
+  id: number;
+  purchase_line_id: number;
+  qty: string;
+  /** null means this delivery took its pro-rata share of the line total. */
+  total_cost: string | null;
+  received_at: string;
+  notes: string | null;
+  /** One value per delivery, so a whole van-load can be undone as one thing. */
+  batch_id: string | null;
+}
 
 export interface PurchaseLine {
   id: number;
   purchase_id: number;
   material_id: number;
+  /** What was ordered. Never rewritten to match what turned up — see closed_at. */
   qty: string;
   total_cost: string;
   notes: string | null;
+  /** Set when the rest of this line is never coming. */
+  closed_at: string | null;
+  received_qty: string;
+  outstanding_qty: string;
+  receipts: PurchaseReceipt[];
 }
 
 export interface Purchase {
@@ -247,6 +266,7 @@ export interface Purchase {
   order_date: string;
   expected_arrival_date: string | null;
   status: PurchaseStatus;
+  /** When the order was completed. null while anything is still outstanding. */
   received_at: string | null;
   notes: string | null;
   created_at: string;
@@ -256,7 +276,12 @@ export interface Purchase {
 
 export interface MaterialStockHistoryEntry {
   id: number;
-  kind: "purchase" | "adjustment";
+  /**
+   * "purchase" is a delivery that happened; those plus "adjustment" account for the
+   * material's quantity exactly. "purchase_outstanding" is what is still on order — on the
+   * same timeline because that is where people look for it, but it has moved nothing.
+   */
+  kind: "purchase" | "purchase_outstanding" | "adjustment";
   at: string;
   qty: string;
   total_cost: string | null;

@@ -26,12 +26,14 @@ export function MaterialSelect({
   onChange,
   filterText = "",
   className,
+  disabled = false,
 }: {
   materials: Material[];
   value: number;
   onChange: (materialId: number) => void;
   filterText?: string;
   className?: string;
+  disabled?: boolean;
 }) {
   // Never hide the row's own current selection, even if it doesn't match the filter —
   // otherwise typing into the filter box can silently un-select an already-chosen material.
@@ -46,8 +48,9 @@ export function MaterialSelect({
 
   return (
     <select
-      className={className ?? "rounded border border-slate-300 px-2 py-1"}
+      className={className ?? "rounded border border-slate-300 px-2 py-1 disabled:bg-slate-100"}
       value={value}
+      disabled={disabled}
       onChange={(e) => onChange(Number(e.target.value))}
     >
       {Array.from(byCategory.entries()).map(([category, group]) => (
