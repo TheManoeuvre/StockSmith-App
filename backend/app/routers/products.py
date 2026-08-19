@@ -9,6 +9,7 @@ from app.models.build import Build
 from app.models.kitting import ProductKittingMaterial
 from app.models.order import Order, OrderLine
 from app.models.product import Product, ProductBundleItem, ProductMaterial
+from app.models.product_category import ProductCategory
 from app.models.product_stock_event import ProductStockEvent
 from app.models.stock_adjustment import StockAdjustment
 from app.models.variant import ProductVariant
@@ -225,14 +226,32 @@ async def list_products(
     session: AsyncSession = Depends(get_db),
 ) -> ProductPage:
     count_query = select(func.count()).select_from(Product)
-    query = select(Product).options(selectinload(Product.product_category))
+    # outerjoin so the ORDER BY below can read the category's name; products without one
+    # keep their row rather than dropping out.
+    query = (
+        select(Product)
+        .options(selectinload(Product.product_category))
+        .outerjoin(ProductCategory, ProductCategory.id == Product.product_category_id)
+    )
     if product_category_id is not None:
         count_query = count_query.where(Product.product_category_id == product_category_id)
         query = query.where(Product.product_category_id == product_category_id)
     total = await session.scalar(count_query)
     # selectinload rather than letting product_category_name touch the relationship lazily —
     # a lazy load in async raises MissingGreenlet (services/allocation.py:19-24).
-    result = await session.execute(query.order_by(Product.name).limit(limit).offset(offset))
+    # Ordered by category, then name — so the list groups the way the materials list always
+    # has, and so pagination cuts through that order cleanly rather than scattering one
+    # category across every page. Uncategorised products sort last: NULLS LAST is not
+    # portable, so this leans on a category id of NULL sorting after any real one.
+    result = await session.execute(
+        query.order_by(
+            Product.product_category_id.is_(None),
+            ProductCategory.name,
+            Product.name,
+        )
+        .limit(limit)
+        .offset(offset)
+    )
     products = list(result.scalars())
     # The bulk lookups below (get_max_buildable_by_product etc.) each run a single
     # aggregate query over the whole products table regardless of how many rows this page

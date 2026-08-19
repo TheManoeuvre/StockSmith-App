@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { Fragment, useMemo, useRef, useState } from "react";
 import { platformsApi, type ProductSyncStatus } from "../../api/platforms";
 import { productsApi } from "../../api/products";
 import { productCategoriesApi } from "../../api/productCategories";
@@ -20,6 +20,28 @@ export const Route = createFileRoute("/products/")({
 });
 
 const PRODUCTS_PAGE_SIZE = 50;
+
+/**
+ * The page's products, split into runs of one category.
+ *
+ * The order is the server's — it sorts by category then name so that pagination cuts
+ * through the grouping rather than scattering one category over every page — so this only
+ * walks the page and notices where the heading changes. Same shape as the materials list,
+ * which is the point: the two read alike now that products have a category too.
+ */
+function groupByCategory(products: Product[]): { key: string; label: string; products: Product[] }[] {
+  const out: { key: string; label: string; products: Product[] }[] = [];
+  for (const product of products) {
+    const label = product.product_category_name ?? "Uncategorised";
+    const last = out[out.length - 1];
+    if (last && last.label === label) {
+      last.products.push(product);
+      continue;
+    }
+    out.push({ key: label, label, products: [product] });
+  }
+  return out;
+}
 
 function ProductsList() {
   const queryClient = useQueryClient();
@@ -63,6 +85,8 @@ function ProductsList() {
       setSku("");
     },
   });
+
+  const groups = useMemo(() => groupByCategory(products ?? []), [products]);
 
   if (isLoading) return <p>Loading products…</p>;
   if (error) return <p className="text-red-600">{(error as Error).message}</p>;
@@ -135,7 +159,7 @@ function ProductsList() {
             <th className="p-2"></th>
             <th className="p-2">Name</th>
             <th className="p-2">SKU</th>
-            <th className="p-2">Category</th>
+
             <th className="p-2">On hand</th>
             <th className="p-2">Sellable</th>
             <th className="p-2">Cost per unit</th>
@@ -143,8 +167,20 @@ function ProductsList() {
           </tr>
         </thead>
         <tbody>
-          {products?.map((p) => (
-            <ProductRow key={p.id} product={p} storeStatuses={storeStatuses} />
+          {groups.map((group) => (
+            <Fragment key={group.key}>
+              <tr className="border-b border-slate-200 bg-slate-50">
+                <th colSpan={7} className="p-2 text-left font-medium">
+                  {group.label}
+                  <span className="ml-2 text-xs font-normal text-slate-500">
+                    {group.products.length} {group.products.length === 1 ? "product" : "products"}
+                  </span>
+                </th>
+              </tr>
+              {group.products.map((p) => (
+                <ProductRow key={p.id} product={p} storeStatuses={storeStatuses} />
+              ))}
+            </Fragment>
           ))}
         </tbody>
       </table>
@@ -221,7 +257,6 @@ function ProductRow({
           "—"
         )}
       </td>
-      <td className="p-2">{p.product_category_name ?? "—"}</td>
       <td className="p-2">{p.is_bundle ? `Ready to ship: ${p.ready_to_ship ?? "—"}` : p.current_stock}</td>
       {/* One column, and it's the figure that reaches the marketplaces — the three it
           replaced (max buildable / expected max buildable / max sellable) were all
