@@ -509,3 +509,36 @@ async def test_a_part_delivered_order_forecasts_only_the_remainder(session):
 
     forecasts = {f.material_id: f for f in await compute_material_forecasts(session)}
     assert forecasts[material.id].on_order_qty == Decimal(60)
+
+
+async def test_stock_history_reconciles_with_current_qty(session):
+    """What the timeline shows and what the material says must be the same number.
+
+    They never were. The purchase half of this query was dated by order_date and included
+    orders that had not arrived, so the rows on screen added up to something that was not
+    current_qty, with nothing on the page admitting it. Deliveries and adjustments now
+    account for the quantity exactly, and what is still on order says so separately.
+    """
+    from app.routers.materials import get_stock_history
+
+    material = await _material(session)
+    purchase = await _order(session, material.id, 10, "100")
+    line_id = await _line_id(session, purchase)
+    await purchase_receipts.record_receipts(session, purchase.id, [(line_id, Decimal(6), None)], received_at=JAN1)
+    await create_adjustment(session, material.id, MaterialAdjustmentMode.adjust, Decimal(-2), "spillage")
+
+    rows = await get_stock_history(material.id, limit=100, session=session)
+    by_kind = {}
+    for row in rows:
+        by_kind.setdefault(row["kind"], []).append(row)
+
+    moved = sum(Decimal(r["qty"]) for r in rows if r["kind"] in ("purchase", "adjustment"))
+    await session.refresh(material)
+    assert moved == Decimal(material.current_qty) == Decimal(4)
+
+    # The four still to come are on the timeline, but as their own kind — they have not
+    # moved anything, and counting them would put the page back where it started.
+    assert len(by_kind["purchase_outstanding"]) == 1
+    assert Decimal(by_kind["purchase_outstanding"][0]["qty"]) == Decimal(4)
+    assert by_kind["purchase_outstanding"][0]["status"] == "ordered"
+    assert Decimal(by_kind["purchase"][0]["total_cost"]) == Decimal(60)

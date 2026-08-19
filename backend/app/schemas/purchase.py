@@ -83,9 +83,13 @@ class PurchaseLineRead(BaseModel):
 
 
 class MaterialStockHistoryRead(BaseModel):
-    """A single row in a material's unified stock timeline — either a purchase line
-    (kind='purchase') or a manual adjustment (kind='adjustment'), merged and ordered
-    chronologically. Used by GET /materials/{id}/stock-history."""
+    """A single row in a material's unified stock timeline, merged and ordered
+    chronologically. Used by GET /materials/{id}/stock-history.
+
+    Three kinds. 'purchase' is a delivery that happened, dated when it arrived, and those
+    plus the 'adjustment' rows account for current_qty exactly. 'purchase_outstanding' is
+    what is still on order — shown on the same timeline because that is where someone looks
+    for it, but deliberately a different kind, because it has not moved any stock."""
 
     id: int
     kind: Literal["purchase", "purchase_outstanding", "adjustment"]
