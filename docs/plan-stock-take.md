@@ -631,3 +631,59 @@ add-column migrations apply, including the SQLite table-rebuild path.
 occurrences of tooling silently converting files to CRLF and destroying diffs). Add an
 `## [Unreleased]` CHANGELOG entry written for users, per the note at the top of
 `CHANGELOG.md`.
+
+---
+
+## Phase C — Grouping, made-to-order, and first-receipt counts
+
+Shipped after Phases A and B, in the release that also introduced per-line receiving.
+Recorded here because all three change what a count sheet contains, which is what the rest
+of this document specifies.
+
+**Product Type became Product Category.** The same idea already existed for materials under
+the other name, and the two list pages are meant to read alike. Renamed throughout — table,
+columns, routes, API client, labels — in `b6c9e1a4f273`. It is a rename migration rather
+than an edit to `a7c3e1f09b52` because that revision had already run against a real
+database by then; the shipped build carried it.
+
+**Count sheets are grouped**, by `services/stock_takes.group_lines`:
+
+```
+Products                       Materials
+  Product category               Material category   (enum order, not alphabetical)
+    Parent SKU                     Material type
+      Variant
+```
+
+Ordered there rather than by row id. Ids run in creation order and would have been free,
+but they freeze the arrangement at the moment the take started, so recategorising a product
+afterwards would leave it filed under its old heading for the rest of the take's life. All
+three read paths — the count sheet, the CSV, the standing-variances list — go through the
+one call, which is what stops them drifting into three different arrangements.
+
+The CSV's `category` column is replaced by `section`, `group` and `subgroup`. One column
+could only ever express one level of a three-level arrangement, and the CSV is the copy
+that gets printed and carried around. Import is unaffected: it keys on `line_id` and
+ignores them, so a re-sorted sheet still round-trips.
+
+**`products.made_to_order`** excludes a product and all of its variants from scope
+resolution and from `compute_due_for_count` — the same two places `is_bundle` is excluded,
+for the same reason. The dashboard card reads through the second, so it needs nothing of
+its own. Product-level deliberately: a shop stocking some colourways and building others on
+demand has two products, not one product with two kinds of variant.
+
+**A material's first delivery counts as a count.** Stamped in
+`services/purchase_receipts.record_receipts` when the material's ledger is empty and
+`last_stock_take_at` is NULL — which follows Phase A.1's principle of putting the stamp in
+the service that knows what the event means. Deliberately narrower than "any delivery onto
+a material at zero": a material that ran down through consumption has an *unverified* zero,
+and that belief is exactly what a count exists to test. An empty ledger is a provable zero,
+so the quantity after the delivery is exactly what was delivered. Reversing that delivery
+takes the stamp back off, when nothing else could have set it.
+
+### Flag 5 revisited
+
+"On day one every item reads as never counted" still holds for products, and is still the
+honest display. It no longer holds for materials bought in after the upgrade: their first
+delivery dates them, so the never-counted list drains as stock arrives rather than needing
+a counting session to clear it.

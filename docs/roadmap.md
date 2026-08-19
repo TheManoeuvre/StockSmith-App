@@ -25,7 +25,8 @@ Written 2026-08-15, against 0.6.3.
 | Etsy + eBay sync, quantity push, cross-platform stock | Shipped — all 11 build-order steps ✅ | `plan-marketplace-integrations.md` |
 | Desktop packaging, updater, backup/restore | Shipped | `README.md`, `CHANGELOG.md` |
 | Draft listing creation (new product → marketplace) | **In flight** — PR #22 (stages 4, 5, 7) | PR #22 |
-| Stock take & ABC classification | **In flight** — Phase A built on `claude/stock-take-planning-ycowuy`, Phase B ahead | `plan-stock-take.md` (on that branch) |
+| Stock take & ABC classification | Shipped — both phases, plus grouped count sheets and made-to-order exclusion | `plan-stock-take.md` |
+| Receiving by line | Shipped — deliveries are their own records, dated and costed individually | `CHANGELOG.md` |
 | Backlog quick wins (CI, line endings, Build-now link) | **In flight** — PR #23 | `backlog.md` |
 | Always-on sync | **Next up** — tray chosen as first step; `plan-background-sync.md` now carries the build plan and the Windows 11 uptime design | `plan-background-sync.md` §6-8, `plan-always-on-sync.md` |
 | **New-user onboarding** | **Unplanned — this document is where it enters** | below |
@@ -38,7 +39,10 @@ Written 2026-08-15, against 0.6.3.
 
 **1. Land what's in flight.** Three parallel workstreams is already the ceiling. Nothing
 new should start against `platforms/`, `listing_*`, the products/materials schemas or the
-dashboard schema until PR #22, PR #23 and the stock-take branch are merged.
+dashboard schema until PR #22 and PR #23 are merged. The stock-take branch has landed,
+along with per-line receiving, which rewrote how material stock and cost are derived —
+anything touching `costing.py`'s replay or the on-order arithmetic should start from
+`services/purchase_sql.py` rather than reinventing a copy of it.
 
 **2. Always-on sync.** The one shipped-but-hollow capability: auto-sync exists and only
 runs while the window is open. `plan-background-sync.md` specifies the tray; the new
@@ -90,8 +94,7 @@ Findings from reading the code, not from assumption:
    components, general settings and backup settings (scheduling on by default). Not
    seeded, and all required before the app does anything useful: material types, colours,
    manufacturers, suppliers, shipping profiles, listing profiles, materials, products,
-   BOMs, the default kitting BOM — and, once the stock-take branch lands, product categories
-   and ABC tiers.
+   BOMs, the default kitting BOM, product categories and ABC tiers.
 
 3. **There is no guided path of any kind.** No wizard, no checklist, no sample data, no
    first-run tour. The empty state is a handful of "No backups yet"-style strings. A new

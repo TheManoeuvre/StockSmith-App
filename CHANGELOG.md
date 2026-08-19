@@ -64,6 +64,59 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 Counting is saved as you go, on the machine rather than in the window, so a stock take
 survives closing StockSmith and picks up where you left it.
 
+- **Count sheets are grouped the way your shelves are.** Products by category, then by their
+  parent SKU so a product's variations sit together, then materials by category and type.
+  Before this it was one long alphabetical list with every kind of thing mixed in, which
+  meant walking back and forth. The downloaded sheet is in the same order, and groups fold
+  away so you can work through one shelf at a time.
+- **Products that are made to order can be left out.** Tick "Made to Order" on a product and
+  it stops appearing on count sheets and on the list of things due for counting, for all of
+  its variations. There's nothing on a shelf to go and count, so there's no point being
+  asked.
+- **The first delivery of something new counts as having counted it.** Buy a material you've
+  never had before, receive it, and StockSmith takes the delivered quantity as verified — it
+  knew there were none, and now it knows exactly how many arrived. It won't do this for
+  something that merely ran out and was restocked: that zero was a belief, not a count, and
+  checking it is the whole point.
+
+- **Deliveries are recorded line by line, as they actually turn up.** A supplier who sends 6
+  of 10 now and the rest next month can be recorded that way instead of forcing a choice
+  between two wrong stock figures. "Record a delivery" on the purchase order lists what's
+  still outstanding, filled in with all of it, and you change only what differs.
+- **Split deliveries cost correctly.** Each delivery is priced at the date it arrived, so the
+  average cost of a material reflects when the stock actually landed rather than pretending
+  it all arrived at once. Leave the cost of a delivery blank and it takes its share of the
+  order line; fill it in when the supplier billed that delivery separately.
+- **A short delivery can be closed off.** When the rest of a line is never coming, close it:
+  it stops counting as on order and the purchase can complete, without rewriting what you
+  originally ordered. You're asked whether you were charged for the full quantity anyway.
+- **One delivery can be undone without undoing the order.** Each delivery is listed on the
+  purchase with its own Undo, so a mis-keyed figure doesn't mean reversing everything and
+  starting again.
+
+### Changed
+- **The Products list is grouped by category**, matching how the Materials list has always
+  worked, with a heading and a count for each. What was called a product "type" is now a
+  product "category" throughout, for the same reason — it was the same idea under two names.
+- **"On order" now means what's still to come**, not the whole order, everywhere it appears:
+  the materials list, buildability, packaging capacity and the stock forecast. A part-
+  delivered order used to be counted twice — once as stock on the shelf and again as
+  something still on its way.
+
+### Fixed
+- **A material's history now adds up to its stock figure.** Purchases were listed against the
+  date they were ordered, and orders that hadn't arrived were mixed in with things that had
+  actually moved stock, so the rows never summed to the quantity shown above them.
+  Deliveries and adjustments now account for it exactly, and what's still on order is shown
+  separately.
+- **Editing a purchase order no longer loses what's been received against it.** Saving any
+  change to a purchase — even just its notes — used to rebuild all of its lines from
+  scratch.
+
+**Before updating, take a backup** (Settings → Backups). This release rewrites how material
+stock and cost are stored, and although the upgrade is checked as it runs and was verified
+against a copy of a real database, a backup is the thing that makes it reversible.
+
 ## [0.7.0] - 2026-08-17
 
 StockSmith now keeps syncing after you close the window, and can start with Windows —
