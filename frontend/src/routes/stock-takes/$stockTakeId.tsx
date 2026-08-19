@@ -1,12 +1,13 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { stockTakesApi } from "../../api/stockTakes";
 import type { StockTakeDetail, StockTakeLine } from "../../api/types";
 import { ConfirmDialog } from "../../components/common/ConfirmDialog";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { SaveButton } from "../../components/common/SaveButton";
 import { StockTakeCsvPanel } from "../../components/stockTakes/StockTakeCsvPanel";
+import { countedInGroup, groupLabel, groupLines } from "../../components/stockTakes/groupLines";
 import { Tabs, type TabDef } from "../../components/common/Tabs";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
@@ -49,8 +50,14 @@ function StockTakeDetailPage() {
 
   const { data: take } = useQuery({ queryKey: ["stock-takes", id], queryFn: () => stockTakesApi.get(id) });
   const [confirmingApprove, setConfirmingApprove] = useState(false);
+  // Collapsed groups, by key. A two-hundred-line sheet is unusable as one list, and the
+  // point of grouping it is to be able to work through one shelf at a time.
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
 
   const seed = useMemo(() => toForm(take), [take]);
+  // The order is the server's — it arrives arranged, and re-sorting here would be a second
+  // opinion that could disagree with the CSV someone printed. This only finds the headings.
+  const groups = useMemo(() => groupLines(take?.lines ?? []), [take?.lines]);
   const {
     value: counts,
     setValue: setCounts,
@@ -149,9 +156,38 @@ function StockTakeDetailPage() {
                 </tr>
               </thead>
               <tbody>
-                {take.lines.map((line) => (
+                {groups.map((group) => {
+                  const isCollapsed = collapsed.has(group.key);
+                  const counted = countedInGroup(group, counts);
+                  return (
+                <Fragment key={group.key}>
+                  <tr className="border-b border-slate-200 bg-slate-50">
+                    <th colSpan={4} className="p-2 text-left font-medium">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setCollapsed((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(group.key)) next.delete(group.key);
+                            else next.add(group.key);
+                            return next;
+                          })
+                        }
+                        className="flex w-full items-center gap-2 text-left"
+                      >
+                        <span className="text-slate-400">{isCollapsed ? "▸" : "▾"}</span>
+                        <span className="text-xs uppercase tracking-wide text-slate-400">{group.section}</span>
+                        <span>{groupLabel(group)}</span>
+                        <span className="ml-auto text-xs font-normal text-slate-500">
+                          counted {counted} of {group.lines.length}
+                        </span>
+                      </button>
+                    </th>
+                  </tr>
+                  {!isCollapsed &&
+                    group.lines.map((line) => (
                   <tr key={line.id} className="border-b border-slate-100">
-                    <td className="p-2">{line.name}</td>
+                    <td className="p-2 pl-6">{line.name}</td>
                     <td className="p-2">
                       {roundQty(line.expected_qty)} {line.unit}
                       {/* The difference between a real variance and a shelf that only
@@ -175,7 +211,10 @@ function StockTakeDetailPage() {
                     </td>
                     <td className="p-2 text-xs text-slate-500">{statusLabel(line)}</td>
                   </tr>
-                ))}
+                    ))}
+                </Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -254,6 +293,8 @@ function ReviewTab({
   take: StockTakeDetail;
   onResolve: (lineId: number, action: "accept_counted" | "accept_system" | "reset") => void;
 }) {
+  // The conflict/non-conflict split comes first — a flagged line needs settling whatever
+  // shelf it came off — and the grouping applies within each half.
   const flagged = take.lines.filter((l) => l.status === "conflict");
   const rest = take.lines.filter((l) => l.status !== "conflict");
 
@@ -316,20 +357,32 @@ function ReviewTab({
               </tr>
             </thead>
             <tbody>
-              {rest.map((line) => {
-                const delta = line.delta === null ? null : Number(line.delta);
-                return (
-                  <tr key={line.id} className="border-b border-slate-100">
-                    <td className="p-2">{line.name}</td>
-                    <td className="p-2">{roundQty(line.expected_qty)}</td>
-                    <td className="p-2">{line.counted_qty === null ? "—" : roundQty(line.counted_qty)}</td>
-                    <td className={`p-2 ${delta ? "text-red-600" : ""}`}>
-                      {delta === null ? "—" : delta > 0 ? `+${roundQty(line.delta!)}` : roundQty(line.delta!)}
-                    </td>
-                    <td className="p-2 text-xs text-slate-500">{statusLabel(line)}</td>
+              {/* Same headings as the count sheet. Someone settling a variance is looking at
+                  the same shelves they just counted, so this reads in the same order. */}
+              {groupLines(rest).map((group) => (
+                <Fragment key={group.key}>
+                  <tr className="border-b border-slate-200 bg-slate-50">
+                    <th colSpan={5} className="p-2 text-left font-medium">
+                      <span className="mr-2 text-xs uppercase tracking-wide text-slate-400">{group.section}</span>
+                      {groupLabel(group)}
+                    </th>
                   </tr>
-                );
-              })}
+                  {group.lines.map((line) => {
+                    const delta = line.delta === null ? null : Number(line.delta);
+                    return (
+                      <tr key={line.id} className="border-b border-slate-100">
+                        <td className="p-2 pl-6">{line.name}</td>
+                        <td className="p-2">{roundQty(line.expected_qty)}</td>
+                        <td className="p-2">{line.counted_qty === null ? "—" : roundQty(line.counted_qty)}</td>
+                        <td className={`p-2 ${delta ? "text-red-600" : ""}`}>
+                          {delta === null ? "—" : delta > 0 ? `+${roundQty(line.delta!)}` : roundQty(line.delta!)}
+                        </td>
+                        <td className="p-2 text-xs text-slate-500">{statusLabel(line)}</td>
+                      </tr>
+                    );
+                  })}
+                </Fragment>
+              ))}
             </tbody>
           </table>
         </div>

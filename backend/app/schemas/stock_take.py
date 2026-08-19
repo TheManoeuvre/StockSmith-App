@@ -49,6 +49,12 @@ class StockTakeLineRead(BaseModel):
     variant_id: int | None
     name: str
     unit: str
+    # Where this line sits in the sheet: Products or Materials, then the category, then the
+    # parent SKU or material type. Resolved server-side so the count sheet, the CSV and the
+    # variances list cannot drift into three different arrangements.
+    section: str
+    group: str
+    subgroup: str
     expected_qty: Decimal
     # Finished-goods lines only: how much of expected_qty is picked for open orders and so
     # probably boxed rather than on the shelf.

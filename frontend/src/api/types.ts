@@ -127,6 +127,15 @@ export interface StockTakeLine {
   variant_id: number | null;
   name: string;
   unit: string;
+  /**
+   * Where this line sits in the sheet: "Products" or "Materials", then the category, then
+   * the parent SKU (products) or material type (materials). Resolved and ordered
+   * server-side, so the sheet on screen, the CSV and the standing-variances list cannot
+   * drift into three different arrangements.
+   */
+  section: string;
+  group: string;
+  subgroup: string;
   expected_qty: string;
   /** Finished stock only: how much of expected_qty is picked for open orders, and so
    * probably boxed rather than on the shelf. Null for materials. */

@@ -68,8 +68,8 @@ async def _name_lookups(session: AsyncSession, lines: list[StockTakeLine]) -> tu
     return materials, products, variants
 
 
-def _to_line_read(line: StockTakeLine, materials: dict, products: dict, variants: dict) -> StockTakeLineRead:
-    name, unit = stock_takes.line_display_name(line, materials, products, variants)
+def _to_line_read(grouped: stock_takes.GroupedLine) -> StockTakeLineRead:
+    line = grouped.line
     # Derived rather than stored so it can never disagree with the two numbers it comes
     # from; None when nothing was counted, which is not the same as a delta of zero.
     delta = None if line.counted_qty is None else Decimal(line.counted_qty) - Decimal(line.expected_qty)
@@ -78,8 +78,11 @@ def _to_line_read(line: StockTakeLine, materials: dict, products: dict, variants
         material_id=line.material_id,
         product_id=line.product_id,
         variant_id=line.variant_id,
-        name=name,
-        unit=unit,
+        name=grouped.name,
+        unit=grouped.unit,
+        section=grouped.section,
+        group=grouped.group,
+        subgroup=grouped.subgroup,
         expected_qty=Decimal(line.expected_qty),
         allocated_qty_at_start=(
             None if line.allocated_qty_at_start is None else Decimal(line.allocated_qty_at_start)
@@ -146,9 +149,13 @@ async def _read_take(session: AsyncSession, take: StockTake) -> StockTakeDetail:
         ).scalars()
     )
     materials, products, variants = await _name_lookups(session, lines)
+    # Arranged the way the stock is arranged, not the order the rows happen to have been
+    # created in. See services/stock_takes.group_lines — the CSV and the variances list go
+    # through the same call, which is the only reason all three agree.
+    grouped = stock_takes.group_lines(lines, materials, products, variants)
     return StockTakeDetail(
         **_take_fields(take, lines),
-        lines=[_to_line_read(line, materials, products, variants) for line in lines],
+        lines=[_to_line_read(g) for g in grouped],
     )
 
 
@@ -196,13 +203,16 @@ async def list_unresolved_variances(session: AsyncSession = Depends(get_db)) -> 
     rows = await stock_takes.unresolved_variances(session)
     lines = [line for line, _ in rows]
     materials, products, variants = await _name_lookups(session, lines)
+    # Same arrangement as the count sheet, through the same call. These are read while
+    # walking the same shelves, so they group the same way.
+    take_by_line = {line.id: take for line, take in rows}
     return [
         UnresolvedVariance(
-            line=_to_line_read(line, materials, products, variants),
-            stock_take_id=take.id,
-            stock_take_closed_at=take.closed_at,
+            line=_to_line_read(g),
+            stock_take_id=take_by_line[g.line.id].id,
+            stock_take_closed_at=take_by_line[g.line.id].closed_at,
         )
-        for line, take in rows
+        for g in stock_takes.group_lines(lines, materials, products, variants)
     ]
 
 

@@ -41,12 +41,18 @@ PRODUCTS_CSV_FIELDS = ["name", "sku", "description"]
 # both stable and unambiguous in a way a name isn't (two variants of one product differ
 # only by a suffix). item_type/item_id ride along as a cross-check so a file edited into
 # the wrong shape fails loudly rather than writing a count onto the wrong item.
+# section/group/subgroup replace what was a single `category` column. The sheet is printed
+# and carried around, so it has to show the same headings the screen does — one column
+# could only ever express one level of a three-level arrangement. Read-only either way:
+# import keys on line_id and ignores them.
 STOCK_TAKE_CSV_FIELDS = [
     "line_id",
     "item_type",
     "item_id",
+    "section",
+    "group",
+    "subgroup",
     "name",
-    "category",
     "unit",
     "expected_qty",
     "allocated_qty",
@@ -348,7 +354,7 @@ async def export_stock_take_csv(session: AsyncSession, stock_take_id: int) -> st
     count that only looks short.
     """
     from app.models.stock_take import StockTakeLine
-    from app.services.stock_takes import line_display_name
+    from app.services.stock_takes import group_lines
 
     lines = list(
         (
@@ -364,22 +370,21 @@ async def export_stock_take_csv(session: AsyncSession, stock_take_id: int) -> st
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=STOCK_TAKE_CSV_FIELDS)
     writer.writeheader()
-    for line in lines:
-        name, unit = line_display_name(line, materials, products, variants)
-        if line.material_id is not None:
-            material = materials.get(line.material_id)
-            category = material.category.value if material else ""
-        else:
-            product = products.get(line.product_id)
-            category = (product.product_category_name or "") if product else ""
+    # Rows come out in the same order the count sheet shows them — this is the copy that
+    # gets printed and walked around with, so it is the one that most needs to match the
+    # shelves. Same call as the screen, so the two cannot drift apart.
+    for grouped in group_lines(lines, materials, products, variants):
+        line = grouped.line
         writer.writerow(
             {
                 "line_id": line.id,
                 "item_type": "material" if line.material_id else "product",
                 "item_id": line.material_id or line.product_id,
-                "name": name,
-                "category": category,
-                "unit": unit,
+                "section": grouped.section,
+                "group": grouped.group,
+                "subgroup": grouped.subgroup,
+                "name": grouped.name,
+                "unit": grouped.unit,
                 "expected_qty": str(line.expected_qty),
                 "allocated_qty": "" if line.allocated_qty_at_start is None else str(line.allocated_qty_at_start),
                 "counted_qty": "" if line.counted_qty is None else str(line.counted_qty),

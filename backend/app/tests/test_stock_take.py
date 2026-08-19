@@ -543,3 +543,85 @@ async def test_made_to_order_products_are_not_offered_for_counting(session):
     )
 
     assert [c.name for c in candidates] == ["Held Product"]
+
+
+async def test_the_sheet_is_arranged_the_way_the_stock_is(session):
+    """Products by category then parent SKU then variant; materials by category then type.
+
+    Counting is walking, and a flat alphabetical list interleaves every category of
+    material and separates a product from its own variants. The order is asserted whole
+    here because it is the feature — the three read paths (count sheet, CSV, standing
+    variances) all come through group_lines precisely so they cannot drift apart.
+    """
+    from app.models.material import Material, MaterialCategory, MaterialUnit
+    from app.models.material_type import MaterialType
+    from app.models.product import Product
+    from app.models.product_category import ProductCategory
+    from app.models.variant import ProductVariant
+    from app.schemas.stock_take import StockTakeScope
+    from app.services.stock_takes import create_stock_take, group_lines
+
+    session.add(GeneralSettings(id=1))
+    coasters = ProductCategory(name="Coaster")
+    keyrings = ProductCategory(name="Keyring")
+    pla = MaterialType(name="PLA")
+    petg = MaterialType(name="PETG")
+    session.add_all([coasters, keyrings, pla, petg])
+    await session.flush()
+
+    # Deliberately created in an order that is neither alphabetical nor grouped, so a pass
+    # that leaned on row ids would come out looking like this input rather than the sheet.
+    boxes = Material(name="Boxes", category=MaterialCategory.packaging, unit=MaterialUnit.each)
+    black = Material(name="Black", category=MaterialCategory.filament, unit=MaterialUnit.g, material_type_id=pla.id)
+    clear = Material(name="Clear", category=MaterialCategory.filament, unit=MaterialUnit.g, material_type_id=petg.id)
+    session.add_all([boxes, black, clear])
+    keyring = Product(name="Round Keyring", sku="KEY-1", product_category_id=keyrings.id, current_stock=0)
+    coaster = Product(name="Slate Coaster", sku="COA-1", product_category_id=coasters.id, current_stock=0)
+    session.add_all([keyring, coaster])
+    await session.flush()
+    session.add_all(
+        [
+            ProductVariant(product_id=coaster.id, variant_name="Square", is_active=True),
+            ProductVariant(product_id=coaster.id, variant_name="Round", is_active=True),
+        ]
+    )
+    await session.commit()
+
+    take, _ = await create_stock_take(
+        session, StockTakeScope(include_materials=True, include_products=True)
+    )
+    lines = await _lines_of(session, take.id)
+    materials, products, variants = await _lookups_for(session, lines)
+
+    grouped = group_lines(lines, materials, products, variants)
+
+    assert [(g.section, g.group, g.subgroup, g.name) for g in grouped] == [
+        # Products first. Coaster before Keyring by category; the coaster's variants sit
+        # together under its parent SKU, alphabetically.
+        ("Products", "Coaster", "COA-1", "Slate Coaster — Round"),
+        ("Products", "Coaster", "COA-1", "Slate Coaster — Square"),
+        ("Products", "Keyring", "KEY-1", "Round Keyring"),
+        # Then materials, in the category order the materials list has always used —
+        # filament before packaging, not alphabetical. PETG before PLA within filament.
+        ("Materials", "filament", "PETG", "Clear"),
+        ("Materials", "filament", "PLA", "Black"),
+        ("Materials", "packaging", "", "Boxes"),
+    ]
+
+
+async def _lines_of(session, take_id):
+    from app.models.stock_take import StockTakeLine
+
+    return list(
+        (
+            await session.execute(
+                select(StockTakeLine).where(StockTakeLine.stock_take_id == take_id).order_by(StockTakeLine.id)
+            )
+        ).scalars()
+    )
+
+
+async def _lookups_for(session, lines):
+    from app.services.csv_io import _stock_take_lookups
+
+    return await _stock_take_lookups(session, lines)

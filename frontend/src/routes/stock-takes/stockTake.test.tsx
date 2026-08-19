@@ -25,6 +25,9 @@ function line(overrides: Record<string, unknown> = {}) {
     variant_id: null,
     name: "Grey Resin",
     unit: "ml",
+    section: "Materials",
+    group: "resin",
+    subgroup: "",
     expected_qty: "10.0000",
     allocated_qty_at_start: null,
     counted_qty: null,
@@ -218,5 +221,41 @@ describe("CSV import confirmation", () => {
     await user.click(dialog.getByRole("button", { name: "Cancel" }));
 
     expect(fetchCalls).toHaveLength(1);
+  });
+});
+
+describe("grouping", () => {
+  it("puts a heading above each group, and hides its rows when collapsed", async () => {
+    const user = userEvent.setup();
+    setRoutes([
+      ...baseRoutes().filter((r) => r.path !== "/stock-takes/1"),
+      {
+        method: "GET" as const,
+        path: "/stock-takes/1",
+        respond: () =>
+          take([
+            line({ id: 1, material_id: null, product_id: 5, name: "Slate Coaster — Round", unit: "each",
+                   section: "Products", group: "Coaster", subgroup: "COA-1" }),
+            line({ id: 2, material_id: null, product_id: 5, name: "Slate Coaster — Square", unit: "each",
+                   section: "Products", group: "Coaster", subgroup: "COA-1" }),
+            line({ id: 3, name: "Grey Resin", section: "Materials", group: "resin", subgroup: "" }),
+          ]),
+      },
+    ]);
+
+    await renderAt("/stock-takes/1");
+
+    // The parent SKU is what a coaster's variants group under; a material with no type
+    // says so rather than showing an empty heading.
+    expect(screen.getByText("Coaster · COA-1")).toBeInTheDocument();
+    expect(screen.getByText("resin")).toBeInTheDocument();
+    expect(screen.getByText("counted 0 of 2")).toBeInTheDocument();
+    expect(screen.getByText("Slate Coaster — Round")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Coaster · COA-1/ }));
+
+    // Collapsing is what makes a two-hundred-line sheet workable one shelf at a time.
+    expect(screen.queryByText("Slate Coaster — Round")).not.toBeInTheDocument();
+    expect(screen.getByText("Grey Resin")).toBeInTheDocument();
   });
 });
