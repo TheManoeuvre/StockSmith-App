@@ -38,7 +38,7 @@ from app.models.pricing import ProductPriceSnapshot
 from app.models.product import Product, ProductBundleItem, ProductMaterial
 from app.models.product_stock_event import ProductStockEvent, ProductStockEventType
 from app.models.product_category import ProductCategory
-from app.models.purchase import MaterialPurchase, Purchase, PurchaseStatus
+from app.models.purchase import MaterialPurchase, MaterialPurchaseReceipt, Purchase, PurchaseStatus
 from app.models.shipping_profile import ShippingProfile
 from app.models.sku_alias import SkuAlias
 from app.models.stock_adjustment import StockAdjustment, StockAdjustmentMode
@@ -71,6 +71,7 @@ __all__ = [
     "Purchase",
     "PurchaseStatus",
     "MaterialPurchase",
+    "MaterialPurchaseReceipt",
     "Product",
     "ProductMaterial",
     "ProductBundleItem",
