@@ -14,7 +14,17 @@ on:
   # Manual re-run for a tag whose build failed, or never fired: without this the only
   # way to retry is to delete and re-push the tag, which rewrites a release marker to
   # work around a CI problem.
+  #
+  # The version input also makes a release possible without pushing a tag at all, which
+  # is what a Claude Code cloud session needs: its git proxy permits pushes only to the
+  # session's working branch, so `git push origin v1.2.3` is refused outright while
+  # dispatching this workflow through the API is not.
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. v0.7.1. Leave blank when re-running a tag build."
+        required: false
+        type: string
 
 permissions:
   contents: write
@@ -24,6 +34,34 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
+
+      # Which version is being released. A tag push reads it from the tag; a manual run has
+      # to say so explicitly, because github.ref_name is then the *branch* name — dispatching
+      # from main without this produced a release tagged "main" carrying fallback notes.
+      #
+      # Read through env rather than interpolated into the script body: a ${{ }} expression
+      # holding user input is executed as source, which is the standard Actions script
+      # injection. Through env it is only ever data.
+      - name: Resolve and check the version
+        id: version
+        shell: pwsh
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $version = if ($env:INPUT_VERSION) { $env:INPUT_VERSION } else { $env:REF_NAME }
+          if ($version -notmatch '^v\d+\.\d+\.\d+$') {
+            throw "Version must look like v1.2.3, got '$version'. A manual run needs the version input."
+          }
+          # The installer takes its version from tauri.conf.json, never from the tag, so a
+          # mismatch ships a build whose version disagrees with the release holding it — and
+          # the updater compares exactly those. Catches a mistyped input and a forgotten bump
+          # alike, in seconds, rather than after a full signed build.
+          $configured = (Get-Content frontend/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          if ($version -ne "v$configured") {
+            throw "Releasing $version but frontend/src-tauri/tauri.conf.json says $configured."
+          }
+          "value=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - uses: dtolnay/rust-toolchain@stable
 
@@ -60,7 +98,7 @@ jobs:
         id: notes
         shell: pwsh
         run: |
-          $notes = ./scripts/Get-ReleaseNotes.ps1 -Version "${{ github.ref_name }}"
+          $notes = ./scripts/Get-ReleaseNotes.ps1 -Version "${{ steps.version.outputs.value }}"
           "notes<<CHANGELOG_EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           $notes | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "CHANGELOG_EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
@@ -72,7 +110,7 @@ jobs:
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: frontend
-          tagName: ${{ github.ref_name }}
+          tagName: ${{ steps.version.outputs.value }}
           releaseName: "StockSmith v__VERSION__"
           releaseBody: ${{ steps.notes.outputs.notes }}
           releaseDraft: true
