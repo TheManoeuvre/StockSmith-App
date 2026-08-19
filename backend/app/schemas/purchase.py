@@ -8,6 +8,10 @@ from app.models.purchase import PurchaseStatus
 
 
 class PurchaseLineInput(BaseModel):
+    # Present for a line that already exists, absent for one being added. PUT /lines is an
+    # upsert keyed on this, not the delete-and-reinsert it used to be — line identity has to
+    # survive an edit now that receipts hang off it.
+    id: int | None = None
     material_id: int
     qty: Decimal
     total_cost: Decimal
@@ -29,6 +33,40 @@ class PurchaseUpdate(BaseModel):
     notes: str | None = None
 
 
+class PurchaseReceiptRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    purchase_line_id: int
+    qty: Decimal
+    # NULL means this delivery took its pro-rata share of the line total rather than being
+    # billed separately — see services/costing.py for how the share is worked out.
+    total_cost: Decimal | None
+    received_at: datetime
+    notes: str | None = None
+    batch_id: str | None = None
+
+
+class PurchaseReceiptLineInput(BaseModel):
+    line_id: int
+    qty: Decimal
+    total_cost: Decimal | None = None
+
+
+class PurchaseReceiptsCreate(BaseModel):
+    """One delivery, covering however many lines of the order turned up in it."""
+
+    received_at: datetime | None = None
+    notes: str | None = None
+    lines: list[PurchaseReceiptLineInput]
+
+
+class PurchaseLineCloseInput(BaseModel):
+    # True when the supplier billed for the whole line but shipped short, so the goods that
+    # did arrive should carry the full charge.
+    apportion_remainder: bool = False
+
+
 class PurchaseLineRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -38,6 +76,10 @@ class PurchaseLineRead(BaseModel):
     qty: Decimal
     total_cost: Decimal
     notes: str | None = None
+    closed_at: datetime | None = None
+    received_qty: Decimal = Decimal(0)
+    outstanding_qty: Decimal = Decimal(0)
+    receipts: list[PurchaseReceiptRead] = []
 
 
 class MaterialStockHistoryRead(BaseModel):
@@ -46,7 +88,7 @@ class MaterialStockHistoryRead(BaseModel):
     chronologically. Used by GET /materials/{id}/stock-history."""
 
     id: int
-    kind: Literal["purchase", "adjustment"]
+    kind: Literal["purchase", "purchase_outstanding", "adjustment"]
     at: datetime
     qty: Decimal
     total_cost: Decimal | None

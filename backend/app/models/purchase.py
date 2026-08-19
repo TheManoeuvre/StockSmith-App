@@ -1,5 +1,6 @@
 import enum
 from datetime import date, datetime
+from decimal import Decimal
 
 from sqlalchemy import CheckConstraint, Date, DateTime, ForeignKey, Index, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -92,6 +93,21 @@ class MaterialPurchase(Base):
     receipts: Mapped[list["MaterialPurchaseReceipt"]] = relationship(
         back_populates="line", cascade="all, delete-orphan", order_by="MaterialPurchaseReceipt.id"
     )
+
+    # Both read `receipts`, so both need it loaded — every read path selectinloads it. They
+    # live here rather than in services/purchase_receipts.py so PurchaseLineRead can pick
+    # them up straight off the attribute, the same way supplier_name works on Purchase.
+    @property
+    def received_qty(self) -> Decimal:
+        return sum((Decimal(r.qty) for r in self.receipts), Decimal(0))
+
+    @property
+    def outstanding_qty(self) -> Decimal:
+        """What is still to come. Zero once the line is closed, whatever went undelivered."""
+        if self.closed_at is not None:
+            return Decimal(0)
+        remaining = Decimal(self.qty) - self.received_qty
+        return remaining if remaining > 0 else Decimal(0)
 
 
 class MaterialPurchaseReceipt(Base):
