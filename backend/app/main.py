@@ -22,7 +22,7 @@ from app.routers import (
     orders,
     platform_config,
     platforms,
-    product_types,
+    product_categories,
     products,
     purchases,
     restore,
@@ -124,7 +124,7 @@ app.include_router(materials.router, prefix="/api/v1")
 app.include_router(material_types.router, prefix="/api/v1")
 app.include_router(colours.router, prefix="/api/v1")
 app.include_router(products.router, prefix="/api/v1")
-app.include_router(product_types.router, prefix="/api/v1")
+app.include_router(product_categories.router, prefix="/api/v1")
 app.include_router(variants.router, prefix="/api/v1")
 app.include_router(assets.router, prefix="/api/v1")
 app.include_router(purchases.router, prefix="/api/v1")

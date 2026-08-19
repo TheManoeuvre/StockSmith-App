@@ -86,18 +86,18 @@ _MAIN_IMAGE_ASSET_ID_BY_PRODUCT_SQL = text(
 
 
 async def _get_product_with_type(session: AsyncSession, product_id: int) -> Product:
-    """Re-fetch with product_type loaded, mirroring materials' _get_material_with_manufacturer.
+    """Re-fetch with product_category loaded, mirroring materials' _get_material_with_manufacturer.
 
-    ProductRead exposes product_type_name, and reading it off an unloaded relationship
+    ProductRead exposes product_category_name, and reading it off an unloaded relationship
     during response serialization raises MissingGreenlet rather than lazy-loading
-    (services/allocation.py:19-24). A plain session.refresh(product, ["product_type"])
+    (services/allocation.py:19-24). A plain session.refresh(product, ["product_category"])
     isn't enough either: commit expires every attribute, and naming one leaves the rest
     expired to fail the same way on the next field.
     """
     result = await session.execute(
         select(Product)
         .where(Product.id == product_id)
-        .options(selectinload(Product.product_type))
+        .options(selectinload(Product.product_category))
         .execution_options(populate_existing=True)
     )
     product = result.scalar_one_or_none()
@@ -221,16 +221,16 @@ async def list_products(
     # Filtering server-side rather than in the client, because this list is paginated: a
     # client-side filter would only ever narrow the current page, and the total under it
     # would be wrong. Mirrors materials' ?material_type_id=.
-    product_type_id: int | None = None,
+    product_category_id: int | None = None,
     session: AsyncSession = Depends(get_db),
 ) -> ProductPage:
     count_query = select(func.count()).select_from(Product)
-    query = select(Product).options(selectinload(Product.product_type))
-    if product_type_id is not None:
-        count_query = count_query.where(Product.product_type_id == product_type_id)
-        query = query.where(Product.product_type_id == product_type_id)
+    query = select(Product).options(selectinload(Product.product_category))
+    if product_category_id is not None:
+        count_query = count_query.where(Product.product_category_id == product_category_id)
+        query = query.where(Product.product_category_id == product_category_id)
     total = await session.scalar(count_query)
-    # selectinload rather than letting product_type_name touch the relationship lazily —
+    # selectinload rather than letting product_category_name touch the relationship lazily —
     # a lazy load in async raises MissingGreenlet (services/allocation.py:19-24).
     result = await session.execute(query.order_by(Product.name).limit(limit).offset(offset))
     products = list(result.scalars())

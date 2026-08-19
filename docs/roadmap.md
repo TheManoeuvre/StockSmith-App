@@ -90,7 +90,7 @@ Findings from reading the code, not from assumption:
    components, general settings and backup settings (scheduling on by default). Not
    seeded, and all required before the app does anything useful: material types, colours,
    manufacturers, suppliers, shipping profiles, listing profiles, materials, products,
-   BOMs, the default kitting BOM — and, once the stock-take branch lands, product types
+   BOMs, the default kitting BOM — and, once the stock-take branch lands, product categories
    and ABC tiers.
 
 3. **There is no guided path of any kind.** No wizard, no checklist, no sample data, no

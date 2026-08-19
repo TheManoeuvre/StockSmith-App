@@ -31,7 +31,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db import async_session_factory
 from app.models.material import Material, MaterialAdjustmentMode
 from app.models.product import Product
-from app.models.product_type import ProductType
+from app.models.product_category import ProductCategory
 from app.models.stock_adjustment import StockAdjustmentMode
 from app.models.stock_take import StockTake, StockTakeLine, StockTakeLineStatus, StockTakeStatus
 from app.models.variant import ProductVariant
@@ -93,8 +93,8 @@ async def _product_candidates(session: AsyncSession, scope: StockTakeScope, due_
         .where(Product.is_active.is_(True), Product.is_bundle.is_(False))
         .order_by(Product.name)
     )
-    if scope.product_type_ids:
-        query = query.where(Product.product_type_id.in_(scope.product_type_ids))
+    if scope.product_category_ids:
+        query = query.where(Product.product_category_id.in_(scope.product_category_ids))
     products = list((await session.execute(query)).scalars())
     if not products:
         return []
@@ -171,9 +171,9 @@ async def describe_scope(session: AsyncSession, scope: StockTakeScope) -> str:
         else:
             parts.append("all materials")
     if scope.include_products:
-        if scope.product_type_ids:
+        if scope.product_category_ids:
             names = (
-                await session.execute(select(ProductType.name).where(ProductType.id.in_(scope.product_type_ids)))
+                await session.execute(select(ProductCategory.name).where(ProductCategory.id.in_(scope.product_category_ids)))
             ).scalars()
             listed = ", ".join(sorted(names))
             parts.append(f"products of type {listed}" if listed else "products of a since-deleted type")

@@ -61,7 +61,7 @@ function baseRoutes(detail = take()) {
   return [
     { method: "GET" as const, path: "/stock-takes/1", respond: () => detail },
     { method: "GET" as const, path: "/stock-takes", respond: () => [] },
-    { method: "GET" as const, path: "/product-types", respond: () => [] },
+    { method: "GET" as const, path: "/product-categories", respond: () => [] },
     { method: "GET" as const, path: "/dashboard/summary", respond: () => ({}) },
     { method: "PUT" as const, path: "/stock-takes/1/lines", respond: () => detail },
     { method: "GET" as const, path: "/system/status", respond: () => ({ status: "ok" }) },

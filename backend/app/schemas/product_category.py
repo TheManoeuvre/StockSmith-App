@@ -3,23 +3,23 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict
 
 
-class ProductTypeBase(BaseModel):
+class ProductCategoryBase(BaseModel):
     name: str
 
 
-class ProductTypeCreate(ProductTypeBase):
+class ProductCategoryCreate(ProductCategoryBase):
     pass
 
 
-class ProductTypeFindOrCreate(BaseModel):
+class ProductCategoryFindOrCreate(BaseModel):
     name: str
 
 
-class ProductTypeUpdate(BaseModel):
+class ProductCategoryUpdate(BaseModel):
     name: str
 
 
-class ProductTypeRead(ProductTypeBase):
+class ProductCategoryRead(ProductCategoryBase):
     model_config = ConfigDict(from_attributes=True)
 
     id: int

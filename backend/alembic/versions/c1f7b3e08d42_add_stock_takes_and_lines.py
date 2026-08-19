@@ -120,7 +120,7 @@ def upgrade() -> None:
     op.create_index('ix_stock_take_lines_status', 'stock_take_lines', ['status'])
 
     # batch_alter_table because each add carries a foreign key, and SQLite has no ADD
-    # CONSTRAINT — the same reason a7c3e1f09b52 needed it for products.product_type_id.
+    # CONSTRAINT — the same reason a7c3e1f09b52 needed it for products.product_category_id.
     for table in ('materials', 'products', 'product_variants'):
         with op.batch_alter_table(table) as batch:
             batch.add_column(

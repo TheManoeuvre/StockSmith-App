@@ -22,10 +22,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   every month, packaging every three — and everything in it follows. Anything unusual can be
   set on its own and overrides the group. Each item's page says which of the two it's
   currently getting, so it's clear where to go and change it.
-- **Products can have a type.** Keyring, coaster, whatever you sell — products had no way of
-  being grouped before, only a name and a SKU. Set one on the product page or manage the list
-  under Settings > Reference data; the Products list gains a column and a filter for it.
-  Types are also what lets products be scheduled for counting by group.
+- **Products can have a category.** Keyring, coaster, whatever you sell — products had no way
+  of being grouped before, only a name and a SKU. Set one on the product page or manage the
+  list under Settings > Reference data; the Products list now groups by it, the same way the
+  Materials list always has. Categories are also what lets products be scheduled for counting
+  by group.
 - Sensible counting intervals are set up already (30, 60 and 90 days by tier) so this is
   useful without configuring anything first. Change any of them under Settings > General.
 - **Counting something by hand already counts.** Use "Set exact amount" on a material or

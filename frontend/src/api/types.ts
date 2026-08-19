@@ -69,7 +69,7 @@ export interface MaterialType {
   created_at: string;
 }
 
-export interface ProductType {
+export interface ProductCategory {
   id: number;
   name: string;
   /** How many records reference this. Computed per request — see the backend's list_with_usage. */
@@ -83,7 +83,7 @@ export type ABCClass = "A" | "B" | "C";
  * An item's effective stock-take tier and cadence, with where each came from.
  *
  * `class_source`/`interval_source` are "item" (set on this item), "group" (from its
- * category or product type) or "default" (the shop-wide baseline / shipped cadence).
+ * category or product category) or "default" (the shop-wide baseline / shipped cadence).
  * Resolved server-side deliberately — see the backend's services/abc.py, which is the only
  * place the fallback order lives.
  */
@@ -173,7 +173,7 @@ export interface StockTakeScope {
   include_materials: boolean;
   include_products: boolean;
   material_categories: MaterialCategory[];
-  product_type_ids: number[];
+  product_category_ids: number[];
   overdue_only: boolean;
 }
 
@@ -226,7 +226,7 @@ export interface StockCountSettings {
   material_tier_intervals: TierInterval[];
   product_tier_intervals: TierInterval[];
   category_tiers: { category: MaterialCategory; abc_class: ABCClass }[];
-  product_type_tiers: { product_type_id: number; abc_class: ABCClass }[];
+  product_category_tiers: { product_category_id: number; abc_class: ABCClass }[];
 }
 
 export type PurchaseStatus = "ordered" | "received";
@@ -306,8 +306,8 @@ export interface Product {
   effective_platform_fee_percent: string | null;
   pricing_mode: PricingMode;
   pricing_variable_attribute: number | null;
-  product_type_id: number | null;
-  product_type_name: string | null;
+  product_category_id: number | null;
+  product_category_name: string | null;
   abc_class: ABCClass | null;
   stock_take_interval_days: number | null;
   last_stock_take_at: string | null;

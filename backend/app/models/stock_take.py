@@ -64,7 +64,7 @@ class StockTake(Base):
     overdue_only: Mapped[bool] = mapped_column(default=False, nullable=False)
     # Rendered once at creation ("Materials in resin, filament") rather than recomputed on
     # read. The scope inputs that produced it can be edited or deleted afterwards — a
-    # product type can be renamed or merged away — and the log should still say what was
+    # product category can be renamed or merged away — and the log should still say what was
     # actually counted at the time.
     scope_description: Mapped[str] = mapped_column(String, nullable=False, default="")
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

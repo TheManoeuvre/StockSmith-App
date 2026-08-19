@@ -39,7 +39,7 @@ source, not assumed.
 | Whole-number qty validation for `each` units | `validate_qty_for_unit` | `backend/app/services/validation.py:10` |
 | CSV export/import conventions | `csv.DictWriter`/`DictReader`, `utf-8-sig`, `enumerate(reader, start=2)`, `{created, updated, failed:[{row,error}]}` | `backend/app/services/csv_io.py` |
 | CSV transport | `downloadCsv`, `uploadCsv`, `CsvImportResult` | `frontend/src/api/client.ts:140-170` |
-| Reference-table CRUD (for product types) | `_reference_crud.py` list-with-usage / patch / delete-if-unused / merge, plus `services/reference_data.py` | `backend/app/routers/_reference_crud.py` |
+| Reference-table CRUD (for product categories) | `_reference_crud.py` list-with-usage / patch / delete-if-unused / merge, plus `services/reference_data.py` | `backend/app/routers/_reference_crud.py` |
 | Two-step preview→apply UI | `BulkBomAmendModal` — one endpoint, `mutate(apply: boolean)` | `frontend/src/components/products/BulkBomAmendModal.tsx` |
 | Sparse-override settings pattern | `platform_field_limits` — ships empty, code defaults win unless overridden | `backend/app/services/platform_limits.py` |
 | "Needs attention" surface | `DashboardSummary` + conditional sections | `backend/app/schemas/dashboard.py:61`, `frontend/src/routes/index.tsx` |
@@ -138,8 +138,8 @@ stand as recorded.
 
 ### Data model
 
-**New: `product_types`** — mirrors `material_types` exactly (`id`, `name` unique,
-`created_at`), plus `products.product_type_id` FK `ON DELETE SET NULL`. Products have no
+**New: `product_categories`** — mirrors `material_types` exactly (`id`, `name` unique,
+`created_at`), plus `products.product_category_id` FK `ON DELETE SET NULL`. Products have no
 type or category today; this gives them one, used by both the ABC Type tier and the
 stock-take scope filter.
 
@@ -156,7 +156,7 @@ exist yet. Phase B adds it as a nullable FK alongside.
 assigned):
 
 - `material_category_abc` — `category` (the `MaterialCategory` enum, PK) → `abc_class`.
-- `product_type_abc` — `product_type_id` (PK, FK CASCADE) → `abc_class`.
+- `product_category_abc` — `product_category_id` (PK, FK CASCADE) → `abc_class`.
 
 **New: `abc_tier_settings`** — sparse cadence overrides: `scope` (`material`/`product`),
 `tier` (`A`/`B`/`C`), `interval_days`. Unique on `(scope, tier)`. **Ships empty**; code
@@ -178,7 +178,7 @@ resolve_abc_class(material) = material.abc_class
                            ?? settings.default_material_abc_class
 
 resolve_abc_class(product)  = product.abc_class
-                           ?? product_type_abc[product.product_type_id]
+                           ?? product_category_abc[product.product_category_id]
                            ?? settings.default_product_abc_class
 
 resolve_interval_days(item) = item.stock_take_interval_days
@@ -206,27 +206,27 @@ Phase A adds one route; declare literal segments before any `/{id}` route added 
 
 - `GET /api/v1/stock-takes/overdue` → `list[DueForCountItem]`
 
-New `routers/product_types.py`, copied from `routers/material_types.py` (list /
+New `routers/product_categories.py`, copied from `routers/material_types.py` (list /
 create / find-or-create / patch / delete / merge, all delegating to `_reference_crud.py`).
 
 Extend `routers/fee_config.py` (which owns the `/settings` prefix):
 `GET|PUT /settings/stock-count-settings` — baseline classes, the three interval
-overrides per scope, and the category/product-type tier assignments, in one payload.
+overrides per scope, and the category/product-category tier assignments, in one payload.
 
 Extend `DashboardSummary` with `items_due_for_count: list[DueForCountItem]`.
 
 ### UI
 
-- **Settings → Reference tab**: add a Product Types table via the existing
+- **Settings → Reference tab**: add a Product Categories table via the existing
   `ReferenceDataTable` (`frontend/src/components/reference/`).
 - **Settings → General tab**: a `StockCountSettings` panel modelled on
   `components/settings/ForecastSettings.tsx` — two baseline selects, six interval
-  inputs, and tier assignment for the seven material categories and each product type.
+  inputs, and tier assignment for the seven material categories and each product category.
 - **Product detail** (`routes/products/$productId.tsx`) and **material detail**
   (`routes/materials/$materialId.tsx`): an ABC class select, an interval override input,
   and a read-only "Last counted" line showing the resolved tier and effective interval,
   so it's clear which level a value came from.
-- **Products list**: a product-type column and filter, matching the materials list's
+- **Products list**: a product-category column and filter, matching the materials list's
   category filter.
 - **Dashboard**: a "Due for counting" section following the existing conditional-section
   pattern, linking to the (Phase B) scope picker with `overdue_only` preselected.
@@ -466,7 +466,7 @@ row — check it still fits the 800×600 default window).
 - **`routes/stock-takes/index.tsx`** — list of takes with an "open X days" indicator, plus
   the scope picker as an expand-in-place form (the materials list's "Add material"
   pattern, not a modal): materials/products checkboxes, `Set<MaterialCategory>` category
-  checkboxes copied from `routes/materials/index.tsx:63`, product-type multi-select,
+  checkboxes copied from `routes/materials/index.tsx:63`, product-category multi-select,
   "overdue only". Live candidate count and soft-lock warnings via `preview-scope`.
 - **`routes/stock-takes/$stockTakeId.tsx`** — `?tab=count|review` via `validateSearch`, so
   tab switches are real navigations the unsaved-changes blocker can intercept (the
@@ -495,13 +495,13 @@ row — check it still fits the 800×600 default window).
 ## Build order
 
 **Phase A — shipped**
-1. ✅ Migration: `product_types` + `products.product_type_id`; `abc_class` /
+1. ✅ Migration: `product_categories` + `products.product_category_id`; `abc_class` /
    `stock_take_interval_days` / `last_stock_take_at` columns; `material_category_abc`,
-   `product_type_abc`, `abc_tier_settings`; two `general_settings` columns.
+   `product_category_abc`, `abc_tier_settings`; two `general_settings` columns.
 2. ✅ `services/abc.py` — resolution + batch forms + `compute_due_for_count`.
-3. ✅ `routers/product_types.py` + schemas, via `_reference_crud.py`.
+3. ✅ `routers/product_categories.py` + schemas, via `_reference_crud.py`.
 4. ✅ `/settings/stock-count-settings` and `/stock-takes/overdue`; `DashboardSummary` field.
-5. ✅ Frontend: Product Types reference table, `StockCountSettings` panel, detail-page
+5. ✅ Frontend: Product Categories reference table, `StockCountSettings` panel, detail-page
    fields, products-list type column/filter, Dashboard section.
 
 **Phase A.1**

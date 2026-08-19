@@ -11,11 +11,11 @@ from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select
 
-from app.models.abc_classification import ABCClass, ABCScope, ABCTierSetting, ProductTypeABC
+from app.models.abc_classification import ABCClass, ABCScope, ABCTierSetting, ProductCategoryABC
 from app.models.general_settings import GeneralSettings
 from app.models.material import Material, MaterialCategory, MaterialCategoryABC, MaterialUnit
 from app.models.product import Product, ProductBundleItem
-from app.models.product_type import ProductType
+from app.models.product_category import ProductCategory
 from app.models.variant import ProductVariant
 from app.routers.materials import list_materials
 from app.routers.products import create_product, get_product, update_product
@@ -80,12 +80,12 @@ async def test_material_tier_falls_through_all_three_levels(session):
 async def test_product_tier_falls_through_all_three_levels(session):
     """The same precedence as materials — the symmetry the brief assumed, asserted."""
     await _settings(session, default_product_abc_class=ABCClass.C)
-    ptype = ProductType(name="Coaster")
+    ptype = ProductCategory(name="Coaster")
     session.add(ptype)
     await session.flush()
-    session.add(ProductTypeABC(product_type_id=ptype.id, abc_class=ABCClass.B))
-    own = await _product(session, "Own", abc_class=ABCClass.A, product_type_id=ptype.id)
-    by_type = await _product(session, "ByType", product_type_id=ptype.id)
+    session.add(ProductCategoryABC(product_category_id=ptype.id, abc_class=ABCClass.B))
+    own = await _product(session, "Own", abc_class=ABCClass.A, product_category_id=ptype.id)
+    by_type = await _product(session, "ByType", product_category_id=ptype.id)
     by_default = await _product(session, "ByDefault")
     await session.commit()
 
@@ -292,33 +292,33 @@ async def test_variants_inherit_the_products_tier_and_cadence_but_own_their_date
 
 
 async def test_creating_and_updating_a_product_returns_a_serializable_read(session, session_factory):
-    """ProductRead exposes product_type_name, which reads through a relationship. If the
+    """ProductRead exposes product_category_name, which reads through a relationship. If the
     handler hands back a product without it loaded, serialization raises MissingGreenlet
     instead of lazy-loading — a failure that only shows up over HTTP, which is how it got
     past a green suite the first time.
 
     Each handler runs on its own fresh session, the way a request does. That detail is the
-    test: reusing the session that created the ProductType lets the lazy load be answered
+    test: reusing the session that created the ProductCategory lets the lazy load be answered
     from the identity map with no IO, so the bug hides and the test passes either way.
     """
     await _settings(session)
-    ptype = ProductType(name="Coaster")
+    ptype = ProductCategory(name="Coaster")
     session.add(ptype)
     await session.commit()
     await session.refresh(ptype)
 
     async with session_factory() as fresh:
-        created = await create_product(ProductCreate(name="Oak", sku="OAK-1", product_type_id=ptype.id), fresh)
-        assert ProductRead.model_validate(created).product_type_name == "Coaster"
+        created = await create_product(ProductCreate(name="Oak", sku="OAK-1", product_category_id=ptype.id), fresh)
+        assert ProductRead.model_validate(created).product_category_name == "Coaster"
         product_id = created.id
 
     async with session_factory() as fresh:
         updated = await update_product(product_id, ProductUpdate(name="Oak Coaster"), fresh)
-        assert ProductRead.model_validate(updated).product_type_name == "Coaster"
+        assert ProductRead.model_validate(updated).product_category_name == "Coaster"
 
     async with session_factory() as fresh:
         read = await get_product(product_id, fresh)
-        assert read.product_type_name == "Coaster"
+        assert read.product_category_name == "Coaster"
         assert read.classification is not None
 
 

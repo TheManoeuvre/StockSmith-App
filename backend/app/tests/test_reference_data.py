@@ -8,12 +8,12 @@ construction, because these are foreign keys and the name was never copied anywh
 import pytest
 from sqlalchemy import select
 
-from app.models.abc_classification import ABCClass, ProductTypeABC
+from app.models.abc_classification import ABCClass, ProductCategoryABC
 from app.models.manufacturer import Manufacturer
 from app.models.material import Material, MaterialCategory, MaterialUnit
 from app.models.material_type import MaterialType
 from app.models.product import Product
-from app.models.product_type import ProductType
+from app.models.product_category import ProductCategory
 from app.models.purchase import Purchase
 from app.models.supplier import Supplier
 from app.services import reference_data
@@ -219,49 +219,49 @@ class TestMaterialTypes:
             await reference_data.delete_if_unused(session, MaterialType, kind.id)
 
 
-class TestProductTypes:
-    async def test_the_same_operations_work_for_product_types(self, session):
-        kind = ProductType(name="Coster")
+class TestProductCategories:
+    async def test_the_same_operations_work_for_product_categories(self, session):
+        kind = ProductCategory(name="Coster")
         session.add(kind)
         await session.commit()
         await session.refresh(kind)
-        product = Product(name="Oak Coaster", sku="SKU-1", product_type_id=kind.id)
+        product = Product(name="Oak Coaster", sku="SKU-1", product_category_id=kind.id)
         session.add(product)
         await session.commit()
 
-        await reference_data.rename(session, ProductType, kind.id, "Coaster")
-        await session.refresh(product, ["product_type"])
-        assert product.product_type_name == "Coaster"
+        await reference_data.rename(session, ProductCategory, kind.id, "Coaster")
+        await session.refresh(product, ["product_category"])
+        assert product.product_category_name == "Coaster"
 
         with pytest.raises(InUseError):
-            await reference_data.delete_if_unused(session, ProductType, kind.id)
+            await reference_data.delete_if_unused(session, ProductCategory, kind.id)
 
     async def test_a_tier_assignment_does_not_count_as_usage(self, session):
-        """product_type_abc is deliberately absent from REFERENCES: having once set a
+        """product_category_abc is deliberately absent from REFERENCES: having once set a
         type's ABC tier is not a reason to refuse deleting an otherwise-unused type. The
         CASCADE takes the assignment with it."""
-        kind = ProductType(name="Prototype")
+        kind = ProductCategory(name="Prototype")
         session.add(kind)
         await session.commit()
         await session.refresh(kind)
-        session.add(ProductTypeABC(product_type_id=kind.id, abc_class=ABCClass.A))
+        session.add(ProductCategoryABC(product_category_id=kind.id, abc_class=ABCClass.A))
         await session.commit()
 
-        assert (await reference_data.usage_counts(session, ProductType)).get(kind.id) is None
-        await reference_data.delete_if_unused(session, ProductType, kind.id)
+        assert (await reference_data.usage_counts(session, ProductCategory)).get(kind.id) is None
+        await reference_data.delete_if_unused(session, ProductCategory, kind.id)
 
-        assert (await session.execute(select(ProductTypeABC))).scalars().all() == []
+        assert (await session.execute(select(ProductCategoryABC))).scalars().all() == []
 
     async def test_merging_repoints_the_products(self, session):
-        keep = ProductType(name="Coaster")
-        dupe = ProductType(name="coaster")
+        keep = ProductCategory(name="Coaster")
+        dupe = ProductCategory(name="coaster")
         session.add_all([keep, dupe])
         await session.commit()
         await session.refresh(keep)
         await session.refresh(dupe)
-        session.add(Product(name="Oak", sku="SKU-2", product_type_id=dupe.id))
+        session.add(Product(name="Oak", sku="SKU-2", product_category_id=dupe.id))
         await session.commit()
 
-        await reference_data.merge(session, ProductType, dupe.id, keep.id)
+        await reference_data.merge(session, ProductCategory, dupe.id, keep.id)
 
-        assert (await reference_data.usage_counts(session, ProductType))[keep.id] == 1
+        assert (await reference_data.usage_counts(session, ProductCategory))[keep.id] == 1

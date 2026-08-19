@@ -314,9 +314,9 @@ async def _stock_take_lookups(session: AsyncSession, lines) -> tuple[dict, dict,
             p.id: p
             for p in (
                 await session.execute(
-                    # product_type_name reads through a relationship, and a lazy load in
+                    # product_category_name reads through a relationship, and a lazy load in
                     # async raises MissingGreenlet rather than fetching.
-                    select(Product).where(Product.id.in_(product_ids)).options(selectinload(Product.product_type))
+                    select(Product).where(Product.id.in_(product_ids)).options(selectinload(Product.product_category))
                 )
             ).scalars()
         }
@@ -371,7 +371,7 @@ async def export_stock_take_csv(session: AsyncSession, stock_take_id: int) -> st
             category = material.category.value if material else ""
         else:
             product = products.get(line.product_id)
-            category = (product.product_type_name or "") if product else ""
+            category = (product.product_category_name or "") if product else ""
         writer.writerow(
             {
                 "line_id": line.id,

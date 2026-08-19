@@ -14,7 +14,7 @@ class StockTakeScope(BaseModel):
     include_materials: bool = False
     include_products: bool = False
     material_categories: list[MaterialCategory] = []
-    product_type_ids: list[int] = []
+    product_category_ids: list[int] = []
     # Narrows to items whose cadence says they're due (services/abc.py). Combines with the
     # category/type filters rather than replacing them.
     overdue_only: bool = False

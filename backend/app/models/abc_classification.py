@@ -40,10 +40,10 @@ class ABCScope(str, enum.Enum):
     product = "product"
 
 
-class ProductTypeABC(Base):
+class ProductCategoryABC(Base):
     """Tier for every product of one type — the products mirror of MaterialCategoryABC.
 
-    CASCADE on the FK because this row is an attribute of the product type, not a record
+    CASCADE on the FK because this row is an attribute of the product category, not a record
     of anything: delete the type and its tier assignment goes with it. That is also why
     this FK is deliberately absent from services/reference_data.py's REFERENCES map — a
     tier assignment is not "usage" that should block deleting an otherwise-unused type.
@@ -51,10 +51,10 @@ class ProductTypeABC(Base):
     Sparse: no row means "fall through to the shop-wide product baseline".
     """
 
-    __tablename__ = "product_type_abc"
+    __tablename__ = "product_category_abc"
 
-    product_type_id: Mapped[int] = mapped_column(
-        ForeignKey("product_types.id", ondelete="CASCADE"), primary_key=True
+    product_category_id: Mapped[int] = mapped_column(
+        ForeignKey("product_categories.id", ondelete="CASCADE"), primary_key=True
     )
     abc_class: Mapped[ABCClass] = mapped_column(portable_enum(ABCClass, name="abc_class"), nullable=False)
 

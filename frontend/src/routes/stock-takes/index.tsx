@@ -1,7 +1,7 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { productTypesApi } from "../../api/productTypes";
+import { productCategoriesApi } from "../../api/productCategories";
 import { stockTakesApi } from "../../api/stockTakes";
 import type { MaterialCategory, StockTakeScope } from "../../api/types";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
@@ -22,7 +22,7 @@ function StockTakesList() {
   const overdueFromUrl = Route.useSearch().overdue ?? false;
 
   const { data: takes, isLoading, error } = useQuery({ queryKey: ["stock-takes"], queryFn: stockTakesApi.list });
-  const { data: productTypes } = useQuery({ queryKey: ["product-types"], queryFn: productTypesApi.list });
+  const { data: productCategories } = useQuery({ queryKey: ["product-categories"], queryFn: productCategoriesApi.list });
 
   const [showPicker, setShowPicker] = useState(overdueFromUrl);
   const [includeMaterials, setIncludeMaterials] = useState(true);
@@ -36,7 +36,7 @@ function StockTakesList() {
       include_materials: includeMaterials,
       include_products: includeProducts,
       material_categories: [...categories],
-      product_type_ids: [...typeIds],
+      product_category_ids: [...typeIds],
       overdue_only: overdueOnly,
     }),
     [includeMaterials, includeProducts, categories, typeIds, overdueOnly],
@@ -113,11 +113,11 @@ function StockTakesList() {
             </div>
           )}
 
-          {includeProducts && productTypes && productTypes.length > 0 && (
+          {includeProducts && productCategories && productCategories.length > 0 && (
             <div>
-              <p className="mb-1 text-sm">Product types (all if none ticked)</p>
+              <p className="mb-1 text-sm">Product categories (all if none ticked)</p>
               <div className="flex flex-wrap gap-3 text-sm">
-                {productTypes.map((t) => (
+                {productCategories.map((t) => (
                   <label key={t.id} className="flex items-center gap-1">
                     <input type="checkbox" checked={typeIds.has(t.id)} onChange={() => setTypeIds(toggle(typeIds, t.id))} />
                     {t.name}
