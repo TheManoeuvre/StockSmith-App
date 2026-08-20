@@ -50,6 +50,13 @@ left off them.
   checking it is the whole point.
 
 ### Changed
+- **An order's discount now reads as part of what was paid, not as another deduction.** The
+  order page listed Order value paid, Postage paid and Discount side by side, which looked
+  like the discount came off the total a second time — it doesn't, and never did, because
+  the order value shown was already net of it. The discount now sits under the figure it
+  explains, as "£6.99 − £1.40 discount", so the top row is simply the figures that add up to
+  the net profit beneath it. The shipping profile moves under Postage cost for the same
+  reason, instead of sitting in its heading.
 - **The Products list is grouped by category**, matching how the Materials list has always
   worked, with a heading and a count for each. What 0.7.1 called a product "type" is now a
   product "category" throughout — it was the same idea as a material category under a
@@ -61,6 +68,19 @@ left off them.
   something still on its way.
 
 ### Fixed
+- **eBay discounts were not being recorded, so those orders looked more profitable than they
+  were.** eBay reports the item total before any discount and the discount separately;
+  StockSmith was reading the discount from the wrong field name, which returned nothing
+  without ever failing. Any eBay order with a multi-buy or volume discount therefore counted
+  the discounted money as revenue. Ten of this shop's eBay orders were affected, overstating
+  profit by £15.36 between them. New orders are now correct, and the figures are checked
+  against what eBay says the buyer actually paid so a gap like this says so instead of
+  sitting quietly. Etsy was never affected — it takes its discount off before StockSmith
+  sees the order, which is why its net profit has always been right.
+
+  **Orders already imported are not corrected automatically** — a sync only revisits recent
+  orders, so the affected ones are exactly the ones it skips. Ask for them to be re-read if
+  you want the history put right.
 - **A material's history now adds up to its stock figure.** Purchases were listed against the
   date they were ordered, and orders that hadn't arrived were mixed in with things that had
   actually moved stock, so the rows never summed to the quantity shown above them.
