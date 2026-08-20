@@ -71,6 +71,28 @@ fallbacks in `Material.category_name` / `Material.colour_name` go at the same ti
 the legacy branch of `services/stock_takes._material_category_sort`, which reads the enum's
 declaration order to place a material whose category row is missing.
 
+## eBay refunds are recognised but never recorded
+
+**Problem:** `EbayAdapter._parse_order` never sets `refunded_amount`. The adapter plainly
+knows a refund happened — `_ORDER_PAYMENT_STATES` maps `PARTIALLY_REFUNDED` to settled and
+`FULLY_REFUNDED` to reversed — it just never reads the amount, so the column stays NULL on
+every eBay order. Etsy fills it from `_sum_refunds(receipt.refunds)`.
+
+`_compute_net_profit` subtracts `Decimal(order.refunded_amount or 0)`, so a partially
+refunded eBay order counts money that went back to the buyer as profit, and the Refunded
+figure never appears on the order page. Same shape as the discount bug fixed in 0.7.2, and
+found alongside it: a field the adapter simply does not read, failing silently because a
+NULL is indistinguishable from an order that was never refunded.
+
+Not fixed with the discount because it has a different cause and a different source — the
+refund total is not in `pricingSummary` at all, so it needs a decision about where to read
+it from (the Sell Finances REFUND transactions, which `_fetch_transactions` already fetches
+and filters to SALE, look like the closest fit).
+
+**Ask:** Populate `refunded_amount` for eBay, and extend the reconciliation warning added
+in 0.7.2 to account for refunds so a mismatch keeps being noisy. Worth checking against a
+real partially-refunded order before trusting the field — the SALE-only filter in
+`_fetch_transactions` is the reason nobody noticed the REFUND rows were there.
 ## Orphaned sidecars are detected but not reaped
 
 **Problem:** The identity half of this is done — `/healthz` carries the build version and the shell refuses to adopt a backend that reports a different one (`backend/app/main.py:146`, `frontend/src-tauri/src/lib.rs:82`, shipped in 0.6.3). What it does on a mismatch is *stop and tell the user to close StockSmith and re-run the installer*, which is honest but is still a dead end the user has to clear by hand.
