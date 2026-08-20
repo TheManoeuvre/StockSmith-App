@@ -24,7 +24,7 @@ import { useGuard } from "../../hooks/useUnsavedChangesGuard";
 import { useAssetUrl } from "../../hooks/useAssetUrl";
 import { pickFile } from "../../lib/tauri";
 import { sellableSummary } from "../../lib/format";
-import { productTypesApi } from "../../api/productTypes";
+import { productCategoriesApi } from "../../api/productCategories";
 import { CreatableSelect } from "../../components/common/CreatableSelect";
 import { StockCountFields } from "../../components/common/StockCountFields";
 import type { ABCClass } from "../../api/types";
@@ -35,8 +35,8 @@ interface DetailsForm {
   description: string;
   barcode: string;
   platformCeilingQty: string;
-  productType: string;
-  productTypeId: number | null;
+  productCategory: string;
+  productCategoryId: number | null;
   abcClass: ABCClass | null;
   stockTakeIntervalDays: string;
 }
@@ -47,8 +47,8 @@ const EMPTY_DETAILS: DetailsForm = {
   description: "",
   barcode: "",
   platformCeilingQty: "",
-  productType: "",
-  productTypeId: null,
+  productCategory: "",
+  productCategoryId: null,
   abcClass: null,
   stockTakeIntervalDays: "",
 };
@@ -96,7 +96,7 @@ function ProductDetail() {
     queryKey: ["products", id, "variants"],
     queryFn: () => productsApi.listVariants(id),
   });
-  const { data: productTypes } = useQuery({ queryKey: ["product-types"], queryFn: productTypesApi.list });
+  const { data: productCategories } = useQuery({ queryKey: ["product-categories"], queryFn: productCategoriesApi.list });
 
   const [isDragOver, setIsDragOver] = useState(false);
 
@@ -109,8 +109,8 @@ function ProductDetail() {
             description: product.description ?? "",
             barcode: product.barcode ?? "",
             platformCeilingQty: product.platform_ceiling_qty != null ? String(product.platform_ceiling_qty) : "",
-            productType: product.product_type_name ?? "",
-            productTypeId: product.product_type_id,
+            productCategory: product.product_category_name ?? "",
+            productCategoryId: product.product_category_id,
             abcClass: product.abc_class,
             stockTakeIntervalDays:
               product.stock_take_interval_days === null ? "" : String(product.stock_take_interval_days),
@@ -130,7 +130,7 @@ function ProductDetail() {
     seed: detailsSeed,
     seedKey: id,
   });
-  const { name, sku, description, barcode, platformCeilingQty, productType, productTypeId, abcClass, stockTakeIntervalDays } =
+  const { name, sku, description, barcode, platformCeilingQty, productCategory, productCategoryId, abcClass, stockTakeIntervalDays } =
     details;
   const setDetailsField = <K extends keyof DetailsForm>(field: K, next: DetailsForm[K]) =>
     setDetails((prev) => ({ ...prev, [field]: next }));
@@ -145,9 +145,9 @@ function ProductDetail() {
       // Same find-or-create-on-save shape the materials page uses for manufacturers and
       // types: the field accepts a typed name, and only a name with no resolved id needs
       // a row creating first.
-      let resolvedProductTypeId = productTypeId;
-      if (!resolvedProductTypeId && productType.trim()) {
-        resolvedProductTypeId = (await productTypesApi.findOrCreate(productType.trim())).id;
+      let resolvedProductCategoryId = productCategoryId;
+      if (!resolvedProductCategoryId && productCategory.trim()) {
+        resolvedProductCategoryId = (await productCategoriesApi.findOrCreate(productCategory.trim())).id;
       }
       return productsApi.update(id, {
         name,
@@ -155,7 +155,7 @@ function ProductDetail() {
         description: description || null,
         barcode: barcode || null,
         platform_ceiling_qty: platformCeilingQty.trim() ? Number(platformCeilingQty) : null,
-        product_type_id: productType.trim() ? resolvedProductTypeId : null,
+        product_category_id: productCategory.trim() ? resolvedProductCategoryId : null,
         abc_class: abcClass,
         stock_take_interval_days: stockTakeIntervalDays === "" ? null : Number(stockTakeIntervalDays),
       });
@@ -164,7 +164,7 @@ function ProductDetail() {
       markDetailsSaved();
       queryClient.invalidateQueries({ queryKey: ["products", id] });
       queryClient.invalidateQueries({ queryKey: ["products"] });
-      queryClient.invalidateQueries({ queryKey: ["product-types"] });
+      queryClient.invalidateQueries({ queryKey: ["product-categories"] });
     },
   });
 
@@ -181,6 +181,17 @@ function ProductDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["products", id] });
       queryClient.invalidateQueries({ queryKey: ["products"] });
+    },
+  });
+
+  const toggleMadeToOrderMutation = useMutation({
+    mutationFn: (made_to_order: boolean) => productsApi.update(id, { made_to_order }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["products", id] });
+      queryClient.invalidateQueries({ queryKey: ["products"] });
+      // It changes what is due for counting, and the dashboard card reads that.
+      queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+      queryClient.invalidateQueries({ queryKey: ["stock-takes"] });
     },
   });
 
@@ -477,13 +488,13 @@ function ProductDetail() {
               />
             </label>
             <label className="flex flex-col gap-1">
-              <span className="text-sm">Product type</span>
+              <span className="text-sm">Product category</span>
               <CreatableSelect
                 className="rounded border border-slate-300 px-2 py-1"
-                options={productTypes ?? []}
-                value={productType}
-                onChange={(v) => setDetailsField("productType", v)}
-                onResolved={(v) => setDetailsField("productTypeId", v)}
+                options={productCategories ?? []}
+                value={productCategory}
+                onChange={(v) => setDetailsField("productCategory", v)}
+                onResolved={(v) => setDetailsField("productCategoryId", v)}
                 placeholder="Keyring, Coaster…"
               />
             </label>
@@ -495,7 +506,7 @@ function ProductDetail() {
                   abcClass={abcClass}
                   intervalDays={stockTakeIntervalDays}
                   classification={product.classification}
-                  groupLabel={product.product_type_name ? `the ${product.product_type_name} type` : null}
+                  groupLabel={product.product_category_name ? `the ${product.product_category_name} type` : null}
                   onAbcClassChange={(next) => setDetailsField("abcClass", next)}
                   onIntervalDaysChange={(next) => setDetailsField("stockTakeIntervalDays", next)}
                 />
@@ -543,6 +554,22 @@ function ProductDetail() {
                 makes that backfill risky.
               </p>
               <ErrorBanner error={togglePushBuildableCapacityMutation.error} />
+
+              <label className="mt-4 flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={product.made_to_order}
+                  onChange={(e) => toggleMadeToOrderMutation.mutate(e.target.checked)}
+                />
+                Made to order — exclude from stock takes
+              </label>
+              <p className="mt-1 text-sm text-slate-500">
+                For products built against an order rather than held on a shelf. They stop appearing
+                on count sheets and on the list of things due for counting, for every variant, because
+                there is nothing to go and count. Everything else — stock, builds, marketplace
+                quantities — is unaffected.
+              </p>
+              <ErrorBanner error={toggleMadeToOrderMutation.error} />
             </>
           )}
           <ErrorBanner error={saveDetailsMutation.error} />

@@ -20,17 +20,7 @@ from app.schemas.dashboard import OrderAwaitingPackaging
 from app.schemas.kitting import OrderKittingOverrideLine, OrderKittingRequirementLine, OrderKittingSummary, VariantKittingBomLine
 from app.services.costing import recompute_material
 from app.services.material_categories import category_flag
-
-# Mirrors costing.py's/buildability.py's own copy of this subquery — kept as a
-# standalone fragment here too rather than importing across modules, per this codebase's
-# existing convention for these small self-contained SQL fragments.
-_ON_ORDER_BY_MATERIAL_SUBQUERY = """
-    SELECT mp.material_id, SUM(mp.qty) AS on_order_qty
-    FROM material_purchases mp
-    JOIN purchases p ON p.id = mp.purchase_id
-    WHERE p.status = 'ordered'
-    GROUP BY mp.material_id
-"""
+from app.services.purchase_sql import ON_ORDER_BY_MATERIAL_SQL
 
 _KITTING_CAPACITY_BY_PRODUCT_SQL = text(
     """
@@ -57,7 +47,7 @@ _EXPECTED_KITTING_CAPACITY_BY_PRODUCT_SQL = text(
                AS expected_kitting_capacity
     FROM product_kitting_materials pkm
     JOIN materials m ON m.id = pkm.material_id
-    LEFT JOIN ({_ON_ORDER_BY_MATERIAL_SUBQUERY}) oo ON oo.material_id = m.id
+    LEFT JOIN ({ON_ORDER_BY_MATERIAL_SQL}) oo ON oo.material_id = m.id
     GROUP BY pkm.product_id
     """
 )
@@ -268,7 +258,7 @@ async def compute_variant_kitting_capacity(
             SELECT m.id, m.current_qty, m.allocated_qty, m.avg_unit_cost,
                    COALESCE(oo.on_order_qty, 0) AS on_order_qty
             FROM materials m
-            LEFT JOIN ({_ON_ORDER_BY_MATERIAL_SUBQUERY}) oo ON oo.material_id = m.id
+            LEFT JOIN ({ON_ORDER_BY_MATERIAL_SQL}) oo ON oo.material_id = m.id
             WHERE m.id IN :ids
             """
         ).bindparams(bindparam("ids", expanding=True)),
@@ -446,7 +436,7 @@ async def compute_variants_kitting_capacity_bulk(
                 SELECT m.id, m.current_qty, m.allocated_qty, m.avg_unit_cost,
                        COALESCE(oo.on_order_qty, 0) AS on_order_qty
                 FROM materials m
-                LEFT JOIN ({_ON_ORDER_BY_MATERIAL_SUBQUERY}) oo ON oo.material_id = m.id
+                LEFT JOIN ({ON_ORDER_BY_MATERIAL_SQL}) oo ON oo.material_id = m.id
                 WHERE m.id IN :ids
                 """
             ).bindparams(bindparam("ids", expanding=True)),

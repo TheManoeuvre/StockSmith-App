@@ -17,12 +17,12 @@ from app.models.kitting import OrderKittingAllocation, OrderKittingOverride, Pro
 from app.models.material import Material, LegacyMaterialCategory, MaterialUnit
 from app.models.order import Order, OrderLine
 from app.models.product import Product, ProductMaterial
-from app.models.purchase import MaterialPurchase, Purchase, PurchaseStatus
 from app.routers.orders import _get_order_with_lines, _serialize_one, create_order
 from app.schemas.order import OrderCreate, OrderLineInput
 from app.services import allocation, listing_push
 from app.services.costing import recompute_material
 from app.services.kitting import get_kitting_cogs_by_order, get_order_kitting_summary, reconcile_order_kitting
+from .conftest import received_purchase
 
 
 _STOCKED_AT = datetime(2020, 1, 1, tzinfo=timezone.utc)
@@ -50,9 +50,7 @@ async def _box(session, unit_cost: Decimal = Decimal("2.00"), qty: int = 100) ->
     # Dated well in the past so it always replays before the consumption adjustments the
     # tests generate — _MATERIAL_HISTORY_SQL orders purchases and adjustments together, and
     # a purchase landing after an adjustment shifts the weighted average.
-    purchase = Purchase(status=PurchaseStatus.received, received_at=_STOCKED_AT)
-    purchase.lines = [MaterialPurchase(material_id=material.id, qty=Decimal(qty), total_cost=unit_cost * qty)]
-    session.add(purchase)
+    await received_purchase(session, material.id, Decimal(qty), unit_cost * qty, received_at=_STOCKED_AT)
     await session.commit()
     await recompute_material(session, material.id)
     await session.commit()
@@ -169,9 +167,9 @@ async def test_unit_cost_frozen_at_first_consumption(session):
 
     # Re-stock at a much higher price so the weighted average moves — via a real purchase,
     # since assigning avg_unit_cost directly gets replayed away by recompute_material.
-    restock = Purchase(status=PurchaseStatus.received, received_at=datetime.now(timezone.utc) + timedelta(days=365))
-    restock.lines = [MaterialPurchase(material_id=box.id, qty=Decimal(100), total_cost=Decimal("1000"))]
-    session.add(restock)
+    await received_purchase(
+        session, box.id, Decimal(100), Decimal("1000"), received_at=datetime.now(timezone.utc) + timedelta(days=365)
+    )
     await session.commit()
     await recompute_material(session, box.id)
     await session.commit()
@@ -268,9 +266,7 @@ async def test_costs_that_accumulate_float_error_stay_exact(session):
     label = Material(name="Label", category=LegacyMaterialCategory.packaging, unit=MaterialUnit.each)
     session.add(label)
     await session.flush()
-    purchase = Purchase(status=PurchaseStatus.received, received_at=_STOCKED_AT)
-    purchase.lines = [MaterialPurchase(material_id=label.id, qty=Decimal(100), total_cost=Decimal("1.099"))]
-    session.add(purchase)
+    await received_purchase(session, label.id, Decimal(100), Decimal("1.099"), received_at=_STOCKED_AT)
     await session.commit()
     await recompute_material(session, label.id)
     await session.commit()

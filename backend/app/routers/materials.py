@@ -29,16 +29,47 @@ class ImportImageUrlRequest(BaseModel):
 
 router = APIRouter(prefix="/materials", tags=["materials"], dependencies=[Depends(require_auth)])
 
+# The material's stock timeline, in three kinds.
+#
+# It used to be two, and the purchase half was dated by order_date and included orders that
+# had not arrived — so the rows on screen never summed to current_qty, and there was no way
+# to tell that from the page. Now a 'purchase' row is a delivery that happened, at the
+# moment it happened, and what is still on order is its own kind rather than a row mixed in
+# with events that actually moved stock. Deliveries and adjustments now reconcile.
+#
+# The kinds also keep ids apart: the frontend keys rows on kind + id, and receipt 3 would
+# otherwise collide with purchase line 3.
 _STOCK_HISTORY_SQL = text(
     """
-    SELECT 'purchase' AS kind, mp.id AS id, CAST(p.order_date AS TIMESTAMP) AS at, mp.qty AS qty,
-           mp.total_cost AS total_cost, p.status AS status, s.name AS supplier_name, NULL AS reason,
+    SELECT 'purchase' AS kind, r.id AS id, r.received_at AS at, r.qty AS qty,
+           COALESCE(r.total_cost, mp.total_cost * r.qty / mp.qty) AS total_cost,
+           'received' AS status, s.name AS supplier_name, NULL AS reason,
+           NULL AS mode, NULL AS target_qty, CAST(NULL AS INTEGER) AS product_id, CAST(NULL AS TEXT) AS product_name,
+           CAST(NULL AS INTEGER) AS variant_id, CAST(NULL AS INTEGER) AS order_id
+    FROM material_purchase_receipts r
+    JOIN material_purchases mp ON mp.id = r.purchase_line_id
+    JOIN purchases p ON p.id = mp.purchase_id
+    LEFT JOIN suppliers s ON s.id = p.supplier_id
+    WHERE mp.material_id = :material_id
+
+    UNION ALL
+
+    SELECT 'purchase_outstanding' AS kind, mp.id AS id, CAST(p.order_date AS TIMESTAMP) AS at,
+           mp.qty - COALESCE(rt.received_qty, 0) AS qty,
+           mp.total_cost * (mp.qty - COALESCE(rt.received_qty, 0)) / mp.qty AS total_cost,
+           'ordered' AS status, s.name AS supplier_name, NULL AS reason,
            NULL AS mode, NULL AS target_qty, CAST(NULL AS INTEGER) AS product_id, CAST(NULL AS TEXT) AS product_name,
            CAST(NULL AS INTEGER) AS variant_id, CAST(NULL AS INTEGER) AS order_id
     FROM material_purchases mp
     JOIN purchases p ON p.id = mp.purchase_id
     LEFT JOIN suppliers s ON s.id = p.supplier_id
+    LEFT JOIN (
+        SELECT purchase_line_id, SUM(qty) AS received_qty
+        FROM material_purchase_receipts GROUP BY purchase_line_id
+    ) rt ON rt.purchase_line_id = mp.id
     WHERE mp.material_id = :material_id
+      AND mp.closed_at IS NULL
+      AND mp.qty - COALESCE(rt.received_qty, 0) > 0
 
     UNION ALL
 

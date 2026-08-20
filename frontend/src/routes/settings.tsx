@@ -23,7 +23,7 @@ import { manufacturersApi } from "../api/manufacturers";
 import { suppliersApi } from "../api/suppliers";
 import { materialCategoriesApi } from "../api/materialCategories";
 import { materialTypesApi } from "../api/materialTypes";
-import { productTypesApi } from "../api/productTypes";
+import { productCategoriesApi } from "../api/productCategories";
 import { coloursApi } from "../api/colours";
 import { BackgroundSyncSettings } from "../components/settings/BackgroundSyncSettings";
 import { CurrencySettings } from "../components/settings/CurrencySettings";
@@ -308,16 +308,16 @@ function Settings() {
             usageLabel={(n) => `${n} material${n === 1 ? "" : "s"}`}
           />
           <ReferenceDataTable
-            title="Product types"
+            title="Product categories"
             description="What kind of thing a product is. Groups products for stock-count scheduling and for scoping a stock take. Renaming one updates every product that uses it."
-            segment="product-types"
-            queryKey={["product-types"]}
+            segment="product-categories"
+            queryKey={["product-categories"]}
             api={{
-              list: productTypesApi.list,
-              create: productTypesApi.findOrCreate,
-              update: productTypesApi.update,
-              remove: productTypesApi.remove,
-              merge: productTypesApi.merge,
+              list: productCategoriesApi.list,
+              create: productCategoriesApi.findOrCreate,
+              update: productCategoriesApi.update,
+              remove: productCategoriesApi.remove,
+              merge: productCategoriesApi.merge,
             }}
             fields={[{ key: "name", label: "Name" }]}
             usageLabel={(n) => `${n} product${n === 1 ? "" : "s"}`}

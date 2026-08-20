@@ -94,7 +94,7 @@ export interface MaterialType {
   created_at: string;
 }
 
-export interface ProductType {
+export interface ProductCategory {
   id: number;
   name: string;
   /** How many records reference this. Computed per request — see the backend's list_with_usage. */
@@ -108,7 +108,7 @@ export type ABCClass = "A" | "B" | "C";
  * An item's effective stock-take tier and cadence, with where each came from.
  *
  * `class_source`/`interval_source` are "item" (set on this item), "group" (from its
- * category or product type) or "default" (the shop-wide baseline / shipped cadence).
+ * category or product category) or "default" (the shop-wide baseline / shipped cadence).
  * Resolved server-side deliberately — see the backend's services/abc.py, which is the only
  * place the fallback order lives.
  */
@@ -152,6 +152,15 @@ export interface StockTakeLine {
   variant_id: number | null;
   name: string;
   unit: string;
+  /**
+   * Where this line sits in the sheet: "Products" or "Materials", then the category, then
+   * the parent SKU (products) or material type (materials). Resolved and ordered
+   * server-side, so the sheet on screen, the CSV and the standing-variances list cannot
+   * drift into three different arrangements.
+   */
+  section: string;
+  group: string;
+  subgroup: string;
   expected_qty: string;
   /** Finished stock only: how much of expected_qty is picked for open orders, and so
    * probably boxed rather than on the shelf. Null for materials. */
@@ -198,7 +207,7 @@ export interface StockTakeScope {
   include_materials: boolean;
   include_products: boolean;
   material_category_ids: number[];
-  product_type_ids: number[];
+  product_category_ids: number[];
   overdue_only: boolean;
 }
 
@@ -251,18 +260,37 @@ export interface StockCountSettings {
   material_tier_intervals: TierInterval[];
   product_tier_intervals: TierInterval[];
   category_tiers: { category_id: number; abc_class: ABCClass }[];
-  product_type_tiers: { product_type_id: number; abc_class: ABCClass }[];
+  product_category_tiers: { product_category_id: number; abc_class: ABCClass }[];
 }
 
-export type PurchaseStatus = "ordered" | "received";
+export type PurchaseStatus = "ordered" | "partially_received" | "received";
+
+/** One physical arrival of part (or all) of a purchase line. */
+export interface PurchaseReceipt {
+  id: number;
+  purchase_line_id: number;
+  qty: string;
+  /** null means this delivery took its pro-rata share of the line total. */
+  total_cost: string | null;
+  received_at: string;
+  notes: string | null;
+  /** One value per delivery, so a whole van-load can be undone as one thing. */
+  batch_id: string | null;
+}
 
 export interface PurchaseLine {
   id: number;
   purchase_id: number;
   material_id: number;
+  /** What was ordered. Never rewritten to match what turned up — see closed_at. */
   qty: string;
   total_cost: string;
   notes: string | null;
+  /** Set when the rest of this line is never coming. */
+  closed_at: string | null;
+  received_qty: string;
+  outstanding_qty: string;
+  receipts: PurchaseReceipt[];
 }
 
 export interface Purchase {
@@ -272,6 +300,7 @@ export interface Purchase {
   order_date: string;
   expected_arrival_date: string | null;
   status: PurchaseStatus;
+  /** When the order was completed. null while anything is still outstanding. */
   received_at: string | null;
   notes: string | null;
   created_at: string;
@@ -281,7 +310,12 @@ export interface Purchase {
 
 export interface MaterialStockHistoryEntry {
   id: number;
-  kind: "purchase" | "adjustment";
+  /**
+   * "purchase" is a delivery that happened; those plus "adjustment" account for the
+   * material's quantity exactly. "purchase_outstanding" is what is still on order — on the
+   * same timeline because that is where people look for it, but it has moved nothing.
+   */
+  kind: "purchase" | "purchase_outstanding" | "adjustment";
   at: string;
   qty: string;
   total_cost: string | null;
@@ -318,6 +352,8 @@ export interface Product {
   theoretical_max_sellable_reason: string | null;
   platform_ceiling_qty: number | null;
   push_buildable_capacity: boolean;
+  /** Built against an order and never held, so it is never counted. Variants follow it. */
+  made_to_order: boolean;
   cost_per_unit: string | null;
   kitting_cost_per_unit: string | null;
   main_image_asset_id: number | null;
@@ -331,8 +367,8 @@ export interface Product {
   effective_platform_fee_percent: string | null;
   pricing_mode: PricingMode;
   pricing_variable_attribute: number | null;
-  product_type_id: number | null;
-  product_type_name: string | null;
+  product_category_id: number | null;
+  product_category_name: string | null;
   abc_class: ABCClass | null;
   stock_take_interval_days: number | null;
   last_stock_take_at: string | null;

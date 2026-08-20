@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { purchasesApi } from "../../api/purchases";
 import type { Purchase } from "../../api/types";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
+import { PurchaseStatusPill } from "../../components/purchases/PurchaseStatusPill";
 
 export const Route = createFileRoute("/purchases/")({
   component: PurchasesList,
@@ -10,6 +11,13 @@ export const Route = createFileRoute("/purchases/")({
 
 function lineTotal(purchase: Purchase): number {
   return purchase.lines.reduce((sum, l) => sum + Number(l.total_cost), 0);
+}
+
+/** How much of the order has actually turned up, counted in lines rather than units —
+ *  "7 of 10 lines" is what someone chasing a supplier wants to see at a glance. */
+function progress(purchase: Purchase): string {
+  const settled = purchase.lines.filter((l) => Number(l.outstanding_qty) === 0).length;
+  return `${settled} of ${purchase.lines.length}`;
 }
 
 function PurchasesList() {
@@ -52,7 +60,7 @@ function PurchasesList() {
             <th className="p-2">Supplier</th>
             <th className="p-2">Order date</th>
             <th className="p-2">Status</th>
-            <th className="p-2">Lines</th>
+            <th className="p-2">Lines in</th>
             <th className="p-2">Total cost</th>
             <th className="p-2" />
           </tr>
@@ -67,24 +75,29 @@ function PurchasesList() {
               </td>
               <td className="p-2">{purchase.order_date}</td>
               <td className="p-2">
-                <span
-                  className={`rounded px-2 py-0.5 text-xs ${
-                    purchase.status === "received" ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"
-                  }`}
-                >
-                  {purchase.status === "received" ? "Received" : "Ordered"}
-                </span>
+                <PurchaseStatusPill status={purchase.status} />
               </td>
-              <td className="p-2">{purchase.lines.length}</td>
+              <td className="p-2">{progress(purchase)}</td>
               <td className="p-2">£{lineTotal(purchase).toFixed(2)}</td>
               <td className="p-2">
+                {/* One click only for the case it can be one click: nothing has arrived, so
+                    "receive" can only mean all of it. A part-received order needs per-line
+                    figures, which is the detail page's job. */}
                 {purchase.status === "ordered" ? (
                   <button
                     onClick={() => receiveMutation.mutate(purchase.id)}
                     className="rounded border border-slate-300 px-2 py-1 text-xs"
                   >
-                    Receive
+                    Receive all
                   </button>
+                ) : purchase.status === "partially_received" ? (
+                  <Link
+                    to="/purchases/$purchaseId"
+                    params={{ purchaseId: String(purchase.id) }}
+                    className="rounded border border-slate-300 px-2 py-1 text-xs"
+                  >
+                    Receive rest
+                  </Link>
                 ) : (
                   <button
                     onClick={() => unreceiveMutation.mutate(purchase.id)}

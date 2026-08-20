@@ -93,11 +93,20 @@ class Product(Base):
     # toward the pushed number is what this toggles. Per-product because build lead
     # time (and therefore backfill risk) varies by product.
     push_buildable_capacity: Mapped[bool] = mapped_column(default=True, nullable=False)
-    product_type_id: Mapped[int | None] = mapped_column(
-        ForeignKey("product_types.id", ondelete="SET NULL"), nullable=True
+    product_category_id: Mapped[int | None] = mapped_column(
+        ForeignKey("product_categories.id", ondelete="SET NULL"), nullable=True
     )
+    # Built against an order and never held, so there is no shelf to count and a count line
+    # for it is noise on somebody's sheet. Excluded from stock take scopes and from the
+    # due-for-counting list (services/stock_takes.py, services/abc.py) — the same two places
+    # is_bundle is excluded, and for the same reason: nothing to count.
+    #
+    # Product-level, so every variant follows. A made-to-order product's variants are made
+    # to order too; a shop that stocks some colourways and builds others on demand is a
+    # different product, not a different variant.
+    made_to_order: Mapped[bool] = mapped_column(default=False, nullable=False)
     # Stock-take classification, mirroring Material's. NULL means "inherit", not "unset":
-    # abc_class falls through to the product type's tier and then the shop-wide product
+    # abc_class falls through to the product category's tier and then the shop-wide product
     # baseline, stock_take_interval_days to the resolved tier's cadence. Resolution order
     # lives in services/abc.py and should not be reimplemented anywhere else.
     #
@@ -126,11 +135,11 @@ class Product(Base):
     kitting_lines: Mapped[list["ProductKittingMaterial"]] = relationship(
         back_populates="product", cascade="all, delete-orphan"
     )
-    product_type: Mapped["ProductType | None"] = relationship()
+    product_category: Mapped["ProductCategory | None"] = relationship()
 
     @property
-    def product_type_name(self) -> str | None:
-        return self.product_type.name if self.product_type else None
+    def product_category_name(self) -> str | None:
+        return self.product_category.name if self.product_category else None
 
 
 class ProductBundleItem(Base):

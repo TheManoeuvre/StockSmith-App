@@ -17,12 +17,14 @@ export function MaterialSelect({
   onChange,
   filterText = "",
   className,
+  disabled = false,
 }: {
   materials: Material[];
   value: number;
   onChange: (materialId: number) => void;
   filterText?: string;
   className?: string;
+  disabled?: boolean;
 }) {
   const { categories } = useMaterialCategories();
 
@@ -47,8 +49,9 @@ export function MaterialSelect({
 
   return (
     <select
-      className={className ?? "rounded border border-slate-300 px-2 py-1"}
+      className={className ?? "rounded border border-slate-300 px-2 py-1 disabled:bg-slate-100"}
       value={value}
+      disabled={disabled}
       onChange={(e) => onChange(Number(e.target.value))}
     >
       {ordered.map((category) => (

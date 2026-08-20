@@ -739,7 +739,21 @@ class EbayAdapter:
                 session, connection, order.get("orderId")
             )
 
-        return ExternalOrder(
+        # priceSubtotal is the items BEFORE any discount, exactly like deliveryCost below:
+        # eBay's own formula is total = (priceSubtotal - priceDiscount) + deliveryCost +
+        # deliveryDiscount + tax + additionalSavings + adjustment + fee + importCharges.
+        # Etsy's subtotal is already net of its discount, so leaving eBay's gross would
+        # make `subtotal` mean two different things depending on the platform and there
+        # would be no correct way to write anything that reads it — including net profit,
+        # which counted the discount as revenue on every discounted eBay order.
+        #
+        # This was reading `priceDiscountSubtotal`, which is not a field of the Fulfillment
+        # API's PricingSummary at all, so it came back empty every time and the whole
+        # problem stayed invisible.
+        item_discount = self._discount_total(pricing.get("priceDiscount"), pricing.get("additionalSavings"))
+        subtotal = self._less_discount(pricing.get("priceSubtotal"), item_discount)
+
+        external = ExternalOrder(
             external_order_id=str(order.get("orderId")),
             buyer_name=buyer_name,
             buyer_note=order.get("buyerCheckoutNotes"),
@@ -751,20 +765,25 @@ class EbayAdapter:
             raw=order,
             currency=currency,
             grand_total=self._parse_money(pricing.get("total")),
-            subtotal=self._parse_money(pricing.get("priceSubtotal")),
+            subtotal=subtotal,
             # deliveryCost is documented as "before any shipping/delivery discount is
             # applied" — confirmed live: showed the pre-discount amount as what the buyer
             # paid, overstating it by exactly the deliveryDiscount on an order that had
             # one. What the buyer actually paid is deliveryCost minus deliveryDiscount.
+            #
+            # A delivery discount is deliberately NOT part of item_discount above: eBay
+            # documents priceDiscount as excluding it, and it is netted here instead.
             shipping_charged=self._net_money(pricing.get("deliveryCost"), pricing.get("deliveryDiscount")),
             tax_charged=self._parse_money(pricing.get("tax")),
-            discount_amount=self._parse_money(pricing.get("priceDiscountSubtotal")),
+            discount_amount=item_discount,
             payment_fees=payment_fees,
             payment_net=payment_net,
             payment_status=payment_status,
             payment_state=payment_state,
             financials_enriched=enrich,
         )
+        self._warn_if_unreconciled(external)
+        return external
 
     def _parse_line_item(self, line_item: dict) -> ExternalOrderLine:
         # lineItemCost is the TOTAL for the line, not a per-unit price — confirmed
@@ -813,6 +832,63 @@ class EbayAdapter:
         discount_value = (discount or {}).get("value")
         net = float(gross_value) + float(discount_value or 0)
         return f"{net:.2f}"
+
+    @staticmethod
+    def _discount_total(*discounts: dict | None) -> str | None:
+        """What came off the items, as a positive amount. None when there was no discount.
+
+        Taken on magnitude rather than on sign. eBay's documentation states its own total
+        formula both ways — once subtracting these terms and once describing them as
+        negative numbers — and deliveryDiscount is known to arrive negative (see
+        _net_money). Reading the sign would mean betting on which convention a given field
+        follows, and being wrong flips a discount into a surcharge silently.
+        """
+        total = 0.0
+        seen = False
+        for money in discounts:
+            value = (money or {}).get("value")
+            if value is None:
+                continue
+            seen = True
+            total += abs(float(value))
+        if not seen or total == 0:
+            return None
+        return f"{total:.2f}"
+
+    @staticmethod
+    def _less_discount(gross: dict | None, discount: str | None) -> str | None:
+        if not gross:
+            return None
+        gross_value = gross.get("value")
+        if gross_value is None:
+            return None
+        return f"{float(gross_value) - float(discount or 0):.2f}"
+
+    @staticmethod
+    def _warn_if_unreconciled(external: ExternalOrder) -> None:
+        """Check the parsed figures against what eBay says the buyer paid.
+
+        Everything above reads named fields; nothing is derived from this. The check exists
+        because reading a field name that does not exist fails silently, which is exactly
+        how the discount went missing on a quarter of this shop's eBay orders without
+        anything ever erroring. It also covers adjustment, fee and importCharges — real
+        terms in eBay's total that nothing here reads yet.
+        """
+        if external.grand_total is None or external.subtotal is None:
+            return
+        parts = float(external.subtotal) + float(external.shipping_charged or 0) + float(external.tax_charged or 0)
+        gap = round(parts - float(external.grand_total), 2)
+        if abs(gap) >= 0.01:
+            logger.warning(
+                "eBay order %s does not reconcile: items %s + postage %s + tax %s is %+.2f against the "
+                "%s the buyer paid. Some charge or discount is not being read.",
+                external.external_order_id,
+                external.subtotal,
+                external.shipping_charged or "0.00",
+                external.tax_charged or "0.00",
+                gap,
+                external.grand_total,
+            )
 
     async def _fetch_transactions(
         self, session, connection: PlatformConnection, order_id

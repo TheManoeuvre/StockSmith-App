@@ -20,13 +20,13 @@ from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
-from sqlalchemy import select, text
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.build import Build, BuildFailedConsumption
 from app.models.order import Order, OrderLine, OrderStatus
 from app.models.product import ProductMaterial
-from app.models.purchase import MaterialPurchase, Purchase, PurchaseStatus
+from app.models.purchase import MaterialPurchase, MaterialPurchaseReceipt, Purchase
 from app.services.buildability import get_resolved_variant_bom
 from app.services.general_settings import get_general_settings
 from app.services.kitting import get_resolved_kitting_bom
@@ -179,13 +179,37 @@ async def _get_scrap_by_entity_material(
 async def _get_on_order_lines(
     session: AsyncSession, default_lead_time_weeks: Decimal, today: date
 ) -> dict[int, list[tuple[Decimal, Decimal]]]:
-    """Per material, every on-order purchase line as a (arrival_weeks_from_now, qty)
-    timed inflow — using the PO's own expected_arrival_date when set, else estimating
-    from order_date + the shop-wide default lead time."""
+    """Per material, every still-outstanding purchase line as a (arrival_weeks_from_now,
+    qty) timed inflow — using the PO's own expected_arrival_date when set, else estimating
+    from order_date + the shop-wide default lead time.
+
+    The quantity is what is still to come, not what was ordered. Before receipts existed
+    this could only ever be the whole line, so a part-delivered order went on forecasting
+    the arrival of goods already sitting on the shelf — counted once in current_qty and
+    again as an inflow.
+
+    A line closed short contributes nothing: closing it is the statement that the rest is
+    not coming.
+    """
+    received = (
+        select(
+            MaterialPurchaseReceipt.purchase_line_id.label("purchase_line_id"),
+            func.sum(MaterialPurchaseReceipt.qty).label("received_qty"),
+        )
+        .group_by(MaterialPurchaseReceipt.purchase_line_id)
+        .subquery()
+    )
+    outstanding = MaterialPurchase.qty - func.coalesce(received.c.received_qty, 0)
     result = await session.execute(
-        select(MaterialPurchase.material_id, MaterialPurchase.qty, Purchase.order_date, Purchase.expected_arrival_date)
+        select(
+            MaterialPurchase.material_id,
+            outstanding.label("outstanding_qty"),
+            Purchase.order_date,
+            Purchase.expected_arrival_date,
+        )
         .join(Purchase, Purchase.id == MaterialPurchase.purchase_id)
-        .where(Purchase.status == PurchaseStatus.ordered)
+        .outerjoin(received, received.c.purchase_line_id == MaterialPurchase.id)
+        .where(MaterialPurchase.closed_at.is_(None), outstanding > 0)
     )
     out: dict[int, list[tuple[Decimal, Decimal]]] = defaultdict(list)
     for material_id, qty, order_date, expected_arrival_date in result:

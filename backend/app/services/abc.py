@@ -31,14 +31,14 @@ from app.models.abc_classification import (
     ABCScope,
     ABCTierSetting,
     MaterialCategoryABC,
-    ProductTypeABC,
+    ProductCategoryABC,
 )
 from app.models.material import Material
 from app.models.product import Product
 from app.models.variant import ProductVariant
 from app.schemas.abc import (
     CategoryTier,
-    ProductTypeTier,
+    ProductCategoryTier,
     ResolvedClassificationRead,
     StockCountSettingsRead,
     StockCountSettingsUpdate,
@@ -82,7 +82,7 @@ class Rules:
 
     baselines: dict[ABCScope, ABCClass]
     category_tiers: dict[int, ABCClass]
-    product_type_tiers: dict[int, ABCClass]
+    product_category_tiers: dict[int, ABCClass]
     tier_intervals: dict[tuple[ABCScope, ABCClass], int]
 
     def _resolve(
@@ -123,8 +123,8 @@ class Rules:
         """A variant resolves through its parent product — variants hold their own stock
         and their own count date, but not their own tier. Pass the parent here."""
         group = (
-            self.product_type_tiers.get(product.product_type_id)
-            if product.product_type_id is not None
+            self.product_category_tiers.get(product.product_category_id)
+            if product.product_category_id is not None
             else None
         )
         return self._resolve(ABCScope.product, product.abc_class, group, product.stock_take_interval_days)
@@ -133,7 +133,7 @@ class Rules:
 async def load_rules(session: AsyncSession) -> Rules:
     settings = await get_general_settings(session)
     category_rows = (await session.execute(select(MaterialCategoryABC))).scalars()
-    product_type_rows = (await session.execute(select(ProductTypeABC))).scalars()
+    product_category_rows = (await session.execute(select(ProductCategoryABC))).scalars()
     tier_rows = (await session.execute(select(ABCTierSetting))).scalars()
     return Rules(
         baselines={
@@ -141,7 +141,7 @@ async def load_rules(session: AsyncSession) -> Rules:
             ABCScope.product: settings.default_product_abc_class,
         },
         category_tiers={row.category_id: row.abc_class for row in category_rows},
-        product_type_tiers={row.product_type_id: row.abc_class for row in product_type_rows},
+        product_category_tiers={row.product_category_id: row.abc_class for row in product_category_rows},
         tier_intervals={(row.scope, row.tier): row.interval_days for row in tier_rows},
     )
 
@@ -164,9 +164,9 @@ async def read_settings(session: AsyncSession) -> StockCountSettingsRead:
             CategoryTier(category_id=category_id, abc_class=abc_class)
             for category_id, abc_class in sorted(rules.category_tiers.items())
         ],
-        product_type_tiers=[
-            ProductTypeTier(product_type_id=type_id, abc_class=abc_class)
-            for type_id, abc_class in sorted(rules.product_type_tiers.items())
+        product_category_tiers=[
+            ProductCategoryTier(product_category_id=type_id, abc_class=abc_class)
+            for type_id, abc_class in sorted(rules.product_category_tiers.items())
         ],
     )
 
@@ -203,7 +203,7 @@ async def write_settings(session: AsyncSession, payload: StockCountSettingsUpdat
 
     await session.execute(delete(ABCTierSetting))
     await session.execute(delete(MaterialCategoryABC))
-    await session.execute(delete(ProductTypeABC))
+    await session.execute(delete(ProductCategoryABC))
 
     for scope, intervals in (
         (ABCScope.material, payload.material_tier_intervals),
@@ -215,8 +215,8 @@ async def write_settings(session: AsyncSession, payload: StockCountSettingsUpdat
 
     for category_tier in payload.category_tiers:
         session.add(MaterialCategoryABC(category_id=category_tier.category_id, abc_class=category_tier.abc_class))
-    for type_tier in payload.product_type_tiers:
-        session.add(ProductTypeABC(product_type_id=type_tier.product_type_id, abc_class=type_tier.abc_class))
+    for type_tier in payload.product_category_tiers:
+        session.add(ProductCategoryABC(product_category_id=type_tier.product_category_id, abc_class=type_tier.abc_class))
 
     await session.commit()
     return await read_settings(session)
@@ -316,11 +316,17 @@ async def compute_due_for_count(session: AsyncSession, now: datetime | None = No
 
     # Bundles hold no stock of their own (see ProductBundleItem) so there is nothing to
     # count for them; their ready_to_ship follows from whatever their components have.
+    # Made-to-order products are never held either, so they are never due — and being
+    # excluded here takes them off the dashboard's due list too, which reads through this.
     products = list(
         (
             await session.execute(
                 select(Product)
-                .where(Product.is_active.is_(True), Product.is_bundle.is_(False))
+                .where(
+                    Product.is_active.is_(True),
+                    Product.is_bundle.is_(False),
+                    Product.made_to_order.is_(False),
+                )
                 .order_by(Product.name)
             )
         ).scalars()

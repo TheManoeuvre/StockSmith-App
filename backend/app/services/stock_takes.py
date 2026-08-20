@@ -29,10 +29,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import async_session_factory
-from app.models.material import Material, MaterialAdjustmentMode
+from app.models.material import LegacyMaterialCategory, Material, MaterialAdjustmentMode
 from app.models.material_category import MaterialCategory
 from app.models.product import Product
-from app.models.product_type import ProductType
+from app.models.product_category import ProductCategory
 from app.models.stock_adjustment import StockAdjustmentMode
 from app.models.stock_take import StockTake, StockTakeLine, StockTakeLineStatus, StockTakeStatus
 from app.models.variant import ProductVariant
@@ -86,16 +86,22 @@ async def _material_candidates(session: AsyncSession, scope: StockTakeScope, due
 async def _product_candidates(session: AsyncSession, scope: StockTakeScope, due_keys: set | None) -> list[_Candidate]:
     """Products contribute their active variants when they have any, themselves otherwise.
 
-    Bundles contribute nothing: their quantity is derived from their components, so there
-    is no row to count and nothing an adjustment could write to.
+    Two kinds contribute nothing. Bundles hold no quantity of their own — theirs is derived
+    from their components, so there is no row to count and nothing an adjustment could
+    write to. Made-to-order products are built against an order and never held, so a count
+    line for one asks somebody to go and count a shelf that does not exist.
     """
     query = (
         select(Product)
-        .where(Product.is_active.is_(True), Product.is_bundle.is_(False))
+        .where(
+            Product.is_active.is_(True),
+            Product.is_bundle.is_(False),
+            Product.made_to_order.is_(False),
+        )
         .order_by(Product.name)
     )
-    if scope.product_type_ids:
-        query = query.where(Product.product_type_id.in_(scope.product_type_ids))
+    if scope.product_category_ids:
+        query = query.where(Product.product_category_id.in_(scope.product_category_ids))
     products = list((await session.execute(query)).scalars())
     if not products:
         return []
@@ -168,7 +174,7 @@ async def describe_scope(session: AsyncSession, scope: StockTakeScope) -> str:
     parts = []
     if scope.include_materials:
         if scope.material_category_ids:
-            # Resolved to names for the same reason product types are: the sentence is the
+            # Resolved to names for the same reason product categories are: the sentence is the
             # log, and an id in it stops meaning anything the moment the row is renamed.
             names = (
                 await session.execute(
@@ -180,9 +186,9 @@ async def describe_scope(session: AsyncSession, scope: StockTakeScope) -> str:
         else:
             parts.append("all materials")
     if scope.include_products:
-        if scope.product_type_ids:
+        if scope.product_category_ids:
             names = (
-                await session.execute(select(ProductType.name).where(ProductType.id.in_(scope.product_type_ids)))
+                await session.execute(select(ProductCategory.name).where(ProductCategory.id.in_(scope.product_category_ids)))
             ).scalars()
             listed = ", ".join(sorted(names))
             parts.append(f"products of type {listed}" if listed else "products of a since-deleted type")
@@ -701,12 +707,139 @@ def line_display_name(line: StockTakeLine, materials: dict, products: dict, vari
     return (base, "each")
 
 
+
+# Sorts after every real name. Used for the ungrouped tail — a material with no type, a
+# product with no category — which belongs at the end of its section rather than at the top
+# under an empty heading.
+_LAST = "\uffff"
+
+# Where a material with no category row at all falls. Only reachable for rows written
+# before categories became a table, and for the test suite, which builds its schema with
+# create_all rather than running migrations — see Material.category_name.
+_LEGACY_ORDER = {category.value: i for i, category in enumerate(LegacyMaterialCategory)}
+
+
+def _material_category_sort(material) -> tuple[int, str]:
+    """Where a material's category sits in the walk.
+
+    Reads `material_categories.sort_order`, which exists because the original order —
+    filament first, other last — was a deliberate frequency ordering rather than
+    alphabetical, and is reorderable under Settings. The count sheet honours it so the
+    sheet someone prints matches the materials list they just came from; sorting these
+    alphabetically here would have quietly disagreed with both.
+
+    Ties break on name, matching MaterialCategory.sort_order's own note that nothing in the
+    schema stops two rows sharing a value.
+    """
+    if material is None:
+        return (len(_LEGACY_ORDER) + 1, "")
+    if material.category_ref is not None:
+        return (material.category_ref.sort_order, material.category_ref.name.lower())
+    legacy = material.category.value if material.category is not None else None
+    return (_LEGACY_ORDER.get(legacy, len(_LEGACY_ORDER)), (legacy or "").lower())
+
+
+@dataclass(frozen=True)
+class GroupedLine:
+    """A stock take line with the headings it sits under, and the key it sorts by."""
+
+    line: StockTakeLine
+    section: str
+    group: str
+    subgroup: str
+    name: str
+    unit: str
+    sort_key: tuple
+
+
+def group_lines(
+    lines: list[StockTakeLine], materials: dict, products: dict, variants: dict
+) -> list[GroupedLine]:
+    """Arrange a take's lines the way the stock itself is arranged.
+
+        Products                 Materials
+          Product category         Material category   (in its configured order)
+            Parent SKU               Material type
+              Variant
+
+    Counting is walking, and someone walking a shelf counts related things together. A flat
+    alphabetical list interleaves every category of material and separates a product from
+    its own variants, which turns a count sheet into a hunt.
+
+    Sorted here rather than left to the row ids the lines were created with. Ids would be
+    cheaper — they already run in creation order — but they freeze the arrangement at the
+    moment the take started, so recategorising a product afterwards would leave it filed
+    under its old heading for the rest of the take's life.
+
+    Reuses the lookups line_display_name already needs, so this costs no extra queries;
+    Material.category_ref is selectin-loaded, so reading the sort order costs none either.
+    """
+    out: list[GroupedLine] = []
+    for line in lines:
+        name, unit = line_display_name(line, materials, products, variants)
+        if line.material_id is not None:
+            material = materials.get(line.material_id)
+            group = (material.category_name if material else None) or ""
+            subgroup = (material.material_type_name if material else None) or ""
+            # Materials sort after products, hence the leading 1.
+            sort_key = (
+                1,
+                _material_category_sort(material),
+                (subgroup or _LAST).lower(),
+                name.lower(),
+                line.id,
+            )
+            out.append(
+                GroupedLine(
+                    line=line,
+                    section="Materials",
+                    group=group,
+                    subgroup=subgroup,
+                    name=name,
+                    unit=unit,
+                    sort_key=sort_key,
+                )
+            )
+            continue
+
+        product = products.get(line.product_id)
+        group = (product.product_category_name if product else None) or ""
+        # The parent SKU is what groups a product's variants together, and it is what a
+        # sheet is read against. Products without one fall back to the name so they still
+        # group with their own variants rather than all collecting under one blank heading.
+        subgroup = (product.sku if product else None) or (product.name if product else "")
+        variant = variants.get(line.variant_id) if line.variant_id is not None else None
+        sort_key = (
+            0,
+            ((0, (group or _LAST).lower()) if group else (1, _LAST)),
+            (subgroup or _LAST).lower(),
+            (variant.variant_name.lower() if variant else ""),
+            line.id,
+        )
+        out.append(
+            GroupedLine(
+                line=line,
+                section="Products",
+                group=group,
+                subgroup=subgroup,
+                name=name,
+                unit=unit,
+                sort_key=sort_key,
+            )
+        )
+
+    out.sort(key=lambda g: g.sort_key)
+    return out
+
+
 __all__ = [
     "ApproveCounts",
+    "GroupedLine",
     "approve_stock_take",
     "create_stock_take",
     "delete_stock_take",
     "get_take_or_404",
+    "group_lines",
     "line_display_name",
     "preview_scope",
     "resolve_line",

@@ -27,7 +27,7 @@ from app.models.material_category import MaterialCategory
 from app.models.material_type import MaterialType
 from app.models.order import Order
 from app.models.product import Product
-from app.models.product_type import ProductType
+from app.models.product_category import ProductCategory
 from app.models.purchase import Purchase
 from app.models.shipping_profile import ShippingProfile
 from app.models.supplier import Supplier
@@ -77,13 +77,13 @@ REFERENCES: dict[type[Base], Sequence[Reference]] = {
         Reference(Purchase.supplier_id, "purchase", "purchases"),
     ),
     MaterialType: (Reference(Material.material_type_id, "material", "materials"),),
-    # product_type_abc.product_type_id and material_category_abc.category_id are second
-    # FKs into product_types and material_categories, and are deliberately not listed.
+    # product_category_abc.product_category_id and material_category_abc.category_id are second
+    # FKs into product_categories and material_categories, and are deliberately not listed.
     # Each holds that row's ABC tier, which is an attribute of the type or category rather
     # than a use of it — counting them here would refuse to delete an unused one purely
     # because someone had once set its tier. Both FKs are ON DELETE CASCADE, so the
     # assignment goes with the row rather than being left dangling.
-    ProductType: (Reference(Product.product_type_id, "product", "products"),),
+    ProductCategory: (Reference(Product.product_category_id, "product", "products"),),
     MaterialCategory: (Reference(Material.category_id, "material", "materials"),),
     Colour: (Reference(Material.colour_id, "material", "materials"),),
     ShippingProfile: (

@@ -223,24 +223,33 @@ function OrderDetail() {
 function OrderFinancialsPanel({ order }: { order: Order }) {
   const currency = order.currency;
 
+  // What the items came to before the coupon. subtotal is already net of it — on both
+  // marketplaces, since the eBay adapter was corrected — so the discount is a breakdown of
+  // the first figure rather than another deduction beside it. It used to sit in the row of
+  // deductions, which read as though it came off the total a second time, and made the row
+  // disagree with the net profit under it for no reason anybody could see.
+  const discount = order.discount_amount != null ? Number(order.discount_amount) : 0;
+  const listPrice = discount > 0 && order.subtotal != null ? Number(order.subtotal) + discount : null;
+
   return (
     <div className="rounded bg-white p-4 text-sm shadow-sm">
       <h2 className="mb-3 text-sm font-medium text-slate-600">Order value &amp; costs</h2>
-      <div className="flex flex-wrap gap-6">
+      {/* items-start so a cell with a note under it doesn't stretch the ones beside it —
+          every figure stays on the same line, which is what makes the row readable as a sum. */}
+      <div className="flex flex-wrap items-start gap-6">
         <div>
           <p className="text-slate-500">Order value paid</p>
           <p>{formatMoney(order.subtotal, currency)}</p>
+          {listPrice != null && (
+            <p className="text-xs text-slate-400">
+              {formatMoney(String(listPrice), currency)} − {formatMoney(order.discount_amount, currency)} discount
+            </p>
+          )}
         </div>
         <div>
           <p className="text-slate-500">Postage paid</p>
           <p>{formatMoney(order.shipping_charged, currency)}</p>
         </div>
-        {order.discount_amount != null && (
-          <div>
-            <p className="text-slate-500">Discount</p>
-            <p>-{formatMoney(order.discount_amount, currency)}</p>
-          </div>
-        )}
         {order.refunded_amount != null && (
           <div>
             <p className="text-slate-500">Refunded</p>
@@ -270,8 +279,11 @@ function OrderFinancialsPanel({ order }: { order: Order }) {
           </p>
         </div>
         <div>
-          <p className="text-slate-500">Postage cost{order.shipping_profile_name ? ` (${order.shipping_profile_name})` : ""}</p>
+          <p className="text-slate-500">Postage cost</p>
           <p>{order.shipping_cost_snapshot != null ? `-${formatMoney(order.shipping_cost_snapshot, currency)}` : "—"}</p>
+          {/* The profile name is an identifier, not a figure. In the header it made one
+              column twice the width of the rest and put a proper noun in a row of money. */}
+          {order.shipping_profile_name && <p className="text-xs text-slate-400">{order.shipping_profile_name}</p>}
         </div>
         <div>
           <p className="text-slate-500">Materials COGS</p>

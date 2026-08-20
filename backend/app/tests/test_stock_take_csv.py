@@ -18,7 +18,7 @@ from app.models.material_category import MaterialCategory
 from app.models.product import Product
 from app.models.stock_take import StockTakeLine, StockTakeLineStatus
 from app.schemas.stock_take import StockTakeScope
-from app.services import stock_takes
+from app.services import csv_io, stock_takes
 from app.services.material_categories import legacy_value_for
 from app.services.csv_io import export_stock_take_csv, import_stock_take_csv
 
@@ -53,13 +53,21 @@ async def _fixture_take(session):
 
 
 async def _lines(session, take_id):
-    return list(
+    """The take's lines in the order the sheet shows them.
+
+    Not creation order. The two used to be the same thing, and the tests below index rows
+    and lines positionally against each other on that basis — so this has to follow the
+    sheet, or every one of them quietly compares the wrong pair.
+    """
+    lines = list(
         (
             await session.execute(
                 select(StockTakeLine).where(StockTakeLine.stock_take_id == take_id).order_by(StockTakeLine.id)
             )
         ).scalars()
     )
+    materials, products, variants = await csv_io._stock_take_lookups(session, lines)
+    return [g.line for g in stock_takes.group_lines(lines, materials, products, variants)]
 
 
 def _rows(csv_text: str) -> list[dict]:
@@ -91,10 +99,16 @@ async def test_export_carries_what_the_counter_needs(session):
 
     rows = _rows(await export_stock_take_csv(session, take.id))
 
-    assert [r["item_type"] for r in rows] == ["material", "product"]
-    assert [r["name"] for r in rows] == ["Grey Resin", "Oak Coaster"]
-    assert [r["unit"] for r in rows] == ["ml", "each"]
-    assert [Decimal(r["expected_qty"]) for r in rows] == [Decimal(10), Decimal(4)]
+    # Products first, then materials, each under the headings the screen shows — the sheet
+    # is the copy that gets printed and walked around with, so it is the one that most has
+    # to match the shelves.
+    assert [r["item_type"] for r in rows] == ["product", "material"]
+    assert [r["name"] for r in rows] == ["Oak Coaster", "Grey Resin"]
+    assert [r["section"] for r in rows] == ["Products", "Materials"]
+    assert [r["subgroup"] for r in rows] == ["OAK-1", ""]
+    assert rows[1]["group"] == "resin"
+    assert [r["unit"] for r in rows] == ["each", "ml"]
+    assert [Decimal(r["expected_qty"]) for r in rows] == [Decimal(4), Decimal(10)]
     # Blank on a fresh sheet — that's what the counter fills in.
     assert [r["counted_qty"] for r in rows] == ["", ""]
 
@@ -251,7 +265,7 @@ async def test_a_mismatched_item_type_fails_alone(session):
     take = await _fixture_take(session)
     rows = _rows(await export_stock_take_csv(session, take.id))
     rows[0]["counted_qty"] = "8"
-    rows[0]["item_type"] = "product"
+    rows[0]["item_type"] = "material"
 
     result = await import_stock_take_csv(session, take.id, _sheet(rows), dry_run=False, on_error="skip")
 

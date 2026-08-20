@@ -12,6 +12,89 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-08-19
+
+Deliveries can now be recorded as they actually turn up, line by line, instead of a
+purchase order being all-or-nothing — and each one is costed at the date it arrived. Count
+sheets are grouped the way your shelves are, and things there is no point counting can be
+left off them.
+
+### Added
+- **Deliveries are recorded line by line, as they actually turn up.** A supplier who sends 6
+  of 10 now and the rest next month can be recorded that way, instead of forcing a choice
+  between two wrong stock figures. "Record a delivery" on the purchase order lists what's
+  still outstanding, filled in with all of it, and you change only what differs.
+- **Split deliveries cost correctly.** Each delivery is priced at the date it arrived, so a
+  material's average cost reflects when the stock actually landed rather than pretending it
+  all came at once. Leave the cost of a delivery blank and it takes its share of the order
+  line; fill it in when the supplier billed that delivery separately.
+- **A short delivery can be closed off.** When the rest of a line is never coming, close it:
+  it stops counting as on order and the purchase can complete, without rewriting what you
+  originally ordered. You're asked whether you were charged for the full quantity anyway.
+- **One delivery can be undone without undoing the order.** Each is listed on the purchase
+  with its own Undo, so a mis-keyed figure doesn't mean reversing everything and starting
+  again.
+- **Count sheets are grouped the way your shelves are.** Products by category, then by their
+  parent SKU so a product's variations sit together; then materials, in the category order
+  you've arranged under Settings. Before this it was one long alphabetical list with every
+  kind of thing mixed in, which meant walking back and forth. The downloaded sheet is in the
+  same order, and groups fold away so you can work through one shelf at a time.
+- **Products that are made to order can be left out.** Tick "Made to Order" on a product and
+  it stops appearing on count sheets and on the list of things due for counting, for all of
+  its variations. There's nothing on a shelf to go and count, so there's no point being
+  asked.
+- **The first delivery of something new counts as having counted it.** Buy a material you've
+  never had before, receive it, and StockSmith takes the delivered quantity as verified — it
+  knew there were none, and now it knows exactly how many arrived. It won't do this for
+  something that merely ran out and was restocked: that zero was a belief, not a count, and
+  checking it is the whole point.
+
+### Changed
+- **An order's discount now reads as part of what was paid, not as another deduction.** The
+  order page listed Order value paid, Postage paid and Discount side by side, which looked
+  like the discount came off the total a second time — it doesn't, and never did, because
+  the order value shown was already net of it. The discount now sits under the figure it
+  explains, as "£6.99 − £1.40 discount", so the top row is simply the figures that add up to
+  the net profit beneath it. The shipping profile moves under Postage cost for the same
+  reason, instead of sitting in its heading.
+- **The Products list is grouped by category**, matching how the Materials list has always
+  worked, with a heading and a count for each. What 0.7.1 called a product "type" is now a
+  product "category" throughout — it was the same idea as a material category under a
+  different name, on two pages meant to read alike. Anything you'd already set is carried
+  over.
+- **"On order" now means what's still to come**, not the whole order, everywhere it appears:
+  the materials list, buildability, packaging capacity and the stock forecast. A
+  part-delivered order used to be counted twice — once as stock on the shelf and again as
+  something still on its way.
+
+### Fixed
+- **eBay discounts were not being recorded, so those orders looked more profitable than they
+  were.** eBay reports the item total before any discount and the discount separately;
+  StockSmith was reading the discount from the wrong field name, which returned nothing
+  without ever failing. Any eBay order with a multi-buy or volume discount therefore counted
+  the discounted money as revenue. Ten of this shop's eBay orders were affected, overstating
+  profit by £15.36 between them. New orders are now correct, and the figures are checked
+  against what eBay says the buyer actually paid so a gap like this says so instead of
+  sitting quietly. Etsy was never affected — it takes its discount off before StockSmith
+  sees the order, which is why its net profit has always been right.
+
+  **Orders already imported are not corrected automatically** — a sync only revisits recent
+  orders, so the affected ones are exactly the ones it skips. Ask for them to be re-read if
+  you want the history put right.
+- **A material's history now adds up to its stock figure.** Purchases were listed against the
+  date they were ordered, and orders that hadn't arrived were mixed in with things that had
+  actually moved stock, so the rows never summed to the quantity shown above them.
+  Deliveries and adjustments now account for it exactly, and what's still on order is shown
+  separately.
+- **Editing a purchase order no longer loses what's been received against it.** Saving any
+  change to a purchase — even just its notes — used to rebuild all of its lines from
+  scratch.
+
+**Before updating, take a backup** (Settings → Backups). This release changes how material
+stock and cost are worked out from your purchase history. The upgrade checks itself as it
+runs and was verified against a copy of a real database, but a backup is the thing that
+makes it reversible.
+
 ## [0.7.1] - 2026-08-18
 
 StockSmith can now count stock properly. Say how often each thing is worth checking, and

@@ -20,8 +20,8 @@ class CategoryTier(BaseModel):
     abc_class: ABCClass
 
 
-class ProductTypeTier(BaseModel):
-    product_type_id: int
+class ProductCategoryTier(BaseModel):
+    product_category_id: int
     abc_class: ABCClass
 
 
@@ -38,7 +38,7 @@ class StockCountSettingsRead(BaseModel):
     material_tier_intervals: list[TierInterval]
     product_tier_intervals: list[TierInterval]
     category_tiers: list[CategoryTier]
-    product_type_tiers: list[ProductTypeTier]
+    product_category_tiers: list[ProductCategoryTier]
 
 
 class StockCountSettingsUpdate(BaseModel):
@@ -54,7 +54,7 @@ class StockCountSettingsUpdate(BaseModel):
     material_tier_intervals: list[TierInterval]
     product_tier_intervals: list[TierInterval]
     category_tiers: list[CategoryTier]
-    product_type_tiers: list[ProductTypeTier]
+    product_category_tiers: list[ProductCategoryTier]
 
 
 class DueForCountItemRead(BaseModel):

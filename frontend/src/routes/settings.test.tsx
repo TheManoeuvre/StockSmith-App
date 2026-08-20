@@ -49,7 +49,7 @@ function baseRoutes() {
     { method: "GET" as const, path: "/suppliers", respond: () => [] },
     { method: "GET" as const, path: "/material-types", respond: () => [] },
     { method: "GET" as const, path: "/material-categories", respond: () => [] },
-    { method: "GET" as const, path: "/product-types", respond: () => [] },
+    { method: "GET" as const, path: "/product-categories", respond: () => [] },
     {
       method: "GET" as const,
       path: "/settings/stock-count-settings",
@@ -67,7 +67,7 @@ function baseRoutes() {
           { tier: "C", interval_days: 90, is_override: false },
         ],
         category_tiers: [],
-        product_type_tiers: [],
+        product_category_tiers: [],
       }),
     },
     { method: "GET" as const, path: "/colours", respond: () => [] },

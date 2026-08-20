@@ -12,6 +12,7 @@ the whole point.
 """
 
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 import pytest
 import pytest_asyncio
@@ -23,6 +24,7 @@ from app.db import configure_sqlite_pragmas, enforce_sqlite_foreign_keys
 from app.models.base import Base
 from app.models.listing import ListingPlatform
 from app.models.platform_connection import PlatformConnection
+from app.models.purchase import MaterialPurchase, MaterialPurchaseReceipt, Purchase, PurchaseStatus
 from app.seed import _ensure_material_categories
 from app.services import listing_push, order_sync, platform_limits, stock_takes
 from app.services.platforms.base import ExternalOrder, ExternalOrderLine, PaymentState
@@ -204,3 +206,34 @@ def _clear_limit_cache():
     platform_limits.invalidate_limits_cache()
     yield
     platform_limits.invalidate_limits_cache()
+
+
+async def received_purchase(
+    session,
+    material_id: int,
+    qty,
+    total_cost,
+    received_at: datetime | None = None,
+) -> Purchase:
+    """A purchase order that has actually arrived, receipt and all.
+
+    Constructing `Purchase(status=received, received_at=...)` by hand no longer stocks
+    anything: since receipts were split out, status is a derived label and the replay in
+    services/costing.py reads the receipt rows. A fixture that skips them produces a
+    material with zero stock and a test that fails somewhere far away, so build them here.
+
+    Does not commit — the caller decides the transaction, as before.
+    """
+    at = received_at or datetime.now(timezone.utc)
+    purchase = Purchase(status=PurchaseStatus.received, received_at=at)
+    purchase.lines = [
+        MaterialPurchase(
+            material_id=material_id,
+            qty=Decimal(qty),
+            total_cost=Decimal(total_cost),
+            receipts=[MaterialPurchaseReceipt(qty=Decimal(qty), received_at=at)],
+        )
+    ]
+    session.add(purchase)
+    await session.flush()
+    return purchase

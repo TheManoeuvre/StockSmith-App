@@ -1,9 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useRef, useState } from "react";
+import { Fragment, useMemo, useRef, useState } from "react";
 import { platformsApi, type ProductSyncStatus } from "../../api/platforms";
 import { productsApi } from "../../api/products";
-import { productTypesApi } from "../../api/productTypes";
+import { productCategoriesApi } from "../../api/productCategories";
 import type { ListingPlatform, Product } from "../../api/types";
 import { CONNECTABLE_PLATFORMS } from "../../lib/platforms";
 import { useAssetUrl } from "../../hooks/useAssetUrl";
@@ -21,16 +21,38 @@ export const Route = createFileRoute("/products/")({
 
 const PRODUCTS_PAGE_SIZE = 50;
 
+/**
+ * The page's products, split into runs of one category.
+ *
+ * The order is the server's — it sorts by category then name so that pagination cuts
+ * through the grouping rather than scattering one category over every page — so this only
+ * walks the page and notices where the heading changes. Same shape as the materials list,
+ * which is the point: the two read alike now that products have a category too.
+ */
+function groupByCategory(products: Product[]): { key: string; label: string; products: Product[] }[] {
+  const out: { key: string; label: string; products: Product[] }[] = [];
+  for (const product of products) {
+    const label = product.product_category_name ?? "Uncategorised";
+    const last = out[out.length - 1];
+    if (last && last.label === label) {
+      last.products.push(product);
+      continue;
+    }
+    out.push({ key: label, label, products: [product] });
+  }
+  return out;
+}
+
 function ProductsList() {
   const queryClient = useQueryClient();
   const [page, setPage] = useState(0);
-  const [productTypeFilter, setProductTypeFilter] = useState<number | null>(null);
+  const [productCategoryFilter, setProductCategoryFilter] = useState<number | null>(null);
   const { data, isLoading, error } = useQuery({
-    queryKey: ["products", page, productTypeFilter],
-    queryFn: () => productsApi.listPaged(PRODUCTS_PAGE_SIZE, page * PRODUCTS_PAGE_SIZE, productTypeFilter),
+    queryKey: ["products", page, productCategoryFilter],
+    queryFn: () => productsApi.listPaged(PRODUCTS_PAGE_SIZE, page * PRODUCTS_PAGE_SIZE, productCategoryFilter),
     placeholderData: keepPreviousData,
   });
-  const { data: productTypes } = useQuery({ queryKey: ["product-types"], queryFn: productTypesApi.list });
+  const { data: productCategories } = useQuery({ queryKey: ["product-categories"], queryFn: productCategoriesApi.list });
   const products = data?.items;
   const total = data?.total ?? 0;
   // One cheap DB-backed query per connectable platform (no marketplace traffic — this
@@ -64,6 +86,8 @@ function ProductsList() {
     },
   });
 
+  const groups = useMemo(() => groupByCategory(products ?? []), [products]);
+
   if (isLoading) return <p>Loading products…</p>;
   if (error) return <p className="text-red-600">{(error as Error).message}</p>;
 
@@ -78,21 +102,21 @@ function ProductsList() {
 
       <CsvImportExport onExport={productsApi.exportCsv} onImport={productsApi.importCsv} invalidateKey="products" />
 
-      {productTypes && productTypes.length > 0 && (
+      {productCategories && productCategories.length > 0 && (
         <label className="flex items-center gap-2 text-sm">
-          Product type
+          Product category
           <select
             className="rounded border border-slate-300 px-2 py-1"
-            value={productTypeFilter ?? ""}
+            value={productCategoryFilter ?? ""}
             onChange={(e) => {
-              setProductTypeFilter(e.target.value === "" ? null : Number(e.target.value));
+              setProductCategoryFilter(e.target.value === "" ? null : Number(e.target.value));
               // Back to the first page: page 3 of the unfiltered list is usually past the
               // end of the filtered one, which would land on a blank table.
               setPage(0);
             }}
           >
             <option value="">All</option>
-            {productTypes.map((t) => (
+            {productCategories.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.name}
               </option>
@@ -135,7 +159,7 @@ function ProductsList() {
             <th className="p-2"></th>
             <th className="p-2">Name</th>
             <th className="p-2">SKU</th>
-            <th className="p-2">Type</th>
+
             <th className="p-2">On hand</th>
             <th className="p-2">Sellable</th>
             <th className="p-2">Cost per unit</th>
@@ -143,8 +167,20 @@ function ProductsList() {
           </tr>
         </thead>
         <tbody>
-          {products?.map((p) => (
-            <ProductRow key={p.id} product={p} storeStatuses={storeStatuses} />
+          {groups.map((group) => (
+            <Fragment key={group.key}>
+              <tr className="border-b border-slate-200 bg-slate-50">
+                <th colSpan={7} className="p-2 text-left font-medium">
+                  {group.label}
+                  <span className="ml-2 text-xs font-normal text-slate-500">
+                    {group.products.length} {group.products.length === 1 ? "product" : "products"}
+                  </span>
+                </th>
+              </tr>
+              {group.products.map((p) => (
+                <ProductRow key={p.id} product={p} storeStatuses={storeStatuses} />
+              ))}
+            </Fragment>
           ))}
         </tbody>
       </table>
@@ -202,6 +238,14 @@ function ProductRow({
         <Link to="/products/$productId" params={{ productId: String(p.id) }} className="text-slate-900 underline">
           {p.name}
         </Link>
+        {p.made_to_order && (
+          <span
+            title="Built against an order, so it is never counted"
+            className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600"
+          >
+            made to order
+          </span>
+        )}
       </td>
       <td className="p-2">
         {p.sku ? (
@@ -213,7 +257,6 @@ function ProductRow({
           "—"
         )}
       </td>
-      <td className="p-2">{p.product_type_name ?? "—"}</td>
       <td className="p-2">{p.is_bundle ? `Ready to ship: ${p.ready_to_ship ?? "—"}` : p.current_stock}</td>
       {/* One column, and it's the figure that reaches the marketplaces — the three it
           replaced (max buildable / expected max buildable / max sellable) were all

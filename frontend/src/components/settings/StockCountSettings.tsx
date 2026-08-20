@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { productTypesApi } from "../../api/productTypes";
+import { productCategoriesApi } from "../../api/productCategories";
 import { stockCountSettingsApi } from "../../api/stockTakes";
 import type { ABCClass, StockCountSettings as Settings } from "../../api/types";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
@@ -26,7 +26,7 @@ export function StockCountSettings() {
     queryKey: ["settings", "stock-count-settings"],
     queryFn: stockCountSettingsApi.get,
   });
-  const { data: productTypes } = useQuery({ queryKey: ["product-types"], queryFn: productTypesApi.list });
+  const { data: productCategories } = useQuery({ queryKey: ["product-categories"], queryFn: productCategoriesApi.list });
   // Categories are configurable now, so the list is whatever the shop has — including any the
   // user added, which is exactly where a per-category cadence earns its keep.
   const { categories } = useMaterialCategories();
@@ -96,14 +96,14 @@ export function StockCountSettings() {
       };
     });
 
-  const setProductTypeTier = (productTypeId: number, value: string) =>
+  const setProductCategoryTier = (productCategoryId: number, value: string) =>
     setForm((prev) => {
       if (!prev) return prev;
-      const without = prev.product_type_tiers.filter((t) => t.product_type_id !== productTypeId);
+      const without = prev.product_category_tiers.filter((t) => t.product_category_id !== productCategoryId);
       return {
         ...prev,
-        product_type_tiers:
-          value === INHERIT ? without : [...without, { product_type_id: productTypeId, abc_class: value as ABCClass }],
+        product_category_tiers:
+          value === INHERIT ? without : [...without, { product_category_id: productCategoryId, abc_class: value as ABCClass }],
       };
     });
 
@@ -210,22 +210,22 @@ export function StockCountSettings() {
         </label>
         {renderIntervals("product")}
         <div>
-          <p className="mb-1 text-sm">By product type</p>
-          {productTypes && productTypes.length > 0 ? (
+          <p className="mb-1 text-sm">By product category</p>
+          {productCategories && productCategories.length > 0 ? (
             <div className="flex flex-wrap gap-3">
-              {productTypes.map((type) => (
+              {productCategories.map((type) => (
                 <label key={type.id} className="flex items-center gap-1 text-sm">
                   {type.name}
                   {tierSelect(
-                    form.product_type_tiers.find((t) => t.product_type_id === type.id)?.abc_class ?? INHERIT,
-                    (next) => setProductTypeTier(type.id, next),
+                    form.product_category_tiers.find((t) => t.product_category_id === type.id)?.abc_class ?? INHERIT,
+                    (next) => setProductCategoryTier(type.id, next),
                   )}
                 </label>
               ))}
             </div>
           ) : (
             <p className="text-xs text-slate-500">
-              No product types yet — add some under Reference data to group products for counting.
+              No product categories yet — add some under Reference data to group products for counting.
             </p>
           )}
         </div>

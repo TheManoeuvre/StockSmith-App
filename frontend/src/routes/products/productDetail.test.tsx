@@ -23,6 +23,7 @@ const PRODUCT = {
   kitting_cost_per_unit: "0.30",
   pricing_mode: "product",
   push_buildable_capacity: true,
+  made_to_order: false,
   platform_ceiling_qty: null,
   variant_attribute1_name: null,
   variant_attribute2_name: null,

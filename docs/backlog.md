@@ -48,6 +48,7 @@ rare, and giving each line its own session — but the underlying fault stays.
 incompatibility, then pin or bump accordingly. A dependency change wants its own commit
 and its own green run, not to ride along inside a feature.
 
+
 ## Drop the superseded `materials.colour` and `materials.category` columns
 
 **Problem:** Two reference-table migrations deliberately left their old column in place for a
@@ -66,7 +67,9 @@ older build, shows those materials as "other".
 `LegacyMaterialCategory` enum, make `materials.category_id` NOT NULL, and delete
 `legacy_value_for` along with the calls that keep the column in step (materials create/patch, CSV
 import, and the rename/merge wrappers in `routers/material_categories.py`). The category-name
-fallbacks in `Material.category_name` / `Material.colour_name` go at the same time.
+fallbacks in `Material.category_name` / `Material.colour_name` go at the same time, as does
+the legacy branch of `services/stock_takes._material_category_sort`, which reads the enum's
+declaration order to place a material whose category row is missing.
 
 ## Orphaned sidecars are detected but not reaped
 
