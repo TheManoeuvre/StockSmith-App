@@ -79,9 +79,29 @@ class ProductRead(ProductBase):
     # unit, so margin can account for it (see pricing.compute_profit_margin). None for a
     # bundle, and for a product with no kitting BOM at all.
     kitting_cost_per_unit: Decimal | None = None
+    # Lowest and highest of the same two figures across the product's ACTIVE variants, once
+    # their BOM overrides and substitutions are resolved. Both None for a product with no
+    # variants (or none with a BOM), in which case the base figures above are the whole
+    # story. They exist because the base figures resolve the base BOM only, so for a variant
+    # product they can report a cost that matches no actual variant — see
+    # buildability.get_cost_per_unit_range_by_product.
+    cost_per_unit_min: Decimal | None = None
+    cost_per_unit_max: Decimal | None = None
+    kitting_cost_per_unit_min: Decimal | None = None
+    kitting_cost_per_unit_max: Decimal | None = None
     main_image_asset_id: int | None = None
     ready_to_ship: int | None = None
     effective_platform_fee_percent: Decimal | None = None
+    # The product's resolved shipping profile and what it costs on the shop-wide margin fee
+    # source (Settings -> Pricing) — the same basis the product page's margin estimate uses,
+    # so the two agree. All None when no profile is assigned, which is itself the signal:
+    # an order for such a product ships with no postage cost recorded at all.
+    effective_shipping_profile_id: int | None = None
+    effective_shipping_profile_name: str | None = None
+    effective_shipping_cost: Decimal | None = None
+    # Something this product needs before its orders can report a truthful profit — see
+    # routers/products.py _cogs_incomplete for exactly what counts.
+    cogs_incomplete: bool = False
     product_category_name: str | None = None
     last_stock_take_at: datetime | None = None
     # See MaterialRead.classification — same reasoning, same population rule.
@@ -91,6 +111,10 @@ class ProductRead(ProductBase):
 class ProductPage(BaseModel):
     items: list[ProductRead]
     total: int
+    # How many products in the current category filter have a COGS gap, regardless of which
+    # page is being shown — what the "Incomplete COGS only" toggle displays beside itself so
+    # the count is visible without first switching the filter on.
+    incomplete_total: int = 0
 
 
 class BomLine(BaseModel):

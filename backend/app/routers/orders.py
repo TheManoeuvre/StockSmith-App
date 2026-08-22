@@ -168,6 +168,25 @@ def _cogs_pending(order: Order) -> bool:
     )
 
 
+def _postage_cost_missing(order: Order) -> bool:
+    """True when an order has shipped without ever recording what the postage cost — the
+    signal a UI should show instead of letting net_profit read as though postage were free.
+
+    Deliberately NOT folded into cogs_pending. That flag means "a line hasn't been allocated
+    yet", says so in its copy, and is fixed by allocating the line; this one is fixed by
+    assigning the product a shipping profile. Merging them would make both messages wrong
+    half the time.
+
+    The shipped gate is the whole rule: shipping_cost_snapshot is legitimately NULL on every
+    order that hasn't shipped, since ship_order is what freezes it. Only once the units have
+    physically left the building does a missing figure mean a real cost went unrecorded.
+
+    Should be permanently empty for orders placed after the fixes in
+    order_costs.default_order_shipping_profile landed, which makes it a standing regression
+    check on that path rather than only a disclaimer about historical rows."""
+    return order.status == OrderStatus.shipped and order.shipping_cost_snapshot is None
+
+
 async def _recompute_manual_order_totals(session: AsyncSession, order: Order) -> None:
     """Manual orders have no marketplace receipt to source subtotal/grand_total from —
     this derives them from the order's own lines whenever ordered_qty or
@@ -241,6 +260,7 @@ def _serialize_order(order: Order, kitting_cogs: Decimal | None) -> OrderRead:
         kitting_cogs=kitting_cogs,
         net_profit=_compute_net_profit(order, materials_cogs, kitting_cogs),
         cogs_pending=_cogs_pending(order),
+        postage_cost_missing=_postage_cost_missing(order),
         sync_issue=order.sync_issue,
         pending_marketplace_cancellation=order.pending_marketplace_cancellation,
         lines=lines,

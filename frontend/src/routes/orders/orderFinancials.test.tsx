@@ -33,6 +33,7 @@ function order(overrides: Record<string, unknown> = {}) {
     kitting_cogs: "0.23",
     net_profit: "3.22",
     cogs_pending: false,
+    postage_cost_missing: false,
     lines: [],
     ...overrides,
   };
@@ -121,4 +122,28 @@ it("leaves a row that adds up to the net profit beneath it", async () => {
   for (const shown of ["£5.59", "£3.60", "-£1.44", "-£3.65", "-£0.65", "-£0.23", "£3.22"]) {
     expect(screen.getByText(shown)).toBeInTheDocument();
   }
+});
+
+it("says the postage cost was never recorded, rather than showing a bare dash", async () => {
+  // The order shipped without a shipping profile, so _compute_net_profit deducted nothing
+  // for postage. A dash reads as "nothing to show"; this figure is wrong, and says so.
+  await renderOrder({
+    shipping_cost_snapshot: null,
+    shipping_profile_id: null,
+    shipping_profile_name: null,
+    postage_cost_missing: true,
+    net_profit: "6.87",
+  });
+
+  expect(screen.getByText("Not recorded")).toBeInTheDocument();
+  expect(screen.getByText(/shipped without a shipping profile/)).toBeInTheDocument();
+});
+
+it("keeps quiet about postage on an order that hasn't shipped yet", async () => {
+  // shipping_cost_snapshot is legitimately null until ship_order freezes it, so an
+  // unshipped order must not be flagged — the backend's status gate is what decides this.
+  await renderOrder({ status: "allocated", shipping_cost_snapshot: null, postage_cost_missing: false });
+
+  expect(screen.queryByText("Not recorded")).not.toBeInTheDocument();
+  expect(screen.queryByText(/shipped without a shipping profile/)).not.toBeInTheDocument();
 });

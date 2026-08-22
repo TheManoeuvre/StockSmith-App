@@ -280,7 +280,13 @@ function OrderFinancialsPanel({ order }: { order: Order }) {
         </div>
         <div>
           <p className="text-slate-500">Postage cost</p>
-          <p>{order.shipping_cost_snapshot != null ? `-${formatMoney(order.shipping_cost_snapshot, currency)}` : "—"}</p>
+          <p className={order.postage_cost_missing ? "text-amber-700" : undefined}>
+            {order.shipping_cost_snapshot != null
+              ? `-${formatMoney(order.shipping_cost_snapshot, currency)}`
+              : order.postage_cost_missing
+                ? "Not recorded"
+                : "—"}
+          </p>
           {/* The profile name is an identifier, not a figure. In the header it made one
               column twice the width of the rest and put a proper noun in a row of money. */}
           {order.shipping_profile_name && <p className="text-xs text-slate-400">{order.shipping_profile_name}</p>}
@@ -305,6 +311,12 @@ function OrderFinancialsPanel({ order }: { order: Order }) {
           {order.cogs_pending && (
             <p className="text-xs text-amber-700">
               COGS pending — one or more lines haven't been allocated yet, so this figure doesn't include their cost.
+            </p>
+          )}
+          {order.postage_cost_missing && (
+            <p className="text-xs text-amber-700">
+              No postage cost — this order shipped without a shipping profile, so this figure doesn't deduct what
+              postage cost. Assign the product a shipping profile so future orders capture it.
             </p>
           )}
         </div>

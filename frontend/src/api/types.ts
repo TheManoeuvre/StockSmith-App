@@ -356,6 +356,24 @@ export interface Product {
   made_to_order: boolean;
   cost_per_unit: string | null;
   kitting_cost_per_unit: string | null;
+  /**
+   * Lowest and highest of the two figures above across the product's ACTIVE variants, once
+   * their BOM overrides and substitutions are resolved. Both null when the product has no
+   * variants, in which case the base figures are the whole story. They exist because the
+   * base figures resolve the base BOM only, so for a variant product they can report a cost
+   * that matches no actual variant.
+   */
+  cost_per_unit_min: string | null;
+  cost_per_unit_max: string | null;
+  kitting_cost_per_unit_min: string | null;
+  kitting_cost_per_unit_max: string | null;
+  /** Resolved shipping profile and its cost on the shop-wide margin fee source. Null when
+   *  none is assigned — which is why such a product's orders ship with no postage cost. */
+  effective_shipping_profile_id: number | null;
+  effective_shipping_profile_name: string | null;
+  effective_shipping_cost: string | null;
+  /** Missing a shipping profile or a materials cost — see the backend's _cogs_incomplete. */
+  cogs_incomplete: boolean;
   main_image_asset_id: number | null;
   ready_to_ship: number | null;
   variant_attribute1_name: string | null;
@@ -379,6 +397,9 @@ export interface Product {
 export interface ProductPage {
   items: Product[];
   total: number;
+  /** Products with a COGS gap under the current category filter, counted whether or not the
+   *  gap filter itself is on — so the toggle can show what it would reveal. */
+  incomplete_total: number;
 }
 
 export type PricingMode = "product" | "variable" | "line";
@@ -702,6 +723,9 @@ export interface Order {
   kitting_cogs: string | null;
   net_profit: string | null;
   cogs_pending: boolean;
+  // Shipped without ever recording a postage cost, so net_profit is missing it. Distinct
+  // from cogs_pending: different cause, different fix (assign the product a shipping profile).
+  postage_cost_missing: boolean;
   sync_issue: string | null;
   pending_marketplace_cancellation: boolean;
   lines: OrderLine[];

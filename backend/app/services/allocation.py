@@ -12,7 +12,7 @@ from app.models.shipping_profile import ShippingProfile
 from app.models.variant import ProductVariant
 from app.services import listing_push
 from app.services.kitting import auto_apply_multiunit_kitting_override, reconcile_order_kitting
-from app.services.order_costs import compute_line_cost_snapshot
+from app.services.order_costs import compute_line_cost_snapshot, default_order_shipping_profile
 from app.services.shipping_profiles import resolve_shipping_cost_for_platform
 from app.services.stock_events import record_stock_event
 
@@ -104,6 +104,12 @@ async def allocate_order(session: AsyncSession, order: Order, source: str = "ord
             continue
         await _allocate_line(session, line, source)
     await _recompute_order_status(session, order)
+    # Every caller of this function has just changed which products the order's lines point
+    # at — a sync importing them, map_sku/create_product_and_map attaching one to a line
+    # that had none, order creation, the manual /allocate endpoint — so this is the one
+    # place worth re-resolving the order's shipping profile from them. See
+    # order_costs.default_order_shipping_profile for why doing it per-caller failed.
+    await default_order_shipping_profile(session, order)
     await auto_apply_multiunit_kitting_override(session, order)
     await reconcile_order_kitting(session, order)
 
@@ -144,6 +150,16 @@ async def auto_allocate_after_build(
         order = await session.get(Order, order_id)
         if order is not None:
             await _recompute_order_status(session, order)
+            # Same one-box-per-parcel default allocate_order applies, and for the same
+            # reason: reconcile_order_kitting below turns whatever overrides exist right
+            # now into physical consumption, so an order that reaches ship time without
+            # one consumes a box PER UNIT. This path is how that happened in practice —
+            # a multi-unit order whose packaging BOM (or extra units) arrived after its
+            # last allocate_order, then got its stock from a build, shipped having
+            # consumed 3 boxes and 3 labels for a single parcel. Insert-only and keyed on
+            # "no existing override", so calling it here can't overwrite a genuinely
+            # multi-box quantity the user set by hand.
+            await auto_apply_multiunit_kitting_override(session, order)
             await reconcile_order_kitting(session, order)
 
 

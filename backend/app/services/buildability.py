@@ -125,6 +125,63 @@ _RESOLVED_PRODUCT_VARIANTS_BOM_SQL = text(
 )
 
 
+# The catalogue-wide analog of _RESOLVED_PRODUCT_VARIANTS_BOM_SQL, aggregated straight to a
+# per-product cost range. Same two-arm resolution (base BOM minus anything substituted away,
+# then the variant's own overrides and additions), with every `product_id = :product_id`
+# filter replaced by a correlation on v.product_id so one query covers every product.
+#
+# Exists because get_cost_per_unit_by_product is base-BOM only: for a product whose variants
+# override their BOM, the single figure it returns can match no actual variant. The products
+# list showed that figure as "Cost per unit" — not merely incomplete, potentially wrong.
+#
+# Only active variants count. A disabled variant is not sellable, so letting it widen the
+# range would misreport what the product actually costs to fulfil today — same reasoning as
+# _ACTIVE_VARIANT_STOCK_TOTALS_BY_PRODUCT_SQL above.
+#
+# A variant whose resolved BOM is empty contributes no row and so is simply absent from the
+# MIN/MAX, mirroring how get_cost_per_unit_by_product omits a product with no BOM rather than
+# reporting it as free. A product where no variant has a BOM therefore doesn't appear at all.
+_VARIANT_COST_RANGE_BY_PRODUCT_SQL = text(
+    """
+    WITH resolved AS (
+        SELECT v.product_id, v.id AS variant_id, pm.material_id,
+               COALESCE(qo.qty_required, pm.qty_required) AS effective_qty_required
+        FROM product_variants v
+        JOIN product_materials pm ON pm.product_id = v.product_id
+        LEFT JOIN product_variant_materials qo
+            ON qo.variant_id = v.id AND qo.material_id = pm.material_id AND qo.replaces_material_id IS NULL
+        LEFT JOIN product_variant_materials sub
+            ON sub.variant_id = v.id AND sub.replaces_material_id = pm.material_id
+        WHERE v.is_active = true AND sub.id IS NULL
+
+        UNION ALL
+
+        SELECT v.product_id, pvm.variant_id, pvm.material_id, pvm.qty_required
+        FROM product_variant_materials pvm
+        JOIN product_variants v ON v.id = pvm.variant_id
+        WHERE v.is_active = true
+          AND (
+              pvm.replaces_material_id IS NOT NULL
+              OR pvm.material_id NOT IN (
+                  SELECT material_id FROM product_materials WHERE product_id = v.product_id
+              )
+          )
+    ),
+    variant_cost AS (
+        SELECT r.product_id, r.variant_id,
+               SUM(r.effective_qty_required * m.avg_unit_cost) AS cost_per_unit
+        FROM resolved r
+        JOIN materials m ON m.id = r.material_id
+        WHERE r.effective_qty_required > 0
+        GROUP BY r.product_id, r.variant_id
+    )
+    SELECT product_id, MIN(cost_per_unit) AS cost_min, MAX(cost_per_unit) AS cost_max
+    FROM variant_cost
+    GROUP BY product_id
+    """
+)
+
+
 _READY_TO_SHIP_BY_BUNDLE_SQL = text(
     """
     SELECT pbi.bundle_product_id, MIN(p.current_stock / pbi.qty) AS ready_to_ship
@@ -187,6 +244,23 @@ async def get_bundle_cost_per_unit(
 async def get_cost_per_unit_by_product(session: AsyncSession) -> dict[int, Decimal]:
     result = await session.execute(_COST_PER_UNIT_BY_PRODUCT_SQL)
     return {row.product_id: Decimal(row.cost_per_unit) for row in result}
+
+
+async def get_cost_per_unit_range_by_product(session: AsyncSession) -> dict[int, tuple[Decimal, Decimal]]:
+    """(lowest, highest) build cost across a product's ACTIVE variants, for the whole
+    catalogue in one query — the variant-aware companion to get_cost_per_unit_by_product,
+    which resolves the base BOM only. Products with no variants (or none with a BOM) are
+    absent, exactly as they are there.
+
+    str() before Decimal: SQLite returns these SUMs as floats, and Decimal(float) expands
+    the full binary representation into something unreadable. Same treatment as
+    kitting.get_kitting_cogs_by_order, for the same reason."""
+    result = await session.execute(_VARIANT_COST_RANGE_BY_PRODUCT_SQL)
+    return {
+        row.product_id: (Decimal(str(row.cost_min)), Decimal(str(row.cost_max)))
+        for row in result
+        if row.cost_min is not None
+    }
 
 
 async def get_resolved_variant_bom(session: AsyncSession, product_id: int, variant_id: int) -> list[VariantBomLine]:

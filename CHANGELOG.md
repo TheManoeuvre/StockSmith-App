@@ -12,6 +12,50 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-22
+
+Two orders currently stuck out of sync — dispatched on the marketplace before StockSmith could allocate them — will now record a real postage cost once mapped and shipped, instead of silently reading as free. The products list can now show you this kind of gap before it reaches an order: sale price, materials, packaging and postage cost, together, with a filter for what's still missing.
+
+### Fixed
+- **Orders dispatched on the marketplace before they were allocated here shipped with no
+  postage cost, making them look more profitable than they were.** When a marketplace SKU
+  isn't recognised, the order line has no product attached — so there is nothing to allocate
+  (which is the "shows as shipped, but no units are allocated" warning) and, less visibly,
+  no shipping profile to take a postage cost from. Mapping the line by hand fixed the first
+  problem but never the second, so the order shipped with postage counted as £0. It now
+  resolves the shipping profile whenever a line is mapped, created or re-allocated. 26 of
+  this shop's shipped orders are affected, overstating profit by about £95 between them.
+- **A shipping profile assigned after an order had already shipped never took effect.** The
+  order would show the profile's name against a blank postage cost, and because shipping
+  can't be changed on a shipped order there was no way to correct it. The cost is now
+  recorded at the point the profile is resolved. Four orders were in this state.
+- **Multi-unit orders that got their stock from a build were charged for a box per unit.**
+  Packaging is meant to be counted once per parcel. That default was applied when an order
+  was allocated, but not when a build handed it stock — so an order whose packaging was set
+  up after it arrived, then filled from a build, consumed three boxes and three labels for a
+  single parcel. Two orders were affected.
+
+  **Orders already shipped are not corrected automatically.** They keep the figures they
+  shipped with; ask for them to be repaired if you want the history restated.
+
+### Added
+- **Orders missing a postage cost now say so.** A shipped order that never recorded what
+  postage cost is marked "No postage cost" on the orders list and explains itself on the
+  order, instead of quietly reporting a profit that leaves it out. Separate from the
+  existing "COGS pending" mark, which means something else and is fixed a different way.
+- **The products list now shows what each product costs to sell.** Sale price, then
+  materials, packaging and postage stacked in one column, with the shipping profile named
+  underneath. For a product with variations each figure shows the range across them — the
+  list previously showed the base recipe's cost, which for some products matched no
+  variation actually sold.
+- **Products with missing cost information can be found in one place.** A count beside the
+  products list says how many are missing a shipping profile or a materials recipe, and
+  filters down to exactly those. This shop has 9. Products genuinely sent without packaging
+  are not counted — no packaging is a real answer, not a gap.
+- **The product margin estimate no longer treats missing postage as free.** Where no
+  shipping profile is set, the margin is marked as excluding postage rather than quietly
+  reading £0.
+
 ## [0.7.2] - 2026-08-19
 
 Deliveries can now be recorded as they actually turn up, line by line, instead of a
