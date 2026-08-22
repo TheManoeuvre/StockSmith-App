@@ -835,6 +835,17 @@ async def list_etsy_shipping_profiles(session: AsyncSession = Depends(get_db)) -
     return [NamedOption(id=str(p["id"]), label=p["title"]) for p in profiles if p["id"] is not None]
 
 
+@router.get("/etsy/readiness-states", response_model=list[NamedOption], dependencies=[Depends(require_auth)])
+async def list_etsy_readiness_states(session: AsyncSession = Depends(get_db)) -> list[NamedOption]:
+    """The shop's processing profiles ("readiness states"), by what they say."""
+    adapter, connection = await _get_etsy_adapter(session)
+    try:
+        states = await adapter.fetch_readiness_states(session, connection)
+    except PlatformError as e:
+        raise _map_platform_error(e)
+    return [NamedOption(id=str(s["id"]), label=s["label"]) for s in states if s["id"] is not None]
+
+
 @router.get("/etsy/return-policies", response_model=list[NamedOption], dependencies=[Depends(require_auth)])
 async def list_etsy_return_policies(session: AsyncSession = Depends(get_db)) -> list[NamedOption]:
     """The shop's return policies, labelled by what they actually do — Etsy's policy object

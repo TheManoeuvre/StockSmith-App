@@ -1037,6 +1037,7 @@ class EtsyAdapter:
             "when_made": draft.metadata.get("etsy.when_made"),
             "taxonomy_id": draft.metadata.get("etsy.taxonomy_id"),
             "shipping_profile_id": draft.metadata.get("etsy.shipping_profile_id"),
+            "readiness_state_id": draft.metadata.get("etsy.readiness_state_id"),
             "type": "physical",
         }
         for optional in ("etsy.is_supply", "etsy.return_policy_id", "etsy.shop_section_id"):
@@ -1304,6 +1305,40 @@ class EtsyAdapter:
             {"id": p.get("return_policy_id"), "label": EtsyAdapter._return_policy_label(p)}
             for p in response.json().get("results", [])
         ]
+
+    async def fetch_readiness_states(self, session, connection: PlatformConnection) -> list[dict]:
+        """The shop's processing profiles ("readiness states") as {id, label}.
+
+        Etsy's own createDraftListing docs list readiness_state_id as optional, but the
+        live endpoint refuses a physical draft without one — a documentation gap, not an
+        optional field in practice. Labelled from what it actually says (ready to ship /
+        made to order, and the processing time), since the object carries no name."""
+        if connection.external_account_id is None:
+            raise PlatformSyncError("Etsy connection has no shop id — reconnect required")
+
+        response = await self._authed_request(
+            session, connection, "GET", f"/shops/{connection.external_account_id}/readiness-state-definitions"
+        )
+        if response.status_code == 403:
+            raise PlatformSyncError(
+                "Etsy did not allow reading your processing profiles. Reconnect Etsy in "
+                "Settings to grant the newer permission."
+            )
+        if response.status_code != 200:
+            raise PlatformSyncError(
+                f"Failed to fetch Etsy processing profiles: {response.status_code} {response.text}"
+            )
+        return [
+            {"id": p.get("readiness_state_id"), "label": EtsyAdapter._readiness_state_label(p)}
+            for p in response.json().get("results", [])
+        ]
+
+    @staticmethod
+    def _readiness_state_label(profile: dict) -> str:
+        state = profile.get("readiness_state")
+        state_label = "Made to order" if state == "made_to_order" else "Ready to ship"
+        days = profile.get("processing_days_display_label")
+        return f"{state_label} ({days})" if days else state_label
 
     @staticmethod
     def _return_policy_label(policy: dict) -> str:

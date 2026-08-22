@@ -12,6 +12,7 @@ export interface ListingProfile {
   etsy_when_made: string | null;
   etsy_is_supply: boolean | null;
   etsy_shipping_profile_id: number | null;
+  etsy_readiness_state_id: number | null;
   etsy_return_policy_id: number | null;
   etsy_shop_section_id: number | null;
   etsy_processing_min: number | null;
@@ -118,5 +119,6 @@ export const listingProfilesApi = {
   createDraft: (platform: ListingPlatform, productId: number) =>
     api.post<DraftPushResult>(`/platforms/${platform}/products/${productId}/draft-listing`),
   etsyShippingProfiles: () => api.get<NamedOption[]>(`/platforms/etsy/shipping-profiles`),
+  etsyReadinessStates: () => api.get<NamedOption[]>(`/platforms/etsy/readiness-states`),
   etsyReturnPolicies: () => api.get<NamedOption[]>(`/platforms/etsy/return-policies`),
 };

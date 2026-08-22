@@ -37,6 +37,11 @@ Two orders currently stuck out of sync — dispatched on the marketplace before 
 
   **Orders already shipped are not corrected automatically.** They keep the figures they
   shipped with; ask for them to be repaired if you want the history restated.
+- **Creating an Etsy draft could fail with "A readiness_state_id is required for physical
+  listings."** Etsy's own API documentation lists that field as optional, but the live
+  endpoint refuses a physical draft without one. A listing profile now needs a processing
+  profile picked, same as it already needs a shipping profile, and the draft panel says so
+  up front instead of letting the create call fail.
 
 ### Added
 - **Orders missing a postage cost now say so.** A shipped order that never recorded what
