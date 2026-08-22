@@ -42,7 +42,7 @@ function computeMargin(
   inputs: MarginInputs,
   profiles: ShippingProfile[],
   feeSource: MarginFeeSource | undefined
-): { profit: number; marginPercent: number } | null {
+): { profit: number; marginPercent: number; postageMissing: boolean } | null {
   if (!inputs.sale_price) return null;
   const salePrice = Number(inputs.sale_price);
   const cost = inputs.cost_per_unit ? Number(inputs.cost_per_unit) : 0;
@@ -51,11 +51,31 @@ function computeMargin(
   // units together pays for one box, not one per unit.
   const kitting = inputs.kitting_cost_per_unit ? Number(inputs.kitting_cost_per_unit) : 0;
   const profile = profiles.find((p) => p.id === inputs.shipping_profile_id);
+  // No profile means postage is unknown, not free. The figure is still shown — it stays
+  // directionally useful, and blanking it would hide the margin on every product that has
+  // this gap — but it is flagged rather than passed off as complete. Same choice as the
+  // order page's "No postage cost", and for the same reason: silently treating an unknown
+  // as zero is exactly what let £95 of real postage sit outside reported profit.
+  const postageMissing = profile === undefined;
   const shipping = profile ? shippingCostForFeeSource(profile, feeSource) : 0;
   const fee = (salePrice * (inputs.effective_platform_fee_percent ? Number(inputs.effective_platform_fee_percent) : 0)) / 100;
   const profit = salePrice - cost - kitting - shipping - fee;
   const marginPercent = salePrice !== 0 ? (profit / salePrice) * 100 : 0;
-  return { profit, marginPercent };
+  return { profit, marginPercent, postageMissing };
+}
+
+/** The margin figure plus, when postage is unknown, a note saying the figure excludes it. */
+function MarginSummary({ margin }: { margin: { profit: number; marginPercent: number; postageMissing: boolean } }) {
+  return (
+    <span className="text-sm">
+      Profit: <strong>£{margin.profit.toFixed(2)}</strong> · Margin: <strong>{margin.marginPercent.toFixed(1)}%</strong>
+      {margin.postageMissing && (
+        <span className="ml-2 rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800" title="No shipping profile is assigned, so postage is not deducted here — and an order for this product will ship with no postage cost recorded at all.">
+          excludes postage
+        </span>
+      )}
+    </span>
+  );
 }
 
 function ShippingProfileSelect({
@@ -464,11 +484,7 @@ function ProductPriceForm({
         >
           Save
         </SaveButton>
-        {margin && (
-          <span className="text-sm">
-            Profit: <strong>£{margin.profit.toFixed(2)}</strong> · Margin: <strong>{margin.marginPercent.toFixed(1)}%</strong>
-          </span>
-        )}
+        {margin && <MarginSummary margin={margin} />}
       </form>
       <ErrorBanner error={saveMutation.error} />
     </>
@@ -791,11 +807,7 @@ function LineRow({
         >
         Save
       </SaveButton>
-      {margin && (
-        <span className="text-sm">
-          Profit: <strong>£{margin.profit.toFixed(2)}</strong> · Margin: <strong>{margin.marginPercent.toFixed(1)}%</strong>
-        </span>
-      )}
+      {margin && <MarginSummary margin={margin} />}
       <ErrorBanner error={saveMutation.error} />
     </form>
   );

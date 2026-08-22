@@ -1,11 +1,18 @@
 from decimal import Decimal
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.order import Order, OrderLine, OrderStatus
 from app.models.product import Product
+from app.models.shipping_profile import ShippingProfile
 from app.models.variant import ProductVariant
 from app.services.buildability import compute_variant_buildability, get_cost_per_unit_by_product
-from app.services.shipping_profiles import get_shipping_profiles_by_id, resolve_variant_shipping_profile
+from app.services.shipping_profiles import (
+    get_shipping_profiles_by_id,
+    resolve_shipping_cost_for_platform,
+    resolve_variant_shipping_profile,
+)
 
 
 async def compute_line_cost_snapshot(
@@ -55,3 +62,45 @@ async def resolve_order_shipping_profile(
         if profile is not None:
             return profile.id
     return None
+
+
+async def default_order_shipping_profile(session: AsyncSession, order: Order) -> None:
+    """Auto-defaults an order's shipping profile from its lines' resolved product/variant
+    default, and — only if the order has somehow already shipped without one — freezes the
+    cost that ship_order would have frozen.
+
+    Never overwrites an already-set profile, so a user's manual reassignment survives both
+    a re-sync and any later allocation.
+
+    Called from allocation.allocate_order rather than from each caller, because "the lines
+    just changed, re-resolve" is exactly what every one of those callers means: a sync
+    importing lines, map_sku/create_product_and_map attaching a product to a line that had
+    none, create_order, and the manual /allocate endpoint. Doing it per-endpoint is how the
+    gap arose in the first place — a needs_mapping line has product_id NULL, so it resolves
+    to nothing at import, and nothing retried once the user mapped it. The order then
+    shipped with no profile and therefore no postage cost, silently reading as £0 profit
+    cost in _compute_net_profit.
+
+    The already-shipped branch is deliberately the one place a cost is frozen outside
+    ship_order. It can only fire when the snapshot was never taken at all, so it can't
+    overwrite a frozen value with a newer price — and without it, an order that gains a
+    profile after shipping (a later sync re-running this once the product was configured)
+    would display a profile name against a blank postage cost forever: routers/orders.py's
+    update_order refuses shipping changes on a shipped order, so the user can't fix it either.
+    """
+    if order.shipping_profile_id is not None:
+        return
+    await session.flush()
+    result = await session.execute(
+        select(OrderLine.product_id, OrderLine.variant_id).where(OrderLine.order_id == order.id)
+    )
+    pairs = [(product_id, variant_id) for product_id, variant_id in result]
+    order.shipping_profile_id = await resolve_order_shipping_profile(session, pairs)
+
+    if order.shipping_profile_id is None or order.shipping_cost_snapshot is not None:
+        return
+    if order.status != OrderStatus.shipped:
+        return
+    profile = await session.get(ShippingProfile, order.shipping_profile_id)
+    if profile is not None:
+        order.shipping_cost_snapshot = resolve_shipping_cost_for_platform(profile, order.platform)

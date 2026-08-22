@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy import delete, func, select, text
@@ -41,6 +43,7 @@ from app.services.buildability import (
     get_active_variant_stock_totals_by_product,
     get_bundle_cost_per_unit,
     get_cost_per_unit_by_product,
+    get_cost_per_unit_range_by_product,
     get_expected_max_buildable_by_product,
     get_max_buildable_by_product,
     get_ready_to_ship_by_bundle,
@@ -59,13 +62,16 @@ from app.services.kitting import (
     get_expected_kitting_capacity_by_product,
     get_kitting_capacity_by_product,
     get_kitting_cost_per_unit_by_product,
+    get_kitting_cost_per_unit_range_by_product,
     kitting_cost_per_unit_from_bom,
     sync_listing_ceiling_qty,
 )
 from app.services.pricing import snapshot_product_pricing
 from app.services.shipping_profiles import (
+    get_active_variant_profile_coverage_by_product,
     get_shipping_profiles_by_id,
     resolve_product_shipping_profile,
+    resolve_shipping_cost_for_fee_source,
     resolve_variant_shipping_profile,
 )
 from app.services.validation import validate_lines_against_units
@@ -112,33 +118,117 @@ async def _get_main_image_asset_id_by_product(session: AsyncSession) -> dict[int
     return {row.product_id: row.id for row in result}
 
 
-def _read_product(
-    product: Product,
-    max_buildable_by_product: dict,
-    expected_max_buildable_by_product: dict,
+async def _cogs_incomplete_product_ids(
+    session: AsyncSession,
     cost_per_unit_by_product: dict,
-    kitting_cost_per_unit_by_product: dict,
-    main_image_asset_id_by_product: dict,
-    ready_to_ship_by_bundle: dict,
+    cost_range_by_product: dict,
     bundle_cost_per_unit: dict,
-    kitting_capacity_by_product: dict,
-    expected_kitting_capacity_by_product: dict,
-    active_variant_stock_totals_by_product: dict,
-    fee_source,
-    fee_components,
-    shipping_profiles_by_id: dict,
-    abc_rules: abc.Rules,
-) -> ProductRead:
+) -> set[int]:
+    """Every product missing something its orders need before they can report a truthful
+    profit. Returned as a set so the same values drive both the per-row flag and the
+    "Incomplete COGS only" filter — the two cannot drift apart.
+
+    Two things count, and only two:
+
+      * **No shipping profile on any sellable path.** The product sets none AND either it
+        has no active variants or some active variant sets none either (see
+        get_active_variant_profile_coverage_by_product for why the variant half matters).
+        Such a product's orders reach ship_order with nothing to freeze, so postage silently
+        costs £0 in _compute_net_profit. This is the gap that put roughly £95 of postage
+        outside reported profit.
+      * **No materials cost at all** — no base BOM and no variant with one. That is what
+        leaves an order line with a NULL cost_per_unit_snapshot and produces the existing
+        "COGS pending" badge.
+
+    Deliberately NOT counted: a missing kitting BOM, because a product genuinely may have no
+    packaging and the codebase is explicit that None means exactly that rather than "free";
+    and a missing sale_price, which is a pricing gap rather than a COGS one. A flag that
+    fires on legitimate configurations gets ignored, which would cost more than it's worth.
+    """
+    coverage = await get_active_variant_profile_coverage_by_product(session)
+    rows = await session.execute(select(Product.id, Product.is_bundle, Product.shipping_profile_id))
+
+    incomplete: set[int] = set()
+    for product_id, is_bundle, shipping_profile_id in rows:
+        active_count, uncovered_count = coverage.get(product_id, (0, 0))
+        missing_postage = shipping_profile_id is None and (active_count == 0 or uncovered_count > 0)
+        base_cost = bundle_cost_per_unit.get(product_id) if is_bundle else cost_per_unit_by_product.get(product_id)
+        missing_materials = base_cost is None and cost_range_by_product.get(product_id) is None
+        if missing_postage or missing_materials:
+            incomplete.add(product_id)
+    return incomplete
+
+
+@dataclass(frozen=True)
+class _ProductReadContext:
+    """Every catalogue-wide lookup _read_product needs, gathered once.
+
+    Exists because both list_products and get_product need the identical set, and passing
+    them as positional arguments had already grown the signature past a dozen entries —
+    adding the COGS lookups to that was how get_product silently fell out of step with
+    list_products and started raising. Each lookup is a single aggregate over the whole
+    products table (see build()), so gathering them for one product costs the same as for a
+    page of fifty.
+    """
+
+    max_buildable_by_product: dict
+    expected_max_buildable_by_product: dict
+    cost_per_unit_by_product: dict
+    kitting_cost_per_unit_by_product: dict
+    cost_range_by_product: dict
+    kitting_cost_range_by_product: dict
+    cogs_incomplete_ids: set[int]
+    main_image_asset_id_by_product: dict
+    ready_to_ship_by_bundle: dict
+    bundle_cost_per_unit: dict
+    kitting_capacity_by_product: dict
+    expected_kitting_capacity_by_product: dict
+    active_variant_stock_totals_by_product: dict
+    fee_source: object
+    fee_components: object
+    shipping_profiles_by_id: dict
+    abc_rules: abc.Rules
+
+    @staticmethod
+    async def build(session: AsyncSession) -> "_ProductReadContext":
+        cost_per_unit_by_product = await get_cost_per_unit_by_product(session)
+        cost_range_by_product = await get_cost_per_unit_range_by_product(session)
+        bundle_cost_per_unit = await get_bundle_cost_per_unit(session, cost_per_unit_by_product)
+        fee_source, fee_components = await platform_fees.get_resolver_context(session)
+        return _ProductReadContext(
+            max_buildable_by_product=await get_max_buildable_by_product(session),
+            expected_max_buildable_by_product=await get_expected_max_buildable_by_product(session),
+            cost_per_unit_by_product=cost_per_unit_by_product,
+            kitting_cost_per_unit_by_product=await get_kitting_cost_per_unit_by_product(session),
+            cost_range_by_product=cost_range_by_product,
+            kitting_cost_range_by_product=await get_kitting_cost_per_unit_range_by_product(session),
+            cogs_incomplete_ids=await _cogs_incomplete_product_ids(
+                session, cost_per_unit_by_product, cost_range_by_product, bundle_cost_per_unit
+            ),
+            main_image_asset_id_by_product=await _get_main_image_asset_id_by_product(session),
+            ready_to_ship_by_bundle=await get_ready_to_ship_by_bundle(session),
+            bundle_cost_per_unit=bundle_cost_per_unit,
+            kitting_capacity_by_product=await get_kitting_capacity_by_product(session),
+            expected_kitting_capacity_by_product=await get_expected_kitting_capacity_by_product(session),
+            active_variant_stock_totals_by_product=await get_active_variant_stock_totals_by_product(session),
+            fee_source=fee_source,
+            fee_components=fee_components,
+            shipping_profiles_by_id=await get_shipping_profiles_by_id(session),
+            abc_rules=await abc.load_rules(session),
+        )
+
+
+def _read_product(product: Product, ctx: "_ProductReadContext") -> ProductRead:
     current_stock = product.current_stock
     allocated_qty = product.allocated_qty
     if product.is_bundle:
         max_buildable = None
         expected_max_buildable = None
-        cost_per_unit = bundle_cost_per_unit.get(product.id)
+        cost_per_unit = ctx.bundle_cost_per_unit.get(product.id)
         # A bundle has no kitting BOM of its own — packaging for one is whatever its
         # components' own BOMs say, which isn't a single per-unit figure.
         kitting_cost_per_unit = None
-        ready_to_ship = ready_to_ship_by_bundle.get(product.id)
+        ready_to_ship = ctx.ready_to_ship_by_bundle.get(product.id)
         max_sellable = None
         max_sellable_reason = None
         expected_max_sellable = None
@@ -150,19 +240,19 @@ def _read_product(
         # allocated_qty (builds always target the variant row) — use the summed variant
         # totals here instead, so this matches what the product detail page already
         # computes client-side, and so max_sellable's free_stock input is correct too.
-        current_stock, allocated_qty = active_variant_stock_totals_by_product.get(
+        current_stock, allocated_qty = ctx.active_variant_stock_totals_by_product.get(
             product.id, (product.current_stock, product.allocated_qty)
         )
-        max_buildable = max_buildable_by_product.get(product.id)
-        expected_max_buildable = expected_max_buildable_by_product.get(product.id)
-        cost_per_unit = cost_per_unit_by_product.get(product.id)
-        kitting_cost_per_unit = kitting_cost_per_unit_by_product.get(product.id)
+        max_buildable = ctx.max_buildable_by_product.get(product.id)
+        expected_max_buildable = ctx.expected_max_buildable_by_product.get(product.id)
+        cost_per_unit = ctx.cost_per_unit_by_product.get(product.id)
+        kitting_cost_per_unit = ctx.kitting_cost_per_unit_by_product.get(product.id)
         ready_to_ship = None
         free_stock = current_stock - allocated_qty
-        kitting_capacity = kitting_capacity_by_product.get(product.id)
+        kitting_capacity = ctx.kitting_capacity_by_product.get(product.id)
         max_sellable, max_sellable_reason = combine_max_sellable(free_stock, kitting_capacity)
         expected_max_sellable, expected_max_sellable_reason = combine_expected_max_sellable(
-            expected_max_buildable, expected_kitting_capacity_by_product.get(product.id)
+            expected_max_buildable, ctx.expected_kitting_capacity_by_product.get(product.id)
         )
         theoretical_max_sellable, theoretical_max_sellable_reason = combine_theoretical_max_sellable(
             free_stock, max_buildable, kitting_capacity
@@ -174,14 +264,18 @@ def _read_product(
         theoretical_max_sellable, theoretical_max_sellable_reason = _clamp_value_to_ceiling(
             theoretical_max_sellable, theoretical_max_sellable_reason, product.platform_ceiling_qty
         )
-    shipping_profile = resolve_product_shipping_profile(shipping_profiles_by_id, product)
+    shipping_profile = resolve_product_shipping_profile(ctx.shipping_profiles_by_id, product)
     effective_platform_fee_percent = platform_fees.resolve_fee_percent(
-        fee_source,
-        fee_components,
+        ctx.fee_source,
+        ctx.fee_components,
         product.platform_fee_percent,
         product.sale_price,
         shipping_profile.price if shipping_profile else None,
     )
+    # A bundle's packaging is whatever its components' own BOMs say, so it has no kitting
+    # figure of its own to take a range of either — same rule as kitting_cost_per_unit above.
+    cost_range = ctx.cost_range_by_product.get(product.id)
+    kitting_cost_range = None if product.is_bundle else ctx.kitting_cost_range_by_product.get(product.id)
     return ProductRead.model_validate(product).model_copy(
         update={
             "current_stock": current_stock,
@@ -196,15 +290,25 @@ def _read_product(
             "theoretical_max_sellable_reason": theoretical_max_sellable_reason,
             "cost_per_unit": cost_per_unit,
             "kitting_cost_per_unit": kitting_cost_per_unit,
-            "main_image_asset_id": main_image_asset_id_by_product.get(product.id),
+            "cost_per_unit_min": cost_range[0] if cost_range else None,
+            "cost_per_unit_max": cost_range[1] if cost_range else None,
+            "kitting_cost_per_unit_min": kitting_cost_range[0] if kitting_cost_range else None,
+            "kitting_cost_per_unit_max": kitting_cost_range[1] if kitting_cost_range else None,
+            "main_image_asset_id": ctx.main_image_asset_id_by_product.get(product.id),
             "ready_to_ship": ready_to_ship,
             "effective_platform_fee_percent": effective_platform_fee_percent,
+            "effective_shipping_profile_id": shipping_profile.id if shipping_profile else None,
+            "effective_shipping_profile_name": shipping_profile.name if shipping_profile else None,
+            "effective_shipping_cost": (
+                resolve_shipping_cost_for_fee_source(shipping_profile, ctx.fee_source) if shipping_profile else None
+            ),
+            "cogs_incomplete": product.id in ctx.cogs_incomplete_ids,
             # Bundles are never counted (their quantity is derived from components), so
             # they carry no classification rather than a meaningless one.
             "classification": (
                 None
                 if product.is_bundle
-                else abc.describe(abc_rules.for_product(product), product.last_stock_take_at)
+                else abc.describe(ctx.abc_rules.for_product(product), product.last_stock_take_at)
             ),
         }
     )
@@ -223,9 +327,20 @@ async def list_products(
     # client-side filter would only ever narrow the current page, and the total under it
     # would be wrong. Mirrors materials' ?material_type_id=.
     product_category_id: int | None = None,
+    # Narrows to products with a COGS gap — see _cogs_incomplete_product_ids. Server-side
+    # for the same reason as the category filter above: the list is paginated, so filtering
+    # in the client would only ever narrow the current page and leave `total` wrong.
+    cogs_incomplete: bool = False,
     session: AsyncSession = Depends(get_db),
 ) -> ProductPage:
+    # Built before the count/page queries because the cogs_incomplete filter reads from it.
+    # Every lookup inside is a single aggregate over the whole products table regardless of
+    # how many rows this page returns — deliberately whole-catalogue rather than scoped to
+    # this page's product IDs, which is also what lets the gap set be exact rather than
+    # page-local. See _ProductReadContext.
+    ctx = await _ProductReadContext.build(session)
     count_query = select(func.count()).select_from(Product)
+    incomplete_count_query = select(func.count()).select_from(Product).where(Product.id.in_(ctx.cogs_incomplete_ids))
     # outerjoin so the ORDER BY below can read the category's name; products without one
     # keep their row rather than dropping out.
     query = (
@@ -235,7 +350,14 @@ async def list_products(
     )
     if product_category_id is not None:
         count_query = count_query.where(Product.product_category_id == product_category_id)
+        incomplete_count_query = incomplete_count_query.where(Product.product_category_id == product_category_id)
         query = query.where(Product.product_category_id == product_category_id)
+    # Counted before the gap filter narrows anything, so the toggle can show how many
+    # products it would reveal while it's still switched off.
+    incomplete_total = await session.scalar(incomplete_count_query)
+    if cogs_incomplete:
+        count_query = count_query.where(Product.id.in_(ctx.cogs_incomplete_ids))
+        query = query.where(Product.id.in_(ctx.cogs_incomplete_ids))
     total = await session.scalar(count_query)
     # selectinload rather than letting product_category_name touch the relationship lazily —
     # a lazy load in async raises MissingGreenlet (services/allocation.py:19-24).
@@ -253,45 +375,8 @@ async def list_products(
         .offset(offset)
     )
     products = list(result.scalars())
-    # The bulk lookups below (get_max_buildable_by_product etc.) each run a single
-    # aggregate query over the whole products table regardless of how many rows this page
-    # returns — deliberately left whole-table rather than scoped to just this page's
-    # product IDs. They're already cheap (one round trip each, no per-product looping),
-    # and scoping them would add real complexity for no measurable win at this scale.
-    max_buildable_by_product = await get_max_buildable_by_product(session)
-    expected_max_buildable_by_product = await get_expected_max_buildable_by_product(session)
-    cost_per_unit_by_product = await get_cost_per_unit_by_product(session)
-    kitting_cost_per_unit_by_product = await get_kitting_cost_per_unit_by_product(session)
-    main_image_asset_id_by_product = await _get_main_image_asset_id_by_product(session)
-    ready_to_ship_by_bundle = await get_ready_to_ship_by_bundle(session)
-    bundle_cost_per_unit = await get_bundle_cost_per_unit(session, cost_per_unit_by_product)
-    kitting_capacity_by_product = await get_kitting_capacity_by_product(session)
-    expected_kitting_capacity_by_product = await get_expected_kitting_capacity_by_product(session)
-    active_variant_stock_totals_by_product = await get_active_variant_stock_totals_by_product(session)
-    fee_source, fee_components = await platform_fees.get_resolver_context(session)
-    shipping_profiles_by_id = await get_shipping_profiles_by_id(session)
-    abc_rules = await abc.load_rules(session)
-    items = [
-        _read_product(
-            p,
-            max_buildable_by_product,
-            expected_max_buildable_by_product,
-            cost_per_unit_by_product,
-            kitting_cost_per_unit_by_product,
-            main_image_asset_id_by_product,
-            ready_to_ship_by_bundle,
-            bundle_cost_per_unit,
-            kitting_capacity_by_product,
-            expected_kitting_capacity_by_product,
-            active_variant_stock_totals_by_product,
-            fee_source,
-            fee_components,
-            shipping_profiles_by_id,
-            abc_rules,
-        )
-        for p in products
-    ]
-    return ProductPage(items=items, total=total or 0)
+    items = [_read_product(p, ctx) for p in products]
+    return ProductPage(items=items, total=total or 0, incomplete_total=incomplete_total or 0)
 
 
 @router.get("/export")
@@ -326,36 +411,7 @@ async def create_product(payload: ProductCreate, session: AsyncSession = Depends
 @router.get("/{product_id}", response_model=ProductRead)
 async def get_product(product_id: int, session: AsyncSession = Depends(get_db)) -> ProductRead:
     product = await _get_product_with_type(session, product_id)
-    max_buildable_by_product = await get_max_buildable_by_product(session)
-    expected_max_buildable_by_product = await get_expected_max_buildable_by_product(session)
-    cost_per_unit_by_product = await get_cost_per_unit_by_product(session)
-    kitting_cost_per_unit_by_product = await get_kitting_cost_per_unit_by_product(session)
-    main_image_asset_id_by_product = await _get_main_image_asset_id_by_product(session)
-    ready_to_ship_by_bundle = await get_ready_to_ship_by_bundle(session)
-    bundle_cost_per_unit = await get_bundle_cost_per_unit(session, cost_per_unit_by_product)
-    kitting_capacity_by_product = await get_kitting_capacity_by_product(session)
-    expected_kitting_capacity_by_product = await get_expected_kitting_capacity_by_product(session)
-    active_variant_stock_totals_by_product = await get_active_variant_stock_totals_by_product(session)
-    fee_source, fee_components = await platform_fees.get_resolver_context(session)
-    shipping_profiles_by_id = await get_shipping_profiles_by_id(session)
-    abc_rules = await abc.load_rules(session)
-    read = _read_product(
-        product,
-        max_buildable_by_product,
-        expected_max_buildable_by_product,
-        cost_per_unit_by_product,
-        kitting_cost_per_unit_by_product,
-        main_image_asset_id_by_product,
-        ready_to_ship_by_bundle,
-        bundle_cost_per_unit,
-        kitting_capacity_by_product,
-        expected_kitting_capacity_by_product,
-        active_variant_stock_totals_by_product,
-        fee_source,
-        fee_components,
-        shipping_profiles_by_id,
-        abc_rules,
-    )
+    read = _read_product(product, await _ProductReadContext.build(session))
     await sync_listing_ceiling_qty(session, product_id, None, read.expected_max_sellable)
     await session.commit()
     return read

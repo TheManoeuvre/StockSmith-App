@@ -103,6 +103,14 @@ function OrdersList() {
                     COGS pending
                   </span>
                 )}
+                {order.postage_cost_missing && (
+                  <span
+                    className="ml-2 rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800"
+                    title="This order shipped without a shipping profile, so what the postage cost was never recorded — this figure doesn't deduct it. Assign the product a shipping profile so future orders capture it."
+                  >
+                    No postage cost
+                  </span>
+                )}
               </td>
               <td className="p-2">{order.platform ? PLATFORM_LABELS[order.platform] : "Manual"}</td>
               <td className="p-2">

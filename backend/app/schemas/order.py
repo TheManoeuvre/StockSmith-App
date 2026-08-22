@@ -122,6 +122,10 @@ class OrderRead(BaseModel):
     kitting_cogs: Decimal | None = None
     net_profit: Decimal | None = None
     cogs_pending: bool = False
+    # A shipped order that never recorded its postage cost — see routers/orders.py
+    # _postage_cost_missing. Kept separate from cogs_pending because the two have
+    # different causes and different fixes.
+    postage_cost_missing: bool = False
     sync_issue: str | None = None
     pending_marketplace_cancellation: bool = False
     lines: list[OrderLineRead] = []
