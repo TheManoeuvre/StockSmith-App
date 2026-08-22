@@ -21,6 +21,7 @@ const ETSY_PROFILE = {
   etsy_when_made: "made_to_order",
   etsy_is_supply: false,
   etsy_shipping_profile_id: 99,
+  etsy_readiness_state_id: 7,
   etsy_return_policy_id: null,
   etsy_shop_section_id: null,
   etsy_processing_min: null,
@@ -38,6 +39,7 @@ const TAXONOMY = [
   { id: 1234, name: "Desk Storage", path: "Home & Living > Storage & Organisation > Desk Storage", level: 2 },
 ];
 const SHIPPING = [{ id: "99", label: "UK Standard" }];
+const READINESS = [{ id: "7", label: "Ready to ship (1-3 days)" }];
 const RETURNS = [{ id: "7", label: "Returns and exchanges within 30 days" }];
 
 let profiles: unknown[] = [];
@@ -59,6 +61,7 @@ beforeEach(() => {
     { method: "GET", path: /\/platforms\/etsy\/taxonomy\/\d+$/, respond: () => TAXONOMY[0] },
     { method: "GET", path: /\/platforms\/etsy\/taxonomy\?/, respond: () => TAXONOMY },
     { method: "GET", path: "/platforms/etsy/shipping-profiles", respond: () => shipping },
+    { method: "GET", path: "/platforms/etsy/readiness-states", respond: () => READINESS },
     { method: "GET", path: "/platforms/etsy/return-policies", respond: () => RETURNS },
     { method: "GET", path: /\/settings\/listing-profiles\/\w+$/, respond: () => profiles },
     { method: "POST", path: /\/settings\/listing-profiles\/\w+$/, respond: () => ETSY_PROFILE },

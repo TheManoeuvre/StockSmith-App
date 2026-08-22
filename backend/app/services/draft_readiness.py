@@ -18,7 +18,10 @@ Three classes of finding, and the distinction is the whole design:
 
 The required sets are taken from the marketplaces' own schemas. Etsy's createDraftListing
 requires exactly quantity, title, description, price, who_made, when_made and taxonomy_id,
-plus a shipping profile for a physical listing. Notably `image_ids` is *optional* there:
+plus a shipping profile and a readiness state (processing profile) for a physical listing
+— the docs list readiness_state_id as optional, but the live endpoint 400s a physical
+draft without one, so it is treated as required here too. Notably `image_ids` is *optional*
+there:
 a draft can be created with no image at all, and only publishing needs one — so a missing
 hero image is a warning here, not a blocker.
 """
@@ -89,6 +92,11 @@ _ETSY_REQUIRED: list[tuple[str, str, str]] = [
         "etsy_shipping_profile_id",
         "Shipping profile",
         "Etsy requires a shipping profile for a physical listing.",
+    ),
+    (
+        "etsy_readiness_state_id",
+        "Processing profile",
+        "Etsy requires a processing profile (readiness state) for a physical listing.",
     ),
 ]
 

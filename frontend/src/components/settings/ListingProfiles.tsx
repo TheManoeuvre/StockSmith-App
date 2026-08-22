@@ -150,6 +150,7 @@ function ProfileForm({
     etsy_when_made: profile?.etsy_when_made ?? null,
     etsy_is_supply: profile?.etsy_is_supply ?? null,
     etsy_shipping_profile_id: profile?.etsy_shipping_profile_id ?? null,
+    etsy_readiness_state_id: profile?.etsy_readiness_state_id ?? null,
     etsy_return_policy_id: profile?.etsy_return_policy_id ?? null,
     etsy_processing_min: profile?.etsy_processing_min ?? null,
     etsy_processing_max: profile?.etsy_processing_max ?? null,
@@ -179,6 +180,12 @@ function ProfileForm({
   const { data: shippingProfiles, error: shippingError } = useQuery({
     queryKey: ["platforms", "etsy", "shipping-profiles"],
     queryFn: () => listingProfilesApi.etsyShippingProfiles(),
+    enabled: platform === "etsy",
+    retry: false,
+  });
+  const { data: readinessStates, error: readinessError } = useQuery({
+    queryKey: ["platforms", "etsy", "readiness-states"],
+    queryFn: () => listingProfilesApi.etsyReadinessStates(),
     enabled: platform === "etsy",
     retry: false,
   });
@@ -232,6 +239,16 @@ function ProfileForm({
               onChange={(v) => set({ etsy_shipping_profile_id: v === null ? null : Number(v) })}
               emptyHint="No shipping profiles on this Etsy shop."
               failedHint="Couldn't read your shipping profiles. Reconnect Etsy in Settings — this needs a permission that older connections didn't grant."
+            />
+          </Field>
+          <Field label="Processing profile" required>
+            <RemoteSelect
+              options={readinessStates}
+              failed={!!readinessError}
+              value={draft.etsy_readiness_state_id ?? null}
+              onChange={(v) => set({ etsy_readiness_state_id: v === null ? null : Number(v) })}
+              emptyHint="No processing profiles on this Etsy shop."
+              failedHint="Couldn't read your processing profiles. Reconnect Etsy in Settings — this needs a permission that older connections didn't grant."
             />
           </Field>
           <Field label="Who made it" required>

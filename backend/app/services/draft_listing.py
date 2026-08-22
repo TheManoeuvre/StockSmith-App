@@ -72,6 +72,7 @@ _ETSY_METADATA = {
     "etsy.when_made": "etsy_when_made",
     "etsy.is_supply": "etsy_is_supply",
     "etsy.shipping_profile_id": "etsy_shipping_profile_id",
+    "etsy.readiness_state_id": "etsy_readiness_state_id",
     "etsy.return_policy_id": "etsy_return_policy_id",
     "etsy.shop_section_id": "etsy_shop_section_id",
 }
