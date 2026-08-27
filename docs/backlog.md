@@ -142,3 +142,46 @@ Live on this shop: 7 failing pushes across two listings, both with several varia
 This matters more once the periodic reconciliation sweep above exists: a sweep that re-pushes every errored listing would retry these forever, burning quota on a call that cannot succeed.
 
 **Ask:** Detect the condition rather than discovering it in a 400. The GET that `push_listing_quantity` already performs carries everything needed — an empty `quantity_on_property` alongside more than one non-deleted product means no per-SKU push is possible. Fail fast with a message naming the fix ("this Etsy listing's quantity doesn't vary by variation — enable it on the listing, or the variants can't be stocked independently"), and mark the failure as permanent/structural so it's distinguishable from a transient one: the badge can direct the user to the listing that needs changing, and any future retry sweep can skip it instead of hammering it.
+
+## Marketplace listing profiles have no bulk-apply action
+
+**Problem:** `ListingProfile` + `ProductPlatformSettings` (`backend/app/models/listing_profile.py`) already model exactly what tools like Sellbrite/LitCommerce call a listing "template" — a named bundle of taxonomy, shipping profile, policies, condition and processing time, resolved per product with a shop-wide default fallback (`listing_profiles.resolve_profile`). What's missing is bulk assignment: there is no way to select several products and set their profile or `is_target` in one action, so changing the shipping profile across twenty products is still twenty edits even though the data model was explicitly built to avoid that (see the model's own docstring).
+
+**Ask:** A bulk-update action — select N products, apply a profile id and/or `is_target` to all of them — built on the existing resolution logic, no new schema. Worth pairing with an auto-apply rule ("new products in category X get profile Y") so the assignment doesn't go stale as the catalogue grows; `listing_profile_backfill.py`'s one-time "suggest profiles from Etsy" pass is the closest existing analogue, but it only runs once rather than keeping up going forward.
+
+## No single-source listing creation across Etsy and eBay
+
+**Problem:** `create_draft_listing` (`backend/app/routers/platforms.py:1030`) and `build_draft` (`draft_listing.py`) already take a `platform` parameter and share the same profile/copy-resolution pipeline for both marketplaces, but the frontend only presents one platform's draft flow at a time. A product meant for both shops has to be built twice, once per platform, even though nothing platform-specific happens until the final adapter call.
+
+**Ask:** Extend the existing draft-builder with a combined form that shows both platforms' readiness/blockers side by side and a "create on both" action that calls `build_draft` for each. Keep Etsy's `taxonomy_id` and eBay's `category_id` as the separate fields they already are on `ListingProfile` — the two vocabularies genuinely don't map onto each other — just surface both instead of switching tabs.
+
+## No bulk CSV import/export for listing settings
+
+**Problem:** `csv_io.py` round-trips materials, products and stock-takes, but nothing at the listing layer — `ListingProfile` assignment, `is_target`, and per-platform copy overrides on `ProductPlatformSettings` can only be edited one product at a time in the app.
+
+**Ask:** A per-platform CSV (mirroring the profile model's own platform split, since Etsy and eBay fields don't unify) covering profile assignment, `is_target` and per-platform copy, exported/imported/re-synced the same way the materials CSV already round-trips. Lower priority once the bulk-apply action above exists, since that covers most of the same "repeat one change across many products" need in-app; this is for batch edits done in a spreadsheet outside the app. Coordinate with any future BOM/variant CSV work (`docs/roadmap.md` finding 6) on shared conventions (id vs. name keys, per-entity file shape) rather than inventing them twice.
+
+## No per-channel profitability reporting
+
+**Problem:** `costing.py` already computes accurate per-product cost, and orders carry their originating platform, but nothing rolls sales or margin up by marketplace — there's no way to see whether Etsy or eBay is actually the more profitable channel.
+
+**Ask:** A report or dashboard panel showing margin and sales by platform, built entirely on existing costing/order data — no new cost logic needed, just an aggregation by platform.
+
+## Etsy listings have no soft quality warnings, only hard blockers
+
+**Problem:** `draft_readiness.py` validates the fields a draft cannot be created without, but says nothing about a technically-valid listing that's still weak — few tags, no alt text, a thin description.
+
+**Ask:** Extend readiness with a non-blocking warnings list surfaced alongside the existing blockers, reusing the same validation framework rather than adding a parallel one.
+
+## Draft listings only ever carry one image, and there's no way to reuse images across products
+
+**Problem:** Two separate gaps in the same area.
+
+First, `build_draft` (`draft_listing.py:169-180`) only queries `AssetType.main_image` when assembling a draft's image list — one hero image, always `rank=1`. But `AssetType.listing_image` already exists in the enum (`backend/app/models/asset.py`) and is already treated as satisfying "has an image" by `draft_readiness.py:173` and `catalogue_compatibility.py:83` — the schema half-supports multiple images per product already, the draft-builder just never reads the second type. There's also no upload UI for anything beyond the single hero image.
+
+Second, every `ProductAsset` belongs to exactly one `product_id` (optionally one `variant_id`) — there is no concept of an image that exists independently of a product. A maker who reuses the same background, prop, or packaging shot across many listings has to upload it separately to every product today, and updating it means re-uploading it everywhere it's used by hand.
+
+**Ask:** Two parts, worth landing separately.
+
+1. *(small)* Have `build_draft` collect `AssetType.listing_image` alongside `main_image`, ordered by `display_order`, and add upload UI for additional (non-hero) images per product. This is most of the day-to-day value and is close to free — the schema and readiness checks already assume it.
+2. *(larger)* A shared image-library concept: images uploaded once, independent of any product, that can be selectively attached to any product's image set at a chosen position — by reference, not by copy, so editing the library image updates every listing that includes it on its next push. Needs a new model, storage handling alongside the existing `file_storage.py`, a library-management UI, and `build_draft`'s image-gathering extended to merge a product's own images with its selected library images in the resolved order.
