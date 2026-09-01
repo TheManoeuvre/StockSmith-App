@@ -110,6 +110,11 @@ class MaterialRead(MaterialBase):
     # Products whose build/kitting BOM names this material — populated on the single-get only
     # (the list leaves it null), for the detail panel's "Used in N products" footer.
     used_in_product_count: int | None = None
+    # The material's line on the currently-open stock take, if any — populated on the
+    # single-get only. `open_stock_take_line_status` is a StockTakeLineStatus value
+    # (pending/counted/applied/conflict/accepted_system/skipped).
+    open_stock_take_id: int | None = None
+    open_stock_take_line_status: str | None = None
     last_stock_take_at: datetime | None = None
     # The effective tier/cadence with its provenance, so the UI can say "C, from the
     # Packaging category" rather than a bare "C" that gives no clue which level to edit.

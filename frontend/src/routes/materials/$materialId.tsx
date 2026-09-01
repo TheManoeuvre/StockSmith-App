@@ -13,10 +13,12 @@ import { DetailPanel } from "../../components/common/DetailPanel";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { CreatableSelect } from "../../components/common/CreatableSelect";
 import { Badge } from "../../components/common/Badge";
-import type { ABCClass, MaterialUnit } from "../../api/types";
+import type { ABCClass, MaterialStockHistoryEntry, MaterialUnit } from "../../api/types";
 import { StockCountFields } from "../../components/common/StockCountFields";
-import type { TabDef } from "../../components/common/Tabs";
+import { Tabs, type TabDef } from "../../components/common/Tabs";
+import { FieldRow } from "../../components/common/FieldRow";
 import {
+  formatDayMonth,
   isLowStock,
   normalizeQtyForUnit,
   roundQty,
@@ -24,7 +26,7 @@ import {
 } from "../../lib/format";
 import { formatUnitCost } from "../../lib/money";
 import {
-  formatWeeksOfSupply,
+  formatWeeksShort,
   STOCKOUT_BADGE_CLASS,
   STOCKOUT_LABEL,
   STOCKOUT_TEXT_CLASS,
@@ -434,9 +436,6 @@ function MaterialDetail() {
           </Badge>
         ) : undefined
       }
-      tabs={TABS}
-      activeTab={activeTab}
-      onTabChange={setActiveTab}
     >
       <div className="flex flex-col gap-6">
         {/* Identity + the three headline figures — shown on every tab. */}
@@ -485,11 +484,14 @@ function MaterialDetail() {
             />
             <Stat
               label="To stockout"
-              value={formatWeeksOfSupply(material)}
+              value={formatWeeksShort(material.weeks_of_supply)}
               sub={
-                material.consumption_rate_per_week
+                (material.consumption_rate_per_week
                   ? `${roundQty(material.consumption_rate_per_week)}/wk used`
-                  : "no history"
+                  : "no history") +
+                (material.fg_buffer_weeks && Number(material.fg_buffer_weeks) > 0.05
+                  ? ` · incl. ${Number(material.fg_buffer_weeks).toFixed(1)} wk from stock`
+                  : "")
               }
               valueClassName={
                 stockoutStatus && stockoutStatus !== "ok"
@@ -509,89 +511,30 @@ function MaterialDetail() {
           </p>
         </div>
 
-        {activeTab === "details" && (
-          <section className="flex flex-col gap-2 rounded bg-white p-4 shadow-sm">
-            <div className="flex items-start gap-4">
-              <div
-                className={`flex h-32 w-32 shrink-0 items-center justify-center rounded border border-slate-200 bg-slate-50 ${isDragOver ? "ring-2 ring-slate-400" : ""}`}
-                onDragOver={(e) => {
-                  if (e.dataTransfer.types.includes("text/uri-list")) {
-                    e.preventDefault();
-                    setIsDragOver(true);
-                  }
-                }}
-                onDragLeave={() => setIsDragOver(false)}
-                onDrop={(e) => {
-                  const droppedUrl =
-                    e.dataTransfer.getData("text/uri-list") ||
-                    e.dataTransfer.getData("text/plain");
-                  if (droppedUrl) {
-                    e.preventDefault();
-                    importImageUrlMutation.mutate(droppedUrl);
-                  }
-                  setIsDragOver(false);
-                }}
+        <Tabs tabs={TABS} active={activeTab} onChange={setActiveTab} />
+
+        {activeTab === "details" && (material.barcode || material.product_url) && (
+          <div className="flex gap-2">
+            {material.barcode && (
+              <Link
+                to="/material-label/$materialId"
+                params={{ materialId: String(id) }}
+                className="rounded border border-slate-300 bg-white px-4 py-1.5 text-sm shadow-sm"
               >
-                {imageUrl ? (
-                  <img
-                    src={imageUrl}
-                    alt={material.name}
-                    className="h-full w-full rounded object-cover"
-                  />
-                ) : (
-                  <span className="text-xs text-slate-400">No image</span>
-                )}
-              </div>
-              <div className="flex-1">
-                <p className="text-sm font-medium">Image</p>
-                <div className="mt-2 flex gap-2">
-                  <button
-                    onClick={() => uploadImageMutation.mutate()}
-                    className="rounded border border-slate-300 px-3 py-1 text-sm"
-                  >
-                    {material.image_path ? "Replace image" : "Upload image"}
-                  </button>
-                  {material.image_path && (
-                    <button
-                      onClick={() => removeImageMutation.mutate()}
-                      className="rounded border border-slate-300 px-3 py-1 text-sm text-red-600"
-                    >
-                      Remove image
-                    </button>
-                  )}
-                </div>
-                <form
-                  className="mt-2 flex gap-2"
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    if (imageUrlInput.trim())
-                      importImageUrlMutation.mutate(imageUrlInput.trim());
-                  }}
-                >
-                  <input
-                    className="flex-1 rounded border border-slate-300 px-2 py-1 text-sm"
-                    placeholder="Paste image URL, or drag a link onto the image…"
-                    value={imageUrlInput}
-                    onChange={(e) => setImageUrlInput(e.target.value)}
-                  />
-                  <button
-                    type="submit"
-                    disabled={!imageUrlInput.trim()}
-                    className="rounded border border-slate-300 px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    Import
-                  </button>
-                </form>
-                <ErrorBanner
-                  error={
-                    uploadImageMutation.error ??
-                    removeImageMutation.error ??
-                    importImageUrlMutation.error
-                  }
-                />
-              </div>
-            </div>
-          </section>
+                Print label
+              </Link>
+            )}
+            {material.product_url && (
+              <a
+                href={material.product_url}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded border border-slate-300 bg-white px-4 py-1.5 text-sm shadow-sm"
+              >
+                Open supplier page
+              </a>
+            )}
+          </div>
         )}
 
         {(activeTab === "details" ||
@@ -600,7 +543,7 @@ function MaterialDetail() {
           <section>
             <ErrorBanner error={saveDetailsMutation.error} />
             <form
-              className="flex flex-wrap items-end gap-2 rounded bg-white p-4 shadow-sm"
+              className="flex flex-col gap-3 rounded bg-white p-4 shadow-sm"
               onSubmit={(e) => {
                 e.preventDefault();
                 saveDetailsMutation.mutate();
@@ -608,17 +551,15 @@ function MaterialDetail() {
             >
               {activeTab === "details" && (
                 <>
-                  <label className="flex flex-col gap-1">
-                    <span className="text-sm">Name</span>
+                  <FieldRow label="Name">
                     <input
                       required
-                      className="rounded border border-slate-300 px-2 py-1"
+                      className="w-full rounded border border-slate-300 px-2 py-1"
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                     />
-                  </label>
-                  <label className="flex flex-col gap-1">
-                    <span className="text-sm">Category</span>
+                  </FieldRow>
+                  <FieldRow label="Category">
                     <select
                       className="rounded border border-slate-300 px-2 py-1"
                       value={category}
@@ -630,9 +571,8 @@ function MaterialDetail() {
                         </option>
                       ))}
                     </select>
-                  </label>
-                  <label className="flex flex-col gap-1">
-                    <span className="text-sm">Unit</span>
+                  </FieldRow>
+                  <FieldRow label="Unit">
                     <select
                       className="rounded border border-slate-300 px-2 py-1"
                       value={unit}
@@ -644,11 +584,10 @@ function MaterialDetail() {
                         </option>
                       ))}
                     </select>
-                  </label>
+                  </FieldRow>
                   {editedCategory?.tracks_colour && (
                     <>
-                      <label className="flex flex-col gap-1">
-                        <span className="text-sm">Colour</span>
+                      <FieldRow label="Colour">
                         {/* Backed by the colours reference table now, so the same colour on two materials
                     is one row that can be renamed once. onResolved is unused deliberately: the
                     backend matches the name case-insensitively and find-or-creates, which is
@@ -660,9 +599,8 @@ function MaterialDetail() {
                           onChange={setColour}
                           onResolved={() => {}}
                         />
-                      </label>
-                      <label className="flex flex-col gap-1">
-                        <span className="text-sm">Material type</span>
+                      </FieldRow>
+                      <FieldRow label="Material type">
                         <CreatableSelect
                           className="rounded border border-slate-300 px-2 py-1"
                           options={materialTypes ?? []}
@@ -671,19 +609,10 @@ function MaterialDetail() {
                           onResolved={setMaterialTypeId}
                           placeholder="PLA, PETG…"
                         />
-                      </label>
+                      </FieldRow>
                     </>
                   )}
-                  <label className="flex flex-col gap-1">
-                    <span className="text-sm">Barcode</span>
-                    <input
-                      className="rounded border border-slate-300 px-2 py-1"
-                      value={barcode}
-                      onChange={(e) => setBarcode(e.target.value)}
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1">
-                    <span className="text-sm">Manufacturer</span>
+                  <FieldRow label="Manufacturer">
                     <CreatableSelect
                       className="rounded border border-slate-300 px-2 py-1"
                       options={manufacturers ?? []}
@@ -691,21 +620,115 @@ function MaterialDetail() {
                       onChange={setManufacturer}
                       onResolved={setManufacturerId}
                     />
-                  </label>
-                  <label className="flex flex-col gap-1 flex-1">
-                    <span className="text-sm">Product URL</span>
+                  </FieldRow>
+                  <FieldRow label="Product URL">
                     <input
-                      className="rounded border border-slate-300 px-2 py-1"
+                      className="w-full rounded border border-slate-300 px-2 py-1"
                       value={productUrl}
                       onChange={(e) => setProductUrl(e.target.value)}
                     />
-                  </label>
+                  </FieldRow>
+                  <FieldRow label="Barcode">
+                    <input
+                      className="rounded border border-slate-300 px-2 py-1"
+                      value={barcode}
+                      onChange={(e) => setBarcode(e.target.value)}
+                    />
+                  </FieldRow>
+                  <FieldRow label="Image">
+                    <div className="flex items-start gap-3">
+                      <div
+                        className={`flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded border border-slate-200 bg-slate-50 ${isDragOver ? "ring-2 ring-slate-400" : ""}`}
+                        onDragOver={(e) => {
+                          if (e.dataTransfer.types.includes("text/uri-list")) {
+                            e.preventDefault();
+                            setIsDragOver(true);
+                          }
+                        }}
+                        onDragLeave={() => setIsDragOver(false)}
+                        onDrop={(e) => {
+                          const droppedUrl =
+                            e.dataTransfer.getData("text/uri-list") ||
+                            e.dataTransfer.getData("text/plain");
+                          if (droppedUrl) {
+                            e.preventDefault();
+                            importImageUrlMutation.mutate(droppedUrl);
+                          }
+                          setIsDragOver(false);
+                        }}
+                      >
+                        {imageUrl ? (
+                          <img
+                            src={imageUrl}
+                            alt={material.name}
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <span className="text-[10px] text-slate-400">
+                            no image
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex flex-1 flex-col gap-2">
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => uploadImageMutation.mutate()}
+                            className="rounded border border-slate-300 px-3 py-1 text-sm"
+                          >
+                            {material.image_path ? "Replace" : "Upload"}
+                          </button>
+                          {material.image_path && (
+                            <button
+                              type="button"
+                              onClick={() => removeImageMutation.mutate()}
+                              className="rounded border border-slate-300 px-3 py-1 text-sm text-red-600"
+                            >
+                              ×
+                            </button>
+                          )}
+                        </div>
+                        <div className="flex gap-2">
+                          <input
+                            className="flex-1 rounded border border-slate-300 px-2 py-1 text-sm"
+                            placeholder="Paste image URL, or drag a link onto the image…"
+                            value={imageUrlInput}
+                            onChange={(e) => setImageUrlInput(e.target.value)}
+                          />
+                          <button
+                            type="button"
+                            disabled={!imageUrlInput.trim()}
+                            onClick={() =>
+                              importImageUrlMutation.mutate(imageUrlInput.trim())
+                            }
+                            className="rounded border border-slate-300 px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                          >
+                            Import
+                          </button>
+                        </div>
+                        <ErrorBanner
+                          error={
+                            uploadImageMutation.error ??
+                            removeImageMutation.error ??
+                            importImageUrlMutation.error
+                          }
+                        />
+                      </div>
+                    </div>
+                  </FieldRow>
+                  <FieldRow label="Used in">
+                    <p className="text-sm text-slate-600">
+                      {material.used_in_product_count ?? 0}{" "}
+                      {(material.used_in_product_count ?? 0) === 1
+                        ? "product"
+                        : "products"}
+                    </p>
+                  </FieldRow>
                 </>
               )}
               {activeTab === "supplier" && (
                 <>
-                  <label className="flex flex-col gap-1">
-                    <span className="text-sm">Default supplier</span>
+                  <FieldRow label="Default supplier">
                     <CreatableSelect
                       className="rounded border border-slate-300 px-2 py-1"
                       options={suppliers ?? []}
@@ -713,99 +736,101 @@ function MaterialDetail() {
                       onChange={setDefaultSupplier}
                       onResolved={setDefaultSupplierId}
                     />
-                  </label>
-                  <label className="flex flex-col gap-1">
-                    <span className="text-sm">Reorder threshold</span>
-                    <input
-                      className="w-28 rounded border border-slate-300 px-2 py-1"
-                      step={wholeNumberStepFor(unit)}
-                      value={reorderThreshold}
-                      onChange={(e) => setReorderThreshold(e.target.value)}
-                      onBlur={(e) =>
-                        setReorderThreshold(
-                          normalizeQtyForUnit(e.target.value, unit),
-                        )
-                      }
-                    />
-                  </label>
-                  <label className="flex flex-col gap-1">
-                    <span className="text-sm">Typical reorder qty</span>
-                    <input
-                      className="w-28 rounded border border-slate-300 px-2 py-1"
-                      step={wholeNumberStepFor(unit)}
-                      value={typicalReorderQty}
-                      onChange={(e) => setTypicalReorderQty(e.target.value)}
-                      onBlur={(e) =>
-                        setTypicalReorderQty(
-                          normalizeQtyForUnit(e.target.value, unit),
-                        )
-                      }
-                    />
-                  </label>
+                  </FieldRow>
+                  <FieldRow label="Reorder threshold">
+                    <div className="flex items-center gap-2">
+                      <input
+                        className="w-28 rounded border border-slate-300 px-2 py-1"
+                        step="1"
+                        value={reorderThreshold}
+                        onChange={(e) => setReorderThreshold(e.target.value)}
+                        onBlur={(e) =>
+                          setReorderThreshold(
+                            Math.round(Number(e.target.value) || 0).toString(),
+                          )
+                        }
+                      />
+                      <span className="text-sm text-slate-400">{unit}</span>
+                    </div>
+                  </FieldRow>
+                  <FieldRow label="Typical reorder qty">
+                    <div className="flex items-center gap-2">
+                      <input
+                        className="w-28 rounded border border-slate-300 px-2 py-1"
+                        step="1"
+                        value={typicalReorderQty}
+                        onChange={(e) => setTypicalReorderQty(e.target.value)}
+                        onBlur={(e) =>
+                          setTypicalReorderQty(
+                            e.target.value.trim() === ""
+                              ? ""
+                              : Math.round(Number(e.target.value) || 0).toString(),
+                          )
+                        }
+                      />
+                      <span className="text-sm text-slate-400">{unit}</span>
+                    </div>
+                  </FieldRow>
                   {/* Read-only — the weighted-average cost only moves via purchases and
                       adjustments, never a direct edit here. */}
-                  <label className="flex flex-col gap-1">
-                    <span className="text-sm">
-                      {editedCategory?.cost_per_kg_display
+                  <FieldRow
+                    label={
+                      editedCategory?.cost_per_kg_display
                         ? "Avg cost/kg"
-                        : "Avg unit cost"}
-                    </span>
-                    <input
-                      readOnly
-                      className="w-28 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-slate-600"
-                      value={
-                        editedCategory?.cost_per_kg_display
-                          ? formatUnitCost(
-                              Number(material.avg_unit_cost) * 1000,
-                            )
-                          : formatUnitCost(material.avg_unit_cost)
-                      }
-                    />
-                  </label>
+                        : "Avg unit cost"
+                    }
+                  >
+                    <div className="flex items-center gap-2">
+                      <input
+                        readOnly
+                        className="w-28 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-slate-600"
+                        value={
+                          editedCategory?.cost_per_kg_display
+                            ? formatUnitCost(
+                                Number(material.avg_unit_cost) * 1000,
+                              )
+                            : formatUnitCost(material.avg_unit_cost)
+                        }
+                      />
+                      <span className="text-sm text-slate-400">
+                        per {editedCategory?.cost_per_kg_display ? "kg" : unit}
+                      </span>
+                    </div>
+                  </FieldRow>
                 </>
               )}
               {activeTab === "counting" && (
-                <div className="basis-full">
-                  <StockCountFields
-                    abcClass={abcClass}
-                    intervalDays={stockTakeIntervalDays}
-                    classification={material.classification}
-                    groupLabel={`the ${category} category`}
-                    onAbcClassChange={(next) => setField("abcClass", next)}
-                    onIntervalDaysChange={(next) =>
-                      setField("stockTakeIntervalDays", next)
-                    }
-                  />
-                </div>
+                <StockCountFields
+                  layout="rows"
+                  abcClass={abcClass}
+                  intervalDays={stockTakeIntervalDays}
+                  classification={material.classification}
+                  groupLabel={`the ${category} category`}
+                  openTake={
+                    material.open_stock_take_id
+                      ? {
+                          id: material.open_stock_take_id,
+                          status: material.open_stock_take_line_status ?? "",
+                        }
+                      : null
+                  }
+                  onAbcClassChange={(next) => setField("abcClass", next)}
+                  onIntervalDaysChange={(next) =>
+                    setField("stockTakeIntervalDays", next)
+                  }
+                />
               )}
-              <SaveButton
-                type="submit"
-                isDirty={detailsDirty}
-                isPending={saveDetailsMutation.isPending}
-                status={saveDetailsStatus}
-                className="rounded bg-slate-900 px-4 py-1.5 text-white disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Save
-              </SaveButton>
-              {activeTab === "details" && material.barcode && (
-                <Link
-                  to="/material-label/$materialId"
-                  params={{ materialId: String(id) }}
-                  className="rounded border border-slate-300 px-4 py-1.5 text-sm"
+              <div>
+                <SaveButton
+                  type="submit"
+                  isDirty={detailsDirty}
+                  isPending={saveDetailsMutation.isPending}
+                  status={saveDetailsStatus}
+                  className="rounded bg-slate-900 px-4 py-1.5 text-white disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Print label
-                </Link>
-              )}
-              {activeTab === "details" && material.product_url && (
-                <a
-                  href={material.product_url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rounded border border-slate-300 px-4 py-1.5 text-sm"
-                >
-                  Open supplier page
-                </a>
-              )}
+                  Save
+                </SaveButton>
+              </div>
             </form>
             {activeTab === "supplier" &&
               isLowStock(material.current_qty, material.reorder_threshold) && (
@@ -819,6 +844,9 @@ function MaterialDetail() {
                   <ErrorBanner error={draftPurchaseMutation.error} />
                 </div>
               )}
+            {activeTab === "supplier" && (
+              <PurchaseOrderHistory history={history} unit={material.unit} />
+            )}
           </section>
         )}
 
@@ -935,105 +963,25 @@ function MaterialDetail() {
                 <tr className="border-b border-slate-200">
                   <th className="p-2">Date</th>
                   <th className="p-2">Type</th>
-                  <th className="p-2">Qty</th>
-                  <th className="p-2">Total cost</th>
-                  <th className="p-2">Unit cost</th>
-                  <th className="p-2">Supplier / reason</th>
+                  <th className="p-2">Delta</th>
+                  <th className="p-2">Comment</th>
                 </tr>
               </thead>
               <tbody>
-                {history?.map((h) => {
-                  const unitCost =
-                    h.kind !== "adjustment" &&
-                    h.total_cost !== null &&
-                    Number(h.qty) > 0
-                      ? Number(h.total_cost) / Number(h.qty)
-                      : null;
-                  return (
-                    <tr
-                      key={`${h.kind}-${h.id}`}
-                      className="border-b border-slate-100"
-                    >
-                      <td className="p-2">
-                        {new Date(h.at).toLocaleDateString()}
-                      </td>
-                      <td className="p-2">
-                        {/* Three kinds now. A delivery moved stock and is dated when it arrived;
-                        "on order" is on this timeline because that is where people look for
-                        it, but it has moved nothing — only the first two add up to the
-                        quantity shown above. */}
-                        {h.kind === "adjustment" ? (
-                          <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-700">
-                            Adjustment
-                          </span>
-                        ) : h.kind === "purchase" ? (
-                          <span className="rounded bg-green-100 px-2 py-0.5 text-xs text-green-800">
-                            Delivered
-                          </span>
-                        ) : (
-                          <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
-                            On order
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-2">
-                        {h.kind === "adjustment" && h.mode === "set" ? (
-                          <>
-                            Set to {roundQty(h.target_qty ?? "0")}{" "}
-                            <span className="text-xs text-slate-400">
-                              (Δ {Number(h.qty) > 0 ? "+" : ""}
-                              {roundQty(h.qty)})
-                            </span>
-                          </>
-                        ) : (
-                          <>
-                            {h.kind === "adjustment" && Number(h.qty) > 0
-                              ? "+"
-                              : ""}
-                            {roundQty(h.qty)}
-                          </>
-                        )}
-                      </td>
-                      <td className="p-2">
-                        {h.total_cost !== null
-                          ? `£${Number(h.total_cost).toFixed(2)}`
-                          : "—"}
-                      </td>
-                      <td className="p-2">
-                        {unitCost === null
-                          ? "—"
-                          : `${formatUnitCost(unitCost)}${h.kind === "purchase_outstanding" ? " (quoted)" : ""}`}
-                      </td>
-                      <td className="p-2">
-                        {h.kind === "adjustment" ? (
-                          h.order_id != null ? (
-                            <Link
-                              to="/orders/$orderId"
-                              params={{ orderId: String(h.order_id) }}
-                              className="underline"
-                            >
-                              {h.reason}
-                            </Link>
-                          ) : h.product_id != null ? (
-                            <Link
-                              to="/products/$productId"
-                              params={{ productId: String(h.product_id) }}
-                              className="underline"
-                            >
-                              {h.product_name
-                                ? `${h.reason} - ${h.product_name}`
-                                : h.reason}
-                            </Link>
-                          ) : (
-                            h.reason
-                          )
-                        ) : (
-                          (h.supplier_name ?? "—")
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
+                {history?.map((h) => (
+                  <tr key={`${h.kind}-${h.id}`} className="border-b border-slate-100">
+                    <td className="p-2 text-slate-500">{formatDayMonth(h.at)}</td>
+                    <td className="p-2">
+                      <HistoryTypeBadge kind={h.kind} />
+                    </td>
+                    <td className="p-2">
+                      <HistoryDelta h={h} unit={material.unit} />
+                    </td>
+                    <td className="p-2">
+                      <HistoryComment h={h} />
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
             {history && (historyExpanded || history.length >= 10) && (
@@ -1049,6 +997,149 @@ function MaterialDetail() {
         )}
       </div>
     </DetailPanel>
+  );
+}
+
+const HISTORY_TYPE_BADGE: Record<MaterialStockHistoryEntry["kind"], string> = {
+  purchase: "bg-green-100 text-green-800",
+  purchase_outstanding: "bg-amber-100 text-amber-800",
+  build: "bg-blue-100 text-blue-800",
+  scrap: "bg-rose-100 text-rose-800",
+  adjustment: "bg-slate-100 text-slate-700",
+};
+
+const HISTORY_TYPE_LABEL: Record<MaterialStockHistoryEntry["kind"], string> = {
+  purchase: "Delivered",
+  purchase_outstanding: "On order",
+  build: "Build",
+  scrap: "Scrap",
+  adjustment: "Adjustment",
+};
+
+function HistoryTypeBadge({ kind }: { kind: MaterialStockHistoryEntry["kind"] }) {
+  return (
+    <span className={`rounded px-2 py-0.5 text-xs ${HISTORY_TYPE_BADGE[kind]}`}>
+      {HISTORY_TYPE_LABEL[kind]}
+    </span>
+  );
+}
+
+/** The qty column, renamed "Delta": unit-suffixed and coloured by direction. The `set`-mode
+ * adjustment keeps its "Set to X (Δ ±Y)" form — the delta alone doesn't say what the count
+ * actually landed on. */
+function HistoryDelta({ h, unit }: { h: MaterialStockHistoryEntry; unit: MaterialUnit }) {
+  const suffix = unit === "each" ? "" : ` ${unit}`;
+  if (h.kind === "adjustment" && h.mode === "set") {
+    return (
+      <>
+        Set to {roundQty(h.target_qty ?? "0")}
+        {suffix}{" "}
+        <span className="text-xs text-slate-400">
+          (Δ {Number(h.qty) > 0 ? "+" : ""}
+          {roundQty(h.qty)}
+          {suffix})
+        </span>
+      </>
+    );
+  }
+  const qty = Number(h.qty);
+  const colour =
+    qty > 0 ? "text-green-700" : qty < 0 ? "text-red-600" : "text-slate-500";
+  return (
+    <span className={colour}>
+      {qty > 0 ? "+" : ""}
+      {roundQty(h.qty)}
+      {suffix}
+    </span>
+  );
+}
+
+/** Renamed from "Supplier / reason": purchase rows link to their PO, everything else keeps
+ * the existing order/product link-or-plain-reason logic. */
+function HistoryComment({ h }: { h: MaterialStockHistoryEntry }) {
+  if (h.kind === "purchase" || h.kind === "purchase_outstanding") {
+    return (
+      <>
+        <Link
+          to="/purchases/$purchaseId"
+          params={{ purchaseId: String(h.purchase_id) }}
+          className="underline"
+        >
+          PO #{h.purchase_id}
+        </Link>
+        {h.supplier_name ? ` · ${h.supplier_name}` : ""}
+      </>
+    );
+  }
+  if (h.order_id != null) {
+    return (
+      <Link
+        to="/orders/$orderId"
+        params={{ orderId: String(h.order_id) }}
+        className="underline"
+      >
+        {h.reason}
+      </Link>
+    );
+  }
+  if (h.product_id != null) {
+    return (
+      <Link
+        to="/products/$productId"
+        params={{ productId: String(h.product_id) }}
+        className="underline"
+      >
+        {h.product_name ? `${h.reason} - ${h.product_name}` : h.reason}
+      </Link>
+    );
+  }
+  return <>{h.reason ?? "—"}</>;
+}
+
+/** The Supplier tab's PO list — reuses the Stock tab's already-fetched history query
+ * (component-level, not scoped to that tab) filtered to the two purchase kinds, rather than
+ * a second request. */
+function PurchaseOrderHistory({
+  history,
+  unit,
+}: {
+  history: MaterialStockHistoryEntry[] | undefined;
+  unit: MaterialUnit;
+}) {
+  const rows = (history ?? []).filter(
+    (h) => h.kind === "purchase" || h.kind === "purchase_outstanding",
+  );
+  return (
+    <div className="mt-4">
+      <h3 className="mb-2 text-sm font-medium text-slate-600">
+        Purchase orders
+      </h3>
+      {rows.length === 0 ? (
+        <p className="text-sm text-slate-500">No purchases yet.</p>
+      ) : (
+        <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">
+          <tbody>
+            {rows.map((h) => (
+              <tr
+                key={`${h.kind}-${h.id}`}
+                className="border-b border-slate-100 last:border-0"
+              >
+                <td className="p-2 text-slate-500">{formatDayMonth(h.at)}</td>
+                <td className="p-2">
+                  <HistoryTypeBadge kind={h.kind} />
+                </td>
+                <td className="p-2">
+                  <HistoryComment h={h} />
+                </td>
+                <td className="p-2 text-right">
+                  <HistoryDelta h={h} unit={unit} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </div>
   );
 }
 

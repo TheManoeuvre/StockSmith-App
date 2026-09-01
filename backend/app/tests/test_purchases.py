@@ -532,6 +532,7 @@ async def test_stock_history_reconciles_with_current_qty(session):
     account for the quantity exactly, and what is still on order says so separately.
     """
     from app.routers.materials import get_stock_history
+    from app.services.builds import create_build
 
     material = await _material(session)
     purchase = await _order(session, material.id, 10, "100")
@@ -539,14 +540,25 @@ async def test_stock_history_reconciles_with_current_qty(session):
     await purchase_receipts.record_receipts(session, purchase.id, [(line_id, Decimal(6), None)], received_at=JAN1)
     await create_adjustment(session, material.id, MaterialAdjustmentMode.adjust, Decimal(-2), "spillage")
 
+    # A build consumes material too — its adjustment row is its own 'build' kind, not the
+    # generic 'adjustment' bucket, but it still has to reconcile like any other movement.
+    product = Product(name="Widget", sku="SKU-BUILD-1")
+    session.add(product)
+    await session.flush()
+    session.add(ProductMaterial(product_id=product.id, material_id=material.id, qty_required=Decimal(1)))
+    await session.commit()
+    build = await create_build(session, product.id, None, qty_built=1, notes=None)
+
     rows = await get_stock_history(material.id, limit=100, session=session)
     by_kind = {}
     for row in rows:
         by_kind.setdefault(row["kind"], []).append(row)
 
-    moved = sum(Decimal(r["qty"]) for r in rows if r["kind"] in ("purchase", "adjustment"))
+    moved = sum(
+        Decimal(r["qty"]) for r in rows if r["kind"] in ("purchase", "adjustment", "build", "scrap")
+    )
     await session.refresh(material)
-    assert moved == Decimal(material.current_qty) == Decimal(4)
+    assert moved == Decimal(material.current_qty) == Decimal(3)
 
     # The four still to come are on the timeline, but as their own kind — they have not
     # moved anything, and counting them would put the page back where it started.
@@ -554,3 +566,15 @@ async def test_stock_history_reconciles_with_current_qty(session):
     assert Decimal(by_kind["purchase_outstanding"][0]["qty"]) == Decimal(4)
     assert by_kind["purchase_outstanding"][0]["status"] == "ordered"
     assert Decimal(by_kind["purchase"][0]["total_cost"]) == Decimal(60)
+    assert by_kind["purchase"][0]["purchase_id"] == purchase.id
+    assert by_kind["purchase_outstanding"][0]["purchase_id"] == purchase.id
+
+    # The build consumption is its own kind, not a generic "adjustment" — and still links
+    # back to the product it built.
+    assert len(by_kind["build"]) == 1
+    assert Decimal(by_kind["build"][0]["qty"]) == Decimal(-1)
+    assert by_kind["build"][0]["product_id"] == product.id
+    assert by_kind["build"][0]["reason"] == f"Build #{build.id}"
+    assert "adjustment" not in by_kind or all(
+        r["reason"] == "spillage" for r in by_kind["adjustment"]
+    )

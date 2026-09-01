@@ -30,13 +30,18 @@ class ImportImageUrlRequest(BaseModel):
 
 router = APIRouter(prefix="/materials", tags=["materials"], dependencies=[Depends(require_auth)])
 
-# The material's stock timeline, in three kinds.
+# The material's stock timeline, in five kinds.
 #
 # It used to be two, and the purchase half was dated by order_date and included orders that
 # had not arrived — so the rows on screen never summed to current_qty, and there was no way
 # to tell that from the page. Now a 'purchase' row is a delivery that happened, at the
 # moment it happened, and what is still on order is its own kind rather than a row mixed in
 # with events that actually moved stock. Deliveries and adjustments now reconcile.
+#
+# 'build'/'scrap' are pulled out of the generic 'adjustment' bucket: services/builds.py is
+# the only writer of a reason starting "Build #", so that prefix is a reliable enough split
+# without a dedicated origin column. Kitting ship/return and manual adjustments stay
+# 'adjustment' — they already carry order_id for a link.
 #
 # The kinds also keep ids apart: the frontend keys rows on kind + id, and receipt 3 would
 # otherwise collide with purchase line 3.
@@ -46,7 +51,7 @@ _STOCK_HISTORY_SQL = text(
            COALESCE(r.total_cost, mp.total_cost * r.qty / mp.qty) AS total_cost,
            'received' AS status, s.name AS supplier_name, NULL AS reason,
            NULL AS mode, NULL AS target_qty, CAST(NULL AS INTEGER) AS product_id, CAST(NULL AS TEXT) AS product_name,
-           CAST(NULL AS INTEGER) AS variant_id, CAST(NULL AS INTEGER) AS order_id
+           CAST(NULL AS INTEGER) AS variant_id, CAST(NULL AS INTEGER) AS order_id, p.id AS purchase_id
     FROM material_purchase_receipts r
     JOIN material_purchases mp ON mp.id = r.purchase_line_id
     JOIN purchases p ON p.id = mp.purchase_id
@@ -60,7 +65,7 @@ _STOCK_HISTORY_SQL = text(
            mp.total_cost * (mp.qty - COALESCE(rt.received_qty, 0)) / mp.qty AS total_cost,
            'ordered' AS status, s.name AS supplier_name, NULL AS reason,
            NULL AS mode, NULL AS target_qty, CAST(NULL AS INTEGER) AS product_id, CAST(NULL AS TEXT) AS product_name,
-           CAST(NULL AS INTEGER) AS variant_id, CAST(NULL AS INTEGER) AS order_id
+           CAST(NULL AS INTEGER) AS variant_id, CAST(NULL AS INTEGER) AS order_id, p.id AS purchase_id
     FROM material_purchases mp
     JOIN purchases p ON p.id = mp.purchase_id
     LEFT JOIN suppliers s ON s.id = p.supplier_id
@@ -74,10 +79,16 @@ _STOCK_HISTORY_SQL = text(
 
     UNION ALL
 
-    SELECT 'adjustment' AS kind, ma.id AS id, ma.created_at AS at, ma.qty_delta AS qty,
-           NULL AS total_cost, NULL AS status, NULL AS supplier_name, ma.reason AS reason,
-           ma.mode AS mode, ma.target_qty AS target_qty, ma.product_id AS product_id, pr.name AS product_name,
-           ma.variant_id AS variant_id, ma.order_id AS order_id
+    SELECT
+        CASE
+            WHEN ma.reason LIKE 'Build #%(failed units)' THEN 'scrap'
+            WHEN ma.reason LIKE 'Build #%' THEN 'build'
+            ELSE 'adjustment'
+        END AS kind,
+        ma.id AS id, ma.created_at AS at, ma.qty_delta AS qty,
+        NULL AS total_cost, NULL AS status, NULL AS supplier_name, ma.reason AS reason,
+        ma.mode AS mode, ma.target_qty AS target_qty, ma.product_id AS product_id, pr.name AS product_name,
+        ma.variant_id AS variant_id, ma.order_id AS order_id, CAST(NULL AS INTEGER) AS purchase_id
     FROM material_adjustments ma
     LEFT JOIN products pr ON pr.id = ma.product_id
     WHERE ma.material_id = :material_id
@@ -94,6 +105,7 @@ def _to_material_read(
     rules: abc.Rules,
     forecasts_by_material: dict[int, MaterialForecast],
     used_in_product_count: int | None = None,
+    open_stock_take_line: tuple[int, str] | None = None,
 ) -> MaterialRead:
     forecast = forecasts_by_material.get(material.id)
     return MaterialRead.model_validate(material).model_copy(
@@ -105,6 +117,8 @@ def _to_material_read(
             "fg_buffer_weeks": forecast.fg_buffer_weeks if forecast else None,
             "stockout_status": forecast.status if forecast else None,
             "used_in_product_count": used_in_product_count,
+            "open_stock_take_id": open_stock_take_line[0] if open_stock_take_line else None,
+            "open_stock_take_line_status": open_stock_take_line[1] if open_stock_take_line else None,
         }
     )
 
@@ -118,6 +132,19 @@ _USED_IN_PRODUCT_COUNT_SQL = text(
         UNION
         SELECT product_id FROM product_kitting_materials WHERE material_id = :material_id
     ) AS u
+    """
+)
+
+# The material's line on the currently-open stock take, if any — for the Counting tab's
+# "On stock take" row. At most one open take exists at a time (stock-take service enforces
+# this), and a material has at most one line per take (uq_stock_take_lines_take_material).
+_OPEN_STOCK_TAKE_LINE_SQL = text(
+    """
+    SELECT st.id AS stock_take_id, stl.status
+    FROM stock_takes st
+    JOIN stock_take_lines stl ON stl.stock_take_id = st.id AND stl.material_id = :material_id
+    WHERE st.status = 'open'
+    LIMIT 1
     """
 )
 
@@ -223,12 +250,16 @@ async def get_material(material_id: int, session: AsyncSession = Depends(get_db)
     used_in_product_count = (
         await session.execute(_USED_IN_PRODUCT_COUNT_SQL, {"material_id": material_id})
     ).scalar_one()
+    open_stock_take_row = (
+        await session.execute(_OPEN_STOCK_TAKE_LINE_SQL, {"material_id": material_id})
+    ).first()
     return _to_material_read(
         material,
         on_order_qty_by_material,
         await abc.load_rules(session),
         forecasts_by_material,
         used_in_product_count,
+        (open_stock_take_row.stock_take_id, open_stock_take_row.status) if open_stock_take_row else None,
     )
 
 

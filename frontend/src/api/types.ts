@@ -44,6 +44,11 @@ export interface Material {
   /** Products whose build/kitting BOM names this material. Populated on the single-get only
    *  (null in the list), for the detail panel's "Used in N products" footer. */
   used_in_product_count: number | null;
+  /** The material's line on the currently-open stock take, if any. Populated on the
+   *  single-get only. `open_stock_take_line_status` is a StockTakeLineStatus value
+   *  ("pending" | "counted" | "applied" | "conflict" | "accepted_system" | "skipped"). */
+  open_stock_take_id: number | null;
+  open_stock_take_line_status: string | null;
   abc_class: ABCClass | null;
   stock_take_interval_days: number | null;
   last_stock_take_at: string | null;
@@ -327,11 +332,13 @@ export interface Purchase {
 export interface MaterialStockHistoryEntry {
   id: number;
   /**
-   * "purchase" is a delivery that happened; those plus "adjustment" account for the
-   * material's quantity exactly. "purchase_outstanding" is what is still on order — on the
-   * same timeline because that is where people look for it, but it has moved nothing.
+   * "purchase" is a delivery that happened; those plus "adjustment"/"build"/"scrap" account
+   * for the material's quantity exactly. "purchase_outstanding" is what is still on order —
+   * on the same timeline because that is where people look for it, but it has moved
+   * nothing. "build"/"scrap" are adjustments written by a build (successful consumption /
+   * failed-build scrap), split out of the generic "adjustment" bucket.
    */
-  kind: "purchase" | "purchase_outstanding" | "adjustment";
+  kind: "purchase" | "purchase_outstanding" | "adjustment" | "build" | "scrap";
   at: string;
   qty: string;
   total_cost: string | null;
@@ -344,6 +351,8 @@ export interface MaterialStockHistoryEntry {
   product_name: string | null;
   variant_id: number | null;
   order_id: number | null;
+  /** Set for "purchase"/"purchase_outstanding" rows only — links the row to its PO. */
+  purchase_id: number | null;
 }
 
 export interface Product {
