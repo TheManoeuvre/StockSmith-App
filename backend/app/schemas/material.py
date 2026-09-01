@@ -107,6 +107,9 @@ class MaterialRead(MaterialBase):
     consumption_rate_per_week: Decimal | None = None
     fg_buffer_weeks: Decimal | None = None
     stockout_status: str | None = None
+    # Products whose build/kitting BOM names this material — populated on the single-get only
+    # (the list leaves it null), for the detail panel's "Used in N products" footer.
+    used_in_product_count: int | None = None
     last_stock_take_at: datetime | None = None
     # The effective tier/cadence with its provenance, so the UI can say "C, from the
     # Packaging category" rather than a bare "C" that gives no clue which level to edit.

@@ -96,6 +96,8 @@ describe("material detail", () => {
     const user = userEvent.setup();
     await renderMaterialPage();
 
+    // The panel opens on the Stock tab now — the editable identity fields are under Details.
+    await user.click(await screen.findByRole("button", { name: "Details" }, { timeout: 5000 }));
     const nameInput = await screen.findByDisplayValue("PLA+ Filament", {}, { timeout: 5000 });
     const save = within(nameInput.closest("form")!).getByRole("button", { name: "Save" });
     expect(save).toBeDisabled();
@@ -112,6 +114,7 @@ describe("material detail", () => {
     const user = userEvent.setup();
     const router = await renderMaterialPage();
 
+    await user.click(await screen.findByRole("button", { name: "Details" }, { timeout: 5000 }));
     const nameInput = await screen.findByDisplayValue("PLA+ Filament", {}, { timeout: 5000 });
     await user.type(nameInput, " v2");
 
@@ -131,11 +134,8 @@ describe("material detail", () => {
     const user = userEvent.setup();
     await renderMaterialPage();
 
-    await screen.findByDisplayValue("PLA+ Filament", {}, { timeout: 5000 });
-    // The adjust form moved onto its own Stock tab — see $materialId.tsx's tab split.
-    await user.click(screen.getByRole("button", { name: "Stock" }));
-
-    const reason = await screen.findByPlaceholderText("Breakage, recount, …", {}, { timeout: 5000 });
+    // The panel opens on the Stock tab, which holds the adjust form.
+    const reason = await screen.findByLabelText("Reason", {}, { timeout: 5000 });
     const adjustForm = reason.closest("form")!;
     const record = within(adjustForm).getByRole("button", { name: "Save" });
     expect(record).toBeDisabled();
@@ -143,7 +143,7 @@ describe("material detail", () => {
     await user.type(within(adjustForm).getByLabelText("Adjust by"), "-5");
     expect(record).toBeDisabled(); // a value alone isn't enough
 
-    await user.type(reason, "Recount");
+    await user.selectOptions(reason, "Correction");
     await waitFor(() => expect(record).toBeEnabled());
   });
 
@@ -151,11 +151,8 @@ describe("material detail", () => {
     const user = userEvent.setup();
     const router = await renderMaterialPage();
 
-    await screen.findByDisplayValue("PLA+ Filament", {}, { timeout: 5000 });
-    await user.click(screen.getByRole("button", { name: "Stock" }));
-
-    const reason = await screen.findByPlaceholderText("Breakage, recount, …", {}, { timeout: 5000 });
-    await user.type(reason, "Spillage");
+    const reason = await screen.findByLabelText("Reason", {}, { timeout: 5000 });
+    await user.selectOptions(reason, "Spool ran short");
 
     await user.click(screen.getByRole("link", { name: "Products" }));
 
@@ -169,7 +166,7 @@ describe("material detail", () => {
   it("does not warn when nothing has been touched", async () => {
     const user = userEvent.setup();
     const router = await renderMaterialPage();
-    await screen.findByDisplayValue("PLA+ Filament", {}, { timeout: 5000 });
+    await screen.findByRole("dialog", { name: "PLA+ Filament" }, { timeout: 5000 });
 
     await user.click(screen.getByRole("link", { name: "Products" }));
 
@@ -208,9 +205,11 @@ describe("materials list", () => {
 
 describe("category-driven fields", () => {
   it("offers Colour and Material type when the category tracks them", async () => {
+    const user = userEvent.setup();
     setRoutes(materialRoutes());
     await renderMaterialPage();
 
+    await user.click(await screen.findByRole("button", { name: "Details" }, { timeout: 5000 }));
     await screen.findByDisplayValue("PLA+ Filament", {}, { timeout: 5000 });
     expect(screen.getByText("Colour")).toBeInTheDocument();
     expect(screen.getByText("Material type")).toBeInTheDocument();
@@ -219,25 +218,28 @@ describe("category-driven fields", () => {
   it("hides them for a category that doesn't, and shows cost per unit", async () => {
     // Same page, same material, different category row — nothing here names filament, which is
     // the point: the fields follow the flags, not a hardcoded category.
+    const user = userEvent.setup();
     setRoutes(materialRoutes({ ...MATERIAL, category: "packaging", category_id: 2, unit: "each" }));
     await renderMaterialPage();
 
+    const panel = await screen.findByRole("dialog", { name: "PLA+ Filament" }, { timeout: 5000 });
+    await user.click(within(panel).getByRole("button", { name: "Details" }));
     await screen.findByDisplayValue("PLA+ Filament", {}, { timeout: 5000 });
-    // Scoped to the detail panel: the materials list behind it (always mounted — see
-    // route.tsx) has its own "Avg unit cost" column header, so an unscoped query is
-    // ambiguous between the two.
-    const panel = screen.getByRole("dialog", { name: "PLA+ Filament" });
     expect(within(panel).queryByText("Colour")).toBeNull();
     expect(within(panel).queryByText("Material type")).toBeNull();
+
+    // The read-only cost figure lives on the Supplier tab now.
+    await user.click(within(panel).getByRole("button", { name: "Supplier" }));
     expect(within(panel).getByText("Avg unit cost")).toBeInTheDocument();
     expect(within(panel).queryByText("Avg cost/kg")).toBeNull();
   });
 
   it("shows cost per kg for a category that asks for it", async () => {
+    const user = userEvent.setup();
     setRoutes(materialRoutes());
     await renderMaterialPage();
 
-    await screen.findByDisplayValue("PLA+ Filament", {}, { timeout: 5000 });
-    expect(screen.getByText("Avg cost/kg")).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Supplier" }, { timeout: 5000 }));
+    expect(await screen.findByText("Avg cost/kg")).toBeInTheDocument();
   });
 });

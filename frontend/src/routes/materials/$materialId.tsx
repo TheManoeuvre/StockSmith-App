@@ -12,6 +12,7 @@ import { useMaterialImageUrl } from "../../hooks/useMaterialImageUrl";
 import { DetailPanel } from "../../components/common/DetailPanel";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { CreatableSelect } from "../../components/common/CreatableSelect";
+import { Badge } from "../../components/common/Badge";
 import type { ABCClass, MaterialUnit } from "../../api/types";
 import { StockCountFields } from "../../components/common/StockCountFields";
 import type { TabDef } from "../../components/common/Tabs";
@@ -22,30 +23,45 @@ import {
   wholeNumberStepFor,
 } from "../../lib/format";
 import { formatUnitCost } from "../../lib/money";
-import { formatWeeksOfSupply } from "../../lib/forecast";
+import {
+  formatWeeksOfSupply,
+  STOCKOUT_BADGE_CLASS,
+  STOCKOUT_LABEL,
+  STOCKOUT_TEXT_CLASS,
+} from "../../lib/forecast";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { SaveButton } from "../../components/common/SaveButton";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { useSiblingNav } from "../../hooks/useSiblingNav";
 
-const TAB_IDS = ["details", "purchasing", "counting", "stock"] as const;
+const TAB_IDS = ["stock", "details", "counting", "supplier"] as const;
 type TabId = (typeof TAB_IDS)[number];
 
 const TABS: TabDef[] = [
-  { id: "details", label: "Details" },
-  { id: "purchasing", label: "Purchasing" },
-  { id: "counting", label: "Counting" },
   { id: "stock", label: "Stock" },
+  { id: "details", label: "Details" },
+  { id: "counting", label: "Counting" },
+  { id: "supplier", label: "Supplier" },
 ];
+
+const ADJUST_REASONS = [
+  "Damaged / scrapped",
+  "Spool ran short",
+  "Found stock",
+  "Correction",
+  "Other…",
+] as const;
+const OTHER_REASON = "Other…";
 
 export const Route = createFileRoute("/materials/$materialId")({
   component: MaterialDetail,
   // Same reasoning as the product page: keeping the tab in the URL makes switching one a
   // real router navigation, so the root unsaved-changes blocker covers leaving a dirty
-  // Details/Purchasing/Counting form (they share one save) without this page knowing the
-  // guard exists.
+  // shared edit form (Details/Counting/Supplier share one save) without this page knowing
+  // the guard exists.
   validateSearch: (search: Record<string, unknown>): { tab?: TabId } => {
-    const tab = search.tab;
+    // "purchasing" was this tab's id before it was renamed to "supplier" — keep old links working.
+    const tab = search.tab === "purchasing" ? "supplier" : search.tab;
     return TAB_IDS.includes(tab as TabId) ? { tab: tab as TabId } : {};
   },
 });
@@ -91,13 +107,17 @@ const EMPTY_MATERIAL_DETAILS: MaterialDetailsForm = {
 interface AdjustForm {
   adjustMode: "adjust" | "set";
   adjustValue: string;
+  /** A preset from ADJUST_REASONS, or "" for the unpicked state. */
   adjustReason: string;
+  /** Free text, only when adjustReason is OTHER_REASON. */
+  adjustReasonOther: string;
 }
 
 const EMPTY_ADJUST: AdjustForm = {
   adjustMode: "adjust",
   adjustValue: "",
   adjustReason: "",
+  adjustReasonOther: "",
 };
 
 const UNITS: MaterialUnit[] = ["g", "ml", "each"];
@@ -108,7 +128,7 @@ function MaterialDetail() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const routeNavigate = Route.useNavigate();
-  const activeTab: TabId = Route.useSearch().tab ?? "details";
+  const activeTab: TabId = Route.useSearch().tab ?? "stock";
   const setActiveTab = (tab: string) =>
     routeNavigate({ search: { tab: tab as TabId } });
   const { prevId, nextId } = useSiblingNav(
@@ -338,18 +358,22 @@ function MaterialDetail() {
     seed: EMPTY_ADJUST,
     seedKey: "const",
   });
-  const { adjustMode, adjustValue, adjustReason } = adjust;
+  const { adjustMode, adjustValue, adjustReason, adjustReasonOther } = adjust;
   const setAdjustMode = (v: "adjust" | "set") =>
     setAdjust((prev) => ({ ...prev, adjustMode: v }));
   const setAdjustValue = (v: string) =>
     setAdjust((prev) => ({ ...prev, adjustValue: v }));
   const setAdjustReason = (v: string) =>
     setAdjust((prev) => ({ ...prev, adjustReason: v }));
-  const canAdjust = adjustValue.trim() !== "" && adjustReason.trim() !== "";
+  const setAdjustReasonOther = (v: string) =>
+    setAdjust((prev) => ({ ...prev, adjustReasonOther: v }));
+  const effectiveReason =
+    adjustReason === OTHER_REASON ? adjustReasonOther.trim() : adjustReason;
+  const canAdjust = adjustValue.trim() !== "" && effectiveReason !== "";
 
   const adjustStockMutation = useMutation({
     mutationFn: () =>
-      materialsApi.adjust(id, adjustMode, adjustValue, adjustReason),
+      materialsApi.adjust(id, adjustMode, adjustValue, effectiveReason),
     onSuccess: () => {
       invalidateMaterial();
       queryClient.invalidateQueries({
@@ -395,122 +419,183 @@ function MaterialDetail() {
     );
   }
 
+  const stockoutStatus = material.stockout_status;
+
   return (
     <DetailPanel
       title={material.name}
       onClose={closePanel}
       onPrev={prevId ? goPrev : undefined}
       onNext={nextId ? goNext : undefined}
+      headerExtra={
+        stockoutStatus && stockoutStatus !== "insufficient_data" ? (
+          <Badge className={STOCKOUT_BADGE_CLASS[stockoutStatus]}>
+            {STOCKOUT_LABEL[stockoutStatus]}
+          </Badge>
+        ) : undefined
+      }
       tabs={TABS}
       activeTab={activeTab}
       onTabChange={setActiveTab}
     >
       <div className="flex flex-col gap-6">
-        <div className="flex gap-4">
-          <div
-            className={`flex h-48 w-48 shrink-0 items-center justify-center rounded border border-slate-200 bg-slate-50 ${isDragOver ? "ring-2 ring-slate-400" : ""}`}
-            onDragOver={(e) => {
-              if (e.dataTransfer.types.includes("text/uri-list")) {
-                e.preventDefault();
-                setIsDragOver(true);
-              }
-            }}
-            onDragLeave={() => setIsDragOver(false)}
-            onDrop={(e) => {
-              const droppedUrl =
-                e.dataTransfer.getData("text/uri-list") ||
-                e.dataTransfer.getData("text/plain");
-              if (droppedUrl) {
-                e.preventDefault();
-                importImageUrlMutation.mutate(droppedUrl);
-              }
-              setIsDragOver(false);
-            }}
-          >
-            {imageUrl ? (
-              <img
-                src={imageUrl}
-                alt={material.name}
-                className="h-full w-full rounded object-cover"
-              />
-            ) : (
-              <span className="text-xs text-slate-400">No image</span>
-            )}
-          </div>
-          <div className="flex-1">
-            <h1 className="text-xl font-semibold">{material.name}</h1>
-            <p className="text-slate-500">
-              {material.category} · {material.unit}
-            </p>
-            <div className="mt-2 flex gap-2">
-              <button
-                onClick={() => uploadImageMutation.mutate()}
-                className="rounded border border-slate-300 px-3 py-1 text-sm"
-              >
-                {material.image_path ? "Replace image" : "Upload image"}
-              </button>
-              {material.image_path && (
-                <button
-                  onClick={() => removeImageMutation.mutate()}
-                  className="rounded border border-slate-300 px-3 py-1 text-sm text-red-600"
-                >
-                  Remove image
-                </button>
+        {/* Identity + the three headline figures — shown on every tab. */}
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-3">
+            <div className="h-16 w-16 shrink-0 overflow-hidden rounded border border-slate-200 bg-slate-50">
+              {imageUrl && (
+                <img
+                  src={imageUrl}
+                  alt={material.name}
+                  className="h-full w-full object-cover"
+                />
               )}
             </div>
-            <form
-              className="mt-2 flex gap-2"
-              onSubmit={(e) => {
-                e.preventDefault();
-                if (imageUrlInput.trim())
-                  importImageUrlMutation.mutate(imageUrlInput.trim());
-              }}
-            >
-              <input
-                className="flex-1 rounded border border-slate-300 px-2 py-1 text-sm"
-                placeholder="Paste image URL, or drag a link onto the image…"
-                value={imageUrlInput}
-                onChange={(e) => setImageUrlInput(e.target.value)}
-              />
-              <button
-                type="submit"
-                disabled={!imageUrlInput.trim()}
-                className="rounded border border-slate-300 px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Import
-              </button>
-            </form>
-            <ErrorBanner
-              error={
-                uploadImageMutation.error ??
-                removeImageMutation.error ??
-                importImageUrlMutation.error
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-slate-700">
+                {material.material_type_name
+                  ? `${material.material_type_name} · ${material.category}`
+                  : material.category}
+              </p>
+              <p className="truncate text-[12.5px] text-slate-500">
+                {material.default_supplier_name ?? "No supplier"}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <Stat
+              label="On hand"
+              value={roundQty(material.current_qty)}
+              sub="counted"
+              tone="highlight"
+            />
+            <Stat
+              label="On order"
+              value={
+                Number(material.on_order_qty ?? 0) > 0
+                  ? `+${roundQty(material.on_order_qty)}`
+                  : "—"
+              }
+              sub={
+                Number(material.on_order_qty ?? 0) > 0
+                  ? "on order"
+                  : "nothing inbound"
+              }
+            />
+            <Stat
+              label="To stockout"
+              value={formatWeeksOfSupply(material)}
+              sub={
+                material.consumption_rate_per_week
+                  ? `${roundQty(material.consumption_rate_per_week)}/wk used`
+                  : "no history"
+              }
+              valueClassName={
+                stockoutStatus && stockoutStatus !== "ok"
+                  ? STOCKOUT_TEXT_CLASS[stockoutStatus]
+                  : undefined
               }
             />
           </div>
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            <Stat label="On hand" value={roundQty(material.current_qty)} />
-            <Stat label="On order" value={roundQty(material.on_order_qty)} />
-            <Stat
-              label="Time to stockout"
-              value={formatWeeksOfSupply(material)}
-            />
-            {categoriesByName.get(material.category)?.cost_per_kg_display ? (
-              <Stat
-                label="Avg cost/kg"
-                value={formatUnitCost(Number(material.avg_unit_cost) * 1000)}
-              />
-            ) : (
-              <Stat
-                label="Avg unit cost"
-                value={formatUnitCost(material.avg_unit_cost)}
-              />
-            )}
-          </div>
+
+          <p className="text-[12px] text-slate-500">
+            Used in {material.used_in_product_count ?? 0}{" "}
+            {(material.used_in_product_count ?? 0) === 1 ? "product" : "products"}{" "}
+            · stock value £
+            {(
+              Number(material.current_qty) * Number(material.avg_unit_cost)
+            ).toFixed(2)}
+          </p>
         </div>
 
+        {activeTab === "details" && (
+          <section className="flex flex-col gap-2 rounded bg-white p-4 shadow-sm">
+            <div className="flex items-start gap-4">
+              <div
+                className={`flex h-32 w-32 shrink-0 items-center justify-center rounded border border-slate-200 bg-slate-50 ${isDragOver ? "ring-2 ring-slate-400" : ""}`}
+                onDragOver={(e) => {
+                  if (e.dataTransfer.types.includes("text/uri-list")) {
+                    e.preventDefault();
+                    setIsDragOver(true);
+                  }
+                }}
+                onDragLeave={() => setIsDragOver(false)}
+                onDrop={(e) => {
+                  const droppedUrl =
+                    e.dataTransfer.getData("text/uri-list") ||
+                    e.dataTransfer.getData("text/plain");
+                  if (droppedUrl) {
+                    e.preventDefault();
+                    importImageUrlMutation.mutate(droppedUrl);
+                  }
+                  setIsDragOver(false);
+                }}
+              >
+                {imageUrl ? (
+                  <img
+                    src={imageUrl}
+                    alt={material.name}
+                    className="h-full w-full rounded object-cover"
+                  />
+                ) : (
+                  <span className="text-xs text-slate-400">No image</span>
+                )}
+              </div>
+              <div className="flex-1">
+                <p className="text-sm font-medium">Image</p>
+                <div className="mt-2 flex gap-2">
+                  <button
+                    onClick={() => uploadImageMutation.mutate()}
+                    className="rounded border border-slate-300 px-3 py-1 text-sm"
+                  >
+                    {material.image_path ? "Replace image" : "Upload image"}
+                  </button>
+                  {material.image_path && (
+                    <button
+                      onClick={() => removeImageMutation.mutate()}
+                      className="rounded border border-slate-300 px-3 py-1 text-sm text-red-600"
+                    >
+                      Remove image
+                    </button>
+                  )}
+                </div>
+                <form
+                  className="mt-2 flex gap-2"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (imageUrlInput.trim())
+                      importImageUrlMutation.mutate(imageUrlInput.trim());
+                  }}
+                >
+                  <input
+                    className="flex-1 rounded border border-slate-300 px-2 py-1 text-sm"
+                    placeholder="Paste image URL, or drag a link onto the image…"
+                    value={imageUrlInput}
+                    onChange={(e) => setImageUrlInput(e.target.value)}
+                  />
+                  <button
+                    type="submit"
+                    disabled={!imageUrlInput.trim()}
+                    className="rounded border border-slate-300 px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Import
+                  </button>
+                </form>
+                <ErrorBanner
+                  error={
+                    uploadImageMutation.error ??
+                    removeImageMutation.error ??
+                    importImageUrlMutation.error
+                  }
+                />
+              </div>
+            </div>
+          </section>
+        )}
+
         {(activeTab === "details" ||
-          activeTab === "purchasing" ||
+          activeTab === "supplier" ||
           activeTab === "counting") && (
           <section>
             <ErrorBanner error={saveDetailsMutation.error} />
@@ -617,7 +702,7 @@ function MaterialDetail() {
                   </label>
                 </>
               )}
-              {activeTab === "purchasing" && (
+              {activeTab === "supplier" && (
                 <>
                   <label className="flex flex-col gap-1">
                     <span className="text-sm">Default supplier</span>
@@ -657,6 +742,26 @@ function MaterialDetail() {
                       }
                     />
                   </label>
+                  {/* Read-only — the weighted-average cost only moves via purchases and
+                      adjustments, never a direct edit here. */}
+                  <label className="flex flex-col gap-1">
+                    <span className="text-sm">
+                      {editedCategory?.cost_per_kg_display
+                        ? "Avg cost/kg"
+                        : "Avg unit cost"}
+                    </span>
+                    <input
+                      readOnly
+                      className="w-28 rounded border border-slate-200 bg-slate-50 px-2 py-1 text-slate-600"
+                      value={
+                        editedCategory?.cost_per_kg_display
+                          ? formatUnitCost(
+                              Number(material.avg_unit_cost) * 1000,
+                            )
+                          : formatUnitCost(material.avg_unit_cost)
+                      }
+                    />
+                  </label>
                 </>
               )}
               {activeTab === "counting" && (
@@ -691,8 +796,18 @@ function MaterialDetail() {
                   Print label
                 </Link>
               )}
+              {activeTab === "details" && material.product_url && (
+                <a
+                  href={material.product_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="rounded border border-slate-300 px-4 py-1.5 text-sm"
+                >
+                  Open supplier page
+                </a>
+              )}
             </form>
-            {activeTab === "purchasing" &&
+            {activeTab === "supplier" &&
               isLowStock(material.current_qty, material.reorder_threshold) && (
                 <div className="mt-2 flex items-center gap-2">
                   <button
@@ -723,8 +838,7 @@ function MaterialDetail() {
               className="mb-3 flex flex-wrap items-end gap-2 rounded bg-white p-4 shadow-sm"
               onSubmit={(e) => {
                 e.preventDefault();
-                if (adjustValue.trim() && adjustReason.trim())
-                  adjustStockMutation.mutate();
+                if (canAdjust) adjustStockMutation.mutate();
               }}
             >
               <label className="flex flex-col gap-1">
@@ -760,16 +874,34 @@ function MaterialDetail() {
                   }
                 />
               </label>
-              <label className="flex flex-col gap-1 flex-1">
+              <label className="flex flex-col gap-1">
                 <span className="text-sm">Reason</span>
-                <input
+                <select
                   required
                   className="rounded border border-slate-300 px-2 py-1"
-                  placeholder="Breakage, recount, …"
                   value={adjustReason}
                   onChange={(e) => setAdjustReason(e.target.value)}
-                />
+                >
+                  <option value="">Pick a reason…</option>
+                  {ADJUST_REASONS.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </select>
               </label>
+              {adjustReason === OTHER_REASON && (
+                <label className="flex flex-1 flex-col gap-1">
+                  <span className="text-sm">Reason detail</span>
+                  <input
+                    required
+                    className="rounded border border-slate-300 px-2 py-1"
+                    placeholder="Breakage, recount, …"
+                    value={adjustReasonOther}
+                    onChange={(e) => setAdjustReasonOther(e.target.value)}
+                  />
+                </label>
+              )}
               <button
                 type="submit"
                 disabled={!canAdjust || adjustStockMutation.isPending}
@@ -778,6 +910,17 @@ function MaterialDetail() {
                 Save
               </button>
             </form>
+            {adjustValue.trim() !== "" && (
+              <p className="mb-1 text-xs text-slate-500">
+                On hand {roundQty(material.current_qty)} →{" "}
+                {roundQty(
+                  adjustMode === "set"
+                    ? Number(adjustValue)
+                    : Number(material.current_qty) + Number(adjustValue),
+                )}
+                {material.unit === "each" ? "" : ` ${material.unit}`}
+              </p>
+            )}
             {adjustMode === "set" && (
               <p className="text-xs text-slate-500">
                 Setting an exact amount records a physical count, so this stops
@@ -909,11 +1052,26 @@ function MaterialDetail() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({
+  label,
+  value,
+  sub,
+  tone = "default",
+  valueClassName,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  tone?: "default" | "highlight";
+  valueClassName?: string;
+}) {
   return (
-    <div className="rounded bg-white p-3 shadow-sm">
+    <div
+      className={`rounded p-3 shadow-sm ${tone === "highlight" ? "bg-blue-50" : "bg-white"}`}
+    >
       <p className="text-xs text-slate-500">{label}</p>
-      <p className="text-lg font-semibold">{value}</p>
+      <p className={`text-lg font-semibold ${valueClassName ?? ""}`}>{value}</p>
+      {sub && <p className="mt-0.5 text-[11px] text-slate-400">{sub}</p>}
     </div>
   );
 }

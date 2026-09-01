@@ -93,6 +93,7 @@ def _to_material_read(
     on_order_qty_by_material: dict,
     rules: abc.Rules,
     forecasts_by_material: dict[int, MaterialForecast],
+    used_in_product_count: int | None = None,
 ) -> MaterialRead:
     forecast = forecasts_by_material.get(material.id)
     return MaterialRead.model_validate(material).model_copy(
@@ -103,8 +104,22 @@ def _to_material_read(
             "consumption_rate_per_week": forecast.consumption_rate_per_week if forecast else None,
             "fg_buffer_weeks": forecast.fg_buffer_weeks if forecast else None,
             "stockout_status": forecast.status if forecast else None,
+            "used_in_product_count": used_in_product_count,
         }
     )
+
+
+# Products whose build BOM or per-order kitting BOM names this material. Distinct product
+# ids across both tables — variant-only usage isn't counted, matching the design's footer.
+_USED_IN_PRODUCT_COUNT_SQL = text(
+    """
+    SELECT COUNT(*) FROM (
+        SELECT product_id FROM product_materials WHERE material_id = :material_id
+        UNION
+        SELECT product_id FROM product_kitting_materials WHERE material_id = :material_id
+    ) AS u
+    """
+)
 
 
 async def _get_material_with_manufacturer(session: AsyncSession, material_id: int) -> Material:
@@ -205,8 +220,15 @@ async def get_material(material_id: int, session: AsyncSession = Depends(get_db)
     forecasts_by_material = {
         f.material_id: f for f in await compute_material_forecasts(session, include_all=True)
     }
+    used_in_product_count = (
+        await session.execute(_USED_IN_PRODUCT_COUNT_SQL, {"material_id": material_id})
+    ).scalar_one()
     return _to_material_read(
-        material, on_order_qty_by_material, await abc.load_rules(session), forecasts_by_material
+        material,
+        on_order_qty_by_material,
+        await abc.load_rules(session),
+        forecasts_by_material,
+        used_in_product_count,
     )
 
 

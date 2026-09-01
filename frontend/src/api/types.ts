@@ -41,6 +41,9 @@ export interface Material {
   consumption_rate_per_week: string | null;
   fg_buffer_weeks: string | null;
   stockout_status: StockoutStatus | null;
+  /** Products whose build/kitting BOM names this material. Populated on the single-get only
+   *  (null in the list), for the detail panel's "Used in N products" footer. */
+  used_in_product_count: number | null;
   abc_class: ABCClass | null;
   stock_take_interval_days: number | null;
   last_stock_take_at: string | null;
