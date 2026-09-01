@@ -1,6 +1,6 @@
 import { createFileRoute, Link, Outlet } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { materialsApi } from "../../api/materials";
 import { manufacturersApi } from "../../api/manufacturers";
 import { suppliersApi } from "../../api/suppliers";
@@ -8,6 +8,8 @@ import { materialTypesApi } from "../../api/materialTypes";
 import { coloursApi } from "../../api/colours";
 import type { Material, MaterialUnit } from "../../api/types";
 import { useMaterialCategories } from "../../hooks/useMaterialCategories";
+import { useMaterialImageUrl } from "../../hooks/useMaterialImageUrl";
+import { useLazyVisible } from "../../hooks/useLazyVisible";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { useDirtyRegistration } from "../../hooks/useDirtyRegistry";
 import { useGuard } from "../../hooks/useUnsavedChangesGuard";
@@ -120,7 +122,9 @@ function MaterialsListContent() {
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<"all" | "low" | "on-order">("all");
   const [showInactive, setShowInactive] = useState(false);
-  const [categoryFilter, setCategoryFilter] = useState<Set<string>>(new Set());
+  // Collapsed category groups, by name. Session-only, like the stock-take count sheet's
+  // collapse — it resets on reload, which is fine for a view toggle.
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({
     key: "name",
     dir: "asc",
@@ -206,11 +210,11 @@ function MaterialsListContent() {
       reorderThreshold !== "0");
   useDirtyRegistration("new-material", "New material", createFormDirty);
 
-  const toggleCategoryFilter = (c: string) => {
-    setCategoryFilter((prev) => {
+  const toggleGroup = (cat: string) => {
+    setCollapsedGroups((prev) => {
       const next = new Set(prev);
-      if (next.has(c)) next.delete(c);
-      else next.add(c);
+      if (next.has(cat)) next.delete(cat);
+      else next.add(cat);
       return next;
     });
   };
@@ -259,8 +263,6 @@ function MaterialsListContent() {
     );
 
     const preFiltered = data.filter((m) => {
-      if (categoryFilter.size > 0 && !categoryFilter.has(m.category))
-        return false;
       if (tab === "low" && !isLowStock(m.current_qty, m.reorder_threshold))
         return false;
       if (tab === "on-order" && !(Number(m.on_order_qty ?? 0) > 0)) return false;
@@ -315,7 +317,6 @@ function MaterialsListContent() {
     search,
     tab,
     showInactive,
-    categoryFilter,
     sort,
     categories,
     categoriesByName,
@@ -340,30 +341,23 @@ function MaterialsListContent() {
             {onHandValue.toFixed(2)} on hand
           </p>
         </div>
-        <button
-          onClick={() =>
-            guard.attempt(() => setShowForm((v) => !v), {
-              prefix: "new-material",
-            })
-          }
-          className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white"
-        >
-          {showForm ? "Cancel" : "Add material"}
-        </button>
-      </div>
-
-      <div className="flex flex-wrap items-start gap-2">
-        <input
-          className="min-w-[200px] flex-1 rounded border border-slate-300 px-2.5 py-1.5 text-sm sm:max-w-xs"
-          placeholder="Search name, barcode, type…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        <CsvImportExport
-          onExport={materialsApi.exportCsv}
-          onImport={materialsApi.importCsv}
-          invalidateKey={["materials", "dashboard-summary"]}
-        />
+        <div className="flex items-center gap-2">
+          <CsvImportExport
+            onExport={materialsApi.exportCsv}
+            onImport={materialsApi.importCsv}
+            invalidateKey={["materials", "dashboard-summary"]}
+          />
+          <button
+            onClick={() =>
+              guard.attempt(() => setShowForm((v) => !v), {
+                prefix: "new-material",
+              })
+            }
+            className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white"
+          >
+            {showForm ? "Cancel" : "Add material"}
+          </button>
+        </div>
       </div>
 
       {showForm && (
@@ -510,7 +504,7 @@ function MaterialsListContent() {
         </form>
       )}
 
-      <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <FilterTabs
           tabs={[
             { id: "all", label: "All materials", count: tabCounts.all },
@@ -520,25 +514,15 @@ function MaterialsListContent() {
           active={tab}
           onChange={(id) => setTab(id as typeof tab)}
         />
-        {/* Per-category narrowing and the inactive toggle. The reviewed design leaves these
-            off the list screen entirely — the group-header rows already segment the table —
-            so they're kept understated here rather than given equal weight to the tabs. */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pb-1.5 text-[12px] text-slate-500">
-          {categories.map((c) => (
-            <label
-              key={c.id}
-              className="flex cursor-pointer items-center gap-1 capitalize"
-            >
-              <input
-                type="checkbox"
-                checked={categoryFilter.has(c.name)}
-                onChange={() => toggleCategoryFilter(c.name)}
-              />
-              {c.name}
-            </label>
-          ))}
+        <div className="flex items-center gap-3">
+          <input
+            className="w-56 rounded border border-slate-300 px-2.5 py-1.5 text-sm"
+            placeholder="Search name, barcode, type…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
           {inactiveCount > 0 && (
-            <label className="flex cursor-pointer items-center gap-1">
+            <label className="flex shrink-0 cursor-pointer items-center gap-1 text-[12px] text-slate-500">
               <input
                 type="checkbox"
                 checked={showInactive}
@@ -570,16 +554,19 @@ function MaterialsListContent() {
               count={materials.length}
               colSpan={8}
               capitalize
+              collapsed={collapsedGroups.has(cat)}
+              onToggle={() => toggleGroup(cat)}
             />
-            {materials.map((m) => (
-              <MaterialRow
-                key={m.id}
-                material={m}
-                costPerKg={
-                  categoriesByName.get(cat)?.cost_per_kg_display ?? false
-                }
-              />
-            ))}
+            {!collapsedGroups.has(cat) &&
+              materials.map((m) => (
+                <MaterialRow
+                  key={m.id}
+                  material={m}
+                  costPerKg={
+                    categoriesByName.get(cat)?.cost_per_kg_display ?? false
+                  }
+                />
+              ))}
           </tbody>
         ))}
       </table>
@@ -604,18 +591,36 @@ function MaterialRow({
   const tier = stockTier(m.current_qty, m.reorder_threshold);
   const onOrder = Number(m.on_order_qty ?? 0) > 0;
 
+  const rowRef = useRef<HTMLTableRowElement>(null);
+  const isVisible = useLazyVisible(rowRef);
+  const imageUrl = useMaterialImageUrl(
+    m.image_path && isVisible ? m.id : null,
+    m.image_path && isVisible ? m.updated_at : null,
+  );
+
   return (
     <tr
+      ref={rowRef}
       className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 ${!m.is_active ? "opacity-60" : ""}`}
     >
       <td className="py-2 pl-3 pr-1">
-        {/* Colour chip in place of the old image thumbnail — filament/resin carry a real hex,
-            everything else falls back to a neutral square. */}
-        <span
-          className="block h-7 w-7 rounded border border-slate-200"
-          style={{ backgroundColor: m.colour_hex ?? "#f1f5f9" }}
-          title={m.colour ?? undefined}
-        />
+        {/* One fixed box: an uploaded photo if there is one, otherwise a hex colour chip
+            (filament etc.), otherwise a neutral tile. Both fill the box identically. */}
+        <div className="h-20 w-20 overflow-hidden rounded border border-slate-200 bg-slate-50">
+          {imageUrl ? (
+            <img
+              src={imageUrl}
+              alt={m.name}
+              className="h-full w-full object-cover"
+            />
+          ) : m.colour_hex ? (
+            <div
+              className="h-full w-full"
+              style={{ backgroundColor: m.colour_hex }}
+              title={m.colour ?? undefined}
+            />
+          ) : null}
+        </div>
       </td>
       <td className="px-2 py-2">
         <Link

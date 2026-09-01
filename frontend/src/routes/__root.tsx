@@ -129,7 +129,7 @@ function RootChrome() {
   ];
 
   return (
-    <div className="flex min-h-screen bg-slate-50 text-slate-900">
+    <div className="flex h-screen overflow-hidden bg-slate-50 text-slate-900">
       <aside className="flex w-[198px] flex-none flex-col border-r border-slate-200 bg-white p-2.5 pt-3.5">
         <div className="flex items-center gap-2 px-2 pb-4">
           <img src={appIcon} alt="StockSmith" className="block h-[26px] w-[26px] flex-none" />

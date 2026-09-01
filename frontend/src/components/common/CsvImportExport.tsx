@@ -39,13 +39,13 @@ export function CsvImportExport({
       <div className="flex gap-2">
         <button
           onClick={() => exportMutation.mutate()}
-          className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50"
+          className="rounded border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50"
         >
           Export CSV
         </button>
         <button
           onClick={() => fileInputRef.current?.click()}
-          className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50"
+          className="rounded border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50"
         >
           Import CSV
         </button>
