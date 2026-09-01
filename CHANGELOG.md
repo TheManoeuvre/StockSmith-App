@@ -12,6 +12,26 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-09-01
+
+A new look for the whole app: navigation moves to a sidebar, and opening a product,
+material, order, purchase or stock take no longer leaves the list behind for a new page —
+it slides a panel over it instead.
+
+### Changed
+- **Navigation moved from a top bar to a sidebar**, and every screen picked up a denser,
+  more consistent visual style — tabs, dialogs, buttons and status pills all restyled to
+  match.
+- **Clicking into a product, material, order, purchase or stock take now opens it in a
+  panel over the list, instead of navigating to a full page.** The list stays put behind
+  it, so closing the panel or stepping to the next/previous item never re-fetches or loses
+  your place. Each one is still its own URL — a direct link or a bookmark opens straight to
+  the right item — and leaving a panel with unsaved changes still asks first, the same as
+  before.
+- **Materials, orders and purchases now split their detail view into tabs**, matching
+  products and stock takes: Materials into Details / Purchasing / Counting / Stock, Orders
+  into Lines / Financials / Shipping, and Purchases into Lines / Receiving history.
+
 ## [0.8.0] - 2026-08-22
 
 Two orders currently stuck out of sync — dispatched on the marketplace before StockSmith could allocate them — will now record a real postage cost once mapped and shipped, instead of silently reading as free. The products list can now show you this kind of gap before it reaches an order: sale price, materials, packaging and postage cost, together, with a filter for what's still missing.

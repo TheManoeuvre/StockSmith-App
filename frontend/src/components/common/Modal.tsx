@@ -3,19 +3,20 @@ import { useEffect, type ReactNode } from "react";
 /**
  * Bare modal shell — backdrop, centred card, Escape to dismiss.
  *
- * Four hand-rolled copies of this backdrop already exist (CancelOrderDialog,
- * BulkBomAmendModal, ListingPickerModal, EtsyListingPickerModal). They're deliberately left
- * alone: each has its own sizing and internal scroll structure, and retrofitting them is a
- * pure refactor with its own risk. They're good candidates for a follow-up.
+ * `subtitle` is an optional line under the heading (e.g. ListingPickerModal's "N of M
+ * listings look eligible"), kept out of the `<h2>` itself so it doesn't inherit the heading's
+ * size/weight.
  */
 export function Modal({
   title,
+  subtitle,
   footer,
   maxWidth = "max-w-md",
   onClose,
   children,
 }: {
   title?: string;
+  subtitle?: ReactNode;
   footer?: ReactNode;
   maxWidth?: string;
   onClose: () => void;
@@ -40,11 +41,12 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className={`flex max-h-[90vh] w-full ${maxWidth} flex-col rounded bg-white shadow-lg`}
+        className={`flex max-h-[90vh] w-full ${maxWidth} flex-col rounded-lg bg-white shadow-lg`}
       >
         {title && (
           <div className="border-b border-slate-200 p-4">
             <h2 className="text-lg font-semibold">{title}</h2>
+            {subtitle}
           </div>
         )}
         <div className="flex-1 overflow-y-auto p-4">{children}</div>

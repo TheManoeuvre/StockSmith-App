@@ -117,7 +117,10 @@ describe("material detail", () => {
 
     await user.click(screen.getByRole("link", { name: "Products" }));
 
-    const dialog = await screen.findByRole("dialog");
+    // Named lookup, not a bare role query: the detail panel itself is also role="dialog"
+    // (see DetailPanel.tsx) and stays mounted underneath, so an unqualified query would be
+    // ambiguous between it and this confirmation.
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
     expect(within(dialog).getByText("Material details")).toBeInTheDocument();
 
     await user.click(within(dialog).getByRole("button", { name: /keep editing/i }));
@@ -127,6 +130,10 @@ describe("material detail", () => {
   it("gates the stock adjustment on having a value and a reason", async () => {
     const user = userEvent.setup();
     await renderMaterialPage();
+
+    await screen.findByDisplayValue("PLA+ Filament", {}, { timeout: 5000 });
+    // The adjust form moved onto its own Stock tab — see $materialId.tsx's tab split.
+    await user.click(screen.getByRole("button", { name: "Stock" }));
 
     const reason = await screen.findByPlaceholderText("Breakage, recount, …", {}, { timeout: 5000 });
     const adjustForm = reason.closest("form")!;
@@ -144,12 +151,15 @@ describe("material detail", () => {
     const user = userEvent.setup();
     const router = await renderMaterialPage();
 
+    await screen.findByDisplayValue("PLA+ Filament", {}, { timeout: 5000 });
+    await user.click(screen.getByRole("button", { name: "Stock" }));
+
     const reason = await screen.findByPlaceholderText("Breakage, recount, …", {}, { timeout: 5000 });
     await user.type(reason, "Spillage");
 
     await user.click(screen.getByRole("link", { name: "Products" }));
 
-    const dialog = await screen.findByRole("dialog");
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
     expect(within(dialog).getByText("Stock adjustment")).toBeInTheDocument();
 
     await user.click(within(dialog).getByRole("button", { name: /discard changes/i }));
@@ -164,7 +174,7 @@ describe("material detail", () => {
     await user.click(screen.getByRole("link", { name: "Products" }));
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/products"));
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Unsaved changes" })).not.toBeInTheDocument();
   });
 });
 
@@ -213,10 +223,14 @@ describe("category-driven fields", () => {
     await renderMaterialPage();
 
     await screen.findByDisplayValue("PLA+ Filament", {}, { timeout: 5000 });
-    expect(screen.queryByText("Colour / hex")).toBeNull();
-    expect(screen.queryByText("Material type")).toBeNull();
-    expect(screen.getByText("Avg unit cost")).toBeInTheDocument();
-    expect(screen.queryByText("Avg cost/kg")).toBeNull();
+    // Scoped to the detail panel: the materials list behind it (always mounted — see
+    // route.tsx) has its own "Avg unit cost" column header, so an unscoped query is
+    // ambiguous between the two.
+    const panel = screen.getByRole("dialog", { name: "PLA+ Filament" });
+    expect(within(panel).queryByText("Colour / hex")).toBeNull();
+    expect(within(panel).queryByText("Material type")).toBeNull();
+    expect(within(panel).getByText("Avg unit cost")).toBeInTheDocument();
+    expect(within(panel).queryByText("Avg cost/kg")).toBeNull();
   });
 
   it("shows cost per kg for a category that asks for it", async () => {

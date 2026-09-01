@@ -3,10 +3,14 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { dashboardApi } from "../api/dashboard";
 import { materialsApi } from "../api/materials";
 import type { LowStockMaterial } from "../api/types";
+import { Badge } from "../components/common/Badge";
 import { ErrorBanner } from "../components/common/ErrorBanner";
+import { GroupHeaderRow, Th } from "../components/common/ListTable";
 import { roundQty } from "../lib/format";
 
-function groupBySupplier(materials: LowStockMaterial[]): { supplierName: string; materials: LowStockMaterial[] }[] {
+function groupBySupplier(
+  materials: LowStockMaterial[],
+): { supplierName: string; materials: LowStockMaterial[] }[] {
   const groups: { supplierName: string; materials: LowStockMaterial[] }[] = [];
   for (const m of materials) {
     const supplierName = m.supplier_name ?? "No supplier";
@@ -55,10 +59,14 @@ function Dashboard() {
   });
 
   const draftPurchaseMutation = useMutation({
-    mutationFn: (materialId: number) => materialsApi.createDraftPurchase(materialId),
+    mutationFn: (materialId: number) =>
+      materialsApi.createDraftPurchase(materialId),
     onSuccess: (purchase) => {
       queryClient.invalidateQueries({ queryKey: ["purchases"] });
-      navigate({ to: "/purchases/$purchaseId", params: { purchaseId: String(purchase.id) } });
+      navigate({
+        to: "/purchases/$purchaseId",
+        params: { purchaseId: String(purchase.id) },
+      });
     },
   });
 
@@ -69,21 +77,39 @@ function Dashboard() {
   return (
     <div className="flex flex-col gap-6">
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-        <SummaryCard label="Total inventory value" value={`£${Number(data.total_inventory_value).toFixed(2)}`} />
-        <SummaryCard label="Active products" value={String(data.active_product_count)} />
-        <SummaryCard label="Materials needing attention" value={String(data.low_stock_materials.length)} />
+        <SummaryCard
+          label="Total inventory value"
+          value={`£${Number(data.total_inventory_value).toFixed(2)}`}
+          accent="border-l-blue-600"
+        />
+        <SummaryCard
+          label="Active products"
+          value={String(data.active_product_count)}
+          accent="border-l-slate-400"
+        />
+        <SummaryCard
+          label="Materials needing attention"
+          value={String(data.low_stock_materials.length)}
+          accent={
+            data.low_stock_materials.length > 0
+              ? "border-l-amber-500"
+              : "border-l-slate-400"
+          }
+        />
       </div>
 
       {data.orders_awaiting_inventory.length > 0 && (
         <section>
-          <h2 className="mb-2 text-lg font-semibold">Orders awaiting inventory</h2>
-          <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">
+          <h2 className="mb-2 text-lg font-semibold">
+            Orders awaiting inventory
+          </h2>
+          <table className="w-full border-collapse bg-white text-left text-[12.5px] shadow-sm">
             <thead>
               <tr className="border-b border-slate-200">
-                <th className="p-2">Product</th>
-                <th className="p-2">Short by</th>
-                <th className="p-2">Order placed</th>
-                <th className="p-2" />
+                <Th>Product</Th>
+                <Th>Short by</Th>
+                <Th>Order placed</Th>
+                <Th>{""}</Th>
               </tr>
             </thead>
             <tbody>
@@ -100,7 +126,9 @@ function Dashboard() {
                     </Link>
                   </td>
                   <td className="p-2 text-red-600">{o.short_by}</td>
-                  <td className="p-2">{new Date(o.order_placed_at).toLocaleDateString()}</td>
+                  <td className="p-2">
+                    {new Date(o.order_placed_at).toLocaleDateString()}
+                  </td>
                   <td className="p-2">
                     {o.product_id != null && (
                       <Link
@@ -109,7 +137,12 @@ function Dashboard() {
                         // Straight to the build form with the variant already chosen, rather
                         // than dropping the user on Details to find the Stock tab and
                         // re-pick the variant they were just looking at here.
-                        search={{ tab: "stock", ...(o.variant_id != null ? { variantId: o.variant_id } : {}) }}
+                        search={{
+                          tab: "stock",
+                          ...(o.variant_id != null
+                            ? { variantId: o.variant_id }
+                            : {}),
+                        }}
                         className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800"
                       >
                         Build now
@@ -125,19 +158,24 @@ function Dashboard() {
 
       {data.orders_awaiting_packaging.length > 0 && (
         <section>
-          <h2 className="mb-2 text-lg font-semibold">Orders awaiting packaging</h2>
-          <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">
+          <h2 className="mb-2 text-lg font-semibold">
+            Orders awaiting packaging
+          </h2>
+          <table className="w-full border-collapse bg-white text-left text-[12.5px] shadow-sm">
             <thead>
               <tr className="border-b border-slate-200">
-                <th className="p-2">Order</th>
-                <th className="p-2">Material</th>
-                <th className="p-2">Short by</th>
-                <th className="p-2">Order placed</th>
+                <Th>Order</Th>
+                <Th>Material</Th>
+                <Th>Short by</Th>
+                <Th>Order placed</Th>
               </tr>
             </thead>
             <tbody>
               {data.orders_awaiting_packaging.map((o, i) => (
-                <tr key={`${o.order_id}-${o.material_id}-${i}`} className="border-b border-slate-100">
+                <tr
+                  key={`${o.order_id}-${o.material_id}-${i}`}
+                  className="border-b border-slate-100"
+                >
                   <td className="p-2">
                     <Link
                       to="/orders/$orderId"
@@ -149,7 +187,9 @@ function Dashboard() {
                   </td>
                   <td className="p-2">{o.material_name}</td>
                   <td className="p-2 text-red-600">{roundQty(o.short_by)}</td>
-                  <td className="p-2">{new Date(o.order_placed_at).toLocaleDateString()}</td>
+                  <td className="p-2">
+                    {new Date(o.order_placed_at).toLocaleDateString()}
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -165,8 +205,10 @@ function Dashboard() {
               params={{ stockTakeId: String(data.open_stock_take.id) }}
               className="rounded border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800"
             >
-              <strong>Stock take in progress</strong> — {data.open_stock_take.counted_count} of{" "}
-              {data.open_stock_take.line_count} counted, open {data.open_stock_take.open_days} day
+              <strong>Stock take in progress</strong> —{" "}
+              {data.open_stock_take.counted_count} of{" "}
+              {data.open_stock_take.line_count} counted, open{" "}
+              {data.open_stock_take.open_days} day
               {data.open_stock_take.open_days === 1 ? "" : "s"}
             </Link>
           )}
@@ -189,17 +231,18 @@ function Dashboard() {
         <section>
           <h2 className="mb-2 text-lg font-semibold">Due for counting</h2>
           <p className="mb-2 text-sm text-slate-500">
-            Items whose count cadence has come round. Nothing here blocks any other work — it's a list of what
-            to check next time you do a stock take.
+            Items whose count cadence has come round. Nothing here blocks any
+            other work — it's a list of what to check next time you do a stock
+            take.
           </p>
-          <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">
+          <table className="w-full border-collapse bg-white text-left text-[12.5px] shadow-sm">
             <thead>
               <tr className="border-b border-slate-200">
-                <th className="p-2">Item</th>
-                <th className="p-2">Tier</th>
-                <th className="p-2">Every</th>
-                <th className="p-2">Last counted</th>
-                <th className="p-2">Overdue by</th>
+                <Th>Item</Th>
+                <Th>Tier</Th>
+                <Th>Every</Th>
+                <Th>Last counted</Th>
+                <Th>Overdue by</Th>
               </tr>
             </thead>
             <tbody>
@@ -230,18 +273,24 @@ function Dashboard() {
                   <td className="p-2">{item.abc_class}</td>
                   <td className="p-2">{item.interval_days} days</td>
                   <td className="p-2">
-                    {item.last_stock_take_at ? new Date(item.last_stock_take_at).toLocaleDateString() : "Never"}
+                    {item.last_stock_take_at
+                      ? new Date(item.last_stock_take_at).toLocaleDateString()
+                      : "Never"}
                   </td>
                   {/* Never-counted has no overdue figure to show — there is no date to measure
                       from, and a made-up number would rank it against genuinely overdue items
                       on a scale it isn't on. */}
                   <td className="p-2">
                     {item.days_overdue === null ? (
-                      <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">Never counted</span>
+                      <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+                        Never counted
+                      </span>
                     ) : item.days_overdue === 0 ? (
                       "Due today"
                     ) : (
-                      <span className="text-amber-800">{item.days_overdue} days</span>
+                      <span className="text-amber-800">
+                        {item.days_overdue} days
+                      </span>
                     )}
                   </td>
                 </tr>
@@ -250,77 +299,93 @@ function Dashboard() {
           </table>
           {data.items_due_for_count_total > data.items_due_for_count.length && (
             <p className="mt-1 text-sm text-slate-500">
-              Showing {data.items_due_for_count.length} of {data.items_due_for_count_total} items due.
+              Showing {data.items_due_for_count.length} of{" "}
+              {data.items_due_for_count_total} items due.
             </p>
           )}
         </section>
       )}
 
       <section>
-        <h2 className="mb-2 text-lg font-semibold">Materials — time to stockout</h2>
+        <h2 className="mb-2 text-lg font-semibold">
+          Materials — time to stockout
+        </h2>
         <p className="mb-2 text-sm text-slate-500">
-          Weeks until you can't fulfil demand for this material — includes finished-goods stock still covering
-          sales before any new builds draw on it.
+          Weeks until you can't fulfil demand for this material — includes
+          finished-goods stock still covering sales before any new builds draw
+          on it.
         </p>
         {data.low_stock_materials.length === 0 ? (
           <p className="text-slate-500">Nothing below its warning threshold.</p>
         ) : (
-          groupBySupplier(data.low_stock_materials).map((group) => (
-            <div key={group.supplierName} className="mb-4">
-              <h3 className="mb-1 text-sm font-semibold text-slate-600">{group.supplierName}</h3>
-              <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">
-                <thead>
-                  <tr className="border-b border-slate-200">
-                    <th className="p-2">Material</th>
-                    <th className="p-2">Status</th>
-                    <th className="p-2">Time to stockout</th>
-                    <th className="p-2">Consumption rate</th>
-                    <th className="p-2">On hand</th>
-                    <th className="p-2">On order</th>
-                    <th className="p-2" />
+          <table className="w-full border-collapse bg-white text-left text-[12.5px] shadow-sm">
+            <thead>
+              <tr className="border-b border-slate-200">
+                <Th>Material</Th>
+                <Th>Status</Th>
+                <Th>Time to stockout</Th>
+                <Th>Consumption rate</Th>
+                <Th>On hand</Th>
+                <Th>On order</Th>
+                <Th>{""}</Th>
+              </tr>
+            </thead>
+            {groupBySupplier(data.low_stock_materials).map((group) => (
+              <tbody key={group.supplierName}>
+                <GroupHeaderRow
+                  label={group.supplierName}
+                  count={group.materials.length}
+                  colSpan={7}
+                />
+                {group.materials.map((m) => (
+                  <tr key={m.id} className="border-b border-slate-100">
+                    <td className="p-2">{m.name}</td>
+                    <td className="p-2">
+                      <Badge className={STATUS_STYLES[m.status]}>
+                        {STATUS_LABELS[m.status]}
+                      </Badge>
+                    </td>
+                    <td className="p-2">{formatWeeksOfSupply(m)}</td>
+                    <td className="p-2">
+                      {m.consumption_rate_per_week != null
+                        ? `${roundQty(m.consumption_rate_per_week)}/wk`
+                        : "—"}
+                    </td>
+                    <td className="p-2 text-red-600">
+                      {roundQty(m.current_qty)}
+                    </td>
+                    <td className="p-2">
+                      {Number(m.on_order_qty) > 0
+                        ? roundQty(m.on_order_qty)
+                        : "—"}
+                    </td>
+                    <td className="p-2">
+                      <button
+                        onClick={() => draftPurchaseMutation.mutate(m.id)}
+                        className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800"
+                      >
+                        Create draft purchase
+                      </button>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {group.materials.map((m) => (
-                    <tr key={m.id} className="border-b border-slate-100">
-                      <td className="p-2">{m.name}</td>
-                      <td className="p-2">
-                        <span className={`rounded px-2 py-0.5 text-xs ${STATUS_STYLES[m.status]}`}>
-                          {STATUS_LABELS[m.status]}
-                        </span>
-                      </td>
-                      <td className="p-2">{formatWeeksOfSupply(m)}</td>
-                      <td className="p-2">
-                        {m.consumption_rate_per_week != null ? `${roundQty(m.consumption_rate_per_week)}/wk` : "—"}
-                      </td>
-                      <td className="p-2 text-red-600">{roundQty(m.current_qty)}</td>
-                      <td className="p-2">{Number(m.on_order_qty) > 0 ? roundQty(m.on_order_qty) : "—"}</td>
-                      <td className="p-2">
-                        <button
-                          onClick={() => draftPurchaseMutation.mutate(m.id)}
-                          className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800"
-                        >
-                          Create draft purchase
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ))
+                ))}
+              </tbody>
+            ))}
+          </table>
         )}
         <ErrorBanner error={draftPurchaseMutation.error} />
       </section>
 
       <section>
-        <h2 className="mb-2 text-lg font-semibold">Lowest buildable products</h2>
-        <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">
+        <h2 className="mb-2 text-lg font-semibold">
+          Lowest buildable products
+        </h2>
+        <table className="w-full border-collapse bg-white text-left text-[12.5px] shadow-sm">
           <thead>
             <tr className="border-b border-slate-200">
-              <th className="p-2">Product</th>
-              <th className="p-2">Max buildable</th>
-              <th className="p-2">Expected max buildable</th>
+              <Th>Product</Th>
+              <Th>Max buildable</Th>
+              <Th>Expected max buildable</Th>
             </tr>
           </thead>
           <tbody>
@@ -328,7 +393,9 @@ function Dashboard() {
               <tr key={p.product_id} className="border-b border-slate-100">
                 <td className="p-2">{p.name}</td>
                 <td className="p-2">{p.max_buildable ?? "No BOM set"}</td>
-                <td className="p-2">{p.expected_max_buildable ?? "No BOM set"}</td>
+                <td className="p-2">
+                  {p.expected_max_buildable ?? "No BOM set"}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -337,24 +404,33 @@ function Dashboard() {
 
       {data.margin_alerts.length > 0 && (
         <section>
-          <h2 className="mb-2 text-lg font-semibold">Products with significant margin changes</h2>
-          <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">
+          <h2 className="mb-2 text-lg font-semibold">
+            Products with significant margin changes
+          </h2>
+          <table className="w-full border-collapse bg-white text-left text-[12.5px] shadow-sm">
             <thead>
               <tr className="border-b border-slate-200">
-                <th className="p-2">Product</th>
-                <th className="p-2">Previous margin</th>
-                <th className="p-2">Current margin</th>
+                <Th>Product</Th>
+                <Th>Previous margin</Th>
+                <Th>Current margin</Th>
               </tr>
             </thead>
             <tbody>
               {data.margin_alerts.map((a) => {
-                const diff = Number(a.current_margin_percent) - Number(a.previous_margin_percent);
+                const diff =
+                  Number(a.current_margin_percent) -
+                  Number(a.previous_margin_percent);
                 return (
                   <tr key={a.product_id} className="border-b border-slate-100">
                     <td className="p-2">{a.name}</td>
-                    <td className="p-2">{Number(a.previous_margin_percent).toFixed(1)}%</td>
-                    <td className={`p-2 ${diff < 0 ? "text-red-600" : "text-green-700"}`}>
-                      {Number(a.current_margin_percent).toFixed(1)}% ({diff > 0 ? "+" : ""}
+                    <td className="p-2">
+                      {Number(a.previous_margin_percent).toFixed(1)}%
+                    </td>
+                    <td
+                      className={`p-2 ${diff < 0 ? "text-red-600" : "text-green-700"}`}
+                    >
+                      {Number(a.current_margin_percent).toFixed(1)}% (
+                      {diff > 0 ? "+" : ""}
                       {diff.toFixed(1)} pts)
                     </td>
                   </tr>
@@ -368,11 +444,25 @@ function Dashboard() {
   );
 }
 
-function SummaryCard({ label, value }: { label: string; value: string }) {
+function SummaryCard({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string;
+  accent: string;
+}) {
   return (
-    <div className="rounded-lg bg-white p-4 shadow-sm">
-      <p className="text-sm text-slate-500">{label}</p>
-      <p className="text-2xl font-semibold">{value}</p>
+    <div
+      className={`rounded-lg border-l-[3px] bg-white p-4 shadow-sm ${accent}`}
+    >
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+        {label}
+      </p>
+      <p className="text-[28px] font-semibold leading-tight tracking-tight">
+        {value}
+      </p>
     </div>
   );
 }

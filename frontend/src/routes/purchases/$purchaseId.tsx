@@ -1,30 +1,90 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { materialsApi } from "../../api/materials";
-import { purchasesApi, type PurchaseLineInput, type ReceiptLineInput } from "../../api/purchases";
+import {
+  purchasesApi,
+  type PurchaseLineInput,
+  type ReceiptLineInput,
+} from "../../api/purchases";
 import { suppliersApi } from "../../api/suppliers";
 import { PurchaseLineEditor } from "../../components/purchases/PurchaseLineEditor";
 import { PurchaseStatusPill } from "../../components/purchases/PurchaseStatusPill";
 import { ReceiptHistoryPanel } from "../../components/purchases/ReceiptHistoryPanel";
 import { ReceiveDialog } from "../../components/purchases/ReceiveDialog";
+import { DetailPanel } from "../../components/common/DetailPanel";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { ConfirmDialog } from "../../components/common/ConfirmDialog";
 import { CreatableSelect } from "../../components/common/CreatableSelect";
+import type { TabDef } from "../../components/common/Tabs";
+import { useSiblingNav } from "../../hooks/useSiblingNav";
+
+const TAB_IDS = ["lines", "receiving"] as const;
+type TabId = (typeof TAB_IDS)[number];
+
+const TABS: TabDef[] = [
+  { id: "lines", label: "Lines" },
+  { id: "receiving", label: "Receiving history" },
+];
 
 export const Route = createFileRoute("/purchases/$purchaseId")({
   component: PurchaseDetail,
+  // Same reasoning as the product page: keeping the tab in the URL makes switching one a
+  // real router navigation, so the root unsaved-changes blocker covers leaving a dirty
+  // Lines edit without this page knowing the guard exists.
+  validateSearch: (search: Record<string, unknown>): { tab?: TabId } => {
+    const tab = search.tab;
+    return TAB_IDS.includes(tab as TabId) ? { tab: tab as TabId } : {};
+  },
 });
 
 function PurchaseDetail() {
   const { purchaseId } = Route.useParams();
   const id = Number(purchaseId);
   const navigate = useNavigate();
+  const routeNavigate = Route.useNavigate();
+  const activeTab: TabId = Route.useSearch().tab ?? "lines";
+  const setActiveTab = (tab: string) =>
+    routeNavigate({ search: { tab: tab as TabId } });
   const queryClient = useQueryClient();
 
-  const { data: purchase } = useQuery({ queryKey: ["purchases", id], queryFn: () => purchasesApi.get(id) });
-  const { data: materials } = useQuery({ queryKey: ["materials"], queryFn: materialsApi.list });
-  const { data: suppliers } = useQuery({ queryKey: ["suppliers"], queryFn: suppliersApi.list });
+  const { data: purchase } = useQuery({
+    queryKey: ["purchases", id],
+    queryFn: () => purchasesApi.get(id),
+  });
+  const { prevId, nextId } = useSiblingNav(
+    ["purchases"],
+    id,
+    (data) => data as { id: number }[] | undefined,
+  );
+  const closePanel = useCallback(
+    () => navigate({ to: "/purchases" }),
+    [navigate],
+  );
+  const goPrev = useCallback(
+    () =>
+      navigate({
+        to: "/purchases/$purchaseId",
+        params: { purchaseId: String(prevId) },
+      }),
+    [navigate, prevId],
+  );
+  const goNext = useCallback(
+    () =>
+      navigate({
+        to: "/purchases/$purchaseId",
+        params: { purchaseId: String(nextId) },
+      }),
+    [navigate, nextId],
+  );
+  const { data: materials } = useQuery({
+    queryKey: ["materials"],
+    queryFn: materialsApi.list,
+  });
+  const { data: suppliers } = useQuery({
+    queryKey: ["suppliers"],
+    queryFn: suppliersApi.list,
+  });
 
   const [supplier, setSupplier] = useState("");
   const [supplierId, setSupplierId] = useState<number | null>(null);
@@ -68,7 +128,8 @@ function PurchaseDetail() {
     mutationFn: async () => {
       let resolvedSupplierId = supplierId;
       if (!resolvedSupplierId && supplier.trim()) {
-        resolvedSupplierId = (await suppliersApi.findOrCreate(supplier.trim())).id;
+        resolvedSupplierId = (await suppliersApi.findOrCreate(supplier.trim()))
+          .id;
       }
       await purchasesApi.update(id, {
         supplier_id: resolvedSupplierId,
@@ -82,31 +143,50 @@ function PurchaseDetail() {
   });
 
   const receiptsMutation = useMutation({
-    mutationFn: ({ receivedAt, lines: receiptLines }: { receivedAt: string; lines: ReceiptLineInput[] }) =>
-      purchasesApi.createReceipts(id, { received_at: receivedAt, lines: receiptLines }),
+    mutationFn: ({
+      receivedAt,
+      lines: receiptLines,
+    }: {
+      receivedAt: string;
+      lines: ReceiptLineInput[];
+    }) =>
+      purchasesApi.createReceipts(id, {
+        received_at: receivedAt,
+        lines: receiptLines,
+      }),
     onSuccess: () => {
       setReceiving(false);
       invalidate();
     },
   });
   const undoBatchMutation = useMutation({
-    mutationFn: (batchId: string) => purchasesApi.deleteReceiptBatch(id, batchId),
+    mutationFn: (batchId: string) =>
+      purchasesApi.deleteReceiptBatch(id, batchId),
     onSuccess: invalidate,
   });
   const undoReceiptMutation = useMutation({
-    mutationFn: (receiptId: number) => purchasesApi.deleteReceipt(id, receiptId),
+    mutationFn: (receiptId: number) =>
+      purchasesApi.deleteReceipt(id, receiptId),
     onSuccess: invalidate,
   });
   const closeLineMutation = useMutation({
-    mutationFn: ({ lineId, apportion }: { lineId: number; apportion: boolean }) =>
-      purchasesApi.closeLine(id, lineId, apportion),
+    mutationFn: ({
+      lineId,
+      apportion,
+    }: {
+      lineId: number;
+      apportion: boolean;
+    }) => purchasesApi.closeLine(id, lineId, apportion),
     onSuccess: invalidate,
   });
   const reopenLineMutation = useMutation({
     mutationFn: (lineId: number) => purchasesApi.reopenLine(id, lineId),
     onSuccess: invalidate,
   });
-  const unreceiveMutation = useMutation({ mutationFn: () => purchasesApi.unreceive(id), onSuccess: invalidate });
+  const unreceiveMutation = useMutation({
+    mutationFn: () => purchasesApi.unreceive(id),
+    onSuccess: invalidate,
+  });
   const deleteMutation = useMutation({
     mutationFn: () => purchasesApi.remove(id),
     onSuccess: () => {
@@ -116,154 +196,187 @@ function PurchaseDetail() {
     },
   });
 
-  if (!purchase) return <p>Loading…</p>;
+  if (!purchase) {
+    return (
+      <DetailPanel title="Loading…" onClose={closePanel}>
+        <p className="text-slate-500">Loading…</p>
+      </DetailPanel>
+    );
+  }
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Purchase #{purchase.id}</h1>
-        <PurchaseStatusPill status={purchase.status} />
-      </div>
+    <DetailPanel
+      title={`Purchase #${purchase.id}`}
+      onClose={closePanel}
+      onPrev={prevId ? goPrev : undefined}
+      onNext={nextId ? goNext : undefined}
+      headerExtra={<PurchaseStatusPill status={purchase.status} />}
+      tabs={TABS}
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
+    >
+      <div className="flex flex-col gap-6">
+        <div className="flex flex-wrap gap-4 rounded bg-white p-4 shadow-sm">
+          <label className="flex flex-col gap-1">
+            <span className="text-sm">Supplier</span>
+            <CreatableSelect
+              className="rounded border border-slate-300 px-2 py-1"
+              options={suppliers ?? []}
+              value={supplier}
+              onChange={setSupplier}
+              onResolved={setSupplierId}
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-sm">Order date</span>
+            <input
+              type="date"
+              className="rounded border border-slate-300 px-2 py-1"
+              value={orderDate}
+              onChange={(e) => setOrderDate(e.target.value)}
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-sm">Expected arrival</span>
+            <input
+              type="date"
+              className="rounded border border-slate-300 px-2 py-1"
+              value={expectedArrivalDate}
+              onChange={(e) => setExpectedArrivalDate(e.target.value)}
+            />
+          </label>
+          <label className="flex flex-col gap-1 flex-1">
+            <span className="text-sm">Notes</span>
+            <input
+              className="rounded border border-slate-300 px-2 py-1"
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+            />
+          </label>
+        </div>
 
-      <div className="flex flex-wrap gap-4 rounded bg-white p-4 shadow-sm">
-        <label className="flex flex-col gap-1">
-          <span className="text-sm">Supplier</span>
-          <CreatableSelect
-            className="rounded border border-slate-300 px-2 py-1"
-            options={suppliers ?? []}
-            value={supplier}
-            onChange={setSupplier}
-            onResolved={setSupplierId}
+        {activeTab === "lines" && (
+          <PurchaseLineEditor
+            materials={materials ?? []}
+            lines={lines}
+            saved={purchase.lines}
+            onChange={setLines}
+            onCloseLine={(lineId) => {
+              setCloseApportion(false);
+              setClosingLineId(lineId);
+            }}
+            onReopenLine={(lineId) => reopenLineMutation.mutate(lineId)}
           />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-sm">Order date</span>
-          <input
-            type="date"
-            className="rounded border border-slate-300 px-2 py-1"
-            value={orderDate}
-            onChange={(e) => setOrderDate(e.target.value)}
+        )}
+
+        {activeTab === "receiving" && (
+          <ReceiptHistoryPanel
+            purchase={purchase}
+            materials={materials ?? []}
+            busy={undoBatchMutation.isPending || undoReceiptMutation.isPending}
+            onUndoBatch={(batchId) => undoBatchMutation.mutate(batchId)}
+            onUndoReceipt={(receiptId) => undoReceiptMutation.mutate(receiptId)}
           />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-sm">Expected arrival</span>
-          <input
-            type="date"
-            className="rounded border border-slate-300 px-2 py-1"
-            value={expectedArrivalDate}
-            onChange={(e) => setExpectedArrivalDate(e.target.value)}
-          />
-        </label>
-        <label className="flex flex-col gap-1 flex-1">
-          <span className="text-sm">Notes</span>
-          <input className="rounded border border-slate-300 px-2 py-1" value={notes} onChange={(e) => setNotes(e.target.value)} />
-        </label>
-      </div>
+        )}
 
-      <PurchaseLineEditor
-        materials={materials ?? []}
-        lines={lines}
-        saved={purchase.lines}
-        onChange={setLines}
-        onCloseLine={(lineId) => {
-          setCloseApportion(false);
-          setClosingLineId(lineId);
-        }}
-        onReopenLine={(lineId) => reopenLineMutation.mutate(lineId)}
-      />
-
-      <ReceiptHistoryPanel
-        purchase={purchase}
-        materials={materials ?? []}
-        busy={undoBatchMutation.isPending || undoReceiptMutation.isPending}
-        onUndoBatch={(batchId) => undoBatchMutation.mutate(batchId)}
-        onUndoReceipt={(receiptId) => undoReceiptMutation.mutate(receiptId)}
-      />
-
-      <div className="flex gap-2">
-        <button
-          onClick={() => saveMutation.mutate()}
-          disabled={lines.length === 0}
-          className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-50"
-        >
-          Save changes
-        </button>
-        {purchase.status !== "received" && (
+        <div className="flex gap-2">
           <button
-            onClick={() => setReceiving(true)}
-            disabled={saveMutation.isPending}
-            className="rounded border border-slate-300 px-4 py-2 disabled:opacity-50"
+            onClick={() => saveMutation.mutate()}
+            disabled={lines.length === 0}
+            className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-50"
           >
-            Record a delivery
+            Save changes
           </button>
-        )}
-        {purchase.status !== "ordered" && (
-          <button onClick={() => unreceiveMutation.mutate()} className="rounded border border-slate-300 px-4 py-2">
-            Undo all deliveries
+          {purchase.status !== "received" && (
+            <button
+              onClick={() => setReceiving(true)}
+              disabled={saveMutation.isPending}
+              className="rounded border border-slate-300 px-4 py-2 disabled:opacity-50"
+            >
+              Record a delivery
+            </button>
+          )}
+          {purchase.status !== "ordered" && (
+            <button
+              onClick={() => unreceiveMutation.mutate()}
+              className="rounded border border-slate-300 px-4 py-2"
+            >
+              Undo all deliveries
+            </button>
+          )}
+          <button
+            onClick={() => deleteMutation.mutate()}
+            className="rounded border border-red-300 px-4 py-2 text-red-600"
+          >
+            Delete purchase
           </button>
-        )}
-        <button onClick={() => deleteMutation.mutate()} className="rounded border border-red-300 px-4 py-2 text-red-600">
-          Delete purchase
-        </button>
-      </div>
-      <ErrorBanner
-        error={
-          saveMutation.error ??
-          unreceiveMutation.error ??
-          undoBatchMutation.error ??
-          undoReceiptMutation.error ??
-          closeLineMutation.error ??
-          reopenLineMutation.error ??
-          deleteMutation.error
-        }
-      />
+        </div>
+        <ErrorBanner
+          error={
+            saveMutation.error ??
+            unreceiveMutation.error ??
+            undoBatchMutation.error ??
+            undoReceiptMutation.error ??
+            closeLineMutation.error ??
+            reopenLineMutation.error ??
+            deleteMutation.error
+          }
+        />
 
-      {/* The billing question is a checkbox inside the confirmation rather than the choice
+        {/* The billing question is a checkbox inside the confirmation rather than the choice
           between its two buttons: Escape and a backdrop click both mean cancel, and closing
           a line short is not something either gesture should be able to do by accident. */}
-      <ConfirmDialog
-        open={closingLineId !== null}
-        title="Close this line short?"
-        tone="default"
-        body={
-          <div className="flex flex-col gap-3">
-            <p>
-              Nothing more is expected on this line, so it stops counting as on order and the
-              purchase can complete. What was ordered stays on the record.
-            </p>
-            <label className="flex items-start gap-2 text-sm">
-              <input
-                type="checkbox"
-                className="mt-0.5"
-                checked={closeApportion}
-                onChange={(e) => setCloseApportion(e.target.checked)}
-              />
-              <span>
-                The supplier charged for the full quantity anyway — put the whole line cost on what
-                actually arrived, rather than only its share.
-              </span>
-            </label>
-          </div>
-        }
-        confirmLabel="Close line"
-        busy={closeLineMutation.isPending}
-        onConfirm={() => {
-          closeLineMutation.mutate({ lineId: closingLineId!, apportion: closeApportion });
-          setClosingLineId(null);
-        }}
-        onCancel={() => setClosingLineId(null)}
-      />
-
-      {receiving && (
-        <ReceiveDialog
-          purchase={purchase}
-          materials={materials ?? []}
-          busy={receiptsMutation.isPending}
-          error={receiptsMutation.error}
-          onSubmit={(receivedAt, receiptLines) => receiptsMutation.mutate({ receivedAt, lines: receiptLines })}
-          onClose={() => setReceiving(false)}
+        <ConfirmDialog
+          open={closingLineId !== null}
+          title="Close this line short?"
+          tone="default"
+          body={
+            <div className="flex flex-col gap-3">
+              <p>
+                Nothing more is expected on this line, so it stops counting as
+                on order and the purchase can complete. What was ordered stays
+                on the record.
+              </p>
+              <label className="flex items-start gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={closeApportion}
+                  onChange={(e) => setCloseApportion(e.target.checked)}
+                />
+                <span>
+                  The supplier charged for the full quantity anyway — put the
+                  whole line cost on what actually arrived, rather than only its
+                  share.
+                </span>
+              </label>
+            </div>
+          }
+          confirmLabel="Close line"
+          busy={closeLineMutation.isPending}
+          onConfirm={() => {
+            closeLineMutation.mutate({
+              lineId: closingLineId!,
+              apportion: closeApportion,
+            });
+            setClosingLineId(null);
+          }}
+          onCancel={() => setClosingLineId(null)}
         />
-      )}
-    </div>
+
+        {receiving && (
+          <ReceiveDialog
+            purchase={purchase}
+            materials={materials ?? []}
+            busy={receiptsMutation.isPending}
+            error={receiptsMutation.error}
+            onSubmit={(receivedAt, receiptLines) =>
+              receiptsMutation.mutate({ receivedAt, lines: receiptLines })
+            }
+            onClose={() => setReceiving(false)}
+          />
+        )}
+      </div>
+    </DetailPanel>
   );
 }

@@ -1,11 +1,22 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router";
+import {
+  RouterProvider,
+  createMemoryHistory,
+  createRouter,
+} from "@tanstack/react-router";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 
-vi.mock("../../api/client", async () => (await import("../../test/fakeBackend")).clientMock());
+vi.mock("../../api/client", async () =>
+  (await import("../../test/fakeBackend")).clientMock(),
+);
 vi.mock("../../lib/tauri", () => ({
-  getSettings: () => Promise.resolve({ backendUrl: "http://127.0.0.1:8000", sharedPassword: "x" }),
+  getSettings: () =>
+    Promise.resolve({
+      backendUrl: "http://127.0.0.1:8000",
+      sharedPassword: "x",
+    }),
   backendHostname: () => Promise.resolve("127.0.0.1"),
 }));
 
@@ -42,18 +53,37 @@ function order(overrides: Record<string, unknown> = {}) {
 function routes(o: Record<string, unknown>) {
   return [
     { method: "GET" as const, path: "/orders/153", respond: () => o },
-    { method: "GET" as const, path: "/system/status", respond: () => ({ status: "ok" }) },
+    {
+      method: "GET" as const,
+      path: "/system/status",
+      respond: () => ({ status: "ok" }),
+    },
   ];
 }
 
 async function renderOrder(overrides: Record<string, unknown> = {}) {
   setRoutes(routes(order(overrides)));
-  const router = createRouter({ routeTree, history: createMemoryHistory({ initialEntries: ["/orders/153"] }) });
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const router = createRouter({
+    routeTree,
+    history: createMemoryHistory({ initialEntries: ["/orders/153"] }),
+  });
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   render(
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router as never} />
     </QueryClientProvider>,
+  );
+  // Financials moved onto its own tab — see $orderId.tsx's tab split — and isn't the
+  // default one (Lines is), so the panel needs a click before its content exists.
+  // Generous timeout: the first render in a file resolves the whole lazy route tree.
+  await userEvent.click(
+    await screen.findByRole(
+      "button",
+      { name: "Financials" },
+      { timeout: 5000 },
+    ),
   );
   await screen.findByText("Order value & costs");
 }
@@ -74,7 +104,11 @@ it("shows what the discount came off, rather than listing it as another deductio
 });
 
 it("says nothing about a discount when there wasn't one", async () => {
-  await renderOrder({ subtotal: "6.99", discount_amount: null, net_profit: "1.82" });
+  await renderOrder({
+    subtotal: "6.99",
+    discount_amount: null,
+    net_profit: "1.82",
+  });
 
   expect(screen.queryByText(/discount/i)).not.toBeInTheDocument();
 });
@@ -82,7 +116,11 @@ it("says nothing about a discount when there wasn't one", async () => {
 it("treats a zero discount as no discount", async () => {
   // eBay reports 0.00 rather than omitting the field on some orders, and "£6.99 − £0.00
   // discount" under every one of them is noise.
-  await renderOrder({ subtotal: "6.99", discount_amount: "0.00", net_profit: "1.82" });
+  await renderOrder({
+    subtotal: "6.99",
+    discount_amount: "0.00",
+    net_profit: "1.82",
+  });
 
   expect(screen.queryByText(/discount/i)).not.toBeInTheDocument();
 });
@@ -93,7 +131,9 @@ it("puts the shipping profile under the postage cost instead of in its heading",
   // The name is an identifier, not a figure — in the heading it made one column twice the
   // width of every other and put a proper noun in a row of money.
   expect(screen.getByText("Postage cost")).toBeInTheDocument();
-  expect(screen.queryByText("Postage cost (Small Parcel 48)")).not.toBeInTheDocument();
+  expect(
+    screen.queryByText("Postage cost (Small Parcel 48)"),
+  ).not.toBeInTheDocument();
   expect(screen.getByText("Small Parcel 48")).toBeInTheDocument();
 });
 
@@ -119,7 +159,15 @@ it("leaves a row that adds up to the net profit beneath it", async () => {
   // 5.59 + 3.60 - 1.44 - 3.65 - 0.65 - 0.23 = 3.22. Every figure on the row is now either
   // added or subtracted exactly once, which was the complaint: the discount sat among them
   // looking like a deduction while net profit correctly ignored it.
-  for (const shown of ["£5.59", "£3.60", "-£1.44", "-£3.65", "-£0.65", "-£0.23", "£3.22"]) {
+  for (const shown of [
+    "£5.59",
+    "£3.60",
+    "-£1.44",
+    "-£3.65",
+    "-£0.65",
+    "-£0.23",
+    "£3.22",
+  ]) {
     expect(screen.getByText(shown)).toBeInTheDocument();
   }
 });
@@ -136,14 +184,22 @@ it("says the postage cost was never recorded, rather than showing a bare dash", 
   });
 
   expect(screen.getByText("Not recorded")).toBeInTheDocument();
-  expect(screen.getByText(/shipped without a shipping profile/)).toBeInTheDocument();
+  expect(
+    screen.getByText(/shipped without a shipping profile/),
+  ).toBeInTheDocument();
 });
 
 it("keeps quiet about postage on an order that hasn't shipped yet", async () => {
   // shipping_cost_snapshot is legitimately null until ship_order freezes it, so an
   // unshipped order must not be flagged — the backend's status gate is what decides this.
-  await renderOrder({ status: "allocated", shipping_cost_snapshot: null, postage_cost_missing: false });
+  await renderOrder({
+    status: "allocated",
+    shipping_cost_snapshot: null,
+    postage_cost_missing: false,
+  });
 
   expect(screen.queryByText("Not recorded")).not.toBeInTheDocument();
-  expect(screen.queryByText(/shipped without a shipping profile/)).not.toBeInTheDocument();
+  expect(
+    screen.queryByText(/shipped without a shipping profile/),
+  ).not.toBeInTheDocument();
 });

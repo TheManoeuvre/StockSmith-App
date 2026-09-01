@@ -1,16 +1,22 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useCallback, useMemo, useState } from "react";
 import { stockTakesApi } from "../../api/stockTakes";
 import type { StockTakeDetail, StockTakeLine } from "../../api/types";
 import { ConfirmDialog } from "../../components/common/ConfirmDialog";
+import { DetailPanel } from "../../components/common/DetailPanel";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { SaveButton } from "../../components/common/SaveButton";
 import { StockTakeCsvPanel } from "../../components/stockTakes/StockTakeCsvPanel";
-import { countedInGroup, groupLabel, groupLines } from "../../components/stockTakes/groupLines";
-import { Tabs, type TabDef } from "../../components/common/Tabs";
+import {
+  countedInGroup,
+  groupLabel,
+  groupLines,
+} from "../../components/stockTakes/groupLines";
+import type { TabDef } from "../../components/common/Tabs";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
+import { useSiblingNav } from "../../hooks/useSiblingNav";
 import { roundQty } from "../../lib/format";
 
 const TAB_IDS = ["count", "review"] as const;
@@ -38,7 +44,12 @@ type CountForm = Record<number, string>;
 
 function toForm(take: StockTakeDetail | undefined): CountForm | undefined {
   if (!take) return undefined;
-  return Object.fromEntries(take.lines.map((l) => [l.id, l.counted_qty === null ? "" : roundQty(l.counted_qty)]));
+  return Object.fromEntries(
+    take.lines.map((l) => [
+      l.id,
+      l.counted_qty === null ? "" : roundQty(l.counted_qty),
+    ]),
+  );
 }
 
 function StockTakeDetailPage() {
@@ -48,7 +59,35 @@ function StockTakeDetailPage() {
   const queryClient = useQueryClient();
   const activeTab = Route.useSearch().tab ?? "count";
 
-  const { data: take } = useQuery({ queryKey: ["stock-takes", id], queryFn: () => stockTakesApi.get(id) });
+  const { data: take } = useQuery({
+    queryKey: ["stock-takes", id],
+    queryFn: () => stockTakesApi.get(id),
+  });
+  const { prevId, nextId } = useSiblingNav(
+    ["stock-takes"],
+    id,
+    (data) => data as { id: number }[] | undefined,
+  );
+  const closePanel = useCallback(
+    () => navigate({ to: "/stock-takes" }),
+    [navigate],
+  );
+  const goPrev = useCallback(
+    () =>
+      navigate({
+        to: "/stock-takes/$stockTakeId",
+        params: { stockTakeId: String(prevId) },
+      }),
+    [navigate, prevId],
+  );
+  const goNext = useCallback(
+    () =>
+      navigate({
+        to: "/stock-takes/$stockTakeId",
+        params: { stockTakeId: String(nextId) },
+      }),
+    [navigate, nextId],
+  );
   const [confirmingApprove, setConfirmingApprove] = useState(false);
   // Collapsed groups, by key. A two-hundred-line sheet is unusable as one list, and the
   // point of grouping it is to be able to work through one shelf at a time.
@@ -84,7 +123,8 @@ function StockTakeDetailPage() {
         (take?.lines ?? []).map((l) => ({
           line_id: l.id,
           // "" clears the count back to "not counted" rather than storing a zero.
-          counted_qty: (counts[l.id] ?? "").trim() === "" ? null : counts[l.id].trim(),
+          counted_qty:
+            (counts[l.id] ?? "").trim() === "" ? null : counts[l.id].trim(),
           notes: l.notes,
         })),
       ),
@@ -100,172 +140,236 @@ function StockTakeDetailPage() {
     onSuccess: () => {
       setConfirmingApprove(false);
       invalidate();
-      navigate({ to: "/stock-takes/$stockTakeId", search: { tab: "review" }, params: { stockTakeId } });
+      navigate({
+        to: "/stock-takes/$stockTakeId",
+        search: { tab: "review" },
+        params: { stockTakeId },
+      });
     },
   });
 
   const resolveMutation = useMutation({
-    mutationFn: ({ lineId, action }: { lineId: number; action: "accept_counted" | "accept_system" | "reset" }) =>
-      stockTakesApi.resolveLine(id, lineId, action),
+    mutationFn: ({
+      lineId,
+      action,
+    }: {
+      lineId: number;
+      action: "accept_counted" | "accept_system" | "reset";
+    }) => stockTakesApi.resolveLine(id, lineId, action),
     onSuccess: () => invalidate(),
   });
 
-  if (!take) return <p>Loading stock take…</p>;
+  if (!take) {
+    return (
+      <DetailPanel title="Loading…" onClose={closePanel}>
+        <p className="text-slate-500">Loading…</p>
+      </DetailPanel>
+    );
+  }
 
   const isOpen = take.status === "open";
-  const pendingApproval = take.lines.filter((l) => l.status === "counted").length;
-  const blanks = take.lines.filter((l) => l.counted_qty === null && l.status === "pending").length;
+  const pendingApproval = take.lines.filter(
+    (l) => l.status === "counted",
+  ).length;
+  const blanks = take.lines.filter(
+    (l) => l.counted_qty === null && l.status === "pending",
+  ).length;
 
   return (
-    <div className="flex flex-col gap-4">
-      <div>
-        <h1 className="text-xl font-semibold">Stock take #{take.id}</h1>
-        <p className="text-sm text-slate-500">
-          {take.scope_description}. Started {new Date(take.started_at).toLocaleDateString()}
-          {isOpen ? (
-            <>
-              {" "}
-              — <span className="text-amber-800">open {take.open_days} day{take.open_days === 1 ? "" : "s"}</span>.
-              The longer it stays open, the more lines will have moved by the time you approve.
-            </>
-          ) : (
-            <> — closed {take.closed_at ? new Date(take.closed_at).toLocaleDateString() : ""}.</>
-          )}
-        </p>
-      </div>
+    <DetailPanel
+      title={`Stock take #${take.id}`}
+      onClose={closePanel}
+      onPrev={prevId ? goPrev : undefined}
+      onNext={nextId ? goNext : undefined}
+      tabs={TABS}
+      activeTab={activeTab}
+      onTabChange={(tab) =>
+        navigate({
+          to: "/stock-takes/$stockTakeId",
+          search: { tab: tab as TabId },
+          params: { stockTakeId },
+        })
+      }
+    >
+      <div className="flex flex-col gap-4">
+        <div>
+          <p className="text-sm text-slate-500">
+            {take.scope_description}. Started{" "}
+            {new Date(take.started_at).toLocaleDateString()}
+            {isOpen ? (
+              <>
+                {" "}
+                —{" "}
+                <span className="text-amber-800">
+                  open {take.open_days} day{take.open_days === 1 ? "" : "s"}
+                </span>
+                . The longer it stays open, the more lines will have moved by
+                the time you approve.
+              </>
+            ) : (
+              <>
+                {" "}
+                — closed{" "}
+                {take.closed_at
+                  ? new Date(take.closed_at).toLocaleDateString()
+                  : ""}
+                .
+              </>
+            )}
+          </p>
+        </div>
 
-      <Tabs
-        tabs={TABS}
-        active={activeTab}
-        onChange={(tab) => navigate({ to: "/stock-takes/$stockTakeId", search: { tab: tab as TabId }, params: { stockTakeId } })}
-      />
-
-      {activeTab === "count" && (
-        <>
-          {isOpen && <StockTakeCsvPanel stockTakeId={id} onImported={invalidate} />}
-          {/* Scrolls inside its own container rather than pushing the page sideways — this
+        {activeTab === "count" && (
+          <>
+            {isOpen && (
+              <StockTakeCsvPanel stockTakeId={id} onImported={invalidate} />
+            )}
+            {/* Scrolls inside its own container rather than pushing the page sideways — this
               is the widest table in the app. */}
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">
-              <thead>
-                <tr className="border-b border-slate-200">
-                  <th className="p-2">Item</th>
-                  <th className="p-2">Expected</th>
-                  <th className="p-2">Counted</th>
-                  <th className="p-2">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {groups.map((group) => {
-                  const isCollapsed = collapsed.has(group.key);
-                  const counted = countedInGroup(group, counts);
-                  return (
-                <Fragment key={group.key}>
-                  <tr className="border-b border-slate-200 bg-slate-50">
-                    <th colSpan={4} className="p-2 text-left font-medium">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setCollapsed((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(group.key)) next.delete(group.key);
-                            else next.add(group.key);
-                            return next;
-                          })
-                        }
-                        className="flex w-full items-center gap-2 text-left"
-                      >
-                        <span className="text-slate-400">{isCollapsed ? "▸" : "▾"}</span>
-                        <span className="text-xs uppercase tracking-wide text-slate-400">{group.section}</span>
-                        <span>{groupLabel(group)}</span>
-                        <span className="ml-auto text-xs font-normal text-slate-500">
-                          counted {counted} of {group.lines.length}
-                        </span>
-                      </button>
-                    </th>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">
+                <thead>
+                  <tr className="border-b border-slate-200">
+                    <th className="p-2">Item</th>
+                    <th className="p-2">Expected</th>
+                    <th className="p-2">Counted</th>
+                    <th className="p-2">Status</th>
                   </tr>
-                  {!isCollapsed &&
-                    group.lines.map((line) => (
-                  <tr key={line.id} className="border-b border-slate-100">
-                    <td className="p-2 pl-6">{line.name}</td>
-                    <td className="p-2">
-                      {roundQty(line.expected_qty)} {line.unit}
-                      {/* The difference between a real variance and a shelf that only
+                </thead>
+                <tbody>
+                  {groups.map((group) => {
+                    const isCollapsed = collapsed.has(group.key);
+                    const counted = countedInGroup(group, counts);
+                    return (
+                      <Fragment key={group.key}>
+                        <tr className="border-b border-slate-200 bg-slate-50">
+                          <th colSpan={4} className="p-2 text-left font-medium">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setCollapsed((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(group.key))
+                                    next.delete(group.key);
+                                  else next.add(group.key);
+                                  return next;
+                                })
+                              }
+                              className="flex w-full items-center gap-2 text-left"
+                            >
+                              <span className="text-slate-400">
+                                {isCollapsed ? "▸" : "▾"}
+                              </span>
+                              <span className="text-xs uppercase tracking-wide text-slate-400">
+                                {group.section}
+                              </span>
+                              <span>{groupLabel(group)}</span>
+                              <span className="ml-auto text-xs font-normal text-slate-500">
+                                counted {counted} of {group.lines.length}
+                              </span>
+                            </button>
+                          </th>
+                        </tr>
+                        {!isCollapsed &&
+                          group.lines.map((line) => (
+                            <tr
+                              key={line.id}
+                              className="border-b border-slate-100"
+                            >
+                              <td className="p-2 pl-6">{line.name}</td>
+                              <td className="p-2">
+                                {roundQty(line.expected_qty)} {line.unit}
+                                {/* The difference between a real variance and a shelf that only
                           looks short, so it belongs next to the number being compared. */}
-                      {line.allocated_qty_at_start !== null && Number(line.allocated_qty_at_start) > 0 && (
-                        <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">
-                          {roundQty(line.allocated_qty_at_start)} picked for orders
-                        </span>
-                      )}
-                    </td>
-                    <td className="p-2">
-                      <input
-                        type="number"
-                        min="0"
-                        disabled={!isOpen}
-                        className="w-24 rounded border border-slate-300 px-2 py-1 disabled:bg-slate-100"
-                        placeholder="—"
-                        value={counts[line.id] ?? ""}
-                        onChange={(e) => setCounts((prev) => ({ ...prev, [line.id]: e.target.value }))}
-                      />
-                    </td>
-                    <td className="p-2 text-xs text-slate-500">{statusLabel(line)}</td>
-                  </tr>
-                    ))}
-                </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          {isOpen && (
-            <div className="flex items-center gap-3">
-              <SaveButton
-                isDirty={isDirty}
-                isPending={saveMutation.isPending}
-                status={saveStatus}
-                onClick={() => saveMutation.mutate()}
-              >
-                Save counts
-              </SaveButton>
-              <button
-                onClick={() => setConfirmingApprove(true)}
-                disabled={isDirty}
-                title={isDirty ? "Save your counts first" : undefined}
-                className="rounded border border-slate-300 px-4 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Review and approve
-              </button>
+                                {line.allocated_qty_at_start !== null &&
+                                  Number(line.allocated_qty_at_start) > 0 && (
+                                    <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">
+                                      {roundQty(line.allocated_qty_at_start)}{" "}
+                                      picked for orders
+                                    </span>
+                                  )}
+                              </td>
+                              <td className="p-2">
+                                <input
+                                  type="number"
+                                  min="0"
+                                  disabled={!isOpen}
+                                  className="w-24 rounded border border-slate-300 px-2 py-1 disabled:bg-slate-100"
+                                  placeholder="—"
+                                  value={counts[line.id] ?? ""}
+                                  onChange={(e) =>
+                                    setCounts((prev) => ({
+                                      ...prev,
+                                      [line.id]: e.target.value,
+                                    }))
+                                  }
+                                />
+                              </td>
+                              <td className="p-2 text-xs text-slate-500">
+                                {statusLabel(line)}
+                              </td>
+                            </tr>
+                          ))}
+                      </Fragment>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-          )}
-          <ErrorBanner error={saveMutation.error} />
-        </>
-      )}
 
-      {activeTab === "review" && (
-        <ReviewTab take={take} onResolve={(lineId, action) => resolveMutation.mutate({ lineId, action })} />
-      )}
-      <ErrorBanner error={resolveMutation.error ?? approveMutation.error} />
+            {isOpen && (
+              <div className="flex items-center gap-3">
+                <SaveButton
+                  isDirty={isDirty}
+                  isPending={saveMutation.isPending}
+                  status={saveStatus}
+                  onClick={() => saveMutation.mutate()}
+                >
+                  Save counts
+                </SaveButton>
+                <button
+                  onClick={() => setConfirmingApprove(true)}
+                  disabled={isDirty}
+                  title={isDirty ? "Save your counts first" : undefined}
+                  className="rounded border border-slate-300 px-4 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Review and approve
+                </button>
+              </div>
+            )}
+            <ErrorBanner error={saveMutation.error} />
+          </>
+        )}
 
-      <ConfirmDialog
-        open={confirmingApprove}
-        title="Approve this stock take?"
-        // Says what will happen to all three groups, because "skipped" is the one someone
-        // would otherwise assume means "counted as zero".
-        body={
-          `${pendingApproval} counted line${pendingApproval === 1 ? "" : "s"} will be applied where nothing has ` +
-          `moved since the take started. ${blanks} line${blanks === 1 ? "" : "s"} left blank will be left ` +
-          `completely alone — not adjusted, and not marked as counted. Anything that moved, or that has stock ` +
-          `picked for open orders, is flagged for you to settle rather than adjusted automatically. The take ` +
-          `closes either way.`
-        }
-        confirmLabel="Approve"
-        busy={approveMutation.isPending}
-        onConfirm={() => approveMutation.mutate()}
-        onCancel={() => setConfirmingApprove(false)}
-      />
-    </div>
+        {activeTab === "review" && (
+          <ReviewTab
+            take={take}
+            onResolve={(lineId, action) =>
+              resolveMutation.mutate({ lineId, action })
+            }
+          />
+        )}
+        <ErrorBanner error={resolveMutation.error ?? approveMutation.error} />
+
+        <ConfirmDialog
+          open={confirmingApprove}
+          title="Approve this stock take?"
+          // Says what will happen to all three groups, because "skipped" is the one someone
+          // would otherwise assume means "counted as zero".
+          body={
+            `${pendingApproval} counted line${pendingApproval === 1 ? "" : "s"} will be applied where nothing has ` +
+            `moved since the take started. ${blanks} line${blanks === 1 ? "" : "s"} left blank will be left ` +
+            `completely alone — not adjusted, and not marked as counted. Anything that moved, or that has stock ` +
+            `picked for open orders, is flagged for you to settle rather than adjusted automatically. The take ` +
+            `closes either way.`
+          }
+          confirmLabel="Approve"
+          busy={approveMutation.isPending}
+          onConfirm={() => approveMutation.mutate()}
+          onCancel={() => setConfirmingApprove(false)}
+        />
+      </div>
+    </DetailPanel>
   );
 }
 
@@ -291,7 +395,10 @@ function ReviewTab({
   onResolve,
 }: {
   take: StockTakeDetail;
-  onResolve: (lineId: number, action: "accept_counted" | "accept_system" | "reset") => void;
+  onResolve: (
+    lineId: number,
+    action: "accept_counted" | "accept_system" | "reset",
+  ) => void;
 }) {
   // The conflict/non-conflict split comes first — a flagged line needs settling whatever
   // shelf it came off — and the grouping applies within each half.
@@ -304,18 +411,23 @@ function ReviewTab({
         <section>
           <h2 className="mb-1 text-lg font-semibold">Needs review</h2>
           <p className="mb-2 text-sm text-slate-500">
-            These weren't adjusted. Each one is two different truths rather than a simple miscount, so it's your call
-            which is right.
+            These weren't adjusted. Each one is two different truths rather than
+            a simple miscount, so it's your call which is right.
           </p>
           <div className="flex flex-col gap-2">
             {flagged.map((line) => (
-              <div key={line.id} className="rounded border border-amber-300 bg-amber-50 p-3">
+              <div
+                key={line.id}
+                className="rounded border border-amber-300 bg-amber-50 p-3"
+              >
                 <p className="font-medium">{line.name}</p>
                 <p className="text-sm text-amber-800">{line.conflict_reason}</p>
                 <p className="mt-1 text-sm">
                   Expected {roundQty(line.expected_qty)} · counted{" "}
                   {line.counted_qty === null ? "—" : roundQty(line.counted_qty)}
-                  {line.system_qty_at_approval !== null && <> · system now {roundQty(line.system_qty_at_approval)}</>}
+                  {line.system_qty_at_approval !== null && (
+                    <> · system now {roundQty(line.system_qty_at_approval)}</>
+                  )}
                 </p>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <button
@@ -363,21 +475,34 @@ function ReviewTab({
                 <Fragment key={group.key}>
                   <tr className="border-b border-slate-200 bg-slate-50">
                     <th colSpan={5} className="p-2 text-left font-medium">
-                      <span className="mr-2 text-xs uppercase tracking-wide text-slate-400">{group.section}</span>
+                      <span className="mr-2 text-xs uppercase tracking-wide text-slate-400">
+                        {group.section}
+                      </span>
                       {groupLabel(group)}
                     </th>
                   </tr>
                   {group.lines.map((line) => {
-                    const delta = line.delta === null ? null : Number(line.delta);
+                    const delta =
+                      line.delta === null ? null : Number(line.delta);
                     return (
                       <tr key={line.id} className="border-b border-slate-100">
                         <td className="p-2 pl-6">{line.name}</td>
                         <td className="p-2">{roundQty(line.expected_qty)}</td>
-                        <td className="p-2">{line.counted_qty === null ? "—" : roundQty(line.counted_qty)}</td>
-                        <td className={`p-2 ${delta ? "text-red-600" : ""}`}>
-                          {delta === null ? "—" : delta > 0 ? `+${roundQty(line.delta!)}` : roundQty(line.delta!)}
+                        <td className="p-2">
+                          {line.counted_qty === null
+                            ? "—"
+                            : roundQty(line.counted_qty)}
                         </td>
-                        <td className="p-2 text-xs text-slate-500">{statusLabel(line)}</td>
+                        <td className={`p-2 ${delta ? "text-red-600" : ""}`}>
+                          {delta === null
+                            ? "—"
+                            : delta > 0
+                              ? `+${roundQty(line.delta!)}`
+                              : roundQty(line.delta!)}
+                        </td>
+                        <td className="p-2 text-xs text-slate-500">
+                          {statusLabel(line)}
+                        </td>
                       </tr>
                     );
                   })}
