@@ -1,6 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useMemo, useState } from "react";
-import { feeConfigApi, type MarginFeeSource } from "../../api/feeConfig";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
+import {
+  feeConfigApi,
+  type MarginFeeSource,
+  type PlatformFeeComponent,
+} from "../../api/feeConfig";
 import { productsApi } from "../../api/products";
 import { shippingProfilesApi } from "../../api/shippingProfiles";
 import { variantsApi } from "../../api/variants";
@@ -111,6 +115,186 @@ function attributeValue(variant: Variant, index: 1 | 2 | 3): string | null {
   if (index === 1) return variant.attribute1_value;
   if (index === 2) return variant.attribute2_value;
   return variant.attribute3_value;
+}
+
+/** <30% red, 30–45% amber, otherwise the default text colour. Mirrors the design's
+ *  margin-health thresholds. */
+function marginToneClass(pct: number | null): string {
+  if (pct == null) return "text-slate-500";
+  if (pct < 30) return "text-red-600";
+  if (pct < 45) return "text-amber-700";
+  return "text-slate-700";
+}
+
+/** Read-only cost-of-goods rows under the active pricing form. Every input is already on
+ *  the product (same figures the panel header's Margin line uses) — nothing new fetched. */
+function CogsBreakdown({ product }: { product: Product }) {
+  const materials = product.cost_per_unit != null ? Number(product.cost_per_unit) : null;
+  const packaging =
+    product.kitting_cost_per_unit != null ? Number(product.kitting_cost_per_unit) : 0;
+  const postage =
+    product.effective_shipping_cost != null
+      ? Number(product.effective_shipping_cost)
+      : null;
+  const totalCogs = materials == null ? null : materials + packaging + (postage ?? 0);
+  const salePrice = product.sale_price != null ? Number(product.sale_price) : null;
+  const marginBeforeFees =
+    totalCogs != null && salePrice != null && salePrice > 0
+      ? ((salePrice - totalCogs) / salePrice) * 100
+      : null;
+
+  const money = (n: number | null) => (n == null ? "—" : `£${n.toFixed(2)}`);
+
+  return (
+    <div className="flex flex-col gap-1 rounded bg-white p-4 text-sm shadow-sm">
+      <h4 className="mb-1 text-sm font-medium text-slate-600">Cost of goods</h4>
+      <Row label="Materials" value={money(materials)} />
+      <Row label="Packaging" value={money(packaging)} />
+      <Row
+        label="Postage"
+        value={
+          postage == null ? (
+            <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
+              no profile
+            </span>
+          ) : (
+            money(postage)
+          )
+        }
+      />
+      <div className="mt-1 border-t border-slate-100 pt-1">
+        <Row label="Total COGS" value={<strong>{money(totalCogs)}</strong>} />
+      </div>
+      <Row
+        label="Margin before fees"
+        value={
+          <strong className={marginToneClass(marginBeforeFees)}>
+            {marginBeforeFees == null ? "—" : `${marginBeforeFees.toFixed(1)}%`}
+          </strong>
+        }
+      />
+    </div>
+  );
+}
+
+function Row({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <span className="text-slate-500">{label}</span>
+      <span className="tabular-nums">{value}</span>
+    </div>
+  );
+}
+
+/** Replicates services/platform_fees.compute_effective_fee_amount client-side. */
+function effectiveFeeAmount(
+  components: PlatformFeeComponent[],
+  salePrice: number,
+  shippingPrice: number,
+): number {
+  let subtotal = 0;
+  for (const c of [...components]
+    .filter((c) => c.enabled)
+    .sort((a, b) => a.display_order - b.display_order)) {
+    if (c.basis === "fees_subtotal") {
+      if (c.rate_percent) subtotal += (subtotal * Number(c.rate_percent)) / 100;
+      continue;
+    }
+    const basis = c.basis === "sale_price" ? salePrice : salePrice + shippingPrice;
+    if (c.rate_percent) subtotal += (basis * Number(c.rate_percent)) / 100;
+    if (c.fixed_amount) subtotal += Number(c.fixed_amount);
+  }
+  return subtotal;
+}
+
+/** Read-only Etsy vs eBay comparison: fee %, fee £ and resulting margin at the product's
+ *  own sale price. No overrides — that stays a backlog item. */
+function ChannelFeeComparison({
+  product,
+  profiles,
+}: {
+  product: Product;
+  profiles: ShippingProfile[];
+}) {
+  const { data: etsyComponents } = useQuery({
+    queryKey: ["settings", "platform-fee-components", "etsy"],
+    queryFn: () => feeConfigApi.listFeeComponents("etsy"),
+  });
+  const { data: ebayComponents } = useQuery({
+    queryKey: ["settings", "platform-fee-components", "ebay"],
+    queryFn: () => feeConfigApi.listFeeComponents("ebay"),
+  });
+
+  const salePrice = product.sale_price != null ? Number(product.sale_price) : null;
+  if (salePrice == null || salePrice <= 0) return null;
+
+  const profile = profiles.find(
+    (p) => p.id === product.effective_shipping_profile_id,
+  );
+  const shippingPrice = profile ? Number(profile.price) : 0;
+  const materials = product.cost_per_unit != null ? Number(product.cost_per_unit) : null;
+  const packaging =
+    product.kitting_cost_per_unit != null ? Number(product.kitting_cost_per_unit) : 0;
+  const postage =
+    product.effective_shipping_cost != null
+      ? Number(product.effective_shipping_cost)
+      : 0;
+  const totalCogs = materials == null ? null : materials + packaging + postage;
+
+  const rows: { platform: string; components: PlatformFeeComponent[] | undefined }[] = [
+    { platform: "Etsy", components: etsyComponents },
+    { platform: "eBay", components: ebayComponents },
+  ];
+
+  return (
+    <div className="flex flex-col gap-1 rounded bg-white p-4 text-sm shadow-sm">
+      <h4 className="mb-1 text-sm font-medium text-slate-600">
+        Channel fees at £{salePrice.toFixed(2)}
+      </h4>
+      <table className="w-full text-left">
+        <thead>
+          <tr className="text-xs text-slate-400">
+            <th className="py-1 font-normal">Channel</th>
+            <th className="py-1 text-right font-normal">Fee %</th>
+            <th className="py-1 text-right font-normal">Fee £</th>
+            <th className="py-1 text-right font-normal">Margin</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(({ platform, components }) => {
+            if (!components) {
+              return (
+                <tr key={platform} className="border-t border-slate-100">
+                  <td className="py-1">{platform}</td>
+                  <td className="py-1 text-right text-slate-400" colSpan={3}>
+                    …
+                  </td>
+                </tr>
+              );
+            }
+            const feeAmount = effectiveFeeAmount(components, salePrice, shippingPrice);
+            const feePct = (feeAmount / salePrice) * 100;
+            const margin =
+              totalCogs == null
+                ? null
+                : ((salePrice - totalCogs - feeAmount) / salePrice) * 100;
+            return (
+              <tr key={platform} className="border-t border-slate-100">
+                <td className="py-1">{platform}</td>
+                <td className="py-1 text-right tabular-nums">{feePct.toFixed(1)}%</td>
+                <td className="py-1 text-right tabular-nums">£{feeAmount.toFixed(2)}</td>
+                <td
+                  className={`py-1 text-right tabular-nums ${marginToneClass(margin)}`}
+                >
+                  {margin == null ? "—" : `${margin.toFixed(1)}%`}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 function ProductDefaultShippingProfile({
@@ -298,6 +482,9 @@ export function PricingSection({ product }: { product: Product }) {
           />
         )}
       </DirtyPath>
+
+      <CogsBreakdown product={product} />
+      <ChannelFeeComparison product={product} profiles={profiles} />
 
       {history && history.length > 0 && (
         <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">

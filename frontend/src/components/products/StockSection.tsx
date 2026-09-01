@@ -6,7 +6,8 @@ import { buildsApi, productsApi, stockAdjustmentsApi } from "../../api/products"
 import { materialsApi } from "../../api/materials";
 import type { ProductStockEvent } from "../../api/types";
 import { ErrorBanner } from "../common/ErrorBanner";
-import { formatDayMonth } from "../../lib/format";
+import { FieldRow } from "../common/FieldRow";
+import { formatDayMonth, sellableSummary } from "../../lib/format";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 
 interface BuildForm {
@@ -24,10 +25,30 @@ interface AdjustForm {
   adjVariantId: number | "";
   adjMode: "adjust" | "set";
   adjValue: string;
+  /** A preset from ADJUST_REASONS, or "" for the unpicked state. */
   adjReason: string;
+  /** Free text, only when adjReason is OTHER_REASON. */
+  adjReasonOther: string;
 }
 
-const EMPTY_ADJUST_FORM: AdjustForm = { adjVariantId: "", adjMode: "adjust", adjValue: "", adjReason: "" };
+const EMPTY_ADJUST_FORM: AdjustForm = {
+  adjVariantId: "",
+  adjMode: "adjust",
+  adjValue: "",
+  adjReason: "",
+  adjReasonOther: "",
+};
+
+// Built-stock adjustment presets, mirroring the Materials Stock tab. "Other…" reveals a
+// free-text detail field so anything unusual is still one dropdown away.
+const ADJUST_REASONS = [
+  "Failed print / scrapped",
+  "Built to stock",
+  "Sample / giveaway",
+  "Correction",
+  "Other…",
+] as const;
+const OTHER_REASON = "Other…";
 
 const EVENT_LABELS: Record<ProductStockEvent["event_type"], string> = {
   build_success: "Build",
@@ -54,6 +75,10 @@ export function StockSection({
 }) {
   const queryClient = useQueryClient();
   const [historyExpanded, setHistoryExpanded] = useState(false);
+  const { data: product } = useQuery({
+    queryKey: ["products", productId],
+    queryFn: () => productsApi.get(productId),
+  });
   const { data: variants } = useQuery({
     queryKey: ["products", productId, "variants"],
     queryFn: () => productsApi.listVariants(productId),
@@ -172,13 +197,16 @@ export function StockSection({
     seed: EMPTY_ADJUST_FORM,
     seedKey: "const",
   });
-  const { adjVariantId, adjMode, adjValue, adjReason } = adjForm;
+  const { adjVariantId, adjMode, adjValue, adjReason, adjReasonOther } = adjForm;
   const setAdjField = <K extends keyof AdjustForm>(field: K, next: AdjustForm[K]) =>
     setAdjForm((prev) => ({ ...prev, [field]: next }));
   const setAdjVariantId = (next: number | "") => setAdjField("adjVariantId", next);
   const setAdjMode = (next: "adjust" | "set") => setAdjField("adjMode", next);
   const setAdjValue = (next: string) => setAdjField("adjValue", next);
   const setAdjReason = (next: string) => setAdjField("adjReason", next);
+  const setAdjReasonOther = (next: string) => setAdjField("adjReasonOther", next);
+  const effectiveAdjReason =
+    adjReason === OTHER_REASON ? adjReasonOther.trim() : adjReason;
 
   const adjustMutation = useMutation({
     mutationFn: () =>
@@ -187,7 +215,7 @@ export function StockSection({
         variant_id: hasActiveVariants ? Number(adjVariantId) : null,
         mode: adjMode,
         value: Number(adjValue),
-        reason: adjReason,
+        reason: effectiveAdjReason,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["products", productId] });
@@ -203,7 +231,23 @@ export function StockSection({
   const canRecordBuild =
     (Number(qtyBuilt) > 0 || qtyFailedNum > 0) && (!hasActiveVariants || variantId !== "");
   const canAdjust =
-    adjValue.trim() !== "" && adjReason.trim() !== "" && (!hasActiveVariants || adjVariantId !== "");
+    adjValue.trim() !== "" && effectiveAdjReason !== "" && (!hasActiveVariants || adjVariantId !== "");
+
+  // The read-only figure block at the top of the tab — all client-derived, same inputs the
+  // product header uses. Free stock is on-hand less what open orders have already claimed;
+  // "once purchases land" only shows when inbound POs actually raise the ceiling.
+  const onHand = hasActiveVariants
+    ? activeVariants.reduce((sum, v) => sum + v.current_stock, 0)
+    : product?.current_stock ?? 0;
+  const allocated = hasActiveVariants
+    ? activeVariants.reduce((sum, v) => sum + v.allocated_qty, 0)
+    : product?.allocated_qty ?? 0;
+  const sellable = product
+    ? sellableSummary(product, {
+        pushBuildableCapacity: product.push_buildable_capacity,
+        platformCeilingQty: product.platform_ceiling_qty,
+      })
+    : null;
 
   const variantName = (id: number | null) => variants?.find((v) => v.id === id)?.variant_name ?? "—";
 
@@ -331,8 +375,34 @@ export function StockSection({
         <ErrorBanner error={buildMutation.error} />
       </div>
 
+      {sellable && (
+        <div className="flex flex-col gap-2 rounded bg-white p-4 text-sm shadow-sm">
+          <FieldRow label="Free stock">
+            <span className="tabular-nums">
+              {onHand - allocated}
+              <span className="ml-2 text-xs text-slate-400">
+                on hand less what open orders have claimed
+              </span>
+            </span>
+          </FieldRow>
+          <FieldRow label="Reserved to orders">
+            <span className="tabular-nums">{allocated}</span>
+          </FieldRow>
+          <FieldRow label="Buildable from materials">
+            <span className="tabular-nums">
+              {sellable.buildable == null ? "—" : sellable.buildable}
+            </span>
+          </FieldRow>
+          {sellable.expected != null && sellable.expected !== sellable.headline && (
+            <FieldRow label="Once purchases land">
+              <span className="tabular-nums">{sellable.expected}</span>
+            </FieldRow>
+          )}
+        </div>
+      )}
+
       <div className="flex flex-col gap-3">
-        <h3 className="text-md font-semibold">Stock adjustment</h3>
+        <h3 className="text-md font-semibold">Adjust built stock</h3>
         <form
           className="flex flex-wrap items-end gap-2 rounded bg-white p-4 shadow-sm"
           onSubmit={(e) => {
@@ -382,16 +452,34 @@ export function StockSection({
               onChange={(e) => setAdjValue(e.target.value)}
             />
           </label>
-          <label className="flex flex-col gap-1 flex-1">
+          <label className="flex flex-col gap-1">
             <span className="text-sm">Reason</span>
-            <input
+            <select
               required
               className="rounded border border-slate-300 px-2 py-1"
-              placeholder="Breakage, recount, …"
               value={adjReason}
               onChange={(e) => setAdjReason(e.target.value)}
-            />
+            >
+              <option value="">Pick a reason…</option>
+              {ADJUST_REASONS.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </select>
           </label>
+          {adjReason === OTHER_REASON && (
+            <label className="flex flex-1 flex-col gap-1">
+              <span className="text-sm">Reason detail</span>
+              <input
+                required
+                className="rounded border border-slate-300 px-2 py-1"
+                placeholder="Breakage, recount, …"
+                value={adjReasonOther}
+                onChange={(e) => setAdjReasonOther(e.target.value)}
+              />
+            </label>
+          )}
           <button
             type="submit"
             disabled={!canAdjust || adjustMutation.isPending}
@@ -400,6 +488,12 @@ export function StockSection({
             Save
           </button>
         </form>
+        {adjValue.trim() !== "" && product && !hasActiveVariants && (
+          <p className="text-xs text-slate-500">
+            On hand {onHand} →{" "}
+            {adjMode === "set" ? Number(adjValue) : onHand + Number(adjValue)}
+          </p>
+        )}
         {adjMode === "set" && (
           <p className="text-xs text-slate-500">
             Setting an exact amount records a physical count, so this stops showing as due and its

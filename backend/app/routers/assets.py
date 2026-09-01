@@ -8,7 +8,13 @@ from app.deps import get_db, require_auth
 from app.models.asset import AssetType, ProductAsset
 from app.models.product import Product
 from app.schemas.asset import AssetRead, AssetUpdate
-from app.services.file_storage import delete_asset_file, resolve_asset_path, save_upload, thumbnail_path_for
+from app.services.file_storage import (
+    delete_asset_file,
+    image_dimensions,
+    resolve_asset_path,
+    save_upload,
+    thumbnail_path_for,
+)
 from app.services.url_import import fetch_image_bytes
 
 
@@ -43,6 +49,7 @@ async def upload_asset(
 
     data = await request.body()
     relative_path, filename_used = save_upload(product_id, product.name, asset_type, original_filename, data)
+    dimensions = image_dimensions(data)
 
     asset = ProductAsset(
         product_id=product_id,
@@ -50,6 +57,8 @@ async def upload_asset(
         asset_type=asset_type,
         file_path=relative_path,
         original_filename=filename_used,
+        width_px=dimensions[0] if dimensions else None,
+        height_px=dimensions[1] if dimensions else None,
         display_order=display_order,
     )
     session.add(asset)
@@ -73,6 +82,7 @@ async def import_asset_from_url(
 
     data, filename = await fetch_image_bytes(payload.url)
     relative_path, filename_used = save_upload(product_id, product.name, asset_type, filename, data)
+    dimensions = image_dimensions(data)
 
     asset = ProductAsset(
         product_id=product_id,
@@ -80,6 +90,8 @@ async def import_asset_from_url(
         asset_type=asset_type,
         file_path=relative_path,
         original_filename=filename_used,
+        width_px=dimensions[0] if dimensions else None,
+        height_px=dimensions[1] if dimensions else None,
         display_order=display_order,
     )
     session.add(asset)

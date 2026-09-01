@@ -14,6 +14,8 @@ class AssetRead(BaseModel):
     asset_type: AssetType
     file_path: str
     original_filename: str
+    width_px: int | None
+    height_px: int | None
     display_order: int
     created_at: datetime
 

@@ -59,8 +59,9 @@ describe("BomEditor", () => {
 
   it("shows each line's cost and share, and a table total", async () => {
     renderEditor();
-    // 2 x £0.50, appearing twice: once on the only row, once as the table total.
-    expect(await screen.findAllByText("£1.00")).toHaveLength(2);
+    // 2 x £0.50, appearing three times: the row cost, the section-header total, and the
+    // table footer total.
+    expect(await screen.findAllByText("£1.00")).toHaveLength(3);
     expect(await screen.findByText("100.0%")).toBeInTheDocument();
     expect(await screen.findByText("Total")).toBeInTheDocument();
   });

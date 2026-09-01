@@ -43,6 +43,9 @@ export function AssetUploader({ productId }: { productId: number }) {
 
   return (
     <div className="flex flex-col gap-4">
+      <h3 className="text-md font-semibold">
+        Assets · {assets?.length ?? 0} {(assets?.length ?? 0) === 1 ? "file" : "files"}
+      </h3>
       <ErrorBanner error={uploadMutation.error ?? removeMutation.error ?? importUrlMutation.error} />
       {SECTIONS.map((section) => (
         <AssetSection
@@ -69,7 +72,12 @@ function AssetSection({
 }: {
   label: string;
   assetType: AssetType;
-  assets: { id: number; original_filename: string }[];
+  assets: {
+    id: number;
+    original_filename: string;
+    width_px: number | null;
+    height_px: number | null;
+  }[];
   onUpload: () => void;
   onImportUrl: (url: string) => void;
   onRemove: (assetId: number) => void;
@@ -140,6 +148,11 @@ function AssetSection({
             key={asset.id}
             assetId={asset.id}
             filename={asset.original_filename}
+            dimensions={
+              asset.width_px && asset.height_px
+                ? `${asset.width_px}×${asset.height_px}`
+                : null
+            }
             isImage={assetType.includes("image")}
             onRemove={() => onRemove(asset.id)}
           />
@@ -152,11 +165,13 @@ function AssetSection({
 function AssetThumb({
   assetId,
   filename,
+  dimensions,
   isImage,
   onRemove,
 }: {
   assetId: number;
   filename: string;
+  dimensions: string | null;
   isImage: boolean;
   onRemove: () => void;
 }) {
@@ -178,6 +193,9 @@ function AssetThumb({
         </div>
       )}
       <p className="truncate text-xs">{filename}</p>
+      {dimensions && (
+        <p className="text-[10px] tabular-nums text-slate-400">{dimensions}</p>
+      )}
       <button onClick={onRemove} className="text-xs text-red-600">
         Remove
       </button>

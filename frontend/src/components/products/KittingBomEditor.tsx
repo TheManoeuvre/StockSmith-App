@@ -7,7 +7,8 @@ import { ErrorBanner } from "../common/ErrorBanner";
 import { SaveButton } from "../common/SaveButton";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
-import { BomLineTable } from "./BomLineTable";
+import { formatMoney } from "../../lib/money";
+import { BomLineTable, computeLineCosts } from "./BomLineTable";
 
 const toLines = (rows: { material_id: number; qty_required: string }[]): KittingBomLine[] =>
   rows.map((l) => ({ material_id: l.material_id, qty_required: l.qty_required }));
@@ -49,6 +50,7 @@ export function KittingBomEditor({ productId }: { productId: number }) {
   const removeLine = (index: number) => setLines((prev) => prev.filter((_, i) => i !== index));
 
   const saveStatus = useSaveStatus(saveMutation.status);
+  const { total } = computeLineCosts(lines, materials);
 
   const addLine = () => {
     const firstUnused = materials?.find((m) => !lines.some((l) => l.material_id === m.id));
@@ -58,7 +60,14 @@ export function KittingBomEditor({ productId }: { productId: number }) {
 
   return (
     <div className="flex flex-col gap-2">
-      <h3 className="text-md font-semibold">Kitting BOM</h3>
+      <div className="flex items-baseline justify-between">
+        <h3 className="text-md font-semibold">Kitting BOM</h3>
+        {total != null && (
+          <span className="text-sm font-medium tabular-nums text-slate-600">
+            {formatMoney(String(total), "GBP")}
+          </span>
+        )}
+      </div>
       <p className="text-sm text-slate-500">
         Packaging (boxes, labels, packing materials) required to pack and ship one unit — reserved when an order
         allocates, consumed only when it ships. Never consumed by recording a build.

@@ -6,8 +6,11 @@ import { assetsApi } from "../../api/assets";
 import { BomEditor } from "../../components/products/BomEditor";
 import { KittingBomEditor } from "../../components/products/KittingBomEditor";
 import { BundleItemsEditor } from "../../components/products/BundleItemsEditor";
+import { ProductStoresSettings } from "../../components/products/ProductStoresSettings";
+import { SyncLog } from "../../components/products/SyncLog";
 import { VariantEditor } from "../../components/products/VariantEditor";
 import { VariantAttributesEditor } from "../../components/products/VariantAttributesEditor";
+import { BulkBomAmendModal } from "../../components/products/BulkBomAmendModal";
 import { AssetUploader } from "../../components/products/AssetUploader";
 import { StockSection } from "../../components/products/StockSection";
 import { PricingSection } from "../../components/products/PricingSection";
@@ -38,7 +41,6 @@ interface DetailsForm {
   sku: string;
   description: string;
   barcode: string;
-  platformCeilingQty: string;
   productCategory: string;
   productCategoryId: number | null;
   abcClass: ABCClass | null;
@@ -50,7 +52,6 @@ const EMPTY_DETAILS: DetailsForm = {
   sku: "",
   description: "",
   barcode: "",
-  platformCeilingQty: "",
   productCategory: "",
   productCategoryId: null,
   abcClass: null,
@@ -187,6 +188,7 @@ function ProductDetail() {
   });
 
   const [isDragOver, setIsDragOver] = useState(false);
+  const [showBomAmend, setShowBomAmend] = useState(false);
 
   const detailsSeed = useMemo(
     () =>
@@ -196,10 +198,6 @@ function ProductDetail() {
             sku: product.sku ?? "",
             description: product.description ?? "",
             barcode: product.barcode ?? "",
-            platformCeilingQty:
-              product.platform_ceiling_qty != null
-                ? String(product.platform_ceiling_qty)
-                : "",
             productCategory: product.product_category_name ?? "",
             productCategoryId: product.product_category_id,
             abcClass: product.abc_class,
@@ -228,7 +226,6 @@ function ProductDetail() {
     sku,
     description,
     barcode,
-    platformCeilingQty,
     productCategory,
     productCategoryId,
     abcClass,
@@ -242,8 +239,6 @@ function ProductDetail() {
   const setSku = (v: string) => setDetailsField("sku", v);
   const setDescription = (v: string) => setDetailsField("description", v);
   const setBarcode = (v: string) => setDetailsField("barcode", v);
-  const setPlatformCeilingQty = (v: string) =>
-    setDetailsField("platformCeilingQty", v);
 
   const saveDetailsMutation = useMutation({
     mutationFn: async () => {
@@ -261,9 +256,6 @@ function ProductDetail() {
         sku: sku || null,
         description: description || null,
         barcode: barcode || null,
-        platform_ceiling_qty: platformCeilingQty.trim()
-          ? Number(platformCeilingQty)
-          : null,
         product_category_id: productCategory.trim()
           ? resolvedProductCategoryId
           : null,
@@ -282,15 +274,6 @@ function ProductDetail() {
 
   const toggleBundleMutation = useMutation({
     mutationFn: (is_bundle: boolean) => productsApi.update(id, { is_bundle }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["products", id] });
-      queryClient.invalidateQueries({ queryKey: ["products"] });
-    },
-  });
-
-  const togglePushBuildableCapacityMutation = useMutation({
-    mutationFn: (push_buildable_capacity: boolean) =>
-      productsApi.update(id, { push_buildable_capacity }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["products", id] });
       queryClient.invalidateQueries({ queryKey: ["products"] });
@@ -597,14 +580,6 @@ function ProductDetail() {
                   onChange={(e) => setBarcode(e.target.value)}
                 />
               </FieldRow>
-              <FieldRow label="Platform qty ceiling">
-                <input
-                  className="w-28 rounded border border-slate-300 px-2 py-1"
-                  placeholder="No cap"
-                  value={platformCeilingQty}
-                  onChange={(e) => setPlatformCeilingQty(e.target.value)}
-                />
-              </FieldRow>
               <FieldRow label="Product category">
                 <CreatableSelect
                   className="rounded border border-slate-300 px-2 py-1"
@@ -615,6 +590,34 @@ function ProductDetail() {
                   placeholder="Keyring, Coaster…"
                 />
               </FieldRow>
+              {/* An immediate-save toggle rather than part of the buffered copy — the
+                  reviewed design lists it among the Details fields. */}
+              {!product.is_bundle && (
+                <div className="flex items-center gap-3">
+                  <span className="w-36 shrink-0 text-sm text-slate-600">
+                    Made to order
+                  </span>
+                  <label className="flex min-w-0 flex-1 items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={product.made_to_order}
+                      onChange={(e) =>
+                        toggleMadeToOrderMutation.mutate(e.target.checked)
+                      }
+                    />
+                    Built against an order — excluded from stock takes
+                  </label>
+                </div>
+              )}
+              <div className="flex items-center gap-3">
+                <span className="w-36 shrink-0 text-sm text-slate-600">
+                  Status
+                </span>
+                <span className="min-w-0 flex-1 text-sm text-slate-600">
+                  {product.is_active ? "Active" : "Inactive"}
+                </span>
+              </div>
+              <ErrorBanner error={toggleMadeToOrderMutation.error} />
               <div className="flex items-start gap-3">
                 <span className="mt-1 w-36 shrink-0 text-sm text-slate-600">
                   Image
@@ -719,66 +722,28 @@ function ProductDetail() {
                 </SaveButton>
               </div>
             </form>
-            <p className="mt-1 text-sm text-slate-500">
-              Platform quantity ceiling caps what's advertised as sellable (the
-              "Sellable now" figure, and what gets synced toward each variant's
-              Etsy listing) at this value, even if stock and packaging could
-              support more. Applies per variant — a variant already below the
-              cap is unaffected. Leave blank for no cap.
-            </p>
-            {!product.is_bundle && (
-              <>
-                <label className="mt-2 flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={product.push_buildable_capacity}
-                    onChange={(e) =>
-                      togglePushBuildableCapacityMutation.mutate(
-                        e.target.checked,
-                      )
-                    }
-                  />
-                  Include buildable stock when pushing to marketplaces
-                </label>
-                <p className="mt-1 text-sm text-slate-500">
-                  When on (default), marketplace pushes advertise on-hand stock
-                  plus what could be built right now from raw materials already
-                  in stock — not already-built, ready-to-ship stock only — on
-                  the reasoning that an incoming order can be backfilled by
-                  building before it ships. Still capped by on-hand packaging
-                  and the platform ceiling either way. Turn off for products
-                  where build lead time makes that backfill risky.
-                </p>
-                <ErrorBanner
-                  error={togglePushBuildableCapacityMutation.error}
-                />
-
-                <label className="mt-4 flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={product.made_to_order}
-                    onChange={(e) =>
-                      toggleMadeToOrderMutation.mutate(e.target.checked)
-                    }
-                  />
-                  Made to order — exclude from stock takes
-                </label>
-                <p className="mt-1 text-sm text-slate-500">
-                  For products built against an order rather than held on a
-                  shelf. They stop appearing on count sheets and on the list of
-                  things due for counting, for every variant, because there is
-                  nothing to go and count. Everything else — stock, builds,
-                  marketplace quantities — is unaffected.
-                </p>
-                <ErrorBanner error={toggleMadeToOrderMutation.error} />
-              </>
-            )}
             <ErrorBanner error={saveDetailsMutation.error} />
           </section>
         )}
 
         {activeTab === "bom" && (
           <section className="flex flex-col gap-6">
+            {!product.is_bundle && product.variant_attribute1_name && (
+              <div>
+                <button
+                  onClick={() => setShowBomAmend(true)}
+                  className="rounded border border-slate-300 px-3 py-1.5 text-sm"
+                >
+                  Amend across variants…
+                </button>
+              </div>
+            )}
+            {showBomAmend && (
+              <BulkBomAmendModal
+                product={product}
+                onClose={() => setShowBomAmend(false)}
+              />
+            )}
             {product.is_bundle ? (
               <BundleItemsEditor productId={id} />
             ) : (
@@ -807,11 +772,22 @@ function ProductDetail() {
         )}
 
         {activeTab === "stores" && (
-          <section className="flex flex-col gap-3">
-            <ProductPlatformSettingsPanel productId={id} platform="etsy" />
-            <PlatformSyncSection productId={id} platform="etsy" />
-            <ProductPlatformSettingsPanel productId={id} platform="ebay" />
-            <PlatformSyncSection productId={id} platform="ebay" />
+          <section className="flex flex-col gap-6">
+            <ProductStoresSettings
+              product={product}
+              sellable={sellable}
+              onHand={onHand}
+              allocated={allocated}
+              showBuildableToggle={!product.is_bundle}
+            />
+            {(["etsy", "ebay"] as const).map((platform) => (
+              <div key={platform} className="flex flex-col gap-3">
+                <h3 className="text-md font-semibold capitalize">{platform}</h3>
+                <ProductPlatformSettingsPanel productId={id} platform={platform} />
+                <PlatformSyncSection productId={id} platform={platform} />
+                <SyncLog productId={id} platform={platform} />
+              </div>
+            ))}
           </section>
         )}
 

@@ -1,5 +1,6 @@
 import { useMaterialCategories } from "../../hooks/useMaterialCategories";
 import type { Material } from "../../api/types";
+import { formatUnitCost } from "../../lib/money";
 
 function matchesFilter(material: Material, filterText: string): boolean {
   if (!filterText.trim()) return true;
@@ -18,6 +19,7 @@ export function MaterialSelect({
   filterText = "",
   className,
   disabled = false,
+  showUnitCost = false,
 }: {
   materials: Material[];
   value: number;
@@ -25,8 +27,19 @@ export function MaterialSelect({
   filterText?: string;
   className?: string;
   disabled?: boolean;
+  /** Append "· £X/unit" to each option — used in the BOM pickers so a line's cost driver is
+   *  visible before it's chosen. */
+  showUnitCost?: boolean;
 }) {
-  const { categories } = useMaterialCategories();
+  const { categories, byName: categoriesByName } = useMaterialCategories();
+
+  const unitCostLabel = (m: Material): string => {
+    if (!showUnitCost) return "";
+    const perKg = categoriesByName.get(m.category)?.cost_per_kg_display;
+    return perKg
+      ? ` · ${formatUnitCost(Number(m.avg_unit_cost) * 1000)}/kg`
+      : ` · ${formatUnitCost(m.avg_unit_cost)}/${m.unit}`;
+  };
 
   // Never hide the row's own current selection, even if it doesn't match the filter —
   // otherwise typing into the filter box can silently un-select an already-chosen material.
@@ -58,7 +71,7 @@ export function MaterialSelect({
         <optgroup key={category} label={category} className="capitalize">
           {(byCategory.get(category) ?? []).map((m) => (
             <option key={m.id} value={m.id}>
-              {m.name} ({m.unit})
+              {m.name} ({m.unit}){unitCostLabel(m)}
             </option>
           ))}
         </optgroup>

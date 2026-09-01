@@ -26,5 +26,10 @@ class ProductAsset(Base):
     asset_type: Mapped[AssetType] = mapped_column(portable_enum(AssetType, name="asset_type"), nullable=False)
     file_path: Mapped[str] = mapped_column(String, nullable=False)
     original_filename: Mapped[str] = mapped_column(String, nullable=False)
+    # Pixel dimensions for image asset types, read at upload/import time. Null for CAD/gcode
+    # files and for image rows created before this was tracked (see
+    # scripts/backfill_asset_dimensions.py).
+    width_px: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    height_px: Mapped[int | None] = mapped_column(Integer, nullable=True)
     display_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

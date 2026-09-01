@@ -623,6 +623,10 @@ export interface Asset {
   asset_type: AssetType;
   file_path: string;
   original_filename: string;
+  /** Pixel size for image asset types; null for CAD/gcode and image rows predating the
+   *  columns (backfilled by scripts/backfill_asset_dimensions.py). */
+  width_px: number | null;
+  height_px: number | null;
   display_order: number;
   created_at: string;
 }

@@ -118,7 +118,7 @@ export function BomLineTable({
           <th className="p-2">Qty required</th>
           <th className="p-2">Cost</th>
           <th className="p-2 text-right">Share</th>
-          {showMaxFromFreeStock && <th className="p-2">Max from free stock</th>}
+          {showMaxFromFreeStock && <th className="p-2">Cover (builds)</th>}
           <th className="p-2" />
         </tr>
       </thead>
@@ -126,13 +126,22 @@ export function BomLineTable({
         {lines.map((line, i) => (
           <tr key={i} className="border-b border-slate-100">
             <td className="p-2">
-              <MaterialSelect
-                materials={materials ?? []}
-                value={line.material_id}
-                onChange={(material_id) => onChangeLine(i, { material_id })}
-                filterText={filterText}
-                className="w-full rounded border border-slate-300 px-2 py-1"
-              />
+              <div className="flex items-center gap-2">
+                {materialFor(line)?.colour_hex && (
+                  <span
+                    className="h-4 w-4 shrink-0 rounded border border-slate-300"
+                    style={{ backgroundColor: materialFor(line)!.colour_hex! }}
+                  />
+                )}
+                <MaterialSelect
+                  materials={materials ?? []}
+                  value={line.material_id}
+                  onChange={(material_id) => onChangeLine(i, { material_id })}
+                  filterText={filterText}
+                  showUnitCost
+                  className="w-full rounded border border-slate-300 px-2 py-1"
+                />
+              </div>
             </td>
             <td className="p-2">
               <input
@@ -153,12 +162,21 @@ export function BomLineTable({
             <td className="p-2 text-right text-slate-500">
               {perLine[i]?.share != null ? `${perLine[i].share!.toFixed(1)}%` : "—"}
             </td>
-            {showMaxFromFreeStock && (
-              <td className={`p-2 ${i === bottleneckIndex ? "font-semibold text-amber-700" : "text-slate-500"}`}>
-                {maxFromFreeStock(line) ?? "—"}
-                {i === bottleneckIndex && <span className="ml-1 text-xs">(bottleneck)</span>}
-              </td>
-            )}
+            {showMaxFromFreeStock &&
+              (() => {
+                const cover = maxFromFreeStock(line);
+                const low = cover != null && cover < 5;
+                return (
+                  <td
+                    className={`p-2 ${i === bottleneckIndex || low ? "font-semibold text-amber-700" : "text-slate-500"}`}
+                  >
+                    {cover ?? "—"}
+                    {i === bottleneckIndex && (
+                      <span className="ml-1 text-xs">(bottleneck)</span>
+                    )}
+                  </td>
+                );
+              })()}
             <td className="p-2">
               <button onClick={() => onRemoveLine(i)} className="text-red-600">
                 Remove
