@@ -216,3 +216,27 @@ async def test_material_above_threshold_with_no_history_is_not_surfaced(session)
 
     forecasts = await compute_material_forecasts(session)
     assert forecasts == []
+
+
+async def test_include_all_returns_every_material_with_a_status(session):
+    """The materials list/detail want a row per material, not just the alerting ones."""
+    await _settings(session)
+    healthy = await _material(session, name="Healthy", current_qty=Decimal(1000))
+    no_history = await _material(session, name="No history", current_qty=Decimal(10), reorder_threshold=Decimal(5))
+    product = await _product(session, "Blue Bottle Opener", "SKU-1", current_stock=0)
+    session.add(ProductMaterial(product_id=product.id, material_id=healthy.id, qty_required=Decimal(1)))
+    await session.commit()
+
+    for w in range(8):
+        await _place_order(session, product.id, qty=2, weeks_ago=w)
+    await session.commit()
+
+    # Default: the healthy material with plenty of cover is not surfaced at all.
+    assert await compute_material_forecasts(session) == []
+
+    by_id = {f.material_id: f for f in await compute_material_forecasts(session, include_all=True)}
+    assert set(by_id) == {healthy.id, no_history.id}
+    assert by_id[healthy.id].status == "ok"
+    assert by_id[healthy.id].weeks_of_supply is not None
+    assert by_id[no_history.id].status == "insufficient_data"
+    assert by_id[no_history.id].weeks_of_supply is None

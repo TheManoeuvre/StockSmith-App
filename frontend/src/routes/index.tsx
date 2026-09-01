@@ -7,6 +7,11 @@ import { Badge } from "../components/common/Badge";
 import { ErrorBanner } from "../components/common/ErrorBanner";
 import { GroupHeaderRow, Th } from "../components/common/ListTable";
 import { roundQty } from "../lib/format";
+import {
+  formatWeeksOfSupply,
+  STOCKOUT_BADGE_CLASS,
+  STOCKOUT_LABEL,
+} from "../lib/forecast";
 
 function groupBySupplier(
   materials: LowStockMaterial[],
@@ -22,28 +27,6 @@ function groupBySupplier(
     }
   }
   return groups;
-}
-
-const STATUS_STYLES: Record<LowStockMaterial["status"], string> = {
-  critical: "bg-red-100 text-red-800",
-  warning: "bg-amber-100 text-amber-800",
-  insufficient_data: "bg-slate-100 text-slate-600",
-};
-
-const STATUS_LABELS: Record<LowStockMaterial["status"], string> = {
-  critical: "Critical",
-  warning: "Warning",
-  insufficient_data: "Not enough history",
-};
-
-function formatWeeksOfSupply(m: LowStockMaterial): string {
-  if (m.weeks_of_supply == null) return "—";
-  const weeks = Number(m.weeks_of_supply);
-  const fgWeeks = m.fg_buffer_weeks != null ? Number(m.fg_buffer_weeks) : 0;
-  if (fgWeeks > 0.05) {
-    return `${weeks.toFixed(1)} wks (incl. ${fgWeeks.toFixed(1)} wk from finished-goods stock)`;
-  }
-  return `${weeks.toFixed(1)} wks`;
 }
 
 export const Route = createFileRoute("/")({
@@ -341,8 +324,8 @@ function Dashboard() {
                   <tr key={m.id} className="border-b border-slate-100">
                     <td className="p-2">{m.name}</td>
                     <td className="p-2">
-                      <Badge className={STATUS_STYLES[m.status]}>
-                        {STATUS_LABELS[m.status]}
+                      <Badge className={STOCKOUT_BADGE_CLASS[m.status]}>
+                        {STOCKOUT_LABEL[m.status]}
                       </Badge>
                     </td>
                     <td className="p-2">{formatWeeksOfSupply(m)}</td>

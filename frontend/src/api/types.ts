@@ -1,5 +1,8 @@
 export type MaterialUnit = "g" | "ml" | "each";
 export type AssetType = "main_image" | "listing_image" | "step" | "threemf" | "gcode";
+/** Time-to-stockout urgency from services/forecasting.py. "ok" only appears where the
+ *  caller asked for every material (the materials list/detail), not on the dashboard. */
+export type StockoutStatus = "critical" | "warning" | "insufficient_data" | "ok";
 
 export interface Material {
   id: number;
@@ -31,6 +34,13 @@ export interface Material {
   created_at: string;
   updated_at: string;
   on_order_qty: string | null;
+  /** Time-to-stockout forecast, populated on the list and single-get paths (null on a
+   *  mutation response). `weeks_of_supply` is null when there's too little sales history —
+   *  `stockout_status` is then "insufficient_data"; "ok" means healthy. See lib/forecast.ts. */
+  weeks_of_supply: string | null;
+  consumption_rate_per_week: string | null;
+  fg_buffer_weeks: string | null;
+  stockout_status: StockoutStatus | null;
   abc_class: ABCClass | null;
   stock_take_interval_days: number | null;
   last_stock_take_at: string | null;

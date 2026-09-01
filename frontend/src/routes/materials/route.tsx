@@ -25,28 +25,20 @@ import {
   wholeNumberStepFor,
 } from "../../lib/format";
 import { formatUnitCost } from "../../lib/money";
+import {
+  formatWeeksShort,
+  STOCKOUT_BADGE_CLASS,
+  STOCKOUT_LABEL,
+  STOCKOUT_TEXT_CLASS,
+} from "../../lib/forecast";
 
-type StockTier = "critical" | "warning" | null;
-
-/**
- * A presentational two-tier split of the existing low-stock flag, for the row pill and the
- * "Low stock" filter tab. "Critical" is at/below half the reorder point (or genuinely out);
- * "warning" is the rest of the low-stock band. The dashboard's forecasting has the
- * authoritative critical/warning — that one is by time-to-stockout, which the list payload
- * doesn't carry — so this is deliberately a rough stand-in that never disagrees about
- * *whether* a material is low, only about how loudly to say so.
- */
-function stockTier(currentQty: string, reorderThreshold: string): StockTier {
-  if (!isLowStock(currentQty, reorderThreshold)) return null;
-  const qty = Number(currentQty);
-  const threshold = Number(reorderThreshold);
-  return qty <= 0 || qty < threshold * 0.5 ? "critical" : "warning";
-}
-
-const TIER_PILL: Record<"critical" | "warning", string> = {
-  critical: "bg-red-100 text-red-700",
-  warning: "bg-amber-100 text-amber-800",
-};
+/** At risk = the forecast flags it critical/warning (by weeks-to-stockout or the user's own
+ *  reorder floor), or it's simply at/below its reorder threshold — the latter covers a new
+ *  material with too little sales history to forecast. Drives the "Low stock" filter tab. */
+const isAtRisk = (m: Material) =>
+  m.stockout_status === "critical" ||
+  m.stockout_status === "warning" ||
+  isLowStock(m.current_qty, m.reorder_threshold);
 
 export const Route = createFileRoute("/materials")({
   component: MaterialsLayout,
@@ -68,7 +60,8 @@ type SortKey =
   | "current_qty"
   | "on_order_qty"
   | "reorder_threshold"
-  | "avg_unit_cost";
+  | "avg_unit_cost"
+  | "weeks_of_supply";
 
 function formatQty(qty: string | null, unit: MaterialUnit): string {
   const suffix = unit === "each" ? "#" : unit;
@@ -233,7 +226,7 @@ function MaterialsListContent() {
     shownCount,
     tabCounts,
     trackedCount,
-    belowThresholdCount,
+    atRiskCount,
     onHandValue,
   } = useMemo(() => {
     const empty = {
@@ -242,7 +235,7 @@ function MaterialsListContent() {
       shownCount: 0,
       tabCounts: { all: 0, low: 0, "on-order": 0 },
       trackedCount: 0,
-      belowThresholdCount: 0,
+      atRiskCount: 0,
       onHandValue: 0,
     };
     if (!data) return empty;
@@ -253,8 +246,7 @@ function MaterialsListContent() {
     const active = data.filter((m) => m.is_active);
     const tabCounts = {
       all: active.length,
-      low: active.filter((m) => isLowStock(m.current_qty, m.reorder_threshold))
-        .length,
+      low: active.filter(isAtRisk).length,
       "on-order": active.filter((m) => Number(m.on_order_qty ?? 0) > 0).length,
     };
     const onHandValue = active.reduce(
@@ -263,8 +255,7 @@ function MaterialsListContent() {
     );
 
     const preFiltered = data.filter((m) => {
-      if (tab === "low" && !isLowStock(m.current_qty, m.reorder_threshold))
-        return false;
+      if (tab === "low" && !isAtRisk(m)) return false;
       if (tab === "on-order" && !(Number(m.on_order_qty ?? 0) > 0)) return false;
       if (needle) {
         const haystack =
@@ -281,6 +272,16 @@ function MaterialsListContent() {
     const dir = sort.dir === "asc" ? 1 : -1;
     filtered.sort((a, b) => {
       if (sort.key === "name") return a.name.localeCompare(b.name) * dir;
+      if (sort.key === "weeks_of_supply") {
+        // A material with no forecast has no place on the urgency scale — keep it last
+        // whichever way the column is sorted.
+        const av = a.weeks_of_supply;
+        const bv = b.weeks_of_supply;
+        if (av == null && bv == null) return 0;
+        if (av == null) return 1;
+        if (bv == null) return -1;
+        return (Number(av) - Number(bv)) * dir;
+      }
       return (Number(a[sort.key] ?? 0) - Number(b[sort.key] ?? 0)) * dir;
     });
 
@@ -309,7 +310,7 @@ function MaterialsListContent() {
       shownCount: filtered.length,
       tabCounts,
       trackedCount: active.length,
-      belowThresholdCount: tabCounts.low,
+      atRiskCount: tabCounts.low,
       onHandValue,
     };
   }, [
@@ -337,7 +338,7 @@ function MaterialsListContent() {
         <div>
           <h1 className="text-xl font-semibold">Materials</h1>
           <p className="mt-0.5 text-[12.5px] text-slate-500">
-            {trackedCount} tracked · {belowThresholdCount} below threshold · £
+            {trackedCount} tracked · {atRiskCount} at risk · £
             {onHandValue.toFixed(2)} on hand
           </p>
         </div>
@@ -544,6 +545,7 @@ function MaterialsListContent() {
             {sortHeader("on_order_qty", "On order")}
             {sortHeader("reorder_threshold", "Reorder at")}
             {sortHeader("avg_unit_cost", "Unit cost")}
+            {sortHeader("weeks_of_supply", "To stockout")}
             <Th>Supplier</Th>
           </tr>
         </thead>
@@ -552,7 +554,7 @@ function MaterialsListContent() {
             <GroupHeaderRow
               label={cat}
               count={materials.length}
-              colSpan={8}
+              colSpan={9}
               capitalize
               collapsed={collapsedGroups.has(cat)}
               onToggle={() => toggleGroup(cat)}
@@ -588,7 +590,8 @@ function MaterialRow({
   material: Material;
   costPerKg: boolean;
 }) {
-  const tier = stockTier(m.current_qty, m.reorder_threshold);
+  const status = m.stockout_status;
+  const atRisk = status === "critical" || status === "warning";
   const onOrder = Number(m.on_order_qty ?? 0) > 0;
 
   const rowRef = useRef<HTMLTableRowElement>(null);
@@ -631,9 +634,9 @@ function MaterialRow({
         >
           {m.name}
         </Link>
-        {tier && (
-          <Badge className={`ml-2 ${TIER_PILL[tier]}`}>
-            {tier === "critical" ? "Critical" : "Warning"}
+        {atRisk && (
+          <Badge className={`ml-2 ${STOCKOUT_BADGE_CLASS[status]}`}>
+            {STOCKOUT_LABEL[status]}
           </Badge>
         )}
         {!m.is_active && (
@@ -644,7 +647,7 @@ function MaterialRow({
         {m.material_type_name ?? "—"}
       </td>
       <td
-        className={`px-2 py-2 tabular-nums ${tier ? "font-medium text-red-600" : ""}`}
+        className={`px-2 py-2 tabular-nums ${atRisk ? `font-medium ${STOCKOUT_TEXT_CLASS[status]}` : ""}`}
       >
         {formatQty(m.current_qty, m.unit)}
       </td>
@@ -664,6 +667,11 @@ function MaterialRow({
         {costPerKg
           ? `${formatUnitCost(Number(m.avg_unit_cost) * 1000)}/kg`
           : formatUnitCost(m.avg_unit_cost)}
+      </td>
+      <td
+        className={`px-2 py-2 tabular-nums ${status && status !== "ok" ? STOCKOUT_TEXT_CLASS[status] : "text-slate-500"}`}
+      >
+        {formatWeeksShort(m.weeks_of_supply)}
       </td>
       <td className="px-2 py-2 text-slate-500">
         {m.default_supplier_name ?? "—"}

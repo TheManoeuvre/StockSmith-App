@@ -99,6 +99,14 @@ class MaterialRead(MaterialBase):
     created_at: datetime
     updated_at: datetime
     on_order_qty: Decimal | None = None
+    # Time-to-stockout forecast, injected from services/forecasting.py on the list and
+    # single-get paths (null on a mutation response — the client refetches). `weeks_of_supply`
+    # is null when there's too little sales history; `stockout_status` is then
+    # "insufficient_data". "ok" means healthy.
+    weeks_of_supply: Decimal | None = None
+    consumption_rate_per_week: Decimal | None = None
+    fg_buffer_weeks: Decimal | None = None
+    stockout_status: str | None = None
     last_stock_take_at: datetime | None = None
     # The effective tier/cadence with its provenance, so the UI can say "C, from the
     # Packaging category" rather than a bare "C" that gives no clue which level to edit.

@@ -19,6 +19,7 @@ from app.services import abc
 from app.services.costing import create_adjustment, get_on_order_qty_by_material
 from app.services.csv_io import export_materials_csv, import_materials_csv
 from app.services.file_storage import delete_asset_file, resolve_asset_path, save_material_image, thumbnail_path_for
+from app.services.forecasting import MaterialForecast, compute_material_forecasts
 from app.services.url_import import fetch_image_bytes
 from app.services.validation import validate_qty_for_unit
 
@@ -87,11 +88,21 @@ _STOCK_HISTORY_SQL = text(
 )
 
 
-def _to_material_read(material: Material, on_order_qty_by_material: dict, rules: abc.Rules) -> MaterialRead:
+def _to_material_read(
+    material: Material,
+    on_order_qty_by_material: dict,
+    rules: abc.Rules,
+    forecasts_by_material: dict[int, MaterialForecast],
+) -> MaterialRead:
+    forecast = forecasts_by_material.get(material.id)
     return MaterialRead.model_validate(material).model_copy(
         update={
             "on_order_qty": on_order_qty_by_material.get(material.id),
             "classification": abc.describe(rules.for_material(material), material.last_stock_take_at),
+            "weeks_of_supply": forecast.weeks_of_supply if forecast else None,
+            "consumption_rate_per_week": forecast.consumption_rate_per_week if forecast else None,
+            "fg_buffer_weeks": forecast.fg_buffer_weeks if forecast else None,
+            "stockout_status": forecast.status if forecast else None,
         }
     )
 
@@ -138,7 +149,12 @@ async def list_materials(
     # Loaded once for the whole list — resolution itself is pure Python, so this stays
     # four queries regardless of how many materials come back.
     rules = await abc.load_rules(session)
-    return [_to_material_read(m, on_order_qty_by_material, rules) for m in materials]
+    forecasts_by_material = {
+        f.material_id: f for f in await compute_material_forecasts(session, include_all=True)
+    }
+    return [
+        _to_material_read(m, on_order_qty_by_material, rules, forecasts_by_material) for m in materials
+    ]
 
 
 @router.get("/colours", response_model=list[str])
@@ -186,7 +202,12 @@ async def create_material(payload: MaterialCreate, session: AsyncSession = Depen
 async def get_material(material_id: int, session: AsyncSession = Depends(get_db)) -> MaterialRead:
     material = await _get_material_with_manufacturer(session, material_id)
     on_order_qty_by_material = await get_on_order_qty_by_material(session)
-    return _to_material_read(material, on_order_qty_by_material, await abc.load_rules(session))
+    forecasts_by_material = {
+        f.material_id: f for f in await compute_material_forecasts(session, include_all=True)
+    }
+    return _to_material_read(
+        material, on_order_qty_by_material, await abc.load_rules(session), forecasts_by_material
+    )
 
 
 @router.patch("/{material_id}", response_model=MaterialRead)

@@ -22,6 +22,7 @@ import {
   wholeNumberStepFor,
 } from "../../lib/format";
 import { formatUnitCost } from "../../lib/money";
+import { formatWeeksOfSupply } from "../../lib/forecast";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { SaveButton } from "../../components/common/SaveButton";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
@@ -487,9 +488,13 @@ function MaterialDetail() {
               }
             />
           </div>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
             <Stat label="On hand" value={roundQty(material.current_qty)} />
             <Stat label="On order" value={roundQty(material.on_order_qty)} />
+            <Stat
+              label="Time to stockout"
+              value={formatWeeksOfSupply(material)}
+            />
             {categoriesByName.get(material.category)?.cost_per_kg_display ? (
               <Stat
                 label="Avg cost/kg"

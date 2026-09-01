@@ -68,7 +68,7 @@ class MaterialForecast:
     consumption_rate_per_week: Decimal | None
     weeks_of_supply: Decimal | None
     fg_buffer_weeks: Decimal | None
-    status: str  # "critical" | "warning" | "insufficient_data"
+    status: str  # "critical" | "warning" | "insufficient_data" | "ok" (last only with include_all)
 
 
 @dataclass
@@ -264,7 +264,16 @@ def _piecewise_weeks_of_supply(
     return t_prev + (remaining / final_rate)
 
 
-async def compute_material_forecasts(session: AsyncSession) -> list[MaterialForecast]:
+async def compute_material_forecasts(
+    session: AsyncSession, *, include_all: bool = False
+) -> list[MaterialForecast]:
+    """By default returns only materials worth an alert (low, at-risk, or short on history).
+
+    Pass ``include_all=True`` to get a forecast row for *every* material — healthy ones come
+    back with ``status="ok"`` and a real ``weeks_of_supply``; ones with too little sales
+    history come back as ``"insufficient_data"``. Used by the materials list/detail, which
+    show the figure per row rather than as an alert list.
+    """
     settings = await get_general_settings(session)
     lookback_weeks = Decimal(settings.forecast_lookback_weeks)
     default_lead_time_weeks = Decimal(str(settings.default_lead_time_weeks))
@@ -325,7 +334,7 @@ async def compute_material_forecasts(session: AsyncSession) -> list[MaterialFore
         sufficient_history = len(active_weeks.get(m.id, set())) >= _MIN_ACTIVE_WEEKS_FOR_FORECAST
 
         if not pieces or not sufficient_history:
-            if reorder_threshold > 0 and current_qty <= reorder_threshold:
+            if include_all or (reorder_threshold > 0 and current_qty <= reorder_threshold):
                 forecasts.append(
                     MaterialForecast(
                         material_id=m.id,
@@ -360,6 +369,8 @@ async def compute_material_forecasts(session: AsyncSession) -> list[MaterialFore
             status = "warning"
         elif reorder_threshold > 0 and current_qty <= reorder_threshold:
             status = "warning"  # manual floor override — forecast says fine, but the user's own floor says otherwise
+        elif include_all:
+            status = "ok"  # healthy — only surfaced when the caller wants every material
         else:
             continue  # ok — nothing to surface
 
