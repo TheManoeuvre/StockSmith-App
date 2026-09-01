@@ -17,6 +17,7 @@ import type { ABCClass, MaterialStockHistoryEntry, MaterialUnit } from "../../ap
 import { StockCountFields } from "../../components/common/StockCountFields";
 import { Tabs, type TabDef } from "../../components/common/Tabs";
 import { FieldRow } from "../../components/common/FieldRow";
+import { Stat } from "../../components/common/Stat";
 import {
   formatDayMonth,
   isLowStock,
@@ -1143,26 +1144,3 @@ function PurchaseOrderHistory({
   );
 }
 
-function Stat({
-  label,
-  value,
-  sub,
-  tone = "default",
-  valueClassName,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  tone?: "default" | "highlight";
-  valueClassName?: string;
-}) {
-  return (
-    <div
-      className={`rounded p-3 shadow-sm ${tone === "highlight" ? "bg-blue-50" : "bg-white"}`}
-    >
-      <p className="text-xs text-slate-500">{label}</p>
-      <p className={`text-lg font-semibold ${valueClassName ?? ""}`}>{value}</p>
-      {sub && <p className="mt-0.5 text-[11px] text-slate-400">{sub}</p>}
-    </div>
-  );
-}

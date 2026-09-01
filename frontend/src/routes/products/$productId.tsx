@@ -13,12 +13,14 @@ import { StockSection } from "../../components/products/StockSection";
 import { PricingSection } from "../../components/products/PricingSection";
 import { ProductPlatformSettingsPanel } from "../../components/products/ProductPlatformSettingsPanel";
 import { PlatformSyncSection } from "../../components/products/PlatformSyncSection";
-import { formatUnitCost } from "../../lib/money";
 import { CopyButton } from "../../components/common/CopyButton";
+import { Badge } from "../../components/common/Badge";
 import { DetailPanel } from "../../components/common/DetailPanel";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
+import { FieldRow } from "../../components/common/FieldRow";
 import { SaveButton } from "../../components/common/SaveButton";
-import type { TabDef } from "../../components/common/Tabs";
+import { Stat } from "../../components/common/Stat";
+import { Tabs, type TabDef } from "../../components/common/Tabs";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { useSiblingNav } from "../../hooks/useSiblingNav";
@@ -29,7 +31,7 @@ import { sellableSummary } from "../../lib/format";
 import { productCategoriesApi } from "../../api/productCategories";
 import { CreatableSelect } from "../../components/common/CreatableSelect";
 import { StockCountFields } from "../../components/common/StockCountFields";
-import type { ABCClass } from "../../api/types";
+import type { ABCClass, Product } from "../../api/types";
 
 interface DetailsForm {
   name: string;
@@ -60,11 +62,50 @@ const TAB_IDS = [
   "bom",
   "pricing",
   "variants",
-  "platform-sync",
+  "stores",
   "stock",
   "assets",
 ] as const;
 type TabId = (typeof TAB_IDS)[number];
+
+/** COGS = the three per-unit deductions an order carries; margin nets platform fees off the
+ *  sale price too. Mirrors what PricingSection computes. Null where the inputs aren't there
+ *  yet (no BOM → no cost; no sale price → no margin). */
+function productEconomics(p: Product): {
+  cogs: number | null;
+  marginPct: number | null;
+  missingPostage: boolean;
+} {
+  const mat = p.cost_per_unit != null ? Number(p.cost_per_unit) : null;
+  const kit = p.kitting_cost_per_unit != null ? Number(p.kitting_cost_per_unit) : 0;
+  const post =
+    p.effective_shipping_cost != null ? Number(p.effective_shipping_cost) : null;
+  const cogs = mat == null ? null : mat + kit + (post ?? 0);
+  const salePrice = p.sale_price != null ? Number(p.sale_price) : null;
+  const feePct =
+    p.effective_platform_fee_percent != null
+      ? Number(p.effective_platform_fee_percent)
+      : 0;
+  const marginPct =
+    cogs != null && salePrice != null && salePrice > 0
+      ? ((salePrice - cogs - (salePrice * feePct) / 100) / salePrice) * 100
+      : null;
+  return { cogs, marginPct, missingPostage: post == null };
+}
+
+/** The header status pill: the first blocking condition wins, else "Sellable". */
+function productStatusBadge(
+  p: Product,
+  sellableHeadline: number | null,
+): { label: string; cls: string } {
+  if (p.cost_per_unit == null)
+    return { label: "No BOM", cls: "bg-red-100 text-red-800" };
+  if (p.effective_shipping_cost == null)
+    return { label: "No shipping profile", cls: "bg-red-100 text-red-800" };
+  if (sellableHeadline === 0)
+    return { label: "Cannot fulfil", cls: "bg-red-100 text-red-800" };
+  return { label: "Sellable", cls: "bg-emerald-100 text-emerald-800" };
+}
 
 export const Route = createFileRoute("/products/$productId")({
   component: ProductDetail,
@@ -82,7 +123,8 @@ export const Route = createFileRoute("/products/$productId")({
   validateSearch: (
     search: Record<string, unknown>,
   ): { tab?: TabId; variantId?: number } => {
-    const tab = search.tab;
+    // "platform-sync" was this tab's id before it was renamed "stores" — keep old links working.
+    const tab = search.tab === "platform-sync" ? "stores" : search.tab;
     const variantId = Number(search.variantId);
     return {
       ...(TAB_IDS.includes(tab as TabId) ? { tab: tab as TabId } : {}),
@@ -312,7 +354,7 @@ function ProductDetail() {
   // counters too. Disabled variants' stock still counts toward the total whenever at
   // least one variant is still active — disabling one doesn't make its physical stock
   // disappear.
-  const { onHand, allocated, freeStock } = useMemo(() => {
+  const { onHand, allocated } = useMemo(() => {
     const hasActiveVariants = (variants ?? []).some((v) => v.is_active);
     const onHand = hasActiveVariants
       ? (variants ?? []).reduce((sum, v) => sum + v.current_stock, 0)
@@ -320,7 +362,7 @@ function ProductDetail() {
     const allocated = hasActiveVariants
       ? (variants ?? []).reduce((sum, v) => sum + v.allocated_qty, 0)
       : (product?.allocated_qty ?? 0);
-    return { onHand, allocated, freeStock: onHand - allocated };
+    return { onHand, allocated };
   }, [variants, product]);
 
   if (!product) {
@@ -351,10 +393,13 @@ function ProductDetail() {
     { id: "bom", label: "Bill of Materials" },
     { id: "pricing", label: "Pricing" },
     ...(!product.is_bundle ? [{ id: "variants", label: "Variants" }] : []),
-    { id: "platform-sync", label: "Platform Sync" },
+    { id: "stores", label: "Stores" },
     ...(!product.is_bundle ? [{ id: "stock", label: "Stock" }] : []),
     { id: "assets", label: "Assets" },
   ];
+
+  const econ = productEconomics(product);
+  const status = productStatusBadge(product, sellable.headline);
 
   return (
     <DetailPanel
@@ -362,107 +407,132 @@ function ProductDetail() {
       onClose={closePanel}
       onPrev={prevId ? goPrev : undefined}
       onNext={nextId ? goNext : undefined}
-      tabs={tabs}
-      activeTab={activeTab}
-      onTabChange={setActiveTab}
+      headerExtra={<Badge className={status.cls}>{status.label}</Badge>}
     >
       <div className="flex flex-col gap-6">
-        <div className="flex items-stretch gap-4">
-          <div className="flex w-44 shrink-0 flex-col">
-            <div
-              className={`flex aspect-square items-center justify-center rounded border border-slate-200 bg-slate-50 ${isDragOver ? "ring-2 ring-slate-400" : ""}`}
-              onDragOver={(e) => {
-                if (e.dataTransfer.types.includes("text/uri-list")) {
-                  e.preventDefault();
-                  setIsDragOver(true);
-                }
-              }}
-              onDragLeave={() => setIsDragOver(false)}
-              onDrop={(e) => {
-                const droppedUrl =
-                  e.dataTransfer.getData("text/uri-list") ||
-                  e.dataTransfer.getData("text/plain");
-                if (droppedUrl) {
-                  e.preventDefault();
-                  importMainImageUrlMutation.mutate(droppedUrl);
-                }
-                setIsDragOver(false);
-              }}
-            >
-              {imageUrl ? (
+        {/* Identity + the headline figures — shown on every tab. */}
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-3">
+            <div className="h-16 w-16 shrink-0 overflow-hidden rounded border border-slate-200 bg-slate-50">
+              {imageUrl && (
                 <img
                   src={imageUrl}
                   alt={product.name}
-                  className="h-full w-full rounded object-cover"
+                  className="h-full w-full object-cover"
                 />
-              ) : (
-                <span className="text-xs text-slate-400">No image</span>
               )}
             </div>
-            {/* mt-auto drops the image's own actions onto the bottom edge of the details
-              column beside it, while aspect-square keeps the image itself 1:1 whatever
-              height that column ends up being. */}
-            <div className="mt-auto flex gap-2 pt-2">
-              <button
-                onClick={() => uploadMainImageMutation.mutate()}
-                className="flex-1 rounded border border-slate-300 px-2 py-1 text-xs"
-              >
-                {product.main_image_asset_id ? "Replace image" : "Upload image"}
-              </button>
-              {product.main_image_asset_id && (
-                <button
-                  onClick={() =>
-                    removeMainImageMutation.mutate(product.main_image_asset_id!)
-                  }
-                  className="rounded border border-slate-300 px-2 py-1 text-xs text-red-600"
-                >
-                  Remove
-                </button>
-              )}
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-slate-700">
+                {product.product_category_name ?? "Uncategorised"}
+                {product.is_bundle ? " · bundle" : ""}
+                {!product.is_active ? " · inactive" : ""}
+              </p>
+              <p className="flex items-center gap-1 truncate text-[12.5px] text-slate-500">
+                {product.sku ? (
+                  <>
+                    <span className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-[11px] text-slate-600">
+                      {product.sku}
+                    </span>
+                    <CopyButton
+                      value={product.sku}
+                      label={`Copy ${product.sku}`}
+                    />
+                  </>
+                ) : (
+                  "No SKU"
+                )}
+              </p>
             </div>
           </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-start gap-2">
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1">
-                  <h1 className="truncate text-xl font-semibold">
-                    {product.name}
-                  </h1>
-                  <CopyButton
-                    value={product.name}
-                    label={`Copy ${product.name}`}
-                  />
-                  {!product.is_active && (
-                    <span className="rounded bg-slate-200 px-2 py-0.5 text-xs text-slate-600">
-                      Inactive
-                    </span>
-                  )}
-                </div>
-                {/* Name and SKU are here to be copied into a marketplace's own listing
-                  tools, so the identity line carries both plus the one figure that
-                  travels with them. */}
-                <div className="mt-1 flex flex-wrap items-center gap-1 text-sm text-slate-500">
-                  {product.sku ? (
-                    <>
-                      <span className="rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-600">
-                        {product.sku}
-                      </span>
-                      <CopyButton
-                        value={product.sku}
-                        label={`Copy ${product.sku}`}
-                      />
-                    </>
-                  ) : (
-                    <span>No SKU</span>
-                  )}
-                  <span>
-                    ·{" "}
-                    {product.cost_per_unit
-                      ? `${formatUnitCost(product.cost_per_unit)} / unit`
-                      : "No unit cost"}
-                  </span>
-                </div>
-              </div>
+
+          {product.is_bundle ? (
+            <div className="grid grid-cols-3 gap-3">
+              <Stat
+                label="Ready to ship"
+                value={String(product.ready_to_ship ?? "—")}
+                sub="assembled on demand"
+                tone="highlight"
+              />
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 gap-3">
+              <Stat
+                label="On hand"
+                value={String(onHand)}
+                sub={`${allocated} reserved to orders`}
+              />
+              <Stat
+                label="Buildable"
+                value={
+                  sellable.buildable == null ? "—" : String(sellable.buildable)
+                }
+                sub={
+                  sellable.buildable == null ? "no BOM set" : "from materials"
+                }
+                valueClassName={
+                  sellable.buildable == null ? "text-amber-700" : undefined
+                }
+              />
+              <Stat
+                label="Sellable"
+                value={
+                  sellable.headline == null ? "—" : String(sellable.headline)
+                }
+                sub={
+                  sellable.expected != null &&
+                  sellable.expected !== sellable.headline
+                    ? `${sellable.expected} once POs land`
+                    : sellable.capLabel ?? "pushed to stores"
+                }
+                tone="highlight"
+                valueClassName={
+                  sellable.headline === 0 ? "text-red-600" : undefined
+                }
+              />
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-[12px] text-slate-500">
+              Margin{" "}
+              {econ.marginPct == null
+                ? "not costed"
+                : `${econ.marginPct.toFixed(0)}%${econ.missingPostage ? " (excl. postage)" : ""}`}
+              {" · "}
+              COGS {econ.cogs == null ? "—" : `£${econ.cogs.toFixed(2)}`}
+            </p>
+            {/* Toggleable from any tab, and through the guard, because flipping it rewrites
+                the tab set — a dirty editor on another tab still gets to warn. */}
+            <label className="flex items-center gap-1.5 text-[12px] text-slate-500">
+              <input
+                type="checkbox"
+                checked={product.is_bundle}
+                onChange={(e) => {
+                  const next = e.target.checked;
+                  guard.attempt(() => toggleBundleMutation.mutate(next));
+                }}
+              />
+              This is a bundle
+            </label>
+          </div>
+          <ErrorBanner error={toggleBundleMutation.error} />
+        </div>
+
+        <Tabs tabs={tabs} active={activeTab} onChange={setActiveTab} />
+
+        {activeTab === "details" && (
+          <section>
+            <div className="mb-3 flex flex-wrap gap-2">
+              {product.barcode && (
+                <Link
+                  to="/product-label/$productId"
+                  params={{ productId: String(id) }}
+                  className="rounded border border-slate-300 bg-white px-4 py-1.5 text-sm shadow-sm"
+                >
+                  Print label
+                </Link>
+              )}
               {product.is_active ? (
                 <button
                   onClick={() => {
@@ -475,7 +545,7 @@ function ProductDetail() {
                     }
                   }}
                   disabled={toggleActiveMutation.isPending}
-                  className="shrink-0 rounded border border-red-300 px-3 py-1 text-xs text-red-600 disabled:opacity-50"
+                  className="rounded border border-red-300 bg-white px-4 py-1.5 text-sm text-red-600 shadow-sm disabled:opacity-50"
                 >
                   Deactivate
                 </button>
@@ -483,154 +553,59 @@ function ProductDetail() {
                 <button
                   onClick={() => toggleActiveMutation.mutate(true)}
                   disabled={toggleActiveMutation.isPending}
-                  className="shrink-0 rounded border border-slate-300 px-3 py-1 text-xs disabled:opacity-50"
+                  className="rounded border border-slate-300 bg-white px-4 py-1.5 text-sm shadow-sm disabled:opacity-50"
                 >
                   Reactivate
                 </button>
               )}
             </div>
-            <ErrorBanner
-              error={
-                uploadMainImageMutation.error ??
-                importMainImageUrlMutation.error ??
-                removeMainImageMutation.error ??
-                toggleActiveMutation.error
-              }
-            />
-            <div className="mt-3 border-t border-slate-200 pt-3 text-sm">
-              {product.is_bundle ? (
-                <span>
-                  Ready to ship:{" "}
-                  <strong>
-                    {product.ready_to_ship ?? "No components set"}
-                  </strong>
-                </span>
-              ) : (
-                <>
-                  <div className="flex flex-wrap items-baseline gap-2">
-                    <span className="text-slate-500">Sellable now</span>
-                    <strong
-                      className={`text-2xl font-medium ${sellable.headline === 0 ? "text-red-600" : ""}`}
-                    >
-                      {sellable.headline ?? "—"}
-                    </strong>
-                    {sellable.capLabel && (
-                      <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
-                        {sellable.capLabel}
-                      </span>
-                    )}
-                    {!product.push_buildable_capacity && (
-                      <span className="text-xs text-slate-400">
-                        on-hand only
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-1 leading-relaxed text-slate-500">
-                    <div>
-                      <strong className="font-medium text-slate-900">
-                        {freeStock}
-                      </strong>{" "}
-                      built and free{" "}
-                      <span className="text-slate-400">
-                        — {onHand} on hand, {allocated} reserved
-                      </span>
-                    </div>
-                    <div>
-                      {sellable.buildable == null ? (
-                        "No BOM set — nothing buildable"
-                      ) : (
-                        <>
-                          +{" "}
-                          <strong className="font-medium text-slate-900">
-                            {sellable.buildable}
-                          </strong>{" "}
-                          buildable from materials on hand
-                        </>
-                      )}
-                    </div>
-                  </div>
-                  {sellable.expected != null && (
-                    <div className="mt-1 text-slate-500">
-                      Once purchase orders land:{" "}
-                      <strong className="font-medium text-slate-900">
-                        {sellable.expected}
-                      </strong>
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-            {/* Stays in the header rather than moving to the Details tab with the other
-              configuration: flipping it rewrites the tab set, so it has to be reachable
-              — and able to warn — while an editor on another tab is dirty. */}
-            <label className="mt-3 flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={product.is_bundle}
-                onChange={(e) => {
-                  const next = e.target.checked;
-                  guard.attempt(() => toggleBundleMutation.mutate(next));
-                }}
-              />
-              This is a bundle
-            </label>
-            <ErrorBanner error={toggleBundleMutation.error} />
-          </div>
-        </div>
+            <ErrorBanner error={toggleActiveMutation.error} />
 
-        {activeTab === "details" && (
-          <section>
             <form
-              className="flex flex-wrap items-end gap-2 rounded bg-white p-4 shadow-sm"
+              className="flex flex-col gap-3 rounded bg-white p-4 shadow-sm"
               onSubmit={(e) => {
                 e.preventDefault();
                 saveDetailsMutation.mutate();
               }}
             >
-              <label className="flex flex-col gap-1">
-                <span className="text-sm">Name</span>
+              <FieldRow label="Name">
                 <input
                   required
-                  className="rounded border border-slate-300 px-2 py-1"
+                  className="w-full rounded border border-slate-300 px-2 py-1"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                 />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-sm">SKU</span>
+              </FieldRow>
+              <FieldRow label="SKU">
                 <input
-                  className="rounded border border-slate-300 px-2 py-1"
+                  className="w-full rounded border border-slate-300 px-2 py-1"
                   value={sku}
                   onChange={(e) => setSku(e.target.value)}
                 />
-              </label>
-              <label className="flex flex-col gap-1 flex-1">
-                <span className="text-sm">Description</span>
+              </FieldRow>
+              <FieldRow label="Description">
                 <input
-                  className="rounded border border-slate-300 px-2 py-1"
+                  className="w-full rounded border border-slate-300 px-2 py-1"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                 />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-sm">Barcode</span>
+              </FieldRow>
+              <FieldRow label="Barcode">
                 <input
                   className="rounded border border-slate-300 px-2 py-1"
                   value={barcode}
                   onChange={(e) => setBarcode(e.target.value)}
                 />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-sm">Platform quantity ceiling</span>
+              </FieldRow>
+              <FieldRow label="Platform qty ceiling">
                 <input
                   className="w-28 rounded border border-slate-300 px-2 py-1"
                   placeholder="No cap"
                   value={platformCeilingQty}
                   onChange={(e) => setPlatformCeilingQty(e.target.value)}
                 />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-sm">Product category</span>
+              </FieldRow>
+              <FieldRow label="Product category">
                 <CreatableSelect
                   className="rounded border border-slate-300 px-2 py-1"
                   options={productCategories ?? []}
@@ -639,47 +614,110 @@ function ProductDetail() {
                   onResolved={(v) => setDetailsField("productCategoryId", v)}
                   placeholder="Keyring, Coaster…"
                 />
-              </label>
+              </FieldRow>
+              <div className="flex items-start gap-3">
+                <span className="mt-1 w-36 shrink-0 text-sm text-slate-600">
+                  Image
+                </span>
+                <div className="flex items-start gap-3">
+                  <div
+                    className={`flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded border border-slate-200 bg-slate-50 ${isDragOver ? "ring-2 ring-slate-400" : ""}`}
+                    onDragOver={(e) => {
+                      if (e.dataTransfer.types.includes("text/uri-list")) {
+                        e.preventDefault();
+                        setIsDragOver(true);
+                      }
+                    }}
+                    onDragLeave={() => setIsDragOver(false)}
+                    onDrop={(e) => {
+                      const droppedUrl =
+                        e.dataTransfer.getData("text/uri-list") ||
+                        e.dataTransfer.getData("text/plain");
+                      if (droppedUrl) {
+                        e.preventDefault();
+                        importMainImageUrlMutation.mutate(droppedUrl);
+                      }
+                      setIsDragOver(false);
+                    }}
+                  >
+                    {imageUrl ? (
+                      <img
+                        src={imageUrl}
+                        alt={product.name}
+                        className="h-full w-full object-cover"
+                      />
+                    ) : (
+                      <span className="text-[10px] text-slate-400">
+                        no image
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => uploadMainImageMutation.mutate()}
+                        className="rounded border border-slate-300 px-3 py-1 text-sm"
+                      >
+                        {product.main_image_asset_id ? "Replace" : "Upload"}
+                      </button>
+                      {product.main_image_asset_id && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            removeMainImageMutation.mutate(
+                              product.main_image_asset_id!,
+                            )
+                          }
+                          className="rounded border border-slate-300 px-3 py-1 text-sm text-red-600"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-400">
+                      or drag an image link onto the tile
+                    </p>
+                    <ErrorBanner
+                      error={
+                        uploadMainImageMutation.error ??
+                        importMainImageUrlMutation.error ??
+                        removeMainImageMutation.error
+                      }
+                    />
+                  </div>
+                </div>
+              </div>
               {/* Bundles hold no stock of their own, so there is nothing to count for one and
                 the backend sends no classification. */}
               {!product.is_bundle && (
-                <div className="basis-full">
-                  <StockCountFields
-                    abcClass={abcClass}
-                    intervalDays={stockTakeIntervalDays}
-                    classification={product.classification}
-                    groupLabel={
-                      product.product_category_name
-                        ? `the ${product.product_category_name} type`
-                        : null
-                    }
-                    onAbcClassChange={(next) =>
-                      setDetailsField("abcClass", next)
-                    }
-                    onIntervalDaysChange={(next) =>
-                      setDetailsField("stockTakeIntervalDays", next)
-                    }
-                  />
-                </div>
+                <StockCountFields
+                  layout="rows"
+                  abcClass={abcClass}
+                  intervalDays={stockTakeIntervalDays}
+                  classification={product.classification}
+                  groupLabel={
+                    product.product_category_name
+                      ? `the ${product.product_category_name} type`
+                      : null
+                  }
+                  onAbcClassChange={(next) => setDetailsField("abcClass", next)}
+                  onIntervalDaysChange={(next) =>
+                    setDetailsField("stockTakeIntervalDays", next)
+                  }
+                />
               )}
-              <SaveButton
-                type="submit"
-                isDirty={detailsDirty}
-                isPending={saveDetailsMutation.isPending}
-                status={saveDetailsStatus}
-                className="rounded bg-slate-900 px-4 py-1.5 text-white disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Save
-              </SaveButton>
-              {product.barcode && (
-                <Link
-                  to="/product-label/$productId"
-                  params={{ productId: String(id) }}
-                  className="rounded border border-slate-300 px-4 py-1.5 text-sm"
+              <div>
+                <SaveButton
+                  type="submit"
+                  isDirty={detailsDirty}
+                  isPending={saveDetailsMutation.isPending}
+                  status={saveDetailsStatus}
+                  className="rounded bg-slate-900 px-4 py-1.5 text-white disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  Print label
-                </Link>
-              )}
+                  Save
+                </SaveButton>
+              </div>
             </form>
             <p className="mt-1 text-sm text-slate-500">
               Platform quantity ceiling caps what's advertised as sellable (the
@@ -768,7 +806,7 @@ function ProductDetail() {
           </section>
         )}
 
-        {activeTab === "platform-sync" && (
+        {activeTab === "stores" && (
           <section className="flex flex-col gap-3">
             <ProductPlatformSettingsPanel productId={id} platform="etsy" />
             <PlatformSyncSection productId={id} platform="etsy" />

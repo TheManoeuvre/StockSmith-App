@@ -1,10 +1,12 @@
+import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useMaterialCategories } from "../../hooks/useMaterialCategories";
 import { buildsApi, productsApi, stockAdjustmentsApi } from "../../api/products";
 import { materialsApi } from "../../api/materials";
 import type { ProductStockEvent } from "../../api/types";
 import { ErrorBanner } from "../common/ErrorBanner";
+import { formatDayMonth } from "../../lib/format";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 
 interface BuildForm {
@@ -34,6 +36,13 @@ const EVENT_LABELS: Record<ProductStockEvent["event_type"], string> = {
   order_fulfillment: "Order shipped",
 };
 
+const EVENT_BADGE: Record<ProductStockEvent["event_type"], string> = {
+  build_success: "bg-blue-100 text-blue-800",
+  build_failed: "bg-rose-100 text-rose-800",
+  adjustment: "bg-slate-100 text-slate-700",
+  order_fulfillment: "bg-amber-100 text-amber-800",
+};
+
 export function StockSection({
   productId,
   initialVariantId,
@@ -44,6 +53,7 @@ export function StockSection({
   initialVariantId?: number;
 }) {
   const queryClient = useQueryClient();
+  const [historyExpanded, setHistoryExpanded] = useState(false);
   const { data: variants } = useQuery({
     queryKey: ["products", productId, "variants"],
     queryFn: () => productsApi.listVariants(productId),
@@ -197,20 +207,37 @@ export function StockSection({
 
   const variantName = (id: number | null) => variants?.find((v) => v.id === id)?.variant_name ?? "—";
 
-  const eventDetail = (e: ProductStockEvent) => {
+  const eventComment = (e: ProductStockEvent) => {
     switch (e.event_type) {
       case "build_success":
-        return e.build_qty_failed ? `${e.build_qty_built} built (${e.build_qty_failed} also failed this run)` : `${e.build_qty_built} built`;
+        return e.build_qty_failed
+          ? `${e.build_qty_built} built (${e.build_qty_failed} also failed this run)`
+          : `${e.build_qty_built} built`;
       case "build_failed":
         return `${e.build_qty_failed} failed`;
       case "adjustment":
         return e.adjustment_mode === "set" ? `Set to ${e.adjustment_target_qty}` : e.reason;
       case "order_fulfillment":
-        return e.order_external_order_id ? `Order ${e.order_external_order_id}` : `Order #${e.order_id}`;
+        return e.order_id != null ? (
+          <Link
+            to="/orders/$orderId"
+            params={{ orderId: String(e.order_id) }}
+            className="underline"
+          >
+            {e.order_external_order_id
+              ? `Order ${e.order_external_order_id}`
+              : `Order #${e.order_id}`}
+          </Link>
+        ) : (
+          (e.order_external_order_id ?? "—")
+        );
       default:
         return "—";
     }
   };
+
+  const visibleHistory =
+    history && (historyExpanded ? history : history.slice(0, 10));
 
   return (
     <div className="flex flex-col gap-6">
@@ -390,27 +417,46 @@ export function StockSection({
               <th className="p-2">Date</th>
               <th className="p-2">Type</th>
               {hasAnyVariants && <th className="p-2">Variant</th>}
-              <th className="p-2">Qty change</th>
+              <th className="p-2">Delta</th>
               <th className="p-2">Balance</th>
-              <th className="p-2">Detail</th>
+              <th className="p-2">Comment</th>
             </tr>
           </thead>
           <tbody>
-            {history?.map((e) => (
-              <tr key={e.id} className="border-b border-slate-100">
-                <td className="p-2">{new Date(e.created_at).toLocaleString()}</td>
-                <td className="p-2">{EVENT_LABELS[e.event_type]}</td>
-                {hasAnyVariants && <td className="p-2">{variantName(e.variant_id)}</td>}
+            {visibleHistory?.map((e) => (
+              <tr key={e.id} className="border-b border-slate-100 last:border-0">
+                <td className="p-2 text-slate-500">{formatDayMonth(e.created_at)}</td>
                 <td className="p-2">
+                  <span
+                    className={`rounded px-2 py-0.5 text-xs ${EVENT_BADGE[e.event_type]}`}
+                  >
+                    {EVENT_LABELS[e.event_type]}
+                  </span>
+                </td>
+                {hasAnyVariants && (
+                  <td className="p-2">{variantName(e.variant_id)}</td>
+                )}
+                <td
+                  className={`p-2 tabular-nums ${e.qty_delta > 0 ? "text-green-700" : e.qty_delta < 0 ? "text-red-600" : "text-slate-500"}`}
+                >
                   {e.qty_delta > 0 ? "+" : ""}
                   {e.qty_delta}
                 </td>
-                <td className="p-2">{e.running_balance}</td>
-                <td className="p-2">{eventDetail(e)}</td>
+                <td className="p-2 tabular-nums">{e.running_balance}</td>
+                <td className="p-2">{eventComment(e)}</td>
               </tr>
             ))}
           </tbody>
         </table>
+        {history && (historyExpanded || history.length > 10) && (
+          <button
+            type="button"
+            onClick={() => setHistoryExpanded((v) => !v)}
+            className="self-start rounded border border-slate-300 px-3 py-1.5 text-sm"
+          >
+            {historyExpanded ? "Show fewer" : "Show full history"}
+          </button>
+        )}
       </div>
     </div>
   );
