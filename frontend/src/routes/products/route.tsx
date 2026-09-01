@@ -6,17 +6,20 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { Fragment, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { platformsApi, type ProductSyncStatus } from "../../api/platforms";
 import { productsApi } from "../../api/products";
-import { productCategoriesApi } from "../../api/productCategories";
 import type { ListingPlatform, Product } from "../../api/types";
 import { CONNECTABLE_PLATFORMS } from "../../lib/platforms";
 import { useAssetUrl } from "../../hooks/useAssetUrl";
 import { useLazyVisible } from "../../hooks/useLazyVisible";
+import { useDirtyRegistration } from "../../hooks/useDirtyRegistry";
+import { useGuard } from "../../hooks/useUnsavedChangesGuard";
+import { Badge } from "../../components/common/Badge";
 import { CopyButton } from "../../components/common/CopyButton";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { CsvImportExport } from "../../components/common/CsvImportExport";
+import { FilterTabs } from "../../components/common/FilterTabs";
 import { GroupHeaderRow, Th } from "../../components/common/ListTable";
 import { PlatformSyncBadge } from "../../components/products/PlatformSyncBadge";
 import { sellableSummary } from "../../lib/format";
@@ -113,25 +116,34 @@ function ProductsLayout() {
 
 function ProductsListContent() {
   const queryClient = useQueryClient();
+  const guard = useGuard();
   const [page, setPage] = useState(0);
-  const [productCategoryFilter, setProductCategoryFilter] = useState<
-    number | null
-  >(null);
-  const [cogsIncompleteOnly, setCogsIncompleteOnly] = useState(false);
+  const [tab, setTab] = useState<"all" | "cost-gaps">("all");
+  const [searchInput, setSearchInput] = useState("");
+  const [q, setQ] = useState("");
+  // Collapsed category groups, by label. Session-only, same as the materials list.
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+
+  // Debounce the search box into the query key so a keystroke isn't a request. Any change to
+  // the effective term (or the tab) sends us back to page 0 — a later page of the wider list
+  // is usually past the end of the narrower one.
+  useEffect(() => {
+    const trimmed = searchInput.trim();
+    const t = setTimeout(() => {
+      setQ(trimmed);
+      setPage(0);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
   const { data, isLoading, error } = useQuery({
-    queryKey: ["products", page, productCategoryFilter, cogsIncompleteOnly],
+    queryKey: ["products", page, tab, q],
     queryFn: () =>
-      productsApi.listPaged(
-        PRODUCTS_PAGE_SIZE,
-        page * PRODUCTS_PAGE_SIZE,
-        productCategoryFilter,
-        cogsIncompleteOnly,
-      ),
+      productsApi.listPaged(PRODUCTS_PAGE_SIZE, page * PRODUCTS_PAGE_SIZE, {
+        cogsIncomplete: tab === "cost-gaps",
+        q,
+      }),
     placeholderData: keepPreviousData,
-  });
-  const { data: productCategories } = useQuery({
-    queryKey: ["product-categories"],
-    queryFn: productCategoriesApi.list,
   });
   const products = data?.items;
   const total = data?.total ?? 0;
@@ -159,6 +171,10 @@ function ProductsListContent() {
   const [name, setName] = useState("");
   const [sku, setSku] = useState("");
 
+  const createFormDirty =
+    showForm && (name.trim() !== "" || sku.trim() !== "");
+  useDirtyRegistration("new-product", "New product", createFormDirty);
+
   const createMutation = useMutation({
     mutationFn: () => productsApi.create({ name, sku: sku || null }),
     onSuccess: () => {
@@ -169,77 +185,85 @@ function ProductsListContent() {
     },
   });
 
+  const toggleGroup = (label: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
+  };
+
   const groups = useMemo(() => groupByCategory(products ?? []), [products]);
 
   if (isLoading) return <p>Loading products…</p>;
   if (error) return <p className="text-red-600">{(error as Error).message}</p>;
 
+  // Keep the "Cost gaps" tab visible while it's the active one even if the count just hit
+  // zero, so fixing the last gap doesn't yank the view out from under you.
+  const showCostGapsTab = incompleteTotal > 0 || tab === "cost-gaps";
+
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Products</h1>
-        <button
-          onClick={() => setShowForm((v) => !v)}
-          className="rounded bg-slate-900 px-4 py-2 text-white"
-        >
-          {showForm ? "Cancel" : "Add product"}
-        </button>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold">Products</h1>
+          <p className="mt-0.5 text-[12.5px] text-slate-500">
+            {tab === "cost-gaps"
+              ? `${total} with cost gaps`
+              : `${total} product${total === 1 ? "" : "s"}${incompleteTotal > 0 ? ` · ${incompleteTotal} with cost gaps` : ""}`}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <CsvImportExport
+            onExport={productsApi.exportCsv}
+            onImport={productsApi.importCsv}
+            invalidateKey={["products", "dashboard-summary"]}
+          />
+          <button
+            onClick={() =>
+              guard.attempt(() => setShowForm((v) => !v), {
+                prefix: "new-product",
+              })
+            }
+            className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white"
+          >
+            {showForm ? "Cancel" : "Add product"}
+          </button>
+        </div>
       </div>
 
-      <CsvImportExport
-        onExport={productsApi.exportCsv}
-        onImport={productsApi.importCsv}
-        invalidateKey="products"
-      />
-
-      {productCategories && productCategories.length > 0 && (
-        <label className="flex items-center gap-2 text-sm">
-          Product category
-          <select
-            className="rounded border border-slate-300 px-2 py-1"
-            value={productCategoryFilter ?? ""}
-            onChange={(e) => {
-              setProductCategoryFilter(
-                e.target.value === "" ? null : Number(e.target.value),
-              );
-              // Back to the first page: page 3 of the unfiltered list is usually past the
-              // end of the filtered one, which would land on a blank table.
-              setPage(0);
-            }}
-          >
-            <option value="">All</option>
-            {productCategories.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-
-      {/* The count is what makes this an active signal rather than a dash to go hunting
-          for: it is reported whether or not the filter is on, so a gap announces itself
-          without the user first suspecting there is one. Hidden entirely at zero — there is
-          nothing to act on, and a permanent "0" trains people to stop reading it. */}
-      {incompleteTotal > 0 && (
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={cogsIncompleteOnly}
-            onChange={(e) => {
-              setCogsIncompleteOnly(e.target.checked);
-              setPage(0);
-            }}
-          />
-          Incomplete COGS only
-          <span
-            className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800"
-            title="Products with no shipping profile, or no materials cost — their orders can't report a truthful profit."
-          >
-            {incompleteTotal}
-          </span>
-        </label>
-      )}
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <FilterTabs
+          tabs={[
+            {
+              id: "all",
+              label: "All products",
+              count: tab === "all" ? total : undefined,
+            },
+            ...(showCostGapsTab
+              ? [
+                  {
+                    id: "cost-gaps",
+                    label: "Cost gaps",
+                    count: incompleteTotal,
+                  },
+                ]
+              : []),
+          ]}
+          active={tab}
+          onChange={(id) => {
+            setTab(id as typeof tab);
+            setPage(0);
+          }}
+        />
+        <input
+          className="w-56 rounded border border-slate-300 px-2.5 py-1.5 text-sm"
+          placeholder="Search name, SKU…"
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+        />
+      </div>
 
       {showForm && (
         <form
@@ -277,9 +301,9 @@ function ProductsListContent() {
         </form>
       )}
 
-      <table className="w-full border-collapse bg-white text-left text-[12.5px] shadow-sm">
+      <table className="w-full border-collapse overflow-hidden rounded-lg bg-white text-left text-[12.5px] shadow-sm">
         <thead>
-          <tr className="border-b border-slate-200">
+          <tr className="border-b border-slate-200 bg-slate-50/60">
             <Th>{""}</Th>
             <Th>Name</Th>
             <Th>SKU</Th>
@@ -300,14 +324,17 @@ function ProductsListContent() {
                 label={group.label}
                 count={group.products.length}
                 colSpan={8}
+                collapsed={collapsedGroups.has(group.label)}
+                onToggle={() => toggleGroup(group.label)}
               />
-              {group.products.map((p) => (
-                <ProductRow
-                  key={p.id}
-                  product={p}
-                  storeStatuses={storeStatuses}
-                />
-              ))}
+              {!collapsedGroups.has(group.label) &&
+                group.products.map((p) => (
+                  <ProductRow
+                    key={p.id}
+                    product={p}
+                    storeStatuses={storeStatuses}
+                  />
+                ))}
             </Fragment>
           ))}
         </tbody>
@@ -359,9 +386,12 @@ function ProductRow({
   });
 
   return (
-    <tr ref={rowRef} className="border-b border-slate-100 hover:bg-slate-50">
+    <tr
+      ref={rowRef}
+      className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 ${!p.is_active ? "opacity-60" : ""}`}
+    >
       <td className="p-2">
-        <div className="h-16 w-16 overflow-hidden rounded border border-slate-200 bg-slate-50">
+        <div className="h-20 w-20 overflow-hidden rounded border border-slate-200 bg-slate-50">
           {imageUrl && (
             <img
               src={imageUrl}
@@ -375,7 +405,7 @@ function ProductRow({
         <Link
           to="/products/$productId"
           params={{ productId: String(p.id) }}
-          className="text-slate-900 underline"
+          className="font-medium text-slate-900 hover:underline"
         >
           {p.name}
         </Link>
@@ -386,6 +416,9 @@ function ProductRow({
           >
             made to order
           </span>
+        )}
+        {!p.is_active && (
+          <Badge className="ml-2 bg-slate-100 text-slate-600">Inactive</Badge>
         )}
       </td>
       <td className="p-2">
@@ -398,7 +431,7 @@ function ProductRow({
           "—"
         )}
       </td>
-      <td className="p-2">
+      <td className="p-2 tabular-nums">
         {p.is_bundle
           ? `Ready to ship: ${p.ready_to_ship ?? "—"}`
           : p.current_stock}
@@ -406,7 +439,7 @@ function ProductRow({
       {/* One column, and it's the figure that reaches the marketplaces — the three it
           replaced (max buildable / expected max buildable / max sellable) were all
           inputs to it rather than answers in their own right. */}
-      <td className="p-2">
+      <td className="p-2 tabular-nums">
         {p.is_bundle ? (
           "—"
         ) : (
@@ -427,7 +460,7 @@ function ProductRow({
           </>
         )}
       </td>
-      <td className="p-2">
+      <td className="p-2 tabular-nums">
         {p.sale_price ? formatUnitCost(p.sale_price) : "—"}
       </td>
       <td className="p-2">
