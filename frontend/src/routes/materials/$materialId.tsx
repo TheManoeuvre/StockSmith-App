@@ -465,7 +465,7 @@ function MaterialDetail() {
           <div className="grid grid-cols-3 gap-3">
             <Stat
               label="On hand"
-              value={roundQty(material.current_qty)}
+              value={`${roundQty(material.current_qty)}${material.unit === "each" ? "" : ` ${material.unit}`}`}
               sub="counted"
               tone="highlight"
             />
