@@ -7,10 +7,15 @@ export function CsvImportExport({
   onExport,
   onImport,
   invalidateKey,
+  className = "flex flex-col gap-2",
 }: {
   onExport: () => Promise<void>;
   onImport: (fileBytes: Uint8Array, filename: string) => Promise<CsvImportResult>;
   invalidateKey: string | string[];
+  /** Wrapper layout. Defaults to a stacked block; pass `"contents"` to let the two buttons
+   *  sit directly in a parent toolbar flex row (the import-result panel then flows after it
+   *  as the next flex child). */
+  className?: string;
 }) {
   const queryClient = useQueryClient();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -30,17 +35,17 @@ export function CsvImportExport({
   });
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className={className}>
       <div className="flex gap-2">
         <button
           onClick={() => exportMutation.mutate()}
-          className="rounded border border-slate-300 px-3 py-1.5 text-sm"
+          className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50"
         >
           Export CSV
         </button>
         <button
           onClick={() => fileInputRef.current?.click()}
-          className="rounded border border-slate-300 px-3 py-1.5 text-sm"
+          className="rounded border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50"
         >
           Import CSV
         </button>

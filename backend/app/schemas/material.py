@@ -88,6 +88,9 @@ class MaterialRead(MaterialBase):
     # Material.colour_name. Aliased rather than renamed so every existing consumer of `colour`
     # (the CSV export, the materials list, materialDetail.test.tsx) is unaffected.
     colour: str | None = Field(default=None, validation_alias=AliasChoices("colour_name", "colour"))
+    # The reference colour's hex code when it has one, for the list swatch. Null for materials
+    # still on the legacy free-text colour path — see Material.colour_hex.
+    colour_hex: str | None = None
     manufacturer_name: str | None = None
     default_supplier_name: str | None = None
     material_type_name: str | None = None

@@ -14,6 +14,9 @@ export interface Material {
   avg_unit_cost: string;
   is_active: boolean;
   colour: string | null;
+  /** Hex code of the reference colour when it has one — for the materials-list swatch. Null
+   *  for materials still on the legacy free-text colour path. */
+  colour_hex: string | null;
   material_type_id: number | null;
   material_type_name: string | null;
   barcode: string | null;
