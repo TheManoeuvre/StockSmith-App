@@ -79,16 +79,18 @@ export function SyncStatusIndicator() {
               )
               .join("\n")
       }
-      className="ml-auto flex items-center gap-2 self-center rounded px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100"
+      className="flex w-full items-center gap-2 rounded-md px-[9px] py-[7px] text-[12.5px] hover:bg-slate-100"
     >
-      {hasProblem && (
-        // Not colour alone — the "!" carries the same meaning for anyone who can't
-        // distinguish the red, and this is the app's only passive failure signal.
-        <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 text-xs font-medium text-white">
-          !
-        </span>
-      )}
-      <span className={hasProblem ? "text-red-700" : undefined}>
+      {/* Not colour alone — the glyph carries the same meaning for anyone who can't
+          distinguish red from green, and this is the app's only passive failure signal. */}
+      <span
+        className={`flex h-[18px] min-w-[18px] flex-none items-center justify-center rounded-full text-[10.5px] font-medium text-white ${
+          hasProblem ? "bg-red-600" : "bg-green-600"
+        }`}
+      >
+        {hasProblem ? "!" : "✓"}
+      </span>
+      <span className={`flex-1 ${hasProblem ? "text-red-700" : "text-slate-600"}`}>
         {latest ? `Synced ${formatRelative(latest)}` : "Never synced"}
       </span>
     </Link>

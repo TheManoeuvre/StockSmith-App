@@ -142,3 +142,63 @@ Live on this shop: 7 failing pushes across two listings, both with several varia
 This matters more once the periodic reconciliation sweep above exists: a sweep that re-pushes every errored listing would retry these forever, burning quota on a call that cannot succeed.
 
 **Ask:** Detect the condition rather than discovering it in a 400. The GET that `push_listing_quantity` already performs carries everything needed — an empty `quantity_on_property` alongside more than one non-deleted product means no per-SKU push is possible. Fail fast with a message naming the fix ("this Etsy listing's quantity doesn't vary by variation — enable it on the listing, or the variants can't be stocked independently"), and mark the failure as permanent/structural so it's distinguishable from a transient one: the badge can direct the user to the listing that needs changing, and any future retry sweep can skip it instead of hammering it.
+
+## Bulk "draft all purchases" for a supplier
+
+**Problem:** Surfaced while reviewing the `StockSmith.dc.html` design canvas — its dashboard stockout panel groups short materials by supplier and offers one button that drafts every short material in a group as a single purchase order. Today a purchase can only be drafted one material at a time, so clearing a supplier's whole shortfall means repeating the draft flow per material.
+
+**Ask:** A backend endpoint that batches draft-purchase creation by supplier (one draft PO per supplier, one line per short material), plus a "draft all" action on the dashboard's stockout-by-supplier grouping.
+
+## Dashboard KPI date-range toggle
+
+**Problem:** Surfaced via the design canvas, which shows a This week / Month / Quarter toggle above the dashboard KPI cards. The real dashboard summary is fixed to "this week" with no way to see the same KPIs over a longer window.
+
+**Ask:** Extend the dashboard summary endpoint to accept a range parameter and wire a toggle to it. Small backend query change; frontend is mostly state plumbing.
+
+## Configurable/hideable list columns
+
+**Problem:** Surfaced via the design canvas, which puts a "Columns" button on every list screen's toolbar (Products, Materials, Orders, Purchases). No real list view currently lets a user show/hide or reorder columns — the column set is fixed per screen.
+
+**Ask:** A shared column-visibility control for list views, persisted per user/screen. Frontend-only, but touches every list route — medium scope, worth doing once as a shared component rather than per-screen.
+
+## CSV export for Orders and Purchases lists
+
+**Problem:** Surfaced via the design canvas, which shows an "Export CSV" action in the shared list header on every list screen. Materials and Products already support CSV export/import (`CsvImportExport`); Orders and Purchases don't have an equivalent today.
+
+**Ask:** Extend the existing `CsvImportExport` pattern to the Orders and Purchases list routes. Small — mostly a router endpoint plus reusing the existing frontend component.
+
+## Per-material lead-time override
+
+**Problem:** Surfaced via the design canvas, whose material Purchasing tab has an editable per-material "Lead time (days)" field. Today lead time is a single global default in Settings — there's no way to say one supplier or material runs longer than the rest.
+
+**Ask:** New `lead_time_days` field on the material (or supplier) model, used by the reorder/forecast calculation in place of the global default when set. Needs a new backend field plus a small forecast-calc change.
+
+## Material cost-trend indicator
+
+**Problem:** Surfaced via the design canvas, which shows a read-only "+1.7% since June" price-change stat on a material's Purchasing tab. Today the only record of cost history is raw stock-movement rows — there's no derived trend figure.
+
+**Ask:** A calculated cost-change-over-window figure (e.g. current unit cost vs. unit cost N months ago), derived from existing purchase/receiving history. Needs a new backend calc, not new storage.
+
+## Keyboard row navigation (j/k) on list views
+
+**Problem:** Surfaced via the design canvas, which wires `j`/`k` to move a selection cursor up/down the Products and Materials list rows (with Enter to open, X to select). No list view in the real app supports keyboard row navigation today.
+
+**Ask:** Frontend-only — add row-cursor state and key handlers to the Products/Materials list routes, matching the pattern already used for bulk-select. Small scope, but worth doing once as a shared hook if it's wanted on more than one list.
+
+## Side-by-side channel-fee/margin comparison on product Pricing tab
+
+**Problem:** Surfaced via the design canvas, whose product Pricing tab shows Etsy vs. eBay fees and resulting margin for the same product/price in one table. Today fee configuration is a global Settings panel with no per-product view of how each channel's fees affect that product's margin.
+
+**Ask:** A per-product calculated view (reusing existing fee-config data) showing margin per connected channel at the product's current price. Needs a new backend calc; no new storage implied. Note: the canvas's per-product Etsy%/eBay% fee override fields (round 5) effectively deliver most of this already — worth checking the canvas's shape before scoping a separate build.
+
+## Per-order-line pricing guardrails
+
+**Problem:** Surfaced via the design canvas, whose "Priced per order line" mode adds a "Minimum accepted price" floor and a "Warn below margin %" threshold for custom-priced lines. Today a manually-priced order line has no floor or margin warning — nothing stops a line being priced below cost by mistake.
+
+**Ask:** New optional fields on the order-line pricing flow: a minimum-price floor (reject/confirm below it) and a margin-warning threshold (soft warning, not a block). Needs a small backend validation addition; no new storage beyond the two settings values.
+
+## Manual-order source/channel tagging
+
+**Problem:** Surfaced via the design canvas, whose manual order composer includes a "Source" field (`Manual · direct sale`, `Etsy · keyed by hand`, `eBay · keyed by hand`) so a hand-entered order can be distinguished from a pure direct sale. Today `/orders/new` has no channel field at all — every manually created order is attribution-less.
+
+**Ask:** Add a source/channel field to manual order creation, distinct from the automatic platform-sync channel tagging. Small — a new field on the order model plus a select in the `/orders/new` form.

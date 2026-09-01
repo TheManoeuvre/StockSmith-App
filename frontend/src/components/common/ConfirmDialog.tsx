@@ -55,8 +55,8 @@ export function ConfirmDialog({
 
   const confirmClass =
     tone === "danger"
-      ? "rounded bg-red-600 px-4 py-2 text-sm text-white disabled:opacity-50 disabled:cursor-not-allowed"
-      : "rounded bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50 disabled:cursor-not-allowed";
+      ? "rounded-md bg-red-600 px-4 py-2 text-sm text-white disabled:opacity-50 disabled:cursor-not-allowed"
+      : "rounded-md bg-slate-900 px-4 py-2 text-sm text-white disabled:opacity-50 disabled:cursor-not-allowed";
 
   return (
     <Modal
@@ -71,7 +71,7 @@ export function ConfirmDialog({
             type="button"
             disabled={busy}
             onClick={onCancel}
-            className="rounded border border-slate-300 px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+            className="rounded-md border border-slate-300 px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {cancelLabel}
           </button>

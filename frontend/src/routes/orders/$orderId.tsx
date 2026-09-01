@@ -5,14 +5,29 @@ import { ordersApi } from "../../api/orders";
 import { productsApi } from "../../api/products";
 import { shippingProfilesApi } from "../../api/shippingProfiles";
 import type { Order, OrderLine, OrderStatus } from "../../api/types";
+import { useCallback } from "react";
+import { Badge } from "../../components/common/Badge";
+import { DetailPanel } from "../../components/common/DetailPanel";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
+import { useSiblingNav } from "../../hooks/useSiblingNav";
 import { CancelOrderDialog } from "../../components/orders/CancelOrderDialog";
 import { OrderKittingSection } from "../../components/orders/OrderKittingSection";
+import type { TabDef } from "../../components/common/Tabs";
 import { formatMoney } from "../../lib/money";
 import { PLATFORM_LABELS } from "../../lib/platforms";
 
+const TAB_IDS = ["lines", "financials", "shipping"] as const;
+type TabId = (typeof TAB_IDS)[number];
+
 export const Route = createFileRoute("/orders/$orderId")({
   component: OrderDetail,
+  // Same reasoning as the product page: keeping the tab in the URL makes switching one a
+  // real router navigation, so the root unsaved-changes blocker covers leaving a dirty
+  // Shipping form without this page knowing the guard exists.
+  validateSearch: (search: Record<string, unknown>): { tab?: TabId } => {
+    const tab = search.tab;
+    return TAB_IDS.includes(tab as TabId) ? { tab: tab as TabId } : {};
+  },
 });
 
 const STATUS_LABELS: Record<OrderStatus, string> = {
@@ -33,10 +48,33 @@ function OrderDetail() {
   const { orderId } = Route.useParams();
   const id = Number(orderId);
   const navigate = useNavigate();
+  const routeNavigate = Route.useNavigate();
+  const requestedTab = Route.useSearch().tab;
+  const setActiveTab = (tab: string) =>
+    routeNavigate({ search: { tab: tab as TabId } });
   const queryClient = useQueryClient();
 
-  const { data: order } = useQuery({ queryKey: ["orders", id], queryFn: () => ordersApi.get(id) });
+  const { data: order } = useQuery({
+    queryKey: ["orders", id],
+    queryFn: () => ordersApi.get(id),
+  });
   const [showCancelDialog, setShowCancelDialog] = useState(false);
+  const { prevId, nextId } = useSiblingNav(
+    ["orders"],
+    id,
+    (data) => (data as { items?: { id: number }[] })?.items,
+  );
+  const closePanel = useCallback(() => navigate({ to: "/orders" }), [navigate]);
+  const goPrev = useCallback(
+    () =>
+      navigate({ to: "/orders/$orderId", params: { orderId: String(prevId) } }),
+    [navigate, prevId],
+  );
+  const goNext = useCallback(
+    () =>
+      navigate({ to: "/orders/$orderId", params: { orderId: String(nextId) } }),
+    [navigate, nextId],
+  );
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["orders", id] });
@@ -45,10 +83,17 @@ function OrderDetail() {
     queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
   };
 
-  const shipMutation = useMutation({ mutationFn: () => ordersApi.ship(id), onSuccess: invalidate });
-  const allocateMutation = useMutation({ mutationFn: () => ordersApi.allocate(id), onSuccess: invalidate });
+  const shipMutation = useMutation({
+    mutationFn: () => ordersApi.ship(id),
+    onSuccess: invalidate,
+  });
+  const allocateMutation = useMutation({
+    mutationFn: () => ordersApi.allocate(id),
+    onSuccess: invalidate,
+  });
   const unassignMutation = useMutation({
-    mutationFn: ({ lineId, qty }: { lineId: number; qty: number }) => ordersApi.unassignLine(lineId, qty),
+    mutationFn: ({ lineId, qty }: { lineId: number; qty: number }) =>
+      ordersApi.unassignLine(lineId, qty),
     onSuccess: invalidate,
   });
   const deleteMutation = useMutation({
@@ -60,163 +105,214 @@ function OrderDetail() {
     },
   });
 
-  if (!order) return <p>Loading…</p>;
+  if (!order) {
+    return (
+      <DetailPanel title="Loading…" onClose={closePanel}>
+        <p className="text-slate-500">Loading…</p>
+      </DetailPanel>
+    );
+  }
 
   const canCancel = order.status !== "cancelled";
   const canShip = order.status === "pending" || order.status === "allocated";
-  const canAllocate = order.status === "pending" || order.status === "allocated";
+  const canAllocate =
+    order.status === "pending" || order.status === "allocated";
   const anyAllocated = order.lines.some((l) => l.allocated_qty > l.shipped_qty);
   // Mirrors the backend's own check (routers/orders.py delete_order) — nothing allocated
   // or shipped on any line, so deleting can't silently strand reserved/shipped stock.
-  const canDelete = order.lines.every((l) => l.allocated_qty === 0 && l.shipped_qty === 0);
+  const canDelete = order.lines.every(
+    (l) => l.allocated_qty === 0 && l.shipped_qty === 0,
+  );
+  // Shipping only applies to a manual order that hasn't shipped yet — same condition the
+  // editor itself was gated on before this became a tab.
+  const showShippingTab = order.platform === null && order.status !== "shipped";
+  const tabs: TabDef[] = [
+    { id: "lines", label: "Lines" },
+    { id: "financials", label: "Financials" },
+    ...(showShippingTab ? [{ id: "shipping", label: "Shipping" }] : []),
+  ];
+  const activeTab: TabId =
+    requestedTab && (requestedTab !== "shipping" || showShippingTab)
+      ? requestedTab
+      : "lines";
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">
-          {order.buyer_name ?? order.external_order_id ?? `Order #${order.id}`}
-        </h1>
-        <span className={`rounded px-2 py-0.5 text-xs ${STATUS_CLASSES[order.status]}`}>
+    <DetailPanel
+      title={
+        order.buyer_name ?? order.external_order_id ?? `Order #${order.id}`
+      }
+      onClose={closePanel}
+      onPrev={prevId ? goPrev : undefined}
+      onNext={nextId ? goNext : undefined}
+      headerExtra={
+        <Badge className={STATUS_CLASSES[order.status]}>
           {STATUS_LABELS[order.status]}
-        </span>
-      </div>
-
-      {order.sync_issue && (
-        <div className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800">
-          <span className="font-medium">Sync issue: </span>
-          {order.sync_issue}
-        </div>
-      )}
-
-      {order.pending_marketplace_cancellation && (
-        <div className="flex items-center justify-between rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
-          <span>
-            <span className="font-medium">
-              {order.platform ? PLATFORM_LABELS[order.platform] : "The marketplace"}
-            </span>{" "}
-            reports this order as cancelled. Nothing has been changed locally — review and confirm below.
-          </span>
-          <button
-            onClick={() => setShowCancelDialog(true)}
-            className="rounded bg-amber-600 px-3 py-1.5 text-white"
-          >
-            Review cancellation
-          </button>
-        </div>
-      )}
-
-      <div className="flex flex-wrap gap-6 rounded bg-white p-4 text-sm shadow-sm">
-        <div>
-          <p className="text-slate-500">Order #</p>
-          <p>{order.id}</p>
-        </div>
-        <div>
-          <p className="text-slate-500">Platform</p>
-          <p>{order.platform ? PLATFORM_LABELS[order.platform] : "Manual"}{order.external_order_id ? ` (${order.external_order_id})` : ""}</p>
-        </div>
-        <div>
-          <p className="text-slate-500">Placed</p>
-          <p>{new Date(order.order_placed_at).toLocaleString()}</p>
-        </div>
-        {order.notes && (
-          <div>
-            <p className="text-slate-500">Notes</p>
-            <p>{order.notes}</p>
+        </Badge>
+      }
+      tabs={tabs}
+      activeTab={activeTab}
+      onTabChange={setActiveTab}
+    >
+      <div className="flex flex-col gap-6">
+        {order.sync_issue && (
+          <div className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800">
+            <span className="font-medium">Sync issue: </span>
+            {order.sync_issue}
           </div>
         )}
-      </div>
 
-      <OrderFinancialsPanel order={order} />
-
-      {order.platform === null && order.status !== "shipped" && (
-        <ManualShippingEditor order={order} onSaved={invalidate} />
-      )}
-
-      <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">
-        <thead>
-          <tr className="border-b border-slate-200">
-            <th className="p-2">Product</th>
-            <th className="p-2">Ordered</th>
-            <th className="p-2">Allocated</th>
-            <th className="p-2">Shipped</th>
-            <th className="p-2">Value</th>
-            <th className="p-2">Cost</th>
-            <th className="p-2" />
-          </tr>
-        </thead>
-        <tbody>
-          {order.lines.map((line) => (
-            <OrderLineRow
-              key={line.id}
-              line={line}
-              currency={order.currency}
-              onUnassign={(qty) => unassignMutation.mutate({ lineId: line.id, qty })}
-            />
-          ))}
-        </tbody>
-      </table>
-      <p className="-mt-2 text-xs text-slate-500">
-        Value and cost cover all ordered units. The panel above counts only shipped units.
-      </p>
-
-      <OrderKittingSection orderId={id} currency={order.currency} />
-
-      <div className="flex gap-2">
-        {canAllocate && (
-          <button
-            onClick={() => allocateMutation.mutate()}
-            disabled={allocateMutation.isPending}
-            className="rounded border border-slate-300 px-4 py-2 disabled:opacity-50"
-          >
-            Allocate stock
-          </button>
+        {order.pending_marketplace_cancellation && (
+          <div className="flex items-center justify-between rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+            <span>
+              <span className="font-medium">
+                {order.platform
+                  ? PLATFORM_LABELS[order.platform]
+                  : "The marketplace"}
+              </span>{" "}
+              reports this order as cancelled. Nothing has been changed locally
+              — review and confirm below.
+            </span>
+            <button
+              onClick={() => setShowCancelDialog(true)}
+              className="rounded bg-amber-600 px-3 py-1.5 text-white"
+            >
+              Review cancellation
+            </button>
+          </div>
         )}
-        {canShip && (
-          <button
-            onClick={() => shipMutation.mutate()}
-            disabled={!anyAllocated}
-            className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-50"
-          >
-            Ship allocated units
-          </button>
-        )}
-        {canCancel && (
-          <button
-            onClick={() => setShowCancelDialog(true)}
-            className="rounded border border-red-300 px-4 py-2 text-red-600"
-          >
-            {order.lines.some((l) => l.shipped_qty > 0) ? "Cancel / process return" : "Cancel order"}
-          </button>
-        )}
-        {canDelete && (
-          <button
-            onClick={() => {
-              if (window.confirm("Delete this order? This cannot be undone.")) {
-                deleteMutation.mutate();
-              }
-            }}
-            disabled={deleteMutation.isPending}
-            className="rounded border border-red-300 px-4 py-2 text-red-600 disabled:opacity-50"
-          >
-            Delete order
-          </button>
-        )}
-      </div>
-      <ErrorBanner
-        error={shipMutation.error ?? allocateMutation.error ?? unassignMutation.error ?? deleteMutation.error}
-      />
 
-      {showCancelDialog && (
-        <CancelOrderDialog
-          orderId={id}
-          onClose={() => setShowCancelDialog(false)}
-          onCancelled={() => {
-            setShowCancelDialog(false);
-            invalidate();
-          }}
+        <div className="flex flex-wrap gap-6 rounded bg-white p-4 text-sm shadow-sm">
+          <div>
+            <p className="text-slate-500">Order #</p>
+            <p>{order.id}</p>
+          </div>
+          <div>
+            <p className="text-slate-500">Platform</p>
+            <p>
+              {order.platform ? PLATFORM_LABELS[order.platform] : "Manual"}
+              {order.external_order_id ? ` (${order.external_order_id})` : ""}
+            </p>
+          </div>
+          <div>
+            <p className="text-slate-500">Placed</p>
+            <p>{new Date(order.order_placed_at).toLocaleString()}</p>
+          </div>
+          {order.notes && (
+            <div>
+              <p className="text-slate-500">Notes</p>
+              <p>{order.notes}</p>
+            </div>
+          )}
+        </div>
+
+        {activeTab === "financials" && <OrderFinancialsPanel order={order} />}
+
+        {activeTab === "shipping" && showShippingTab && (
+          <ManualShippingEditor order={order} onSaved={invalidate} />
+        )}
+
+        {activeTab === "lines" && (
+          <>
+            <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">
+              <thead>
+                <tr className="border-b border-slate-200">
+                  <th className="p-2">Product</th>
+                  <th className="p-2">Ordered</th>
+                  <th className="p-2">Allocated</th>
+                  <th className="p-2">Shipped</th>
+                  <th className="p-2">Value</th>
+                  <th className="p-2">Cost</th>
+                  <th className="p-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {order.lines.map((line) => (
+                  <OrderLineRow
+                    key={line.id}
+                    line={line}
+                    currency={order.currency}
+                    onUnassign={(qty) =>
+                      unassignMutation.mutate({ lineId: line.id, qty })
+                    }
+                  />
+                ))}
+              </tbody>
+            </table>
+            <p className="-mt-2 text-xs text-slate-500">
+              Value and cost cover all ordered units. The panel above counts
+              only shipped units.
+            </p>
+
+            <OrderKittingSection orderId={id} currency={order.currency} />
+          </>
+        )}
+
+        <div className="flex gap-2">
+          {canAllocate && (
+            <button
+              onClick={() => allocateMutation.mutate()}
+              disabled={allocateMutation.isPending}
+              className="rounded border border-slate-300 px-4 py-2 disabled:opacity-50"
+            >
+              Allocate stock
+            </button>
+          )}
+          {canShip && (
+            <button
+              onClick={() => shipMutation.mutate()}
+              disabled={!anyAllocated}
+              className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-50"
+            >
+              Ship allocated units
+            </button>
+          )}
+          {canCancel && (
+            <button
+              onClick={() => setShowCancelDialog(true)}
+              className="rounded border border-red-300 px-4 py-2 text-red-600"
+            >
+              {order.lines.some((l) => l.shipped_qty > 0)
+                ? "Cancel / process return"
+                : "Cancel order"}
+            </button>
+          )}
+          {canDelete && (
+            <button
+              onClick={() => {
+                if (
+                  window.confirm("Delete this order? This cannot be undone.")
+                ) {
+                  deleteMutation.mutate();
+                }
+              }}
+              disabled={deleteMutation.isPending}
+              className="rounded border border-red-300 px-4 py-2 text-red-600 disabled:opacity-50"
+            >
+              Delete order
+            </button>
+          )}
+        </div>
+        <ErrorBanner
+          error={
+            shipMutation.error ??
+            allocateMutation.error ??
+            unassignMutation.error ??
+            deleteMutation.error
+          }
         />
-      )}
-    </div>
+
+        {showCancelDialog && (
+          <CancelOrderDialog
+            orderId={id}
+            onClose={() => setShowCancelDialog(false)}
+            onCancelled={() => {
+              setShowCancelDialog(false);
+              invalidate();
+            }}
+          />
+        )}
+      </div>
+    </DetailPanel>
   );
 }
 
@@ -228,12 +324,18 @@ function OrderFinancialsPanel({ order }: { order: Order }) {
   // the first figure rather than another deduction beside it. It used to sit in the row of
   // deductions, which read as though it came off the total a second time, and made the row
   // disagree with the net profit under it for no reason anybody could see.
-  const discount = order.discount_amount != null ? Number(order.discount_amount) : 0;
-  const listPrice = discount > 0 && order.subtotal != null ? Number(order.subtotal) + discount : null;
+  const discount =
+    order.discount_amount != null ? Number(order.discount_amount) : 0;
+  const listPrice =
+    discount > 0 && order.subtotal != null
+      ? Number(order.subtotal) + discount
+      : null;
 
   return (
     <div className="rounded bg-white p-4 text-sm shadow-sm">
-      <h2 className="mb-3 text-sm font-medium text-slate-600">Order value &amp; costs</h2>
+      <h2 className="mb-3 text-sm font-medium text-slate-600">
+        Order value &amp; costs
+      </h2>
       {/* items-start so a cell with a note under it doesn't stretch the ones beside it —
           every figure stays on the same line, which is what makes the row readable as a sum. */}
       <div className="flex flex-wrap items-start gap-6">
@@ -242,7 +344,8 @@ function OrderFinancialsPanel({ order }: { order: Order }) {
           <p>{formatMoney(order.subtotal, currency)}</p>
           {listPrice != null && (
             <p className="text-xs text-slate-400">
-              {formatMoney(String(listPrice), currency)} − {formatMoney(order.discount_amount, currency)} discount
+              {formatMoney(String(listPrice), currency)} −{" "}
+              {formatMoney(order.discount_amount, currency)} discount
             </p>
           )}
         </div>
@@ -280,7 +383,11 @@ function OrderFinancialsPanel({ order }: { order: Order }) {
         </div>
         <div>
           <p className="text-slate-500">Postage cost</p>
-          <p className={order.postage_cost_missing ? "text-amber-700" : undefined}>
+          <p
+            className={
+              order.postage_cost_missing ? "text-amber-700" : undefined
+            }
+          >
             {order.shipping_cost_snapshot != null
               ? `-${formatMoney(order.shipping_cost_snapshot, currency)}`
               : order.postage_cost_missing
@@ -289,34 +396,48 @@ function OrderFinancialsPanel({ order }: { order: Order }) {
           </p>
           {/* The profile name is an identifier, not a figure. In the header it made one
               column twice the width of the rest and put a proper noun in a row of money. */}
-          {order.shipping_profile_name && <p className="text-xs text-slate-400">{order.shipping_profile_name}</p>}
+          {order.shipping_profile_name && (
+            <p className="text-xs text-slate-400">
+              {order.shipping_profile_name}
+            </p>
+          )}
         </div>
         <div>
           <p className="text-slate-500">Materials COGS</p>
           <p title="Each line's build-BOM cost per unit across the units that have shipped, frozen when the line was first allocated.">
-            {order.materials_cogs != null ? `-${formatMoney(order.materials_cogs, currency)}` : "—"}
+            {order.materials_cogs != null
+              ? `-${formatMoney(order.materials_cogs, currency)}`
+              : "—"}
           </p>
         </div>
         <div>
           <p className="text-slate-500">Kitting COGS</p>
           <p title="Packaging actually consumed for this order's shipped units — one box per parcel, not per unit — valued at what each material cost when it was consumed.">
-            {order.kitting_cogs != null ? `-${formatMoney(order.kitting_cogs, currency)}` : "—"}
+            {order.kitting_cogs != null
+              ? `-${formatMoney(order.kitting_cogs, currency)}`
+              : "—"}
           </p>
         </div>
         <div>
           <p className="text-slate-500">Net profit</p>
-          <p className={`font-semibold ${order.net_profit != null && Number(order.net_profit) < 0 ? "text-red-600" : ""}`}>
-            {order.net_profit != null ? formatMoney(order.net_profit, currency) : "—"}
+          <p
+            className={`font-semibold ${order.net_profit != null && Number(order.net_profit) < 0 ? "text-red-600" : ""}`}
+          >
+            {order.net_profit != null
+              ? formatMoney(order.net_profit, currency)
+              : "—"}
           </p>
           {order.cogs_pending && (
             <p className="text-xs text-amber-700">
-              COGS pending — one or more lines haven't been allocated yet, so this figure doesn't include their cost.
+              COGS pending — one or more lines haven't been allocated yet, so
+              this figure doesn't include their cost.
             </p>
           )}
           {order.postage_cost_missing && (
             <p className="text-xs text-amber-700">
-              No postage cost — this order shipped without a shipping profile, so this figure doesn't deduct what
-              postage cost. Assign the product a shipping profile so future orders capture it.
+              No postage cost — this order shipped without a shipping profile,
+              so this figure doesn't deduct what postage cost. Assign the
+              product a shipping profile so future orders capture it.
             </p>
           )}
         </div>
@@ -325,7 +446,13 @@ function OrderFinancialsPanel({ order }: { order: Order }) {
   );
 }
 
-function ManualShippingEditor({ order, onSaved }: { order: Order; onSaved: () => void }) {
+function ManualShippingEditor({
+  order,
+  onSaved,
+}: {
+  order: Order;
+  onSaved: () => void;
+}) {
   const { data: shippingProfiles } = useQuery({
     queryKey: ["settings", "shipping-profiles"],
     // Wrapped, not passed by reference: React Query calls queryFn with a context object,
@@ -336,14 +463,18 @@ function ManualShippingEditor({ order, onSaved }: { order: Order; onSaved: () =>
   const profiles = shippingProfiles ?? [];
 
   const [shippingProfileId, setShippingProfileId] = useState(
-    order.shipping_profile_id != null ? String(order.shipping_profile_id) : ""
+    order.shipping_profile_id != null ? String(order.shipping_profile_id) : "",
   );
-  const [shippingCharged, setShippingCharged] = useState(order.shipping_charged ?? "");
+  const [shippingCharged, setShippingCharged] = useState(
+    order.shipping_charged ?? "",
+  );
 
   const saveMutation = useMutation({
     mutationFn: () =>
       ordersApi.update(order.id, {
-        shipping_profile_id: shippingProfileId ? Number(shippingProfileId) : null,
+        shipping_profile_id: shippingProfileId
+          ? Number(shippingProfileId)
+          : null,
         shipping_charged: shippingCharged || null,
       }),
     onSuccess: onSaved,
@@ -411,15 +542,20 @@ function OrderLineRow({
   // is forward-looking; the panel itself counts only what has shipped.
   //
   // Materials only — packaging is an order-level cost, shown in the Kitting section.
-  const lineValue = line.unit_price != null ? Number(line.unit_price) * line.ordered_qty : null;
+  const lineValue =
+    line.unit_price != null ? Number(line.unit_price) * line.ordered_qty : null;
   const lineCost =
-    line.cost_per_unit_snapshot != null ? Number(line.cost_per_unit_snapshot) * line.ordered_qty : null;
+    line.cost_per_unit_snapshot != null
+      ? Number(line.cost_per_unit_snapshot) * line.ordered_qty
+      : null;
   return (
     <tr className="border-b border-slate-100">
       <td className="p-2">
         {line.needs_mapping ? (
           <div className="flex flex-col gap-1">
-            <span className="text-amber-700">Unmapped SKU: {line.sku ?? "—"}</span>
+            <span className="text-amber-700">
+              Unmapped SKU: {line.sku ?? "—"}
+            </span>
             <UnmappedLineResolver line={line} />
           </div>
         ) : (
@@ -432,11 +568,20 @@ function OrderLineRow({
       <td className="p-2">{line.ordered_qty}</td>
       <td className="p-2">{line.allocated_qty}</td>
       <td className="p-2">{line.shipped_qty}</td>
-      <td className="p-2">{lineValue != null ? formatMoney(lineValue.toFixed(2), line.currency ?? currency) : "—"}</td>
-      <td className="p-2">{lineCost != null ? formatMoney(lineCost.toFixed(2), currency) : "—"}</td>
+      <td className="p-2">
+        {lineValue != null
+          ? formatMoney(lineValue.toFixed(2), line.currency ?? currency)
+          : "—"}
+      </td>
+      <td className="p-2">
+        {lineCost != null ? formatMoney(lineCost.toFixed(2), currency) : "—"}
+      </td>
       <td className="p-2">
         {unassignable > 0 && (
-          <button onClick={() => onUnassign(unassignable)} className="rounded border border-slate-300 px-2 py-1 text-xs">
+          <button
+            onClick={() => onUnassign(unassignable)}
+            className="rounded border border-slate-300 px-2 py-1 text-xs"
+          >
             Unassign
           </button>
         )}
@@ -447,7 +592,10 @@ function OrderLineRow({
 
 function UnmappedLineResolver({ line }: { line: OrderLine }) {
   const queryClient = useQueryClient();
-  const { data: products } = useQuery({ queryKey: ["products"], queryFn: productsApi.list });
+  const { data: products } = useQuery({
+    queryKey: ["products"],
+    queryFn: productsApi.list,
+  });
   const [productId, setProductId] = useState<number | "">("");
   const [variantId, setVariantId] = useState<number | "">("");
   const [showCreateForm, setShowCreateForm] = useState(false);
@@ -477,7 +625,11 @@ function UnmappedLineResolver({ line }: { line: OrderLine }) {
   });
 
   const createMutation = useMutation({
-    mutationFn: () => ordersApi.createProductAndMap(line.id, { name: newName, sku: newSku || null }),
+    mutationFn: () =>
+      ordersApi.createProductAndMap(line.id, {
+        name: newName,
+        sku: newSku || null,
+      }),
     onSuccess: onResolved,
   });
 
@@ -503,7 +655,9 @@ function UnmappedLineResolver({ line }: { line: OrderLine }) {
           <select
             className="rounded border border-slate-300 px-2 py-1"
             value={variantId}
-            onChange={(e) => setVariantId(e.target.value ? Number(e.target.value) : "")}
+            onChange={(e) =>
+              setVariantId(e.target.value ? Number(e.target.value) : "")
+            }
           >
             <option value="">(no variant)</option>
             {variants.map((v) => (

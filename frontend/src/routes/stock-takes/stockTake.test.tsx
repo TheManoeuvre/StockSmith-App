@@ -1,12 +1,25 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  RouterProvider,
+  createMemoryHistory,
+  createRouter,
+} from "@tanstack/react-router";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("../../api/client", async () => (await import("../../test/fakeBackend")).clientMock());
+vi.mock("../../api/client", async () =>
+  (await import("../../test/fakeBackend")).clientMock(),
+);
 vi.mock("../../lib/tauri", () => ({
-  getSettings: () => Promise.resolve({ backendUrl: "http://test", sharedPassword: "pw" }),
+  getSettings: () =>
+    Promise.resolve({ backendUrl: "http://test", sharedPassword: "pw" }),
   saveSettings: () => Promise.resolve(),
   pickFile: () => Promise.resolve(null),
   saveFileTo: () => Promise.resolve(null),
@@ -14,7 +27,8 @@ vi.mock("../../lib/tauri", () => ({
   backendHostname: () => Promise.resolve("127.0.0.1"),
 }));
 
-const { setRoutes, setFetchResponder, calls, fetchCalls } = await import("../../test/fakeBackend");
+const { setRoutes, setFetchResponder, calls, fetchCalls } =
+  await import("../../test/fakeBackend");
 const { routeTree } = await import("../../routeTree.gen");
 
 function line(overrides: Record<string, unknown> = {}) {
@@ -66,20 +80,38 @@ function baseRoutes(detail = take()) {
     { method: "GET" as const, path: "/stock-takes", respond: () => [] },
     { method: "GET" as const, path: "/product-categories", respond: () => [] },
     { method: "GET" as const, path: "/dashboard/summary", respond: () => ({}) },
-    { method: "PUT" as const, path: "/stock-takes/1/lines", respond: () => detail },
-    { method: "GET" as const, path: "/system/status", respond: () => ({ status: "ok" }) },
+    {
+      method: "PUT" as const,
+      path: "/stock-takes/1/lines",
+      respond: () => detail,
+    },
+    {
+      method: "GET" as const,
+      path: "/system/status",
+      respond: () => ({ status: "ok" }),
+    },
   ];
 }
 
 async function renderAt(path: string) {
-  const router = createRouter({ routeTree, history: createMemoryHistory({ initialEntries: [path] }) });
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const router = createRouter({
+    routeTree,
+    history: createMemoryHistory({ initialEntries: [path] }),
+  });
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   render(
     <QueryClientProvider client={queryClient}>
       <RouterProvider router={router as never} />
     </QueryClientProvider>,
   );
-  await screen.findByRole("heading", { name: /Stock take #1/ });
+  // Generous timeout: the first render in a file resolves the whole lazy route tree.
+  await screen.findByRole(
+    "heading",
+    { name: /Stock take #1/ },
+    { timeout: 5000 },
+  );
   return router;
 }
 
@@ -106,14 +138,20 @@ describe("count sheet", () => {
     // counts as strings, so an emptied box reaching the server as 0 is a live possibility —
     // it would adjust the item to nothing and date it as counted.
     const user = userEvent.setup();
-    setRoutes(baseRoutes(take([line({ counted_qty: "8.0000", status: "counted" })])));
+    setRoutes(
+      baseRoutes(take([line({ counted_qty: "8.0000", status: "counted" })])),
+    );
     await renderAt("/stock-takes/1");
 
     await user.clear(countInput());
     await user.click(saveButton());
 
-    await waitFor(() => expect(calls.some((c) => c.method === "PUT")).toBe(true));
-    const sent = calls.find((c) => c.method === "PUT")!.body as { lines: { counted_qty: string | null }[] };
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === "PUT")).toBe(true),
+    );
+    const sent = calls.find((c) => c.method === "PUT")!.body as {
+      lines: { counted_qty: string | null }[];
+    };
     expect(sent.lines[0].counted_qty).toBeNull();
   });
 
@@ -123,7 +161,9 @@ describe("count sheet", () => {
 
     await user.type(countInput(), "8");
 
-    expect(screen.getByRole("button", { name: "Review and approve" })).toBeDisabled();
+    expect(
+      screen.getByRole("button", { name: "Review and approve" }),
+    ).toBeDisabled();
   });
 
   it("shows how much of the expected figure is already picked for orders", async () => {
@@ -150,11 +190,17 @@ describe("count sheet", () => {
 describe("CSV import confirmation", () => {
   async function uploadFile(result: Record<string, unknown>) {
     setFetchResponder(() => result);
-    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const input = document.querySelector(
+      'input[type="file"]',
+    ) as HTMLInputElement;
     // fireEvent rather than user.upload: the input is deliberately hidden behind a styled
     // button, and userEvent refuses to interact with something it can't see.
-    const file = new File(["line_id,counted_qty\n1,8\n"], "sheet.csv", { type: "text/csv" });
-    Object.defineProperty(file, "arrayBuffer", { value: () => Promise.resolve(new ArrayBuffer(8)) });
+    const file = new File(["line_id,counted_qty\n1,8\n"], "sheet.csv", {
+      type: "text/csv",
+    });
+    Object.defineProperty(file, "arrayBuffer", {
+      value: () => Promise.resolve(new ArrayBuffer(8)),
+    });
     fireEvent.change(input, { target: { files: [file] } });
     await screen.findByRole("heading", { name: "Check before applying" });
   }
@@ -163,7 +209,12 @@ describe("CSV import confirmation", () => {
     const user = userEvent.setup();
     await renderAt("/stock-takes/1");
 
-    await uploadFile({ matched: 1, skipped_blank: 0, failed: [], applied: false });
+    await uploadFile({
+      matched: 1,
+      skipped_blank: 0,
+      failed: [],
+      applied: false,
+    });
 
     // The first call must be a dry run — that is what makes the preview a preview.
     expect(fetchCalls[0].url).toContain("dry_run=true");
@@ -188,7 +239,9 @@ describe("CSV import confirmation", () => {
     });
 
     // The failing row is named, because the point of the screen is knowing what to fix.
-    expect(screen.getByText(/Row 3: 'oops' is not a number/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/Row 3: 'oops' is not a number/),
+    ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /Apply nothing/ }));
 
@@ -199,25 +252,48 @@ describe("CSV import confirmation", () => {
   it("offers no all-or-nothing choice when every row parsed", async () => {
     await renderAt("/stock-takes/1");
 
-    await uploadFile({ matched: 2, skipped_blank: 0, failed: [], applied: false });
+    await uploadFile({
+      matched: 2,
+      skipped_blank: 0,
+      failed: [],
+      applied: false,
+    });
 
-    expect(screen.queryByRole("button", { name: /Apply nothing/ })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Apply nothing/ }),
+    ).not.toBeInTheDocument();
   });
 
   it("says blank rows are left alone rather than counted as zero", async () => {
     await renderAt("/stock-takes/1");
 
-    await uploadFile({ matched: 1, skipped_blank: 2, failed: [], applied: false });
+    await uploadFile({
+      matched: 1,
+      skipped_blank: 2,
+      failed: [],
+      applied: false,
+    });
 
-    expect(screen.getByText(/aren't treated as a count of zero/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/aren't treated as a count of zero/),
+    ).toBeInTheDocument();
   });
 
   it("cancelling applies nothing", async () => {
     const user = userEvent.setup();
     await renderAt("/stock-takes/1");
 
-    await uploadFile({ matched: 1, skipped_blank: 0, failed: [], applied: false });
-    const dialog = within(screen.getByRole("heading", { name: "Check before applying" }).closest("div")!.parentElement!);
+    await uploadFile({
+      matched: 1,
+      skipped_blank: 0,
+      failed: [],
+      applied: false,
+    });
+    const dialog = within(
+      screen
+        .getByRole("heading", { name: "Check before applying" })
+        .closest("div")!.parentElement!,
+    );
     await user.click(dialog.getByRole("button", { name: "Cancel" }));
 
     expect(fetchCalls).toHaveLength(1);
@@ -234,11 +310,33 @@ describe("grouping", () => {
         path: "/stock-takes/1",
         respond: () =>
           take([
-            line({ id: 1, material_id: null, product_id: 5, name: "Slate Coaster — Round", unit: "each",
-                   section: "Products", group: "Coaster", subgroup: "COA-1" }),
-            line({ id: 2, material_id: null, product_id: 5, name: "Slate Coaster — Square", unit: "each",
-                   section: "Products", group: "Coaster", subgroup: "COA-1" }),
-            line({ id: 3, name: "Grey Resin", section: "Materials", group: "resin", subgroup: "" }),
+            line({
+              id: 1,
+              material_id: null,
+              product_id: 5,
+              name: "Slate Coaster — Round",
+              unit: "each",
+              section: "Products",
+              group: "Coaster",
+              subgroup: "COA-1",
+            }),
+            line({
+              id: 2,
+              material_id: null,
+              product_id: 5,
+              name: "Slate Coaster — Square",
+              unit: "each",
+              section: "Products",
+              group: "Coaster",
+              subgroup: "COA-1",
+            }),
+            line({
+              id: 3,
+              name: "Grey Resin",
+              section: "Materials",
+              group: "resin",
+              subgroup: "",
+            }),
           ]),
       },
     ]);
