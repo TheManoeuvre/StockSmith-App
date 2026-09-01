@@ -212,7 +212,7 @@ describe("category-driven fields", () => {
     await renderMaterialPage();
 
     await screen.findByDisplayValue("PLA+ Filament", {}, { timeout: 5000 });
-    expect(screen.getByText("Colour / hex")).toBeInTheDocument();
+    expect(screen.getByText("Colour")).toBeInTheDocument();
     expect(screen.getByText("Material type")).toBeInTheDocument();
   });
 
@@ -227,7 +227,7 @@ describe("category-driven fields", () => {
     // route.tsx) has its own "Avg unit cost" column header, so an unscoped query is
     // ambiguous between the two.
     const panel = screen.getByRole("dialog", { name: "PLA+ Filament" });
-    expect(within(panel).queryByText("Colour / hex")).toBeNull();
+    expect(within(panel).queryByText("Colour")).toBeNull();
     expect(within(panel).queryByText("Material type")).toBeNull();
     expect(within(panel).getByText("Avg unit cost")).toBeInTheDocument();
     expect(within(panel).queryByText("Avg cost/kg")).toBeNull();

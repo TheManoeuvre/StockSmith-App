@@ -558,7 +558,7 @@ function MaterialDetail() {
                   {editedCategory?.tracks_colour && (
                     <>
                       <label className="flex flex-col gap-1">
-                        <span className="text-sm">Colour / hex</span>
+                        <span className="text-sm">Colour</span>
                         {/* Backed by the colours reference table now, so the same colour on two materials
                     is one row that can be renamed once. onResolved is unused deliberately: the
                     backend matches the name case-insensitively and find-or-creates, which is

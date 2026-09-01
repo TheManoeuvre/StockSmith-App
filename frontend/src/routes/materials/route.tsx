@@ -431,7 +431,7 @@ function MaterialsListContent() {
           {tracksColour && (
             <>
               <label className="flex flex-col gap-1">
-                <span className="text-sm">Colour / hex</span>
+                <span className="text-sm">Colour</span>
                 {/* Backed by the colours reference table now, so the same colour on two materials
                     is one row that can be renamed once. onResolved is unused deliberately: the
                     backend matches the name case-insensitively and find-or-creates, which is
@@ -604,9 +604,10 @@ function MaterialRow({
       className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 ${!m.is_active ? "opacity-60" : ""}`}
     >
       <td className="py-2 pl-3 pr-1">
-        {/* One fixed box: an uploaded photo if there is one, otherwise a hex colour chip
-            (filament etc.), otherwise a neutral tile. Both fill the box identically. */}
-        <div className="h-20 w-20 overflow-hidden rounded border border-slate-200 bg-slate-50">
+        {/* Fixed 80px box. An uploaded photo fills it; a colour chip sits at 75% (60px)
+            centred, so a swatch reads as a swatch rather than a cropped image; a material
+            with neither is left as an empty tile. */}
+        <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded border border-slate-200 bg-slate-50">
           {imageUrl ? (
             <img
               src={imageUrl}
@@ -615,7 +616,7 @@ function MaterialRow({
             />
           ) : m.colour_hex ? (
             <div
-              className="h-full w-full"
+              className="h-[60px] w-[60px] rounded"
               style={{ backgroundColor: m.colour_hex }}
               title={m.colour ?? undefined}
             />

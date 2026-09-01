@@ -202,3 +202,21 @@ This matters more once the periodic reconciliation sweep above exists: a sweep t
 **Problem:** Surfaced via the design canvas, whose manual order composer includes a "Source" field (`Manual · direct sale`, `Etsy · keyed by hand`, `eBay · keyed by hand`) so a hand-entered order can be distinguished from a pure direct sale. Today `/orders/new` has no channel field at all — every manually created order is attribution-less.
 
 **Ask:** Add a source/channel field to manual order creation, distinct from the automatic platform-sync channel tagging. Small — a new field on the order model plus a select in the `/orders/new` form.
+
+## Colour chip in the material slide-over hero slot
+
+**Problem:** The Materials list now shows a colour chip (from the linked colour's `hex_code`) in place of a thumbnail for materials with no uploaded image. The material detail slide-over (`routes/materials/$materialId.tsx`) still only shows the 192px hero image box with a plain "No image" placeholder — it doesn't fall back to the colour chip the way the list does.
+
+**Ask:** In the detail panel's hero area, when `material.image_path` is null but `colour_hex` is set, render the colour as a filled swatch in the same box (keep the upload/replace controls). Frontend-only — `colour_hex` is already on `MaterialRead`. Mirror the list's image → chip → neutral precedence.
+
+## Let a new colour's hex be set at the point of use, or link to the colour settings page
+
+**Problem:** When you set a colour on a material (Details tab "Colour" field, `CreatableSelect` backed by `coloursApi`), creating a new colour only records its name — `find_or_create` never sets `hex_code`. So the only way to give a colour a hex (which drives the list/detail chip) is to go to Settings → Reference data → Colours afterwards and edit the row. Nothing on the material form tells you that, or that the colour you just picked has no hex.
+
+**Ask:** On the material colour field: when the user is creating a *new* colour, also offer an optional hex input and pass it through (needs `find-or-create` / the material create/update path to accept `hex_code`, or a follow-up `PATCH /colours/{id}`). When an *existing* colour with no `hex_code` is selected, show a small inline "no colour chip set — add one" link to `/settings?tab=reference` (the Colours table). Keeps the reference table as the source of truth while removing the dead end.
+
+## Colour swatches in the Colours settings table
+
+**Problem:** Settings → Reference data → Colours (`ReferenceDataTable`, `settings.tsx` ~L325) lists each colour by name with an editable "Hex code" text field, but shows no visual swatch — you can't see at a glance which colours have a hex or what they look like.
+
+**Ask:** Render a small colour chip next to each colour name in that table, filled from `hex_code` (neutral/empty when unset). Likely a small `renderCell`-style addition to `ReferenceDataTable` or a colours-specific column; frontend-only, `hex_code` is already in `ColourRead`.
