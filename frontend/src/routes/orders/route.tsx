@@ -14,7 +14,6 @@ import {
 import { useState, type MouseEvent } from "react";
 import { ordersApi } from "../../api/orders";
 import type { Order, OrderStatus } from "../../api/types";
-import { FilterTabs } from "../../components/common/FilterTabs";
 import { Th } from "../../components/common/ListTable";
 import { formatMoney } from "../../lib/money";
 import { formatDayMonth } from "../../lib/format";
@@ -48,13 +47,10 @@ export const STATUS_CLASSES: Record<OrderStatus, string> = {
   cancelled: "bg-slate-200 text-slate-600",
 };
 
-const STATUS_TABS: { id: OrderStatus | "all"; label: string }[] = [
-  { id: "all", label: "All orders" },
-  { id: "pending", label: "Pending" },
-  { id: "allocated", label: "Allocated" },
-  { id: "shipped", label: "Shipped" },
-  { id: "cancelled", label: "Cancelled" },
-];
+/** A terminal order has nothing left to fulfil — it drops out of "Awaiting shipment". */
+function isDone(o: Order): boolean {
+  return o.status === "shipped" || o.status === "cancelled";
+}
 
 /** Margin as a % of order value, or null when either figure is missing. */
 function orderMarginPct(order: Order): number | null {
@@ -85,33 +81,32 @@ function OrdersListContent() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [page, setPage] = useState(0);
-  const [tab, setTab] = useState<OrderStatus | "all">("all");
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["orders", page, tab],
-    queryFn: () =>
-      ordersApi.list(
-        ORDERS_PAGE_SIZE,
-        page * ORDERS_PAGE_SIZE,
-        tab === "all" ? undefined : tab,
-      ),
+    queryKey: ["orders", page],
+    queryFn: () => ordersApi.list(ORDERS_PAGE_SIZE, page * ORDERS_PAGE_SIZE),
     placeholderData: keepPreviousData,
   });
 
-  // One cheap count per tab — kept off the ["orders", …] key so useSiblingNav in the
+  // Cheap totals for the subtitle — kept off the ["orders", …] key so useSiblingNav in the
   // slide-over doesn't mistake a single-row count page for the sibling sequence.
   const countQueries = useQueries({
-    queries: STATUS_TABS.map((t) => ({
-      queryKey: ["order-counts", t.id],
+    queries: (["all", "shipped", "cancelled"] as const).map((id) => ({
+      queryKey: ["order-counts", id],
       queryFn: () =>
-        ordersApi.list(1, 0, t.id === "all" ? undefined : t.id).then((p) => p.total),
+        ordersApi
+          .list(1, 0, id === "all" ? undefined : id)
+          .then((p) => p.total),
     })),
   });
-  const countFor = (id: OrderStatus | "all") =>
-    countQueries[STATUS_TABS.findIndex((t) => t.id === id)]?.data;
-
+  const [allCount, shippedCount, cancelledCount] = countQueries.map(
+    (q) => q.data,
+  );
   const total = data?.total ?? 0;
-  const openCount = (countFor("pending") ?? 0) + (countFor("allocated") ?? 0);
+  const awaitingCount =
+    allCount != null && shippedCount != null && cancelledCount != null
+      ? allCount - shippedCount - cancelledCount
+      : null;
 
   const actionMutation = useMutation({
     mutationFn: ({ id, kind }: { id: number; kind: "allocate" | "ship" }) =>
@@ -126,20 +121,37 @@ function OrdersListContent() {
   if (isLoading) return <p>Loading orders…</p>;
   if (error) return <p className="text-red-600">{(error as Error).message}</p>;
 
-  // On the "All" view, open orders lead — shipped and cancelled sink below, keeping the
-  // server's newest-first order within each group. (A true cross-page pin needs a backend
-  // sort param; the status tabs cover the rest.)
-  const rows =
-    tab === "all"
-      ? [
-          ...(data?.items ?? []).filter(
-            (o) => o.status !== "shipped" && o.status !== "cancelled",
-          ),
-          ...(data?.items ?? []).filter(
-            (o) => o.status === "shipped" || o.status === "cancelled",
-          ),
-        ]
-      : (data?.items ?? []);
+  const items = data?.items ?? [];
+  const placedTs = (o: Order) => new Date(o.order_placed_at).getTime();
+  // Anything still to fulfil is pinned above, oldest first — a stale order is the one that
+  // needs chasing. Shipped and cancelled fall to a second group, newest first. The oldest-
+  // first sort is within the loaded page; a true cross-page pin needs a backend sort param.
+  const awaiting = items
+    .filter((o) => !isDone(o))
+    .sort((a, b) => placedTs(a) - placedTs(b));
+  const done = items
+    .filter(isDone)
+    .sort((a, b) => placedTs(b) - placedTs(a));
+  const rows = [...awaiting, ...done];
+
+  const groups = [
+    { label: "Awaiting shipment", note: "oldest first", rows: awaiting },
+    { label: "Shipped & cancelled", note: "newest first", rows: done },
+  ].filter((g) => g.rows.length > 0);
+
+  const renderRow = (order: Order) => (
+    <OrderRow
+      key={order.id}
+      order={order}
+      onOpen={() =>
+        navigate({
+          to: "/orders/$orderId",
+          params: { orderId: String(order.id) },
+        })
+      }
+      onAction={(kind) => actionMutation.mutate({ id: order.id, kind })}
+    />
+  );
 
   return (
     <div className="flex flex-col gap-4">
@@ -147,8 +159,8 @@ function OrdersListContent() {
         <div>
           <h1 className="text-xl font-semibold">Orders</h1>
           <p className="mt-0.5 text-[12.5px] text-slate-500">
-            {countFor("all") ?? total} order{(countFor("all") ?? total) === 1 ? "" : "s"}
-            {openCount > 0 ? ` · ${openCount} to fulfil` : ""}
+            {awaitingCount ?? "…"} awaiting shipment · {shippedCount ?? "…"}{" "}
+            shipped
           </p>
         </div>
         <Link
@@ -158,19 +170,6 @@ function OrdersListContent() {
           New order
         </Link>
       </div>
-
-      <FilterTabs
-        tabs={STATUS_TABS.map((t) => ({
-          id: t.id,
-          label: t.label,
-          count: countFor(t.id),
-        }))}
-        active={tab}
-        onChange={(id) => {
-          setTab(id as OrderStatus | "all");
-          setPage(0);
-        }}
-      />
 
       <table className="w-full border-collapse overflow-hidden rounded-lg bg-white text-left text-[12.5px] shadow-sm">
         <thead>
@@ -185,23 +184,32 @@ function OrdersListContent() {
             <Th>{""}</Th>
           </tr>
         </thead>
-        <tbody>
-          {rows.map((order) => (
-            <OrderRow
-              key={order.id}
-              order={order}
-              onOpen={() =>
-                navigate({
-                  to: "/orders/$orderId",
-                  params: { orderId: String(order.id) },
-                })
-              }
-              onAction={(kind) =>
-                actionMutation.mutate({ id: order.id, kind })
-              }
-            />
-          ))}
-        </tbody>
+        {groups.length === 0 ? (
+          <tbody>
+            <tr>
+              <td colSpan={8} className="p-6 text-center text-slate-500">
+                No orders
+              </td>
+            </tr>
+          </tbody>
+        ) : (
+          groups.map((group) => (
+            <tbody key={group.label}>
+              <tr className="border-b border-slate-200 bg-slate-100">
+                <th
+                  colSpan={8}
+                  className="p-2 text-left text-[11.5px] font-semibold text-slate-600"
+                >
+                  {group.label}
+                  <span className="ml-2 font-normal text-slate-400">
+                    {group.rows.length} · {group.note}
+                  </span>
+                </th>
+              </tr>
+              {group.rows.map(renderRow)}
+            </tbody>
+          ))
+        )}
       </table>
 
       <div className="flex items-center justify-between text-sm text-slate-500">

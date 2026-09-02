@@ -215,6 +215,29 @@ This matters more once the periodic reconciliation sweep above exists: a sweep t
 
 **Ask:** On the material colour field: when the user is creating a *new* colour, also offer an optional hex input and pass it through (needs `find-or-create` / the material create/update path to accept `hex_code`, or a follow-up `PATCH /colours/{id}`). When an *existing* colour with no `hex_code` is selected, show a small inline "no colour chip set — add one" link to `/settings?tab=reference` (the Colours table). Keeps the reference table as the source of truth while removing the dead end.
 
+## No UI to cancel / abandon an open stock take
+
+**Problem:** The backend already supports it — `DELETE /stock-takes/{id}`
+(`routers/stock_takes.py:252` → `services/stock_takes.delete_stock_take`) abandons an
+open take and refuses a closed one, and the frontend client already wraps it
+(`stockTakesApi.remove`, `api/stockTakes.ts:32`). Nothing calls `remove`: neither the
+list (`routes/stock-takes/route.tsx`) nor the detail slide-over
+(`routes/stock-takes/$stockTakeId.tsx`) has a cancel/abandon control, so an open take
+can only be worked to completion or left open forever.
+
+This bit on 2026-09-02: a start-take bug created takes #3 and #4 with identical scope
+six seconds apart ("Materials in Filament, due for counting only"). #3 was counted
+against; #4 sat at 0/6 with no way to clear it from the app — it had to be deleted by
+hand via the API.
+
+**Ask:** Add an "Abandon stock take" action to the detail slide-over footer (open takes
+only), behind a `ConfirmDialog` (`tone="danger"`) since it drops any counts entered so
+far. On success invalidate `["stock-takes"]` and `["dashboard-summary"]` and route back
+to `/stock-takes`. A row-level action on the list is optional follow-up. Separately,
+consider a guard against creating a second open take whose scope matches an existing open
+one — the underlying start-take double-fire is its own bug, but a scope-collision check
+at create time would stop it turning into orphaned takes.
+
 ## Colour swatches in the Colours settings table
 
 **Problem:** Settings → Reference data → Colours (`ReferenceDataTable`, `settings.tsx` ~L325) lists each colour by name with an editable "Hex code" text field, but shows no visual swatch — you can't see at a glance which colours have a hex or what they look like.

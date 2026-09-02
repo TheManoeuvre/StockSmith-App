@@ -111,17 +111,41 @@ async function renderList() {
 
 beforeEach(() => setRoutes(routes([order()])));
 
-it("filters by status when a tab is clicked", async () => {
-  const user = userEvent.setup();
+it("splits orders into an Awaiting shipment group above a Shipped & cancelled group", async () => {
+  setRoutes(
+    routes([
+      order({
+        id: 900,
+        external_order_id: "E-900",
+        status: "shipped",
+        order_placed_at: "2026-08-25T09:00:00Z",
+        lines: [line({ product_name: "Shipped Planter" })],
+      }),
+      order({
+        id: 901,
+        external_order_id: "E-901",
+        status: "pending",
+        order_placed_at: "2026-08-20T09:00:00Z",
+        lines: [line({ order_id: 901, product_name: "Waiting Planter" })],
+      }),
+    ]),
+  );
   await renderList();
 
-  await user.click(await screen.findByRole("button", { name: /Shipped/ }));
+  const awaiting = await screen.findByText("Awaiting shipment");
+  const done = screen.getByText("Shipped & cancelled");
+  expect(awaiting).toBeInTheDocument();
+  expect(done).toBeInTheDocument();
 
-  await waitFor(() =>
-    expect(
-      calls.some((c) => c.method === "GET" && c.path.includes("status_filter=shipped")),
-    ).toBe(true),
-  );
+  // The awaiting group's header comes before the terminal group's header in the DOM.
+  expect(
+    awaiting.compareDocumentPosition(done) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+
+  // And each order sits under the right header.
+  const waitingRow = screen.getByText("Waiting Planter").closest("tbody")!;
+  expect(within(waitingRow).getByText("Awaiting shipment")).toBeInTheDocument();
 });
 
 it("shows a derived Fulfilment state with an Allocate action for a pending order", async () => {
