@@ -332,7 +332,18 @@ async def _stock_take_lookups(session: AsyncSession, lines) -> tuple[dict, dict,
     product_ids = {line.product_id for line in lines if line.product_id}
     variant_ids = {line.variant_id for line in lines if line.variant_id}
     materials = (
-        {m.id: m for m in (await session.execute(select(Material).where(Material.id.in_(material_ids)))).scalars()}
+        {
+            m.id: m
+            for m in (
+                await session.execute(
+                    # group_lines reads material_type_name through a relationship — a lazy
+                    # load in async raises MissingGreenlet rather than fetching.
+                    select(Material)
+                    .where(Material.id.in_(material_ids))
+                    .options(selectinload(Material.material_type))
+                )
+            ).scalars()
+        }
         if material_ids
         else {}
     )
