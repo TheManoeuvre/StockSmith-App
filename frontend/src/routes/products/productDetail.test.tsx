@@ -258,7 +258,7 @@ const pricingTab = () => screen.getByRole("button", { name: "Pricing" });
 
 /** BOM tables only — other tabs render tables of their own. */
 const bomTables = () =>
-  screen.getAllByRole("table").filter((t) => within(t).queryByText("Cover (builds)"));
+  screen.getAllByRole("table").filter((t) => within(t).queryByText("Cover"));
 
 /**
  * The build BOM's qty input. Async because the Save button renders before the BOM query

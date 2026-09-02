@@ -637,14 +637,14 @@ function ProductPriceForm({
           saveMutation.mutate();
         }}
       >
-        <FieldRow label="Sale price (£)">
+        <FieldRow label="Sale price (£)" align="right">
           <input
-            className="w-28 rounded border border-slate-300 px-2 py-1"
+            className="w-28 rounded border border-slate-300 px-2 py-1 text-right tabular-nums"
             value={salePrice}
             onChange={(e) => setSalePrice(e.target.value)}
           />
         </FieldRow>
-        <FieldRow label="Shipping profile">
+        <FieldRow label="Shipping profile" align="right">
           <ShippingProfileSelect
             profiles={profiles}
             value={shippingProfileId}
@@ -652,7 +652,7 @@ function ProductPriceForm({
             feeSource={feeSource}
           />
         </FieldRow>
-        <FieldRow label="Platform fee (%)">
+        <FieldRow label="Platform fee (%)" align="right">
           {isCalculatedFee ? (
             <span className="text-sm text-slate-500">
               {product.effective_platform_fee_percent
@@ -661,7 +661,7 @@ function ProductPriceForm({
             </span>
           ) : (
             <input
-              className="w-24 rounded border border-slate-300 px-2 py-1"
+              className="w-24 rounded border border-slate-300 px-2 py-1 text-right tabular-nums"
               value={platformFeePercent}
               onChange={(e) => setPlatformFeePercent(e.target.value)}
             />

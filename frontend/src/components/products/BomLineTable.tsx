@@ -106,7 +106,7 @@ export function BomLineTable({
     <table className={tableClassName}>
       <colgroup>
         <col />
-        <col className="w-16" />
+        <col className="w-20" />
         <col className="w-16" />
         {showMaxFromFreeStock && <col className="w-24" />}
         <col className="w-8" />
@@ -114,9 +114,9 @@ export function BomLineTable({
       <thead>
         <tr className="border-b border-slate-200">
           <th className="p-2">Material</th>
-          <th className="p-2">Qty</th>
-          <th className="p-2">Cost</th>
-          {showMaxFromFreeStock && <th className="p-2">Cover (builds)</th>}
+          <th className="p-2 text-right">Qty</th>
+          <th className="p-2 text-right">Cost</th>
+          {showMaxFromFreeStock && <th className="p-2 text-right">Cover</th>}
           <th className="p-2" />
         </tr>
       </thead>
@@ -143,7 +143,7 @@ export function BomLineTable({
             </td>
             <td className="p-2">
               <input
-                className="w-24 rounded border border-slate-300 px-2 py-1"
+                className="w-full rounded border border-slate-300 px-2 py-1 text-right tabular-nums"
                 step={wholeNumberStepFor(materialFor(line)?.unit)}
                 value={line.qty_required}
                 onChange={(e) => onChangeLine(i, { qty_required: e.target.value })}
@@ -154,7 +154,7 @@ export function BomLineTable({
                 }
               />
             </td>
-            <td className="p-2 tabular-nums">
+            <td className="p-2 text-right tabular-nums">
               {perLine[i]?.cost != null ? formatMoney(String(perLine[i].cost), "GBP") : "—"}
             </td>
             {showMaxFromFreeStock &&
@@ -163,11 +163,11 @@ export function BomLineTable({
                 const low = cover != null && cover < 5;
                 return (
                   <td
-                    className={`p-2 ${i === bottleneckIndex || low ? "font-semibold text-amber-700" : "text-slate-500"}`}
+                    className={`p-2 text-right tabular-nums ${i === bottleneckIndex || low ? "font-semibold text-amber-700" : "text-slate-500"}`}
                   >
                     {cover ?? "—"}
                     {i === bottleneckIndex && (
-                      <span className="ml-1 text-xs">(bottleneck)</span>
+                      <span className="ml-1 text-[10px]">(bottleneck)</span>
                     )}
                   </td>
                 );
@@ -190,7 +190,7 @@ export function BomLineTable({
           <tr className="border-t border-slate-300 font-medium">
             <td className="p-2">{isDirty ? "Total (unsaved)" : "Total"}</td>
             <td className="p-2" />
-            <td className="p-2 tabular-nums">
+            <td className="p-2 text-right tabular-nums">
               {total != null ? formatMoney(String(total), "GBP") : "—"}
             </td>
             {showMaxFromFreeStock && <td className="p-2" />}

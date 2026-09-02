@@ -8,6 +8,7 @@ import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { useManagedSave } from "../../hooks/useDirtyRegistry";
 import { normalizeQtyForUnit, wholeNumberStepFor } from "../../lib/format";
+import { formatMoney } from "../../lib/money";
 
 /**
  * Whether two materials are in the same category, which is the rule the backend enforces on
@@ -170,6 +171,38 @@ export function BomOverrideEditor({
     setOverrides((prev) => ({ ...prev, [materialId]: { ...prev[materialId], substitute_material_id: subMaterialId } }));
   };
 
+  const setAdditive = (updater: (prev: EffectiveLine[]) => EffectiveLine[]) =>
+    setValue((prev) => ({ ...prev, additiveLines: updater(prev.additiveLines) }));
+  const addAdditiveLine = () => {
+    const first = materials[0];
+    if (!first) return;
+    setAdditive((prev) => [
+      ...prev,
+      { material_id: first.id, qty_required: "1", replaces_material_id: null },
+    ]);
+  };
+
+  const overrideFor = (materialId: number): OverrideRow =>
+    overrides[materialId] ?? { mode: "inherit", qty_required: "", substitute_material_id: null };
+
+  /** The material and quantity a line actually resolves to, after its override. */
+  const resolveLine = (base: OverrideableLine) => {
+    const o = overrideFor(base.material_id);
+    const mat =
+      o.mode === "substitute" && o.substitute_material_id != null
+        ? materials.find((m) => m.id === o.substitute_material_id)
+        : materials.find((m) => m.id === base.material_id);
+    const qty = o.mode === "inherit" ? base.qty_required : o.qty_required;
+    return { mat, qty, inherited: o.mode === "inherit" };
+  };
+  const effectiveLabel = (mat: Material | undefined, qty: string): string => {
+    if (!mat) return "—";
+    const n = Number(qty);
+    const unit = mat.unit === "each" ? "" : ` ${mat.unit}`;
+    const cost = Number.isFinite(n) ? formatMoney(String(n * Number(mat.avg_unit_cost)), "GBP") : "—";
+    return `${qty}${unit} · ${cost}`;
+  };
+
   const bottleneckFor = (base: OverrideableLine, o: OverrideRow): EffectiveLine | undefined => {
     if (o.mode === "substitute" && o.substitute_material_id != null) {
       return effectiveBom.find(
@@ -194,82 +227,173 @@ export function BomOverrideEditor({
     );
   }
 
+  // The tightest line — the one holding buildable count down — named for the footer note.
+  const overallBottleneck = (() => {
+    let worst: { qty: number | null; name: string } | null = null;
+    for (const base of baseBom) {
+      const cover = bottleneckFor(base, overrideFor(base.material_id))?.line_max_buildable ?? null;
+      const { mat } = resolveLine(base);
+      if (worst == null || (cover != null && (worst.qty == null || cover < worst.qty))) {
+        worst = { qty: cover, name: mat?.name ?? String(base.material_id) };
+      }
+    }
+    return worst;
+  })();
+
+  const MODES: { mode: OverrideMode; label: string }[] = [
+    { mode: "inherit", label: "Inherit" },
+    { mode: "qty", label: "Qty" },
+    { mode: "substitute", label: "Swap" },
+  ];
+
   return (
     <div className="mt-3">
       <h4 className="mb-1 text-sm font-medium text-slate-600">{title}</h4>
-      <table className="w-full text-left text-sm">
-        <thead>
-          <tr>
-            <th className="p-1">Material</th>
-            <th className="p-1">Base qty</th>
-            <th className="p-1">Mode</th>
-            <th className="p-1">Value</th>
-            <th className="p-1">Max theoretical</th>
-          </tr>
-        </thead>
-        <tbody>
-          {baseBom.map((base) => {
-            const material = materials.find((m) => m.id === base.material_id);
-            const o: OverrideRow = overrides[base.material_id] ?? {
-              mode: "inherit",
-              qty_required: "",
-              substitute_material_id: null,
-            };
-            const substituteMaterial =
-              o.substitute_material_id != null ? materials.find((m) => m.id === o.substitute_material_id) : undefined;
-            const bottleneck = bottleneckFor(base, o);
-            return (
-              <tr key={base.material_id}>
-                <td className="p-1">{material?.name ?? base.material_id}</td>
-                <td className="p-1 text-slate-400">{base.qty_required}</td>
-                <td className="p-1">
-                  <select
-                    className="rounded border border-slate-300 px-1 py-1 text-sm"
-                    value={o.mode}
-                    onChange={(e) => setMode(base.material_id, e.target.value as OverrideMode)}
+      <div className="overflow-hidden rounded border border-slate-200">
+        {baseBom.map((base) => {
+          const material = materials.find((m) => m.id === base.material_id);
+          const o = overrideFor(base.material_id);
+          const swap = o.mode === "substitute";
+          const { mat: effMat, qty: effQty, inherited } = resolveLine(base);
+          return (
+            <div
+              key={base.material_id}
+              className="flex items-center gap-2 border-b border-slate-100 px-2.5 py-1.5 last:border-0"
+            >
+              <span
+                className={`shrink-0 truncate text-xs text-slate-500 ${swap ? "w-24" : "w-40"}`}
+                title={material?.name}
+              >
+                {material?.name ?? base.material_id}
+              </span>
+
+              <div className="flex shrink-0 gap-px rounded bg-slate-100 p-0.5">
+                {MODES.map(({ mode, label }) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setMode(base.material_id, mode)}
+                    className={`rounded px-2 py-0.5 text-[11px] font-semibold ${
+                      o.mode === mode
+                        ? "bg-white text-slate-900 shadow-sm"
+                        : "text-slate-500 hover:text-slate-700"
+                    }`}
                   >
-                    <option value="inherit">Inherit</option>
-                    <option value="qty">Override qty</option>
-                    <option value="substitute">Substitute</option>
-                  </select>
-                </td>
-                <td className="p-1">
-                  {o.mode === "qty" && (
-                    <input
-                      className="w-24 rounded border border-slate-300 px-2 py-1"
-                      step={wholeNumberStepFor(material?.unit)}
-                      placeholder={base.qty_required}
-                      value={o.qty_required}
-                      onChange={(e) => updateQty(base.material_id, e.target.value)}
-                      onBlur={(e) => updateQty(base.material_id, normalizeQtyForUnit(e.target.value, material?.unit))}
-                    />
-                  )}
-                  {o.mode === "substitute" && (
-                    <div className="flex flex-col gap-1">
-                      <input
-                        className="w-20 rounded border border-slate-300 px-2 py-1"
-                        step={wholeNumberStepFor(substituteMaterial?.unit)}
-                        value={o.qty_required}
-                        onChange={(e) => updateQty(base.material_id, e.target.value)}
-                        onBlur={(e) => updateQty(base.material_id, normalizeQtyForUnit(e.target.value, substituteMaterial?.unit))}
-                      />
-                      <MaterialSelect
-                        materials={materials.filter((m) => m.id !== base.material_id && sameCategory(m, material))}
-                        value={o.substitute_material_id ?? base.material_id}
-                        onChange={(id) => updateSubstituteMaterial(base.material_id, id)}
-                        className="w-full rounded border border-slate-300 px-2 py-1"
-                      />
-                    </div>
-                  )}
-                </td>
-                <td className={`p-1 ${bottleneck?.line_max_buildable != null ? "text-slate-600" : "text-slate-400"}`}>
-                  {bottleneck?.line_max_buildable ?? "—"}
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {swap && (
+                <MaterialSelect
+                  materials={materials.filter((m) => m.id !== base.material_id && sameCategory(m, material))}
+                  value={o.substitute_material_id ?? base.material_id}
+                  onChange={(id) => updateSubstituteMaterial(base.material_id, id)}
+                  className="h-[26px] min-w-0 flex-1 rounded border border-slate-300 px-1.5 text-xs"
+                />
+              )}
+
+              {o.mode !== "inherit" && (
+                <input
+                  className="w-16 shrink-0 rounded border border-slate-300 px-1.5 py-0.5 text-right text-xs tabular-nums"
+                  step={wholeNumberStepFor(effMat?.unit)}
+                  placeholder={base.qty_required}
+                  value={o.qty_required}
+                  onChange={(e) => updateQty(base.material_id, e.target.value)}
+                  onBlur={(e) =>
+                    updateQty(base.material_id, normalizeQtyForUnit(e.target.value, effMat?.unit))
+                  }
+                />
+              )}
+
+              {!swap && <div className="min-w-0 flex-1" />}
+
+              <span
+                className={`shrink-0 text-right text-[11px] tabular-nums ${
+                  swap ? "w-20" : "w-28"
+                } ${inherited ? "text-slate-400" : "text-slate-700"}`}
+              >
+                {effectiveLabel(effMat, effQty)}
+              </span>
+            </div>
+          );
+        })}
+
+        {additiveLines.map((line, i) => {
+          const mat = materials.find((m) => m.id === line.material_id);
+          const n = Number(line.qty_required);
+          return (
+            <div
+              key={`add-${i}`}
+              className="flex items-center gap-2 border-b border-slate-100 bg-slate-50 px-2.5 py-1.5 last:border-0"
+            >
+              <span className="w-20 shrink-0 text-[11px] font-semibold text-teal-700">
+                extra
+              </span>
+              <MaterialSelect
+                materials={materials}
+                value={line.material_id}
+                onChange={(id) =>
+                  setAdditive((prev) =>
+                    prev.map((l, j) => (j === i ? { ...l, material_id: id } : l)),
+                  )
+                }
+                className="h-[26px] min-w-0 flex-1 rounded border border-slate-300 px-1.5 text-xs"
+              />
+              <input
+                className="w-16 shrink-0 rounded border border-slate-300 px-1.5 py-0.5 text-right text-xs tabular-nums"
+                step={wholeNumberStepFor(mat?.unit)}
+                value={line.qty_required}
+                onChange={(e) =>
+                  setAdditive((prev) =>
+                    prev.map((l, j) => (j === i ? { ...l, qty_required: e.target.value } : l)),
+                  )
+                }
+                onBlur={(e) =>
+                  setAdditive((prev) =>
+                    prev.map((l, j) =>
+                      j === i
+                        ? { ...l, qty_required: normalizeQtyForUnit(e.target.value, mat?.unit) }
+                        : l,
+                    ),
+                  )
+                }
+              />
+              <span className="w-20 shrink-0 text-right text-[11px] tabular-nums text-slate-500">
+                {mat && Number.isFinite(n)
+                  ? formatMoney(String(n * Number(mat.avg_unit_cost)), "GBP")
+                  : "—"}
+              </span>
+              <button
+                type="button"
+                onClick={() => setAdditive((prev) => prev.filter((_, j) => j !== i))}
+                aria-label="Remove extra line"
+                className="shrink-0 text-red-600 hover:text-red-700"
+              >
+                ✕
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="mt-1.5 flex items-center gap-2">
+        <button
+          type="button"
+          onClick={addAdditiveLine}
+          className="rounded border border-dashed border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-600 hover:border-blue-500 hover:text-blue-600"
+        >
+          + Extra material
+        </button>
+        <span className="text-[11px] text-slate-400">
+          {overallBottleneck
+            ? overallBottleneck.qty == null
+              ? "No materials"
+              : `Limited by ${overallBottleneck.name}`
+            : "No materials"}
+        </span>
+      </div>
+
       {!managed && (
         <SaveButton
           isDirty={isDirty}
