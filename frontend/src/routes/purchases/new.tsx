@@ -8,6 +8,7 @@ import { PurchaseLineEditor } from "../../components/purchases/PurchaseLineEdito
 import { DetailPanel } from "../../components/common/DetailPanel";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { CreatableSelect } from "../../components/common/CreatableSelect";
+import { FieldRow } from "../../components/common/FieldRow";
 
 export const Route = createFileRoute("/purchases/new")({
   component: NewPurchase,
@@ -60,9 +61,8 @@ function NewPurchase() {
       onClose={() => navigate({ to: "/purchases" })}
     >
       <div className="flex flex-col gap-6">
-        <div className="flex flex-wrap gap-4 rounded bg-white p-4 shadow-sm">
-          <label className="flex flex-col gap-1">
-            <span className="text-sm">Supplier</span>
+        <div className="flex flex-col gap-3 rounded bg-white p-4 shadow-sm">
+          <FieldRow label="Supplier">
             <CreatableSelect
               className="rounded border border-slate-300 px-2 py-1"
               options={suppliers ?? []}
@@ -70,33 +70,30 @@ function NewPurchase() {
               onChange={setSupplier}
               onResolved={setSupplierId}
             />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-sm">Order date</span>
+          </FieldRow>
+          <FieldRow label="Order date">
             <input
               type="date"
               className="rounded border border-slate-300 px-2 py-1"
               value={orderDate}
               onChange={(e) => setOrderDate(e.target.value)}
             />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-sm">Expected arrival</span>
+          </FieldRow>
+          <FieldRow label="Expected arrival">
             <input
               type="date"
               className="rounded border border-slate-300 px-2 py-1"
               value={expectedArrivalDate}
               onChange={(e) => setExpectedArrivalDate(e.target.value)}
             />
-          </label>
-          <label className="flex flex-col gap-1 flex-1">
-            <span className="text-sm">Notes</span>
+          </FieldRow>
+          <FieldRow label="Notes">
             <input
-              className="rounded border border-slate-300 px-2 py-1"
+              className="w-full rounded border border-slate-300 px-2 py-1"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
             />
-          </label>
+          </FieldRow>
         </div>
 
         <PurchaseLineEditor

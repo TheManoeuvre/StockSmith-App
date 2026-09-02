@@ -5,12 +5,16 @@ import {
   useNavigate,
 } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type MouseEvent } from "react";
 import { productCategoriesApi } from "../../api/productCategories";
 import { stockTakesApi } from "../../api/stockTakes";
 import type { StockTakeScope } from "../../api/types";
 import { useMaterialCategories } from "../../hooks/useMaterialCategories";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
+import { Badge } from "../../components/common/Badge";
+import { FilterTabs } from "../../components/common/FilterTabs";
+import { Th } from "../../components/common/ListTable";
+import { formatDayMonth } from "../../lib/format";
 
 /**
  * Pathless layout for /stock-takes: the list lives here (not in index.tsx) so it stays
@@ -52,6 +56,7 @@ function StockTakesListContent() {
   });
 
   const [showPicker, setShowPicker] = useState(overdueFromUrl);
+  const [tab, setTab] = useState<"all" | "open" | "closed">("all");
   const [includeMaterials, setIncludeMaterials] = useState(true);
   const [includeProducts, setIncludeProducts] = useState(true);
   const [categoryIds, setCategoryIds] = useState<Set<number>>(new Set());
@@ -99,10 +104,21 @@ function StockTakesListContent() {
   if (isLoading) return <p>Loading stock takes…</p>;
   if (error) return <p className="text-red-600">{(error as Error).message}</p>;
 
+  const all = takes ?? [];
+  const openN = all.filter((t) => t.status === "open").length;
+  const countFor = (id: "all" | "open" | "closed") =>
+    id === "all" ? all.length : all.filter((t) => t.status === id).length;
+  const rows = tab === "all" ? all : all.filter((t) => t.status === tab);
+
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold">Stock takes</h1>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-xl font-semibold">Stock takes</h1>
+          <p className="mt-0.5 text-[12.5px] text-slate-500">
+            {openN} open · {all.length - openN} closed
+          </p>
+        </div>
         <div className="flex gap-2">
           <Link
             to="/stock-takes/unresolved"
@@ -112,12 +128,22 @@ function StockTakesListContent() {
           </Link>
           <button
             onClick={() => setShowPicker((v) => !v)}
-            className="rounded bg-slate-900 px-4 py-2 text-white"
+            className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white"
           >
             {showPicker ? "Cancel" : "Start stock take"}
           </button>
         </div>
       </div>
+
+      <FilterTabs
+        tabs={[
+          { id: "all", label: "All takes", count: countFor("all") },
+          { id: "open", label: "Open", count: countFor("open") },
+          { id: "closed", label: "Closed", count: countFor("closed") },
+        ]}
+        active={tab}
+        onChange={(id) => setTab(id as "all" | "open" | "closed")}
+      />
 
       {showPicker && (
         <div className="flex flex-col gap-3 rounded bg-white p-4 shadow-sm">
@@ -251,58 +277,71 @@ function StockTakesListContent() {
         </div>
       )}
 
-      {takes && takes.length === 0 ? (
+      {all.length === 0 ? (
         <p className="text-slate-500">No stock takes yet.</p>
       ) : (
-        <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">
+        <table className="w-full border-collapse overflow-hidden rounded-lg bg-white text-left text-[12.5px] shadow-sm">
           <thead>
-            <tr className="border-b border-slate-200">
-              <th className="p-2">Started</th>
-              <th className="p-2">Scope</th>
-              <th className="p-2">Status</th>
-              <th className="p-2">Progress</th>
-              <th className="p-2">Flagged</th>
+            <tr className="border-b border-slate-200 bg-slate-50/60">
+              <Th>Started</Th>
+              <Th>Scope</Th>
+              <Th>Status</Th>
+              <Th>Progress</Th>
+              <Th>Flagged</Th>
             </tr>
           </thead>
           <tbody>
-            {takes?.map((t) => (
-              <tr
-                key={t.id}
-                className="border-b border-slate-100 hover:bg-slate-50"
-              >
-                <td className="p-2">
-                  <Link
-                    to="/stock-takes/$stockTakeId"
-                    params={{ stockTakeId: String(t.id) }}
-                    className="text-slate-900 underline"
-                  >
-                    {new Date(t.started_at).toLocaleDateString()}
-                  </Link>
-                </td>
-                <td className="p-2">{t.scope_description}</td>
-                <td className="p-2">
-                  {t.status === "open" ? (
-                    <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">
-                      Open {t.open_days} day{t.open_days === 1 ? "" : "s"}
-                    </span>
-                  ) : (
-                    <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
-                      Closed
-                    </span>
-                  )}
-                </td>
-                <td className="p-2">
-                  {t.counted_count} of {t.line_count} counted
-                </td>
-                <td className="p-2">
-                  {t.conflict_count > 0 ? (
-                    <span className="text-amber-800">{t.conflict_count}</span>
-                  ) : (
-                    "—"
-                  )}
-                </td>
-              </tr>
-            ))}
+            {rows.map((t) => {
+              const openDetail = (e: MouseEvent<HTMLTableRowElement>) => {
+                if (
+                  (e.target as HTMLElement).closest("a, button, input, select, label")
+                )
+                  return;
+                navigate({
+                  to: "/stock-takes/$stockTakeId",
+                  params: { stockTakeId: String(t.id) },
+                });
+              };
+              return (
+                <tr
+                  key={t.id}
+                  onClick={openDetail}
+                  className="cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50"
+                >
+                  <td className="p-2">
+                    <Link
+                      to="/stock-takes/$stockTakeId"
+                      params={{ stockTakeId: String(t.id) }}
+                      className="font-medium text-slate-900 hover:underline"
+                    >
+                      {formatDayMonth(t.started_at)}
+                    </Link>
+                  </td>
+                  <td className="p-2 text-slate-600">{t.scope_description}</td>
+                  <td className="p-2">
+                    {t.status === "open" ? (
+                      <Badge className="bg-amber-100 text-amber-800">
+                        Open {t.open_days} day{t.open_days === 1 ? "" : "s"}
+                      </Badge>
+                    ) : (
+                      <Badge className="bg-slate-100 text-slate-600">Closed</Badge>
+                    )}
+                  </td>
+                  <td className="p-2 tabular-nums">
+                    {t.counted_count} / {t.line_count}
+                  </td>
+                  <td className="p-2 tabular-nums">
+                    {t.conflict_count > 0 ? (
+                      <span className="font-medium text-amber-700">
+                        {t.conflict_count}
+                      </span>
+                    ) : (
+                      <span className="text-slate-400">—</span>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}
