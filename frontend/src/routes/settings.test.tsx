@@ -268,7 +268,7 @@ describe("settings page", () => {
     /** The General tab has several cards, each with its own Save — scope to the one under test. */
     const forecastCard = () => {
       const heading = screen.getByRole("heading", { name: "Materials forecasting" });
-      const card = heading.closest("div.rounded");
+      const card = heading.closest("section");
       if (!card) throw new Error("Could not find the forecasting card");
       return within(card as HTMLElement);
     };
@@ -354,7 +354,7 @@ describe("settings page", () => {
   describe("stock counting", () => {
     const stockCountCard = () => {
       const heading = screen.getByRole("heading", { name: "Stock counting" });
-      const card = heading.closest("div.rounded");
+      const card = heading.closest("section");
       if (!card) throw new Error("Could not find the stock counting card");
       return within(card as HTMLElement);
     };

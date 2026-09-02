@@ -8,6 +8,7 @@ import { ApiError } from "../../api/client";
 import { ConfirmDialog } from "../common/ConfirmDialog";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { SaveButton } from "../common/SaveButton";
+import { SettingsCard } from "../settings/SettingsCard";
 
 export interface ReferenceRow {
   id: number;
@@ -135,12 +136,7 @@ export function ReferenceDataTable<T extends ReferenceRow>({
 
   return (
     <DirtyPath segment={segment}>
-      <div className="flex flex-col gap-3 rounded border border-slate-300 p-3">
-        <div>
-          <h2 className="font-medium">{title}</h2>
-          {description && <p className="text-sm text-slate-500">{description}</p>}
-        </div>
-
+      <SettingsCard title={title} help={description}>
         <CreateForm title={title} api={api} queryKey={queryKey} />
 
         {rows && rows.length === 0 && <p className="text-sm text-slate-500">Nothing here yet.</p>}
@@ -207,7 +203,7 @@ export function ReferenceDataTable<T extends ReferenceRow>({
             ))}
           </ul>
         )}
-      </div>
+      </SettingsCard>
     </DirtyPath>
   );
 }

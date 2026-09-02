@@ -1,8 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { getSettings, openExternalUrl, saveSettings } from "../lib/tauri";
-import { healthCheck } from "../api/client";
+import { getSettings, openExternalUrl } from "../lib/tauri";
 import { platformsApi, type PlatformEnvironment } from "../api/platforms";
 import type { ListingPlatform } from "../api/types";
 import { CONNECTABLE_PLATFORMS, PLATFORM_LABELS } from "../lib/platforms";
@@ -31,9 +30,10 @@ import { ForecastSettings } from "../components/settings/ForecastSettings";
 import { StockCountSettings } from "../components/settings/StockCountSettings";
 import { DefaultKittingBomSettings } from "../components/settings/DefaultKittingBomSettings";
 import { BackupSettings } from "../components/settings/BackupSettings";
+import { ConnectionSettings } from "../components/settings/ConnectionSettings";
 import { Tabs, type TabDef } from "../components/common/Tabs";
 import { useShopIconUrl } from "../hooks/useShopIconUrl";
-import { DirtyPath, useDirtyRegistration } from "../hooks/useDirtyRegistry";
+import { DirtyPath } from "../hooks/useDirtyRegistry";
 
 const TAB_IDS = ["general", "integrations", "pricing", "reference", "backup", "connection"] as const;
 type TabId = (typeof TAB_IDS)[number];
@@ -63,33 +63,20 @@ const SETTINGS_TABS: TabDef[] = [
 function Settings() {
   const navigate = Route.useNavigate();
   const tabFromUrl = Route.useSearch().tab;
-  const [backendUrl, setBackendUrl] = useState("");
-  const [sharedPassword, setSharedPassword] = useState("");
-  const [savedBackendUrl, setSavedBackendUrl] = useState("");
-  const [savedSharedPassword, setSavedSharedPassword] = useState("");
-  const [showPassword, setShowPassword] = useState(false);
-  const [testResult, setTestResult] = useState<"idle" | "ok" | "fail" | "testing">("idle");
   const [settingsLoaded, setSettingsLoaded] = useState(false);
-  const [showConnectionFields, setShowConnectionFields] = useState(false);
+  const [hasConnection, setHasConnection] = useState(true);
 
   useEffect(() => {
     getSettings().then((s) => {
-      setBackendUrl(s.backendUrl ?? "");
-      setSharedPassword(s.sharedPassword ?? "");
-      setSavedBackendUrl(s.backendUrl ?? "");
-      setSavedSharedPassword(s.sharedPassword ?? "");
+      setHasConnection(Boolean(s.backendUrl && s.sharedPassword));
       setSettingsLoaded(true);
-      // Auto-provisioned connections (the common case for the packaged app) start
-      // collapsed — nothing for the user to do here. Show the fields up front only when
-      // there's actually something missing to fill in.
-      setShowConnectionFields(!s.backendUrl || !s.sharedPassword);
     });
   }, []);
 
   // General leads for everyone with a working connection — which, thanks to auto-provisioning,
   // is the overwhelmingly common case. Connection only jumps the queue when there's genuinely
-  // something to fill in, reusing the same condition that decides whether to expand its fields.
-  const needsConnectionSetup = settingsLoaded && (!backendUrl || !sharedPassword);
+  // something to fill in. The tab's own editable copy of the store lives in ConnectionSettings.
+  const needsConnectionSetup = settingsLoaded && !hasConnection;
   // Re-checked here rather than trusting validateSearch to have dropped an unknown value: a tab
   // id that matches nothing renders a page with a heading and no content, which is a far worse
   // failure than ignoring a bad URL. The default can't live in validateSearch anyway — it
@@ -101,100 +88,13 @@ function Settings() {
       : "general";
   const setActiveTab = (tab: string) => navigate({ search: { tab: tab as TabId } });
 
-  const isDirty = backendUrl !== savedBackendUrl || sharedPassword !== savedSharedPassword;
-  // This block already knew whether it was dirty; it just never told anyone. Registering it is
-  // what makes navigating away — or switching tabs, now that's a navigation — prompt instead of
-  // silently dropping a half-typed backend URL. Everything else (blocker, dialog) is already
-  // mounted at the root.
-  useDirtyRegistration("connection", "Connection settings", isDirty);
-
-  const handleSave = async () => {
-    await saveSettings({ backendUrl, sharedPassword });
-    setSavedBackendUrl(backendUrl);
-    setSavedSharedPassword(sharedPassword);
-  };
-
-  const handleTest = async () => {
-    setTestResult("testing");
-    const ok = await healthCheck(backendUrl);
-    setTestResult(ok ? "ok" : "fail");
-  };
-
   return (
     <div className="max-w-5xl flex flex-col gap-4">
       <h1 className="text-xl font-semibold">Settings</h1>
 
       <Tabs tabs={SETTINGS_TABS} active={activeTab} onChange={setActiveTab} />
 
-      {activeTab === "connection" && (
-        <div className="max-w-md flex flex-col gap-4">
-          {settingsLoaded && backendUrl && sharedPassword && (
-            <p className="text-sm text-slate-500">
-              Connected to <span className="font-medium text-slate-700">{backendUrl}</span>.
-            </p>
-          )}
-
-          <button
-            type="button"
-            onClick={() => setShowConnectionFields((v) => !v)}
-            className="self-start text-sm text-slate-600 underline"
-          >
-            {showConnectionFields ? "Hide" : "Show"} advanced connection settings
-          </button>
-
-          {showConnectionFields && (
-            <>
-              <label className="flex flex-col gap-1">
-                <span className="text-sm font-medium">Backend URL</span>
-                <input
-                  className="rounded border border-slate-300 px-3 py-2 disabled:bg-slate-50 disabled:text-slate-400"
-                  placeholder="http://homebase.tailnet-name.ts.net:8000"
-                  value={backendUrl}
-                  disabled={!settingsLoaded}
-                  onChange={(e) => setBackendUrl(e.target.value)}
-                />
-              </label>
-
-              <label className="flex flex-col gap-1">
-                <span className="text-sm font-medium">Shared password</span>
-                <div className="flex gap-2">
-                  <input
-                    type={showPassword ? "text" : "password"}
-                    className="flex-1 rounded border border-slate-300 px-3 py-2 disabled:bg-slate-50 disabled:text-slate-400"
-                    value={sharedPassword}
-                    disabled={!settingsLoaded}
-                    onChange={(e) => setSharedPassword(e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword((v) => !v)}
-                    className="rounded border border-slate-300 px-3 py-1.5 text-sm"
-                  >
-                    {showPassword ? "Hide" : "Show"}
-                  </button>
-                </div>
-              </label>
-
-              <div className="flex gap-2">
-                <button
-                  onClick={handleSave}
-                  disabled={!isDirty}
-                  className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Save
-                </button>
-                <button onClick={handleTest} className="rounded border border-slate-300 px-4 py-2">
-                  Test connection
-                </button>
-              </div>
-
-              {testResult === "testing" && <p className="text-slate-500">Testing…</p>}
-              {testResult === "ok" && <p className="text-green-600">Connected successfully.</p>}
-              {testResult === "fail" && <p className="text-red-600">Could not reach the backend.</p>}
-            </>
-          )}
-        </div>
-      )}
+      {activeTab === "connection" && <ConnectionSettings />}
 
       {activeTab === "integrations" && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">

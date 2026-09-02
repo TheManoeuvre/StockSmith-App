@@ -3,7 +3,9 @@ import { appSettingsApi, type ForecastSettings as ForecastSettingsValue } from "
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { ErrorBanner } from "../common/ErrorBanner";
+import { FieldRow } from "../common/FieldRow";
 import { SaveButton } from "../common/SaveButton";
+import { SettingsCard } from "./SettingsCard";
 
 /**
  * Buffered rather than auto-saved, for two reasons that both apply here.
@@ -54,65 +56,64 @@ export function ForecastSettings() {
   const setField = <K extends keyof ForecastSettingsValue>(field: K, next: ForecastSettingsValue[K]) =>
     setForm((prev) => (prev ? { ...prev, [field]: next } : prev));
 
+  const numberInput = "w-28 rounded border border-slate-300 px-2 py-1 text-right tabular-nums";
+
   return (
-    <div className="flex flex-col gap-3 rounded border border-slate-300 p-3">
-      <div>
-        <h2 className="font-medium">Materials forecasting</h2>
-        <p className="text-sm text-slate-500">
-          Controls the "Time to stockout" figures on the dashboard — how far back consumption history is
-          averaged, and the two weeks-of-cover thresholds that decide when a material shows up as a warning
-          or critical alert.
-        </p>
-      </div>
-      <div className="grid grid-cols-2 gap-3 sm:max-w-md">
-        <label className="flex flex-col gap-1 text-sm">
-          Warning threshold (weeks)
+    <SettingsCard
+      title="Materials forecasting"
+      help={
+        <>
+          Controls the "Time to stockout" figures on the dashboard — how far back consumption
+          history is averaged, and the two weeks-of-cover thresholds that decide when a material
+          shows up as a warning or critical alert.
+        </>
+      }
+    >
+      <div className="flex flex-col gap-2">
+        <FieldRow label="Warning threshold (weeks)">
           <input
             type="number"
             min="0"
             step="0.5"
-            className="rounded border border-slate-300 px-2 py-1"
+            className={numberInput}
             value={form.forecast_warning_weeks}
             onChange={(e) => setField("forecast_warning_weeks", e.target.value)}
           />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          Critical threshold (weeks)
+        </FieldRow>
+        <FieldRow label="Critical threshold (weeks)">
           <input
             type="number"
             min="0"
             step="0.5"
-            className="rounded border border-slate-300 px-2 py-1"
+            className={numberInput}
             value={form.forecast_critical_weeks}
             onChange={(e) => setField("forecast_critical_weeks", e.target.value)}
           />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          Lookback window (weeks)
+        </FieldRow>
+        <FieldRow label="Lookback window (weeks)">
           <input
             type="number"
             min="1"
             step="1"
-            className="rounded border border-slate-300 px-2 py-1"
+            className={numberInput}
             value={form.forecast_lookback_weeks}
             onChange={(e) => setField("forecast_lookback_weeks", Number(e.target.value))}
           />
-        </label>
-        <label className="flex flex-col gap-1 text-sm">
-          Default lead time (weeks)
+        </FieldRow>
+        <FieldRow label="Default lead time (weeks)">
           <input
             type="number"
             min="0"
             step="0.5"
-            className="rounded border border-slate-300 px-2 py-1"
+            className={numberInput}
             value={form.default_lead_time_weeks}
             onChange={(e) => setField("default_lead_time_weeks", e.target.value)}
           />
-        </label>
+        </FieldRow>
       </div>
       <p className="text-xs text-slate-500">
-        Default lead time estimates when an on-order purchase will arrive if it wasn't given its own expected
-        arrival date — used so a distant order doesn't mask a material about to run out.
+        Default lead time estimates when an on-order purchase will arrive if it wasn't given its own
+        expected arrival date — used so a distant order doesn't mask a material about to run out.
       </p>
       <div className="flex items-center gap-2">
         <SaveButton
@@ -125,6 +126,6 @@ export function ForecastSettings() {
         </SaveButton>
       </div>
       <ErrorBanner error={updateMutation.error} />
-    </div>
+    </SettingsCard>
   );
 }
