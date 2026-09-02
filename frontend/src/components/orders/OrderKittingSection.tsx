@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef, useState } from "react";
+import { useMemo } from "react";
 import { materialsApi } from "../../api/materials";
 import { ordersApi } from "../../api/orders";
 import type { OrderKittingOverrideLine } from "../../api/types";
@@ -7,7 +7,16 @@ import { MaterialSelect } from "../materials/MaterialSelect";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { SaveIndicator } from "../common/SaveIndicator";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
+import { useEditableCopy } from "../../hooks/useEditableCopy";
+import { useManagedSave } from "../../hooks/useDirtyRegistry";
 import { formatMoney } from "../../lib/money";
+
+interface KittingEdits {
+  /** qty override per auto-computed material line, keyed by material_id. "" = inherit. */
+  overrides: Record<number, string>;
+  /** Extra lines added on top of the auto set. */
+  extras: OrderKittingOverrideLine[];
+}
 
 // Lets an order override its auto-computed aggregate kitting requirement — e.g. two lines
 // that each nominally need a label only need one shared label for the order as a whole.
@@ -27,26 +36,33 @@ export function OrderKittingSection({ orderId, currency }: { orderId: number; cu
   });
   const { data: materials } = useQuery({ queryKey: ["materials"], queryFn: materialsApi.list });
 
-  const [overrides, setOverrides] = useState<Record<number, string>>({});
-  const [extraOverrides, setExtraOverrides] = useState<OrderKittingOverrideLine[]>([]);
-  const seeded = useRef(false);
-
-  useEffect(() => {
-    if (!summary || seeded.current) return;
+  const seed = useMemo<KittingEdits | undefined>(() => {
+    if (!summary) return undefined;
     const autoMaterialIds = new Set(summary.lines.map((l) => l.material_id));
-    const next: Record<number, string> = {};
+    const overrides: Record<number, string> = {};
     const extras: OrderKittingOverrideLine[] = [];
     for (const o of summary.overrides) {
       if (o.replaces_material_id == null && autoMaterialIds.has(o.material_id)) {
-        next[o.material_id] = o.qty_required;
+        overrides[o.material_id] = o.qty_required;
       } else {
         extras.push(o);
       }
     }
-    setOverrides(next);
-    setExtraOverrides(extras);
-    seeded.current = true;
+    return { overrides, extras };
   }, [summary]);
+
+  const { value, setValue, isDirty, markSaved, revert } = useEditableCopy<KittingEdits>({
+    key: "order-kitting",
+    label: "Kitting overrides",
+    initial: { overrides: {}, extras: [] },
+    seed,
+    seedKey: orderId,
+  });
+  const { overrides, extras } = value;
+  const setOverride = (materialId: number, qty: string) =>
+    setValue((prev) => ({ ...prev, overrides: { ...prev.overrides, [materialId]: qty } }));
+  const setExtras = (updater: (prev: OrderKittingOverrideLine[]) => OrderKittingOverrideLine[]) =>
+    setValue((prev) => ({ ...prev, extras: updater(prev.extras) }));
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ["orders", orderId, "kitting-overrides"] });
@@ -64,29 +80,36 @@ export function OrderKittingSection({ orderId, currency }: { orderId: number; cu
             qty_required: qty,
             replaces_material_id: null,
           })),
-        ...extraOverrides,
+        ...extras,
       ];
       return ordersApi.replaceKittingOverrides(orderId, payload);
     },
-    onSuccess: invalidate,
+    onSuccess: () => {
+      markSaved();
+      invalidate();
+    },
+  });
+
+  const saveStatus = useSaveStatus(saveMutation.status);
+  const managed = useManagedSave("order-kitting", {
+    save: () => saveMutation.mutate(),
+    revert,
   });
 
   const addExtraOverride = () => {
-    const usedIds = new Set([...Object.keys(overrides).map(Number), ...extraOverrides.map((o) => o.material_id)]);
+    const usedIds = new Set([
+      ...Object.keys(overrides).map(Number),
+      ...extras.map((o) => o.material_id),
+    ]);
     const firstUnused = materials?.find((m) => !usedIds.has(m.id));
     if (!firstUnused) return;
-    setExtraOverrides((prev) => [...prev, { material_id: firstUnused.id, qty_required: "1", replaces_material_id: null }]);
+    setExtras((prev) => [
+      ...prev,
+      { material_id: firstUnused.id, qty_required: "1", replaces_material_id: null },
+    ]);
   };
 
-  const updateExtraOverride = (index: number, patch: Partial<OrderKittingOverrideLine>) => {
-    setExtraOverrides((prev) => prev.map((o, i) => (i === index ? { ...o, ...patch } : o)));
-  };
-
-  const removeExtraOverride = (index: number) => setExtraOverrides((prev) => prev.filter((_, i) => i !== index));
-
-  const saveStatus = useSaveStatus(saveMutation.status);
-
-  if (!summary || (summary.lines.length === 0 && extraOverrides.length === 0)) {
+  if (!summary || (summary.lines.length === 0 && extras.length === 0)) {
     return null;
   }
 
@@ -119,7 +142,7 @@ export function OrderKittingSection({ orderId, currency }: { orderId: number; cu
                   className="w-20 rounded border border-slate-300 px-2 py-1"
                   placeholder={line.auto_qty}
                   value={overrides[line.material_id] ?? ""}
-                  onChange={(e) => setOverrides((prev) => ({ ...prev, [line.material_id]: e.target.value }))}
+                  onChange={(e) => setOverride(line.material_id, e.target.value)}
                 />
               </td>
               <td className="p-2">{line.effective_qty}</td>
@@ -142,7 +165,7 @@ export function OrderKittingSection({ orderId, currency }: { orderId: number; cu
               </td>
             </tr>
           ))}
-          {extraOverrides.map((o, i) => {
+          {extras.map((o, i) => {
             const material = materials?.find((m) => m.id === o.material_id);
             return (
               <tr key={`extra-${i}`} className="border-b border-slate-100 bg-slate-50">
@@ -150,7 +173,9 @@ export function OrderKittingSection({ orderId, currency }: { orderId: number; cu
                   <MaterialSelect
                     materials={materials ?? []}
                     value={o.material_id}
-                    onChange={(material_id) => updateExtraOverride(i, { material_id })}
+                    onChange={(material_id) =>
+                      setExtras((prev) => prev.map((x, j) => (j === i ? { ...x, material_id } : x)))
+                    }
                   />
                   {!material && <span className="text-xs text-slate-400">Additional line</span>}
                 </td>
@@ -159,7 +184,11 @@ export function OrderKittingSection({ orderId, currency }: { orderId: number; cu
                   <input
                     className="w-20 rounded border border-slate-300 px-2 py-1"
                     value={o.qty_required}
-                    onChange={(e) => updateExtraOverride(i, { qty_required: e.target.value })}
+                    onChange={(e) =>
+                      setExtras((prev) =>
+                        prev.map((x, j) => (j === i ? { ...x, qty_required: e.target.value } : x)),
+                      )
+                    }
                   />
                 </td>
                 {/* Effective/Cost/Reserved stay blank until saved — these rows aren't in the
@@ -168,7 +197,10 @@ export function OrderKittingSection({ orderId, currency }: { orderId: number; cu
                 <td className="p-2 text-slate-400">—</td>
                 <td className="p-2 text-slate-400">—</td>
                 <td className="p-2">
-                  <button onClick={() => removeExtraOverride(i)} className="text-xs text-red-600">
+                  <button
+                    onClick={() => setExtras((prev) => prev.filter((_, j) => j !== i))}
+                    className="text-xs text-red-600"
+                  >
                     Remove
                   </button>
                 </td>
@@ -190,10 +222,18 @@ export function OrderKittingSection({ orderId, currency }: { orderId: number; cu
         <button onClick={addExtraOverride} className="rounded border border-slate-300 px-3 py-1.5 text-sm">
           + Add material override
         </button>
-        <button onClick={() => saveMutation.mutate()} className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white">
-          Save kitting overrides
-        </button>
-        <SaveIndicator status={saveStatus} />
+        {!managed && (
+          <>
+            <button
+              onClick={() => saveMutation.mutate()}
+              disabled={!isDirty}
+              className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+            >
+              Save kitting overrides
+            </button>
+            <SaveIndicator status={saveStatus} />
+          </>
+        )}
       </div>
       <ErrorBanner error={saveMutation.error} />
     </div>

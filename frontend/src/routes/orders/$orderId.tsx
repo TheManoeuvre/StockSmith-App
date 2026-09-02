@@ -1,48 +1,56 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { ordersApi } from "../../api/orders";
 import { productsApi } from "../../api/products";
-import { shippingProfilesApi } from "../../api/shippingProfiles";
-import type { Order, OrderLine, OrderStatus } from "../../api/types";
-import { useCallback } from "react";
+import type { Order, OrderLine } from "../../api/types";
 import { Badge } from "../../components/common/Badge";
 import { DetailPanel } from "../../components/common/DetailPanel";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
+import { Stat } from "../../components/common/Stat";
+import { Tabs, type TabDef } from "../../components/common/Tabs";
 import { useSiblingNav } from "../../hooks/useSiblingNav";
+import { useEditableCopy } from "../../hooks/useEditableCopy";
+import {
+  SlideOverManagedContext,
+  useCommittableDirty,
+  useDirtyRegistryApi,
+  useManagedSave,
+} from "../../hooks/useDirtyRegistry";
 import { CancelOrderDialog } from "../../components/orders/CancelOrderDialog";
 import { OrderKittingSection } from "../../components/orders/OrderKittingSection";
-import type { TabDef } from "../../components/common/Tabs";
+import { OrderShippingForm } from "../../components/orders/OrderShippingForm";
+import { OrderTimeline } from "../../components/orders/OrderTimeline";
 import { formatMoney } from "../../lib/money";
-import { PLATFORM_LABELS } from "../../lib/platforms";
+import { orderFulfilment } from "../../lib/orderFulfilment";
+import { PLATFORM_COLORS, PLATFORM_LABELS } from "../../lib/platforms";
+import { STATUS_CLASSES, STATUS_LABELS } from "./route";
 
-const TAB_IDS = ["lines", "financials", "shipping"] as const;
+const TAB_IDS = ["fulfilment", "financials", "shipping", "timeline"] as const;
 type TabId = (typeof TAB_IDS)[number];
 
 export const Route = createFileRoute("/orders/$orderId")({
-  component: OrderDetail,
-  // Same reasoning as the product page: keeping the tab in the URL makes switching one a
-  // real router navigation, so the root unsaved-changes blocker covers leaving a dirty
-  // Shipping form without this page knowing the guard exists.
+  component: OrderDetailRoute,
+  // The tab lives in the URL so switching one is a real router navigation — the root
+  // unsaved-changes blocker then covers leaving a dirty sub-form without this page wiring a
+  // guard itself.
   validateSearch: (search: Record<string, unknown>): { tab?: TabId } => {
-    const tab = search.tab;
+    // "lines" was this tab's id before it was renamed "fulfilment".
+    const tab = search.tab === "lines" ? "fulfilment" : search.tab;
     return TAB_IDS.includes(tab as TabId) ? { tab: tab as TabId } : {};
   },
 });
 
-const STATUS_LABELS: Record<OrderStatus, string> = {
-  pending: "Pending",
-  allocated: "Allocated",
-  shipped: "Shipped",
-  cancelled: "Cancelled",
-};
-
-const STATUS_CLASSES: Record<OrderStatus, string> = {
-  pending: "bg-amber-100 text-amber-800",
-  allocated: "bg-blue-100 text-blue-800",
-  shipped: "bg-green-100 text-green-800",
-  cancelled: "bg-slate-200 text-slate-600",
-};
+// The slide-over replaces every sub-form's own Save button with one footer Save (see
+// OrderFooter and useManagedSave); providing the context a layer above the body is what lets
+// those forms read it.
+function OrderDetailRoute() {
+  return (
+    <SlideOverManagedContext.Provider value={true}>
+      <OrderDetail />
+    </SlideOverManagedContext.Provider>
+  );
+}
 
 function OrderDetail() {
   const { orderId } = Route.useParams();
@@ -77,8 +85,8 @@ function OrderDetail() {
   );
 
   const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ["orders", id] });
     queryClient.invalidateQueries({ queryKey: ["orders"] });
+    queryClient.invalidateQueries({ queryKey: ["order-counts"] });
     queryClient.invalidateQueries({ queryKey: ["products"] });
     queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
   };
@@ -99,10 +107,35 @@ function OrderDetail() {
   const deleteMutation = useMutation({
     mutationFn: () => ordersApi.remove(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["orders"] });
-      queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
+      invalidate();
       navigate({ to: "/orders" });
     },
+  });
+
+  // Editable notes — the one plain field the order carries that PATCH accepts.
+  const notesSeed = useMemo(() => order?.notes ?? "", [order?.notes]);
+  const {
+    value: notes,
+    setValue: setNotes,
+    markSaved: markNotesSaved,
+    revert: revertNotes,
+  } = useEditableCopy<string>({
+    key: "order-notes",
+    label: "Notes",
+    initial: "",
+    seed: order ? notesSeed : undefined,
+    seedKey: id,
+  });
+  const notesMutation = useMutation({
+    mutationFn: () => ordersApi.update(id, { notes: notes || null }),
+    onSuccess: () => {
+      markNotesSaved();
+      queryClient.invalidateQueries({ queryKey: ["orders", id] });
+    },
+  });
+  useManagedSave("order-notes", {
+    save: () => notesMutation.mutate(),
+    revert: revertNotes,
   });
 
   if (!order) {
@@ -113,34 +146,33 @@ function OrderDetail() {
     );
   }
 
-  const canCancel = order.status !== "cancelled";
   const canShip = order.status === "pending" || order.status === "allocated";
-  const canAllocate =
-    order.status === "pending" || order.status === "allocated";
+  const canAllocate = order.status === "pending" || order.status === "allocated";
   const anyAllocated = order.lines.some((l) => l.allocated_qty > l.shipped_qty);
-  // Mirrors the backend's own check (routers/orders.py delete_order) — nothing allocated
-  // or shipped on any line, so deleting can't silently strand reserved/shipped stock.
+  const canCancel = order.status !== "cancelled";
+  // Mirrors the backend delete check — nothing allocated or shipped on any line.
   const canDelete = order.lines.every(
     (l) => l.allocated_qty === 0 && l.shipped_qty === 0,
   );
-  // Shipping only applies to a manual order that hasn't shipped yet — same condition the
-  // editor itself was gated on before this became a tab.
-  const showShippingTab = order.platform === null && order.status !== "shipped";
+
+  const activeTab: TabId = requestedTab ?? "fulfilment";
   const tabs: TabDef[] = [
-    { id: "lines", label: "Lines" },
+    { id: "fulfilment", label: "Fulfilment" },
     { id: "financials", label: "Financials" },
-    ...(showShippingTab ? [{ id: "shipping", label: "Shipping" }] : []),
+    { id: "shipping", label: "Shipping" },
+    { id: "timeline", label: "Timeline" },
   ];
-  const activeTab: TabId =
-    requestedTab && (requestedTab !== "shipping" || showShippingTab)
-      ? requestedTab
-      : "lines";
+
+  const items = order.lines.reduce((sum, l) => sum + l.ordered_qty, 0);
+  const discount =
+    order.discount_amount != null ? Number(order.discount_amount) : 0;
+  const fulfilment = orderFulfilment(order);
+  const placed = new Date(order.order_placed_at).toLocaleString();
+  const channelLabel = order.platform ? PLATFORM_LABELS[order.platform] : "Manual";
 
   return (
     <DetailPanel
-      title={
-        order.buyer_name ?? order.external_order_id ?? `Order #${order.id}`
-      }
+      title={order.buyer_name ?? order.external_order_id ?? `Order #${order.id}`}
       onClose={closePanel}
       onPrev={prevId ? goPrev : undefined}
       onNext={nextId ? goNext : undefined}
@@ -149,9 +181,55 @@ function OrderDetail() {
           {STATUS_LABELS[order.status]}
         </Badge>
       }
-      tabs={tabs}
-      activeTab={activeTab}
-      onTabChange={setActiveTab}
+      footer={
+        <OrderFooter
+          actions={
+            <>
+              {canAllocate && (
+                <button
+                  onClick={() => allocateMutation.mutate()}
+                  disabled={allocateMutation.isPending}
+                  className="rounded border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50"
+                >
+                  Allocate
+                </button>
+              )}
+              {canShip && (
+                <button
+                  onClick={() => shipMutation.mutate()}
+                  disabled={!anyAllocated || shipMutation.isPending}
+                  className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
+                >
+                  Ship
+                </button>
+              )}
+              {canCancel && (
+                <button
+                  onClick={() => setShowCancelDialog(true)}
+                  className="rounded border border-red-300 px-3 py-1.5 text-sm text-red-600"
+                >
+                  {order.lines.some((l) => l.shipped_qty > 0)
+                    ? "Cancel / return"
+                    : "Cancel"}
+                </button>
+              )}
+              {canDelete && (
+                <button
+                  onClick={() => {
+                    if (window.confirm("Delete this order? This cannot be undone.")) {
+                      deleteMutation.mutate();
+                    }
+                  }}
+                  disabled={deleteMutation.isPending}
+                  className="rounded border border-red-300 px-3 py-1.5 text-sm text-red-600 disabled:opacity-50"
+                >
+                  Delete
+                </button>
+              )}
+            </>
+          }
+        />
+      }
     >
       <div className="flex flex-col gap-6">
         {order.sync_issue && (
@@ -160,59 +238,72 @@ function OrderDetail() {
             {order.sync_issue}
           </div>
         )}
-
         {order.pending_marketplace_cancellation && (
           <div className="flex items-center justify-between rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
             <span>
-              <span className="font-medium">
-                {order.platform
-                  ? PLATFORM_LABELS[order.platform]
-                  : "The marketplace"}
-              </span>{" "}
-              reports this order as cancelled. Nothing has been changed locally
-              — review and confirm below.
+              <span className="font-medium">{channelLabel}</span> reports this
+              order as cancelled. Nothing has been changed locally — review and
+              confirm.
             </span>
             <button
               onClick={() => setShowCancelDialog(true)}
               className="rounded bg-amber-600 px-3 py-1.5 text-white"
             >
-              Review cancellation
+              Review
             </button>
           </div>
         )}
 
-        <div className="flex flex-wrap gap-6 rounded bg-white p-4 text-sm shadow-sm">
-          <div>
-            <p className="text-slate-500">Order #</p>
-            <p>{order.id}</p>
-          </div>
-          <div>
-            <p className="text-slate-500">Platform</p>
-            <p>
-              {order.platform ? PLATFORM_LABELS[order.platform] : "Manual"}
-              {order.external_order_id ? ` (${order.external_order_id})` : ""}
-            </p>
-          </div>
-          <div>
-            <p className="text-slate-500">Placed</p>
-            <p>{new Date(order.order_placed_at).toLocaleString()}</p>
-          </div>
-          {order.notes && (
-            <div>
-              <p className="text-slate-500">Notes</p>
-              <p>{order.notes}</p>
+        {/* Identity + headline figures — on every tab. */}
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-3">
+            <div
+              className={`flex h-16 w-16 shrink-0 items-center justify-center rounded border text-xs font-semibold ${
+                order.platform
+                  ? PLATFORM_COLORS[order.platform].muted
+                  : "border-slate-200 bg-slate-50 text-slate-500"
+              }`}
+            >
+              {channelLabel}
             </div>
-          )}
+            <div className="min-w-0">
+              <p className="truncate text-sm font-medium text-slate-700">
+                Order #{order.id}
+                {order.external_order_id ? ` · ${order.external_order_id}` : ""}
+              </p>
+              <p className="truncate text-[12.5px] text-slate-500">
+                {channelLabel} · {placed}
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-3 gap-3">
+            <Stat label="Items" value={String(items)} sub={`${order.lines.length} line${order.lines.length === 1 ? "" : "s"}`} />
+            <Stat
+              label="Order value"
+              value={formatMoney(order.grand_total ?? order.subtotal, order.currency)}
+              sub={discount > 0 ? `after ${formatMoney(order.discount_amount, order.currency)} discount` : "before fees"}
+            />
+            <Stat
+              label="Fulfilment"
+              value={fulfilment.label}
+              sub={fulfilment.detail}
+              tone="highlight"
+              valueClassName={fulfilment.toneClass}
+            />
+          </div>
         </div>
 
-        {activeTab === "financials" && <OrderFinancialsPanel order={order} />}
+        <Tabs tabs={tabs} active={activeTab} onChange={setActiveTab} />
 
-        {activeTab === "shipping" && showShippingTab && (
-          <ManualShippingEditor order={order} onSaved={invalidate} />
-        )}
-
-        {activeTab === "lines" && (
+        {activeTab === "fulfilment" && (
           <>
+            {order.lines.some((l) => l.needs_mapping) && (
+              <div className="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                Some lines couldn't be matched to a product — map them below, or
+                the order can't reserve stock.
+              </div>
+            )}
             <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">
               <thead>
                 <tr className="border-b border-slate-200">
@@ -239,67 +330,47 @@ function OrderDetail() {
               </tbody>
             </table>
             <p className="-mt-2 text-xs text-slate-500">
-              Value and cost cover all ordered units. The panel above counts
+              Value and cost cover all ordered units; the Financials tab counts
               only shipped units.
             </p>
 
             <OrderKittingSection orderId={id} currency={order.currency} />
+
+            <label className="flex items-start gap-3">
+              <span className="mt-1 w-36 shrink-0 text-sm text-slate-600">Notes</span>
+              <textarea
+                rows={3}
+                className="min-w-0 flex-1 resize-y rounded border border-slate-300 px-2 py-1 text-sm"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+              />
+            </label>
+
+            <ErrorBanner
+              error={
+                shipMutation.error ??
+                allocateMutation.error ??
+                unassignMutation.error ??
+                deleteMutation.error ??
+                notesMutation.error
+              }
+            />
           </>
         )}
 
-        <div className="flex gap-2">
-          {canAllocate && (
-            <button
-              onClick={() => allocateMutation.mutate()}
-              disabled={allocateMutation.isPending}
-              className="rounded border border-slate-300 px-4 py-2 disabled:opacity-50"
-            >
-              Allocate stock
-            </button>
-          )}
-          {canShip && (
-            <button
-              onClick={() => shipMutation.mutate()}
-              disabled={!anyAllocated}
-              className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-50"
-            >
-              Ship allocated units
-            </button>
-          )}
-          {canCancel && (
-            <button
-              onClick={() => setShowCancelDialog(true)}
-              className="rounded border border-red-300 px-4 py-2 text-red-600"
-            >
-              {order.lines.some((l) => l.shipped_qty > 0)
-                ? "Cancel / process return"
-                : "Cancel order"}
-            </button>
-          )}
-          {canDelete && (
-            <button
-              onClick={() => {
-                if (
-                  window.confirm("Delete this order? This cannot be undone.")
-                ) {
-                  deleteMutation.mutate();
-                }
-              }}
-              disabled={deleteMutation.isPending}
-              className="rounded border border-red-300 px-4 py-2 text-red-600 disabled:opacity-50"
-            >
-              Delete order
-            </button>
-          )}
-        </div>
-        <ErrorBanner
-          error={
-            shipMutation.error ??
-            allocateMutation.error ??
-            unassignMutation.error ??
-            deleteMutation.error
-          }
-        />
+        {activeTab === "financials" && <OrderFinancialsPanel order={order} />}
+
+        {activeTab === "shipping" && (
+          <OrderShippingForm
+            order={order}
+            onSaved={() => {
+              queryClient.invalidateQueries({ queryKey: ["orders", id] });
+              queryClient.invalidateQueries({ queryKey: ["orders"] });
+            }}
+          />
+        )}
+
+        {activeTab === "timeline" && <OrderTimeline order={order} />}
 
         {showCancelDialog && (
           <CancelOrderDialog
@@ -313,6 +384,38 @@ function OrderDetail() {
         )}
       </div>
     </DetailPanel>
+  );
+}
+
+/** The persistent footer: order actions on the left, the one Save/Revert on the right. */
+function OrderFooter({ actions }: { actions: ReactNode }) {
+  const { isDirty } = useCommittableDirty();
+  const registry = useDirtyRegistryApi();
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center gap-2">{actions}</div>
+      <div className="flex items-center gap-2">
+        <span className="text-[12px] text-slate-500">
+          {isDirty ? "Unsaved changes" : "No changes"}
+        </span>
+        <button
+          type="button"
+          disabled={!isDirty}
+          onClick={() => registry.revertDirtyUnder("")}
+          className="rounded border border-slate-300 px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Revert
+        </button>
+        <button
+          type="button"
+          disabled={!isDirty}
+          onClick={() => registry.commitDirtyUnder("")}
+          className="rounded bg-slate-900 px-4 py-1.5 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Save
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -367,11 +470,6 @@ function OrderFinancialsPanel({ order }: { order: Order }) {
             ) : order.payment_fees != null ? (
               `-${formatMoney(order.payment_fees, currency)}`
             ) : (
-              // Deliberately NOT "Not yet settled". This renders whenever no fee figure
-              // has been stored, and the app cannot tell an order the marketplace hasn't
-              // billed yet from one whose fee lookup failed — which is precisely how
-              // every eBay order sitting behind a 403'd Sell Finances call read as
-              // "settling" indefinitely. Say what is actually known.
               <span
                 className="text-slate-500"
                 title={`StockSmith has no fee figure from this marketplace yet. Either it hasn't billed the order, or the fee lookup is failing — check Settings > Integrations.`}
@@ -394,8 +492,6 @@ function OrderFinancialsPanel({ order }: { order: Order }) {
                 ? "Not recorded"
                 : "—"}
           </p>
-          {/* The profile name is an identifier, not a figure. In the header it made one
-              column twice the width of the rest and put a proper noun in a row of money. */}
           {order.shipping_profile_name && (
             <p className="text-xs text-slate-400">
               {order.shipping_profile_name}
@@ -446,86 +542,6 @@ function OrderFinancialsPanel({ order }: { order: Order }) {
   );
 }
 
-function ManualShippingEditor({
-  order,
-  onSaved,
-}: {
-  order: Order;
-  onSaved: () => void;
-}) {
-  const { data: shippingProfiles } = useQuery({
-    queryKey: ["settings", "shipping-profiles"],
-    // Wrapped, not passed by reference: React Query calls queryFn with a context object,
-    // which as a positional arg would read as includeArchived=true and put retired
-    // profiles back into this picker.
-    queryFn: () => shippingProfilesApi.list(),
-  });
-  const profiles = shippingProfiles ?? [];
-
-  const [shippingProfileId, setShippingProfileId] = useState(
-    order.shipping_profile_id != null ? String(order.shipping_profile_id) : "",
-  );
-  const [shippingCharged, setShippingCharged] = useState(
-    order.shipping_charged ?? "",
-  );
-
-  const saveMutation = useMutation({
-    mutationFn: () =>
-      ordersApi.update(order.id, {
-        shipping_profile_id: shippingProfileId
-          ? Number(shippingProfileId)
-          : null,
-        shipping_charged: shippingCharged || null,
-      }),
-    onSuccess: onSaved,
-  });
-
-  return (
-    <div className="rounded bg-white p-4 text-sm shadow-sm">
-      <h2 className="mb-3 text-sm font-medium text-slate-600">Shipping</h2>
-      <div className="flex flex-wrap items-end gap-4">
-        <label className="flex flex-col gap-1">
-          <span className="text-slate-500">Shipping profile</span>
-          <select
-            className="w-48 rounded border border-slate-300 px-2 py-1"
-            value={shippingProfileId}
-            onChange={(e) => {
-              const id = e.target.value;
-              setShippingProfileId(id);
-              const profile = profiles.find((p) => String(p.id) === id);
-              if (profile) setShippingCharged(profile.price);
-            }}
-          >
-            <option value="">No profile</option>
-            {profiles.map((p) => (
-              <option key={p.id} value={p.id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-slate-500">Shipping charged</span>
-          <input
-            className="w-28 rounded border border-slate-300 px-2 py-1"
-            placeholder="0.00"
-            value={shippingCharged}
-            onChange={(e) => setShippingCharged(e.target.value)}
-          />
-        </label>
-        <button
-          onClick={() => saveMutation.mutate()}
-          disabled={saveMutation.isPending}
-          className="rounded bg-slate-900 px-3 py-1.5 text-white disabled:opacity-50"
-        >
-          Save
-        </button>
-      </div>
-      <ErrorBanner error={saveMutation.error} />
-    </div>
-  );
-}
-
 function OrderLineRow({
   line,
   currency,
@@ -536,12 +552,6 @@ function OrderLineRow({
   onUnassign: (qty: number) => void;
 }) {
   const unassignable = line.allocated_qty - line.shipped_qty;
-  // Both on ordered_qty, deliberately. Value has to be, to reconcile with the receipt
-  // subtotal, and a row that priced revenue over all ordered units but cost over only the
-  // shipped ones read as pure margin mid-fulfilment. Everything below the financials panel
-  // is forward-looking; the panel itself counts only what has shipped.
-  //
-  // Materials only — packaging is an order-level cost, shown in the Kitting section.
   const lineValue =
     line.unit_price != null ? Number(line.unit_price) * line.ordered_qty : null;
   const lineCost =
