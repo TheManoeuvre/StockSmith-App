@@ -10,7 +10,7 @@ import { ErrorBanner } from "../common/ErrorBanner";
 import { SaveButton } from "../common/SaveButton";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
-import { DirtyPath } from "../../hooks/useDirtyRegistry";
+import { DirtyPath, useManagedSave } from "../../hooks/useDirtyRegistry";
 import { useGuard } from "../../hooks/useUnsavedChangesGuard";
 import { PlatformSyncBadge } from "./PlatformSyncBadge";
 import { BomOverrideEditor } from "./BomOverrideEditor";
@@ -191,14 +191,19 @@ function VariantRow({
     () => ({ name: variant.variant_name, skuSuffix: variant.sku_suffix ?? "" }),
     [variant.variant_name, variant.sku_suffix]
   );
-  const { value: renameValue, setValue: setRenameValue, isDirty: renameDirty, markSaved: markRenameSaved } =
-    useEditableCopy<{ name: string; skuSuffix: string }>({
-      key: "rename",
-      label: `Variant "${variant.variant_name}"`,
-      initial: seed,
-      seed,
-      seedKey: variant.id,
-    });
+  const {
+    value: renameValue,
+    setValue: setRenameValue,
+    isDirty: renameDirty,
+    markSaved: markRenameSaved,
+    revert: revertRename,
+  } = useEditableCopy<{ name: string; skuSuffix: string }>({
+    key: "rename",
+    label: `Variant "${variant.variant_name}"`,
+    initial: seed,
+    seed,
+    seedKey: variant.id,
+  });
   const { name, skuSuffix } = renameValue;
   const setName = (next: string) => setRenameValue((prev) => ({ ...prev, name: next }));
   const setSkuSuffix = (next: string) => setRenameValue((prev) => ({ ...prev, skuSuffix: next }));
@@ -223,6 +228,10 @@ function VariantRow({
 
   const badges = attributeBadges(variant);
   const renameStatus = useSaveStatus(renameMutation.status);
+  const renameManaged = useManagedSave("rename", {
+    save: () => renameMutation.mutate(),
+    revert: revertRename,
+  });
   const sellable = sellableSummary(variant, { pushBuildableCapacity });
 
   return (
@@ -298,15 +307,17 @@ function VariantRow({
                 {variant.full_sku ?? "—"}
               </span>
             </label>
-            <SaveButton
-              isDirty={renameDirty}
-              isPending={renameMutation.isPending}
-              status={renameStatus}
-              onClick={() => renameMutation.mutate()}
-              className="rounded border border-slate-300 px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Save
-            </SaveButton>
+            {!renameManaged && (
+              <SaveButton
+                isDirty={renameDirty}
+                isPending={renameMutation.isPending}
+                status={renameStatus}
+                onClick={() => renameMutation.mutate()}
+                className="rounded border border-slate-300 px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Save
+              </SaveButton>
+            )}
             <button
               // Never counted dirty (it saves immediately), but disabling can hide the row and
               // so unmount the editors inside it.

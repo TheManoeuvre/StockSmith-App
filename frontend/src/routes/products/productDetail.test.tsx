@@ -299,26 +299,24 @@ describe("product detail page", () => {
     );
   });
 
-  it("keeps each table's Save independent", async () => {
+  it("arms the one slide-over Save when a BOM table is edited", async () => {
     const user = userEvent.setup();
     await renderProductPage();
     await user.click(bomTab());
 
-    const buildSave = await screen.findByRole("button", {
-      name: /save build bom/i,
-    });
-    const kittingSave = screen.getByRole("button", {
-      name: /save kitting bom/i,
-    });
-    expect(buildSave).toBeDisabled();
-    expect(kittingSave).toBeDisabled();
+    // The slide-over has a single footer Save now, not one per editor.
+    expect(
+      screen.queryByRole("button", { name: /save build bom/i }),
+    ).not.toBeInTheDocument();
+    const footerSave = screen.getByRole("button", { name: "Save" });
+    expect(footerSave).toBeDisabled();
 
     const qty = await buildQtyInput();
     await user.clear(qty);
     await user.type(qty, "3");
 
-    await waitFor(() => expect(buildSave).toBeEnabled());
-    expect(kittingSave).toBeDisabled(); // editing one table must not arm the other
+    await waitFor(() => expect(footerSave).toBeEnabled());
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
   });
 
   it("warns before a tab switch would discard edits, and stays put on Keep editing", async () => {
@@ -395,9 +393,7 @@ describe("product detail page", () => {
     const qty = await buildQtyInput();
     await user.clear(qty);
     await user.type(qty, "3");
-    await user.click(
-      await screen.findByRole("button", { name: /save build bom/i }),
-    );
+    await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() =>
       expect(
@@ -413,6 +409,27 @@ describe("product detail page", () => {
     expect(
       screen.queryByRole("button", { name: /keep editing/i }),
     ).not.toBeInTheDocument();
+  });
+
+  it("the footer Revert discards a buffered edit without a PUT", async () => {
+    const user = userEvent.setup();
+    await renderProductPage();
+    await user.click(bomTab());
+
+    const qty = await buildQtyInput();
+    await user.clear(qty);
+    await user.type(qty, "7");
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Revert" }));
+
+    await waitFor(() =>
+      expect(screen.getAllByDisplayValue("2")[0]).toBeInTheDocument(),
+    );
+    expect(screen.getByText("No changes")).toBeInTheDocument();
+    expect(
+      calls.some((c) => c.method === "PUT" && c.path === "/products/1/bom"),
+    ).toBe(false);
   });
 
   it("shows the kitting table for a bundle too", async () => {
@@ -600,17 +617,16 @@ describe("variant paths", () => {
     await user.click(await screen.findByRole("button", { name: /red/i }));
     const nameInput = await screen.findByDisplayValue("Red");
 
-    const saveRename = within(
-      nameInput.closest("div")!.parentElement!,
-    ).getByRole("button", { name: "Save" });
-    expect(saveRename).toBeDisabled();
+    // The row's own Save is gone — the slide-over footer Save commits the rename.
+    const footerSave = screen.getByRole("button", { name: "Save" });
+    expect(footerSave).toBeDisabled();
 
     await user.clear(nameInput);
     await user.type(nameInput, "Crimson");
-    await waitFor(() => expect(saveRename).toBeEnabled());
+    await waitFor(() => expect(footerSave).toBeEnabled());
 
-    await user.click(saveRename);
-    await waitFor(() => expect(saveRename).toBeDisabled());
+    await user.click(footerSave);
+    await waitFor(() => expect(footerSave).toBeDisabled());
     expect(
       calls.some((c) => c.method === "PATCH" && c.path === "/variants/11"),
     ).toBe(true);

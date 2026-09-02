@@ -6,6 +6,7 @@ import { ErrorBanner } from "../common/ErrorBanner";
 import { SaveButton } from "../common/SaveButton";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
+import { useManagedSave } from "../../hooks/useDirtyRegistry";
 import { normalizeQtyForUnit, wholeNumberStepFor } from "../../lib/format";
 
 /**
@@ -94,7 +95,7 @@ export function BomOverrideEditor({
     };
   }, [baseBom, effectiveBom]);
 
-  const { value, setValue, isDirty, markSaved } = useEditableCopy<{
+  const { value, setValue, isDirty, markSaved, revert } = useEditableCopy<{
     overrides: Record<number, OverrideRow>;
     additiveLines: EffectiveLine[];
   }>({
@@ -179,6 +180,10 @@ export function BomOverrideEditor({
   };
 
   const saveStatus = useSaveStatus(saveMutation.status);
+  const managed = useManagedSave(dirtyKey, {
+    save: () => saveMutation.mutate(),
+    revert,
+  });
 
   if (baseBom.length === 0) {
     return (
@@ -265,15 +270,17 @@ export function BomOverrideEditor({
           })}
         </tbody>
       </table>
-      <SaveButton
-        isDirty={isDirty}
-        isPending={saveMutation.isPending}
-        status={saveStatus}
-        onClick={() => saveMutation.mutate()}
-        className="mt-2 rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
-      >
-        Save {title.toLowerCase()}
-      </SaveButton>
+      {!managed && (
+        <SaveButton
+          isDirty={isDirty}
+          isPending={saveMutation.isPending}
+          status={saveStatus}
+          onClick={() => saveMutation.mutate()}
+          className="mt-2 rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Save {title.toLowerCase()}
+        </SaveButton>
+      )}
       <ErrorBanner error={saveMutation.error} />
     </div>
   );

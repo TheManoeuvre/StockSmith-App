@@ -28,6 +28,12 @@ import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { useSiblingNav } from "../../hooks/useSiblingNav";
 import { useGuard } from "../../hooks/useUnsavedChangesGuard";
+import {
+  SlideOverManagedContext,
+  useCommittableDirty,
+  useDirtyRegistryApi,
+  useManagedSave,
+} from "../../hooks/useDirtyRegistry";
 import { useAssetUrl } from "../../hooks/useAssetUrl";
 import { pickFile } from "../../lib/tauri";
 import { sellableSummary } from "../../lib/format";
@@ -109,7 +115,7 @@ function productStatusBadge(
 }
 
 export const Route = createFileRoute("/products/$productId")({
-  component: ProductDetail,
+  component: ProductDetailRoute,
   // The active tab lives in the URL rather than component state, which buys two things:
   // switching tabs becomes a real router navigation (so the unsaved-changes blocker covers
   // it with the same code path as leaving the page), and a tab is linkable — the dashboard
@@ -133,6 +139,17 @@ export const Route = createFileRoute("/products/$productId")({
     };
   },
 });
+
+// The slide-over replaces every editor's own Save button with one footer Save (see the
+// footer below and useManagedSave); providing the context here — a layer above the body —
+// is what lets those editors read it, since a component can't consume a context it renders.
+function ProductDetailRoute() {
+  return (
+    <SlideOverManagedContext.Provider value={true}>
+      <ProductDetail />
+    </SlideOverManagedContext.Provider>
+  );
+}
 
 function ProductDetail() {
   // Registry, blocker and dialog all live at the root (see __root.tsx) — this page only
@@ -214,6 +231,7 @@ function ProductDetail() {
     setValue: setDetails,
     isDirty: detailsDirty,
     markSaved: markDetailsSaved,
+    revert: revertDetails,
   } = useEditableCopy<DetailsForm>({
     key: "details",
     label: "Details",
@@ -301,6 +319,10 @@ function ProductDetail() {
   });
 
   const saveDetailsStatus = useSaveStatus(saveDetailsMutation.status);
+  const detailsManaged = useManagedSave("details", {
+    save: () => saveDetailsMutation.mutate(),
+    revert: revertDetails,
+  });
 
   const invalidateImage = () => {
     queryClient.invalidateQueries({ queryKey: ["products", id] });
@@ -391,6 +413,7 @@ function ProductDetail() {
       onPrev={prevId ? goPrev : undefined}
       onNext={nextId ? goNext : undefined}
       headerExtra={<Badge className={status.cls}>{status.label}</Badge>}
+      footer={<SlideOverFooter econ={econ} />}
     >
       <div className="flex flex-col gap-6">
         {/* Identity + the headline figures — shown on every tab. */}
@@ -714,17 +737,19 @@ function ProductDetail() {
                   }
                 />
               )}
-              <div>
-                <SaveButton
-                  type="submit"
-                  isDirty={detailsDirty}
-                  isPending={saveDetailsMutation.isPending}
-                  status={saveDetailsStatus}
-                  className="rounded bg-slate-900 px-4 py-1.5 text-white disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Save
-                </SaveButton>
-              </div>
+              {!detailsManaged && (
+                <div>
+                  <SaveButton
+                    type="submit"
+                    isDirty={detailsDirty}
+                    isPending={saveDetailsMutation.isPending}
+                    status={saveDetailsStatus}
+                    className="rounded bg-slate-900 px-4 py-1.5 text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Save
+                  </SaveButton>
+                </div>
+              )}
             </form>
             <ErrorBanner error={saveDetailsMutation.error} />
           </section>
@@ -811,5 +836,51 @@ function ProductDetail() {
         )}
       </div>
     </DetailPanel>
+  );
+}
+
+/** The one Save/Revert bar for the whole slide-over — commits (or discards) every buffered
+ *  editor across every tab that reported an unsaved change. Command forms on the Stock tab
+ *  keep their own action buttons and aren't touched by this. */
+function SlideOverFooter({
+  econ,
+}: {
+  econ: { cogs: number | null; marginPct: number | null; missingPostage: boolean };
+}) {
+  const { isDirty } = useCommittableDirty();
+  const registry = useDirtyRegistryApi();
+
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <p className="text-[12px] text-slate-500">
+        Margin{" "}
+        {econ.marginPct == null
+          ? "not costed"
+          : `${econ.marginPct.toFixed(0)}%${econ.missingPostage ? " (excl. postage)" : ""}`}
+        {" · "}
+        COGS {econ.cogs == null ? "—" : `£${econ.cogs.toFixed(2)}`}
+      </p>
+      <div className="flex items-center gap-2">
+        <span className="text-[12px] text-slate-500">
+          {isDirty ? "Unsaved changes" : "No changes"}
+        </span>
+        <button
+          type="button"
+          disabled={!isDirty}
+          onClick={() => registry.revertDirtyUnder("")}
+          className="rounded border border-slate-300 px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Revert
+        </button>
+        <button
+          type="button"
+          disabled={!isDirty}
+          onClick={() => registry.commitDirtyUnder("")}
+          className="rounded bg-slate-900 px-4 py-1.5 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Save
+        </button>
+      </div>
+    </div>
   );
 }

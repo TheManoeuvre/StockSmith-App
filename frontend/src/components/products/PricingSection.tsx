@@ -14,7 +14,7 @@ import { FieldRow } from "../common/FieldRow";
 import { SaveButton } from "../common/SaveButton";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
-import { DirtyPath } from "../../hooks/useDirtyRegistry";
+import { DirtyPath, useManagedSave } from "../../hooks/useDirtyRegistry";
 import { useGuard } from "../../hooks/useUnsavedChangesGuard";
 import { formatUnitCost } from "../../lib/money";
 
@@ -589,6 +589,7 @@ function ProductPriceForm({
     setPlatformFeePercent,
     isDirty,
     markSaved,
+    revert,
   } = usePriceFields({
     key: "product",
     label: "Pricing",
@@ -608,6 +609,10 @@ function ProductPriceForm({
       markSaved();
       onSaved();
     },
+  });
+  const managed = useManagedSave("product", {
+    save: () => saveMutation.mutate(),
+    revert,
   });
 
   const margin = computeMargin(
@@ -663,15 +668,17 @@ function ProductPriceForm({
           )}
         </FieldRow>
         <div className="flex items-center gap-3">
-          <SaveButton
-            type="submit"
-            isDirty={isDirty}
-            isPending={saveMutation.isPending}
-            status={saveStatus}
-            className="rounded bg-slate-900 px-4 py-1.5 text-white disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Save
-          </SaveButton>
+          {!managed && (
+            <SaveButton
+              type="submit"
+              isDirty={isDirty}
+              isPending={saveMutation.isPending}
+              status={saveStatus}
+              className="rounded bg-slate-900 px-4 py-1.5 text-white disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Save
+            </SaveButton>
+          )}
           {margin && <MarginSummary margin={margin} />}
         </div>
       </form>
@@ -748,6 +755,7 @@ function VariableGroupRow({
     setPlatformFeePercent,
     isDirty,
     markSaved,
+    revert,
   } = usePriceFields({
     key: `group-${label}`,
     label: `Pricing — ${label}`,
@@ -771,6 +779,10 @@ function VariableGroupRow({
       markSaved();
       onSaved();
     },
+  });
+  const managed = useManagedSave(`group-${label}`, {
+    save: () => saveMutation.mutate(),
+    revert,
   });
 
   const saveStatus = useSaveStatus(saveMutation.status);
@@ -822,15 +834,17 @@ function VariableGroupRow({
           />
         )}
       </label>
-      <SaveButton
+      {!managed && (
+        <SaveButton
           type="submit"
           isDirty={isDirty}
           isPending={saveMutation.isPending}
           status={saveStatus}
           className="rounded bg-slate-900 px-4 py-1.5 text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
-        Save
-      </SaveButton>
+          Save
+        </SaveButton>
+      )}
       <ErrorBanner error={saveMutation.error} />
     </form>
   );
@@ -911,6 +925,7 @@ function LineRow({
     setPlatformFeePercent,
     isDirty,
     markSaved,
+    revert,
   } = usePriceFields({
     key: "price",
     label: `Pricing — ${variant.variant_name}`,
@@ -930,6 +945,10 @@ function LineRow({
       markSaved();
       onSaved();
     },
+  });
+  const managed = useManagedSave("price", {
+    save: () => saveMutation.mutate(),
+    revert,
   });
 
   const saveStatus = useSaveStatus(saveMutation.status);
@@ -987,15 +1006,17 @@ function LineRow({
           />
         )}
       </label>
-      <SaveButton
+      {!managed && (
+        <SaveButton
           type="submit"
           isDirty={isDirty}
           isPending={saveMutation.isPending}
           status={saveStatus}
           className="rounded bg-slate-900 px-4 py-1.5 text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
-        Save
-      </SaveButton>
+          Save
+        </SaveButton>
+      )}
       {margin && <MarginSummary margin={margin} />}
       <ErrorBanner error={saveMutation.error} />
     </form>

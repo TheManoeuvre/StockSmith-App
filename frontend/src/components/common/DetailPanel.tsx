@@ -19,6 +19,7 @@ export function DetailPanel({
   activeTab,
   onTabChange,
   headerExtra,
+  footer,
   children,
 }: {
   title: ReactNode;
@@ -30,6 +31,8 @@ export function DetailPanel({
   onTabChange?: (id: string) => void;
   /** Extra controls in the header row, e.g. an active/inactive badge. */
   headerExtra?: ReactNode;
+  /** A persistent bar below the scroll area, e.g. the product slide-over's Save/Revert. */
+  footer?: ReactNode;
   children: ReactNode;
 }) {
   const headingId = useId();
@@ -83,6 +86,9 @@ export function DetailPanel({
           </div>
         )}
         <div className="flex-1 overflow-y-auto overscroll-contain p-4">{children}</div>
+        {footer && (
+          <div className="flex-none border-t border-slate-200 bg-white p-3">{footer}</div>
+        )}
       </div>
     </div>
   );

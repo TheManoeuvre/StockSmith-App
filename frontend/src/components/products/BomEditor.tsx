@@ -7,6 +7,7 @@ import { ErrorBanner } from "../common/ErrorBanner";
 import { SaveButton } from "../common/SaveButton";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
+import { useManagedSave } from "../../hooks/useDirtyRegistry";
 import { formatMoney } from "../../lib/money";
 import { BomLineTable, computeLineCosts } from "./BomLineTable";
 
@@ -21,7 +22,7 @@ export function BomEditor({ productId }: { productId: number }) {
   const [filterText, setFilterText] = useState("");
 
   const seed = useMemo(() => (bom ? toLines(bom) : undefined), [bom]);
-  const { value: lines, setValue: setLines, isDirty, markSaved } = useEditableCopy<BomLine[]>({
+  const { value: lines, setValue: setLines, isDirty, markSaved, revert } = useEditableCopy<BomLine[]>({
     key: "bom",
     label: "Build BOM",
     initial: [],
@@ -49,6 +50,10 @@ export function BomEditor({ productId }: { productId: number }) {
   const removeLine = (index: number) => setLines((prev) => prev.filter((_, i) => i !== index));
 
   const saveStatus = useSaveStatus(saveMutation.status);
+  const managed = useManagedSave("bom", {
+    save: () => saveMutation.mutate(),
+    revert,
+  });
   const { total } = computeLineCosts(lines, materials);
 
   const addLine = () => {
@@ -94,14 +99,16 @@ export function BomEditor({ productId }: { productId: number }) {
         <button onClick={addLine} className="rounded border border-slate-300 px-3 py-1.5 text-sm">
           + Add material
         </button>
-        <SaveButton
-          isDirty={isDirty}
-          isPending={saveMutation.isPending}
-          status={saveStatus}
-          onClick={() => saveMutation.mutate()}
-        >
-          Save build BOM
-        </SaveButton>
+        {!managed && (
+          <SaveButton
+            isDirty={isDirty}
+            isPending={saveMutation.isPending}
+            status={saveStatus}
+            onClick={() => saveMutation.mutate()}
+          >
+            Save build BOM
+          </SaveButton>
+        )}
       </div>
       <ErrorBanner error={saveMutation.error} />
     </div>
