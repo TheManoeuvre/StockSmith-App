@@ -1,6 +1,6 @@
-import { createFileRoute, Link, Outlet } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, type MouseEvent } from "react";
 import { materialsApi } from "../../api/materials";
 import { manufacturersApi } from "../../api/manufacturers";
 import { suppliersApi } from "../../api/suppliers";
@@ -594,6 +594,14 @@ function MaterialRow({
   const atRisk = status === "critical" || status === "warning";
   const onOrder = Number(m.on_order_qty ?? 0) > 0;
 
+  const navigate = useNavigate();
+  // Clicking anywhere on the row opens the slide-over; clicks that land on a real control
+  // inside it (the name link, later any buttons) are left to that control.
+  const openDetail = (e: MouseEvent<HTMLTableRowElement>) => {
+    if ((e.target as HTMLElement).closest("a, button, input, select, label")) return;
+    navigate({ to: "/materials/$materialId", params: { materialId: String(m.id) } });
+  };
+
   const rowRef = useRef<HTMLTableRowElement>(null);
   const isVisible = useLazyVisible(rowRef);
   const imageUrl = useMaterialImageUrl(
@@ -604,7 +612,8 @@ function MaterialRow({
   return (
     <tr
       ref={rowRef}
-      className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 ${!m.is_active ? "opacity-60" : ""}`}
+      onClick={openDetail}
+      className={`cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50 ${!m.is_active ? "opacity-60" : ""}`}
     >
       <td className="py-2 pl-3 pr-1">
         {/* Fixed 80px box. An uploaded photo fills it; a colour chip sits at 75% (60px)

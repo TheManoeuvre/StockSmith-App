@@ -1,4 +1,4 @@
-import { createFileRoute, Link, Outlet } from "@tanstack/react-router";
+import { createFileRoute, Link, Outlet, useNavigate } from "@tanstack/react-router";
 import {
   keepPreviousData,
   useMutation,
@@ -6,7 +6,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { platformsApi, type ProductSyncStatus } from "../../api/platforms";
 import { productsApi } from "../../api/products";
 import type { ListingPlatform, Product } from "../../api/types";
@@ -385,10 +385,19 @@ function ProductRow({
     platformCeilingQty: p.platform_ceiling_qty,
   });
 
+  const navigate = useNavigate();
+  // Clicking anywhere on the row opens the slide-over; clicks on a real control inside it
+  // (the name link, the SKU copy button) are left to that control.
+  const openDetail = (e: MouseEvent<HTMLTableRowElement>) => {
+    if ((e.target as HTMLElement).closest("a, button, input, select, label")) return;
+    navigate({ to: "/products/$productId", params: { productId: String(p.id) } });
+  };
+
   return (
     <tr
       ref={rowRef}
-      className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 ${!p.is_active ? "opacity-60" : ""}`}
+      onClick={openDetail}
+      className={`cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50 ${!p.is_active ? "opacity-60" : ""}`}
     >
       <td className="p-2">
         <div className="h-20 w-20 overflow-hidden rounded border border-slate-200 bg-slate-50">
