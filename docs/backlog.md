@@ -149,6 +149,53 @@ This matters more once the periodic reconciliation sweep above exists: a sweep t
 
 **Ask:** A backend endpoint that batches draft-purchase creation by supplier (one draft PO per supplier, one line per short material), plus a "draft all" action on the dashboard's stockout-by-supplier grouping.
 
+## Channel column on the dashboard's Blocked orders table
+
+**Problem:** Surfaced via the design canvas — its dashboard Blocked-orders table has a
+`Channel` column (Etsy / eBay / Manual pill) beside `Placed`. The real table
+(`src/routes/index.tsx`, `blockedRows`) can't show it: `orders_awaiting_inventory` and
+`orders_awaiting_packaging` on the `/dashboard/summary` payload carry no `platform`, so
+there's nothing to render.
+
+**Ask:** Add `platform` to those two dashboard row schemas (the order is already joined in
+the query), then a Channel column in `blockedRows` reusing `PLATFORM_COLORS` /
+`PLATFORM_LABELS`. Small — one field each side.
+
+## Variance value column on the stock-take count sheet
+
+**Problem:** Surfaced via the design canvas — its stock-take sheet has a `Value` column
+showing the money impact of each line's variance (`delta × unit cost`). The real sheet
+(`src/routes/stock-takes/$stockTakeId.tsx`) shows Expected / Counted / Delta but no
+monetary figure, and `StockTakeLine` carries no unit cost to compute one from.
+
+**Ask:** Put a `unit_cost` (or a precomputed `delta_value`) on the `StockTakeLine` schema
+— materials from `avg_unit_cost`, products/variants from `cost_per_unit` — and add a
+right-aligned `Value` column. Lets someone triage a sheet by "what's the £ exposure"
+rather than raw quantity.
+
+## Settle a flagged stock-take line inline on the count sheet
+
+**Problem:** Surfaced via the design canvas — it settles a held-back line (Accept / Keep /
+Recount) in a `Settle` column right in the count-sheet row. The real app removed the
+in-take Review tab and routes every flagged line to the standalone
+`/stock-takes/unresolved` page instead. That page works and is the right home for lines
+from *closed* takes, but settling one you just approved means leaving the take.
+
+**Ask:** When a take is closed but still has `conflict` lines, render the Accept / Keep /
+Recount actions inline in the count-sheet row (reusing `stockTakesApi.resolveLine`), so a
+just-approved take can be cleared without a page change. The Unresolved page stays as the
+cross-take view.
+
+## Settings toggles render as checkboxes, not switches
+
+**Problem:** The design canvas draws every boolean setting as a pill switch. The real
+settings forms (`BackgroundSyncSettings`, `BackupSettings`, `StockCountSettings`, the
+reference-table checkbox fields) use a bare `<input type="checkbox">`.
+
+**Ask:** A small `Switch` that renders `<input type="checkbox">` styled as a track+knob
+(peer-checked Tailwind, `role` unchanged so `getByRole("checkbox")` tests keep passing).
+Purely visual; swap it in across the settings forms.
+
 ## Dashboard KPI date-range toggle
 
 **Problem:** Surfaced via the design canvas, which shows a This week / Month / Quarter toggle above the dashboard KPI cards. The real dashboard summary is fixed to "this week" with no way to see the same KPIs over a longer window.
