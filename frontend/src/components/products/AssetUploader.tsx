@@ -1,12 +1,53 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { assetsApi } from "../../api/assets";
+import { assetDownloadUrl, platformFetch } from "../../api/client";
 import { pickFile } from "../../lib/tauri";
 import { useAssetUrl } from "../../hooks/useAssetUrl";
 import { useLazyVisible } from "../../hooks/useLazyVisible";
 import type { AssetType } from "../../api/types";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
+
+/** Fetches an asset's original bytes with auth and hands the viewer a save dialog — works
+ *  in the Tauri webview where a plain <a href> to a Bearer-guarded URL can't. */
+function DownloadButton({
+  assetId,
+  filename,
+  className,
+}: {
+  assetId: number;
+  filename: string;
+  className?: string;
+}) {
+  const [busy, setBusy] = useState(false);
+  const download = async () => {
+    setBusy(true);
+    try {
+      const { url, headers } = await assetDownloadUrl(assetId);
+      const res = await platformFetch(url, { headers });
+      if (!res.ok) return;
+      const objectUrl = URL.createObjectURL(await res.blob());
+      const a = document.createElement("a");
+      a.href = objectUrl;
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(objectUrl);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <button
+      type="button"
+      onClick={download}
+      disabled={busy}
+      className={className ?? "text-xs text-slate-600 underline disabled:opacity-50"}
+    >
+      {busy ? "…" : "Download"}
+    </button>
+  );
+}
 
 const SECTIONS: { type: AssetType; label: string }[] = [
   { type: "listing_image", label: "Listing images" },
@@ -142,22 +183,52 @@ function AssetSection({
           Import
         </button>
       </form>
-      <div className="flex flex-wrap gap-3">
-        {assets.map((asset) => (
-          <AssetThumb
-            key={asset.id}
-            assetId={asset.id}
-            filename={asset.original_filename}
-            dimensions={
-              asset.width_px && asset.height_px
-                ? `${asset.width_px}×${asset.height_px}`
-                : null
-            }
-            isImage={assetType.includes("image")}
-            onRemove={() => onRemove(asset.id)}
-          />
-        ))}
-      </div>
+      {assetType.includes("image") ? (
+        <div className="flex flex-wrap gap-3">
+          {assets.map((asset) => (
+            <AssetThumb
+              key={asset.id}
+              assetId={asset.id}
+              filename={asset.original_filename}
+              dimensions={
+                asset.width_px && asset.height_px
+                  ? `${asset.width_px}×${asset.height_px}`
+                  : null
+              }
+              isImage
+              onRemove={() => onRemove(asset.id)}
+            />
+          ))}
+        </div>
+      ) : (
+        assets.length > 0 && (
+          <ul className="divide-y divide-slate-100 text-sm">
+            {assets.map((asset) => (
+              <li key={asset.id} className="flex items-center gap-3 py-1.5">
+                <span className="min-w-0 flex-1 truncate">
+                  {asset.original_filename}
+                </span>
+                <span className="shrink-0 text-xs tabular-nums text-slate-400">
+                  {asset.width_px && asset.height_px
+                    ? `${asset.width_px}×${asset.height_px}`
+                    : "—"}
+                </span>
+                <DownloadButton
+                  assetId={asset.id}
+                  filename={asset.original_filename}
+                />
+                <button
+                  type="button"
+                  onClick={() => onRemove(asset.id)}
+                  className="shrink-0 text-xs text-red-600"
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        )
+      )}
     </div>
   );
 }
@@ -196,9 +267,12 @@ function AssetThumb({
       {dimensions && (
         <p className="text-[10px] tabular-nums text-slate-400">{dimensions}</p>
       )}
-      <button onClick={onRemove} className="text-xs text-red-600">
-        Remove
-      </button>
+      <div className="flex items-center justify-center gap-2">
+        <DownloadButton assetId={assetId} filename={filename} />
+        <button onClick={onRemove} className="text-xs text-red-600">
+          Remove
+        </button>
+      </div>
     </div>
   );
 }

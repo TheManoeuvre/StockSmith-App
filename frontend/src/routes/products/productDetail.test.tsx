@@ -253,12 +253,12 @@ async function renderProductPage(initialEntry = "/products/1") {
   return router;
 }
 
-const bomTab = () => screen.getByRole("button", { name: "Bill of Materials" });
+const bomTab = () => screen.getByRole("button", { name: "BOM" });
 const pricingTab = () => screen.getByRole("button", { name: "Pricing" });
 
 /** BOM tables only — other tabs render tables of their own. */
 const bomTables = () =>
-  screen.getAllByRole("table").filter((t) => within(t).queryByText("Share"));
+  screen.getAllByRole("table").filter((t) => within(t).queryByText("Cover (builds)"));
 
 /**
  * The build BOM's qty input. Async because the Save button renders before the BOM query
@@ -269,7 +269,7 @@ const buildQtyInput = async () => (await screen.findAllByDisplayValue("2"))[0];
 describe("product detail page", () => {
   beforeEach(() => setRoutes(baseRoutes()));
 
-  it("puts both BOM tables under one Bill of Materials tab", async () => {
+  it("puts both BOM tables under one BOM tab", async () => {
     const user = userEvent.setup();
     await renderProductPage();
 
@@ -438,7 +438,7 @@ describe("product detail page", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("shows cost and share per line with a table total", async () => {
+  it("shows each line's cost with a table total", async () => {
     const user = userEvent.setup();
     await renderProductPage();
     await user.click(bomTab());
@@ -446,8 +446,7 @@ describe("product detail page", () => {
     await buildQtyInput();
     const buildTable = bomTables()[0];
     // 2 x £0.50
-    expect(within(buildTable).getAllByText("£1.00")).toHaveLength(2); // row + total
-    expect(within(buildTable).getByText("100.0%")).toBeInTheDocument();
+    expect(within(buildTable).getAllByText("£1.00")).toHaveLength(2); // row + footer total
     expect(within(buildTable).getByText("Total")).toBeInTheDocument();
   });
 });

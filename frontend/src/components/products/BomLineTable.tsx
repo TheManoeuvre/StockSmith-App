@@ -105,19 +105,17 @@ export function BomLineTable({
   return (
     <table className={tableClassName}>
       <colgroup>
-        <col className="w-[26rem]" />
-        <col className="w-28" />
-        <col className="w-28" />
-        <col className="w-20" />
-        {showMaxFromFreeStock && <col className="w-40" />}
         <col />
+        <col className="w-16" />
+        <col className="w-16" />
+        {showMaxFromFreeStock && <col className="w-24" />}
+        <col className="w-8" />
       </colgroup>
       <thead>
         <tr className="border-b border-slate-200">
           <th className="p-2">Material</th>
-          <th className="p-2">Qty required</th>
+          <th className="p-2">Qty</th>
           <th className="p-2">Cost</th>
-          <th className="p-2 text-right">Share</th>
           {showMaxFromFreeStock && <th className="p-2">Cover (builds)</th>}
           <th className="p-2" />
         </tr>
@@ -156,11 +154,8 @@ export function BomLineTable({
                 }
               />
             </td>
-            <td className="p-2">
+            <td className="p-2 tabular-nums">
               {perLine[i]?.cost != null ? formatMoney(String(perLine[i].cost), "GBP") : "—"}
-            </td>
-            <td className="p-2 text-right text-slate-500">
-              {perLine[i]?.share != null ? `${perLine[i].share!.toFixed(1)}%` : "—"}
             </td>
             {showMaxFromFreeStock &&
               (() => {
@@ -178,8 +173,13 @@ export function BomLineTable({
                 );
               })()}
             <td className="p-2">
-              <button onClick={() => onRemoveLine(i)} className="text-red-600">
-                Remove
+              <button
+                type="button"
+                onClick={() => onRemoveLine(i)}
+                aria-label="Remove line"
+                className="text-red-600 hover:text-red-700"
+              >
+                ✕
               </button>
             </td>
           </tr>
@@ -190,8 +190,9 @@ export function BomLineTable({
           <tr className="border-t border-slate-300 font-medium">
             <td className="p-2">{isDirty ? "Total (unsaved)" : "Total"}</td>
             <td className="p-2" />
-            <td className="p-2">{total != null ? formatMoney(String(total), "GBP") : "—"}</td>
-            <td className="p-2 text-right text-slate-500">{total != null ? "100%" : "—"}</td>
+            <td className="p-2 tabular-nums">
+              {total != null ? formatMoney(String(total), "GBP") : "—"}
+            </td>
             {showMaxFromFreeStock && <td className="p-2" />}
             <td className="p-2" />
           </tr>

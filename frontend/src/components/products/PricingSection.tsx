@@ -10,6 +10,7 @@ import { shippingProfilesApi } from "../../api/shippingProfiles";
 import { variantsApi } from "../../api/variants";
 import type { PricingMode, Product, ShippingProfile, Variant } from "../../api/types";
 import { ErrorBanner } from "../common/ErrorBanner";
+import { FieldRow } from "../common/FieldRow";
 import { SaveButton } from "../common/SaveButton";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
@@ -625,34 +626,33 @@ function ProductPriceForm({
   return (
     <>
       <form
-        className="flex flex-wrap items-end gap-2 rounded bg-white p-4 shadow-sm"
+        className="flex flex-col gap-3 rounded bg-white p-4 shadow-sm"
         onSubmit={(e) => {
           e.preventDefault();
           saveMutation.mutate();
         }}
       >
-        <label className="flex flex-col gap-1">
-          <span className="text-sm">Sale price (£)</span>
+        <FieldRow label="Sale price (£)">
           <input
             className="w-28 rounded border border-slate-300 px-2 py-1"
             value={salePrice}
             onChange={(e) => setSalePrice(e.target.value)}
           />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-sm">Shipping profile</span>
+        </FieldRow>
+        <FieldRow label="Shipping profile">
           <ShippingProfileSelect
             profiles={profiles}
             value={shippingProfileId}
             onChange={setShippingProfileId}
             feeSource={feeSource}
           />
-        </label>
-        <label className="flex flex-col gap-1">
-          <span className="text-sm">Platform fee (%)</span>
+        </FieldRow>
+        <FieldRow label="Platform fee (%)">
           {isCalculatedFee ? (
-            <span className="w-24 rounded border border-transparent px-2 py-1 text-slate-500">
-              {product.effective_platform_fee_percent ? `${Number(product.effective_platform_fee_percent).toFixed(2)}%` : "—"}
+            <span className="text-sm text-slate-500">
+              {product.effective_platform_fee_percent
+                ? `${Number(product.effective_platform_fee_percent).toFixed(2)}%`
+                : "—"}
             </span>
           ) : (
             <input
@@ -661,17 +661,19 @@ function ProductPriceForm({
               onChange={(e) => setPlatformFeePercent(e.target.value)}
             />
           )}
-        </label>
-        <SaveButton
-          type="submit"
-          isDirty={isDirty}
-          isPending={saveMutation.isPending}
-          status={saveStatus}
-          className="rounded bg-slate-900 px-4 py-1.5 text-white disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Save
-        </SaveButton>
-        {margin && <MarginSummary margin={margin} />}
+        </FieldRow>
+        <div className="flex items-center gap-3">
+          <SaveButton
+            type="submit"
+            isDirty={isDirty}
+            isPending={saveMutation.isPending}
+            status={saveStatus}
+            className="rounded bg-slate-900 px-4 py-1.5 text-white disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Save
+          </SaveButton>
+          {margin && <MarginSummary margin={margin} />}
+        </div>
       </form>
       <ErrorBanner error={saveMutation.error} />
     </>

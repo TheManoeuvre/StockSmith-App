@@ -373,7 +373,7 @@ function ProductDetail() {
 
   const tabs: TabDef[] = [
     { id: "details", label: "Details" },
-    { id: "bom", label: "Bill of Materials" },
+    { id: "bom", label: "BOM" },
     { id: "pricing", label: "Pricing" },
     ...(!product.is_bundle ? [{ id: "variants", label: "Variants" }] : []),
     { id: "stores", label: "Stores" },
@@ -566,13 +566,17 @@ function ProductDetail() {
                   onChange={(e) => setSku(e.target.value)}
                 />
               </FieldRow>
-              <FieldRow label="Description">
-                <input
-                  className="w-full rounded border border-slate-300 px-2 py-1"
+              <label className="flex items-start gap-3">
+                <span className="mt-1 w-36 shrink-0 text-sm text-slate-600">
+                  Description
+                </span>
+                <textarea
+                  rows={5}
+                  className="min-w-0 flex-1 resize-y whitespace-pre-wrap rounded border border-slate-300 px-2 py-1"
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                 />
-              </FieldRow>
+              </label>
               <FieldRow label="Barcode">
                 <input
                   className="rounded border border-slate-300 px-2 py-1"

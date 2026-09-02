@@ -215,14 +215,7 @@ export function BomOverrideEditor({
             const bottleneck = bottleneckFor(base, o);
             return (
               <tr key={base.material_id}>
-                <td className="p-1">
-                  {material?.name ?? base.material_id}
-                  {o.mode === "substitute" && substituteMaterial && (
-                    <div className="text-xs text-slate-500">
-                      {substituteMaterial.name} (replaces {material?.name ?? base.material_id})
-                    </div>
-                  )}
-                </td>
+                <td className="p-1">{material?.name ?? base.material_id}</td>
                 <td className="p-1 text-slate-400">{base.qty_required}</td>
                 <td className="p-1">
                   <select
@@ -232,7 +225,7 @@ export function BomOverrideEditor({
                   >
                     <option value="inherit">Inherit</option>
                     <option value="qty">Override qty</option>
-                    <option value="substitute">Substitute material</option>
+                    <option value="substitute">Substitute</option>
                   </select>
                 </td>
                 <td className="p-1">
@@ -247,18 +240,19 @@ export function BomOverrideEditor({
                     />
                   )}
                   {o.mode === "substitute" && (
-                    <div className="flex items-center gap-1">
-                      <MaterialSelect
-                        materials={materials.filter((m) => m.id !== base.material_id && sameCategory(m, material))}
-                        value={o.substitute_material_id ?? base.material_id}
-                        onChange={(id) => updateSubstituteMaterial(base.material_id, id)}
-                      />
+                    <div className="flex flex-col gap-1">
                       <input
                         className="w-20 rounded border border-slate-300 px-2 py-1"
                         step={wholeNumberStepFor(substituteMaterial?.unit)}
                         value={o.qty_required}
                         onChange={(e) => updateQty(base.material_id, e.target.value)}
                         onBlur={(e) => updateQty(base.material_id, normalizeQtyForUnit(e.target.value, substituteMaterial?.unit))}
+                      />
+                      <MaterialSelect
+                        materials={materials.filter((m) => m.id !== base.material_id && sameCategory(m, material))}
+                        value={o.substitute_material_id ?? base.material_id}
+                        onChange={(id) => updateSubstituteMaterial(base.material_id, id)}
+                        className="w-full rounded border border-slate-300 px-2 py-1"
                       />
                     </div>
                   )}
