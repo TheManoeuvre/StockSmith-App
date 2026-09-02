@@ -53,6 +53,10 @@ export function useEditableCopy<T>({
   isDirty: boolean;
   isSeeded: boolean;
   markSaved: (canonical?: T) => void;
+  /** Snaps the editor back to its last-saved baseline, discarding local edits (the footer
+   *  Revert). Unlike `reseed` this restores the visible values immediately without waiting
+   *  for a fresh `seed`. */
+  revert: () => void;
   reseed: () => void;
 } {
   const [value, setValue] = useState<T>(initial);
@@ -105,7 +109,12 @@ export function useEditableCopy<T>({
     setIsSeeded(false);
   }, []);
 
+  /** Discards local edits, restoring the last-saved baseline right away. */
+  const revert = useCallback(() => {
+    setValue(baselineRef.current);
+  }, []);
+
   useDirtyRegistration(key, label, isDirty);
 
-  return { value, setValue, isDirty, isSeeded, markSaved, reseed };
+  return { value, setValue, isDirty, isSeeded, markSaved, revert, reseed };
 }

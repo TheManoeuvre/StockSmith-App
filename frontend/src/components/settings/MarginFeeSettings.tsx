@@ -6,6 +6,7 @@ import { PLATFORM_LABELS } from "../../lib/platforms";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { SaveIndicator } from "../common/SaveIndicator";
+import { SettingsCard } from "./SettingsCard";
 import { BASIS_LABELS } from "./PlatformFeeComponents";
 
 const SOURCE_LABELS: Record<MarginFeeSource, string> = {
@@ -46,14 +47,15 @@ export function MarginFeeSettings() {
   const source = config?.fee_source ?? "manual";
 
   return (
-    <div className="flex flex-col gap-3 rounded border border-slate-300 p-3">
-      <div>
-        <p className="font-medium">Margin estimate basis</p>
-        <p className="text-sm text-slate-500">
-          Which channel every product's "Platform fee" is estimated for. Applies shop-wide, and also selects
-          which shipping cost each shipping profile contributes.
-        </p>
-      </div>
+    <SettingsCard
+      title="Margin estimate basis"
+      help={
+        <>
+          Which channel every product's &ldquo;Platform fee&rdquo; is estimated for. Applies
+          shop-wide, and also selects which shipping cost each shipping profile contributes.
+        </>
+      }
+    >
       {/* Auto-save: one atomic choice whose options are all visible in the control. The indicator
           matters more here than anywhere else in settings — this silently moves every margin
           figure in the app, so "did that take?" is a real question. */}
@@ -82,7 +84,7 @@ export function MarginFeeSettings() {
       ) : (
         <EffectiveFeeSummary platform={source} />
       )}
-    </div>
+    </SettingsCard>
   );
 }
 

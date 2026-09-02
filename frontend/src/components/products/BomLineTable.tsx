@@ -105,20 +105,18 @@ export function BomLineTable({
   return (
     <table className={tableClassName}>
       <colgroup>
-        <col className="w-[26rem]" />
-        <col className="w-28" />
-        <col className="w-28" />
-        <col className="w-20" />
-        {showMaxFromFreeStock && <col className="w-40" />}
         <col />
+        <col className="w-20" />
+        <col className="w-16" />
+        {showMaxFromFreeStock && <col className="w-24" />}
+        <col className="w-8" />
       </colgroup>
       <thead>
         <tr className="border-b border-slate-200">
           <th className="p-2">Material</th>
-          <th className="p-2">Qty required</th>
-          <th className="p-2">Cost</th>
-          <th className="p-2 text-right">Share</th>
-          {showMaxFromFreeStock && <th className="p-2">Max from free stock</th>}
+          <th className="p-2 text-right">Qty</th>
+          <th className="p-2 text-right">Cost</th>
+          {showMaxFromFreeStock && <th className="p-2 text-right">Cover</th>}
           <th className="p-2" />
         </tr>
       </thead>
@@ -126,17 +124,26 @@ export function BomLineTable({
         {lines.map((line, i) => (
           <tr key={i} className="border-b border-slate-100">
             <td className="p-2">
-              <MaterialSelect
-                materials={materials ?? []}
-                value={line.material_id}
-                onChange={(material_id) => onChangeLine(i, { material_id })}
-                filterText={filterText}
-                className="w-full rounded border border-slate-300 px-2 py-1"
-              />
+              <div className="flex items-center gap-2">
+                {materialFor(line)?.colour_hex && (
+                  <span
+                    className="h-4 w-4 shrink-0 rounded border border-slate-300"
+                    style={{ backgroundColor: materialFor(line)!.colour_hex! }}
+                  />
+                )}
+                <MaterialSelect
+                  materials={materials ?? []}
+                  value={line.material_id}
+                  onChange={(material_id) => onChangeLine(i, { material_id })}
+                  filterText={filterText}
+                  showUnitCost
+                  className="w-full rounded border border-slate-300 px-2 py-1"
+                />
+              </div>
             </td>
             <td className="p-2">
               <input
-                className="w-24 rounded border border-slate-300 px-2 py-1"
+                className="w-full rounded border border-slate-300 px-2 py-1 text-right tabular-nums"
                 step={wholeNumberStepFor(materialFor(line)?.unit)}
                 value={line.qty_required}
                 onChange={(e) => onChangeLine(i, { qty_required: e.target.value })}
@@ -147,21 +154,32 @@ export function BomLineTable({
                 }
               />
             </td>
-            <td className="p-2">
+            <td className="p-2 text-right tabular-nums">
               {perLine[i]?.cost != null ? formatMoney(String(perLine[i].cost), "GBP") : "—"}
             </td>
-            <td className="p-2 text-right text-slate-500">
-              {perLine[i]?.share != null ? `${perLine[i].share!.toFixed(1)}%` : "—"}
-            </td>
-            {showMaxFromFreeStock && (
-              <td className={`p-2 ${i === bottleneckIndex ? "font-semibold text-amber-700" : "text-slate-500"}`}>
-                {maxFromFreeStock(line) ?? "—"}
-                {i === bottleneckIndex && <span className="ml-1 text-xs">(bottleneck)</span>}
-              </td>
-            )}
+            {showMaxFromFreeStock &&
+              (() => {
+                const cover = maxFromFreeStock(line);
+                const low = cover != null && cover < 5;
+                return (
+                  <td
+                    className={`p-2 text-right tabular-nums ${i === bottleneckIndex || low ? "font-semibold text-amber-700" : "text-slate-500"}`}
+                  >
+                    {cover ?? "—"}
+                    {i === bottleneckIndex && (
+                      <span className="ml-1 text-[10px]">(bottleneck)</span>
+                    )}
+                  </td>
+                );
+              })()}
             <td className="p-2">
-              <button onClick={() => onRemoveLine(i)} className="text-red-600">
-                Remove
+              <button
+                type="button"
+                onClick={() => onRemoveLine(i)}
+                aria-label="Remove line"
+                className="text-red-600 hover:text-red-700"
+              >
+                ✕
               </button>
             </td>
           </tr>
@@ -172,8 +190,9 @@ export function BomLineTable({
           <tr className="border-t border-slate-300 font-medium">
             <td className="p-2">{isDirty ? "Total (unsaved)" : "Total"}</td>
             <td className="p-2" />
-            <td className="p-2">{total != null ? formatMoney(String(total), "GBP") : "—"}</td>
-            <td className="p-2 text-right text-slate-500">{total != null ? "100%" : "—"}</td>
+            <td className="p-2 text-right tabular-nums">
+              {total != null ? formatMoney(String(total), "GBP") : "—"}
+            </td>
             {showMaxFromFreeStock && <td className="p-2" />}
             <td className="p-2" />
           </tr>

@@ -49,13 +49,17 @@ const ALL_PRODUCTS_LIMIT = 10000;
 
 export const productsApi = {
   list: () => api.get<ProductPage>(`/products?limit=${ALL_PRODUCTS_LIMIT}&offset=0`).then((page) => page.items),
-  listPaged: (limit: number, offset: number, productCategoryId?: number | null, cogsIncomplete?: boolean) =>
+  listPaged: (
+    limit: number,
+    offset: number,
+    opts: { cogsIncomplete?: boolean; q?: string } = {},
+  ) =>
     api.get<ProductPage>(
       // Filtered server-side: the list is paginated, so narrowing it client-side would
       // filter only the current page and leave the total wrong.
       `/products?limit=${limit}&offset=${offset}` +
-        `${productCategoryId != null ? `&product_category_id=${productCategoryId}` : ""}` +
-        `${cogsIncomplete ? "&cogs_incomplete=true" : ""}`,
+        `${opts.cogsIncomplete ? "&cogs_incomplete=true" : ""}` +
+        `${opts.q?.trim() ? `&q=${encodeURIComponent(opts.q.trim())}` : ""}`,
     ),
   get: (id: number) => api.get<Product>(`/products/${id}`),
   create: (input: ProductInput) => api.post<Product>("/products", input),

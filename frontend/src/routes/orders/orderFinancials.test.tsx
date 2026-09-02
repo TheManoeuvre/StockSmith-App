@@ -4,7 +4,7 @@ import {
   createMemoryHistory,
   createRouter,
 } from "@tanstack/react-router";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 
@@ -88,6 +88,12 @@ async function renderOrder(overrides: Record<string, unknown> = {}) {
   await screen.findByText("Order value & costs");
 }
 
+/** The financials card itself — scoped so money figures that also appear in the slide-over's
+ *  persistent stat tiles (Order value, Fulfilment) don't make a bare getByText ambiguous. */
+function panel() {
+  return screen.getByText("Order value & costs").closest("div") as HTMLElement;
+}
+
 beforeEach(() => {
   setRoutes([]);
 });
@@ -98,8 +104,8 @@ it("shows what the discount came off, rather than listing it as another deductio
   // The £6.99 is not stored anywhere — subtotal is already net of the coupon, so the
   // original is subtotal + discount. Showing it under the figure it explains is the whole
   // point: as a column of its own it read as a second deduction from the same money.
-  expect(screen.getByText("£6.99 − £1.40 discount")).toBeInTheDocument();
-  expect(screen.getByText("£5.59")).toBeInTheDocument();
+  expect(within(panel()).getByText("£6.99 − £1.40 discount")).toBeInTheDocument();
+  expect(within(panel()).getByText("£5.59")).toBeInTheDocument();
   expect(screen.queryByText("Discount")).not.toBeInTheDocument();
 });
 
@@ -130,11 +136,11 @@ it("puts the shipping profile under the postage cost instead of in its heading",
 
   // The name is an identifier, not a figure — in the heading it made one column twice the
   // width of every other and put a proper noun in a row of money.
-  expect(screen.getByText("Postage cost")).toBeInTheDocument();
+  expect(within(panel()).getByText("Postage cost")).toBeInTheDocument();
   expect(
     screen.queryByText("Postage cost (Small Parcel 48)"),
   ).not.toBeInTheDocument();
-  expect(screen.getByText("Small Parcel 48")).toBeInTheDocument();
+  expect(within(panel()).getByText("Small Parcel 48")).toBeInTheDocument();
 });
 
 it("omits the profile line when no profile is assigned", async () => {
@@ -168,7 +174,7 @@ it("leaves a row that adds up to the net profit beneath it", async () => {
     "-£0.23",
     "£3.22",
   ]) {
-    expect(screen.getByText(shown)).toBeInTheDocument();
+    expect(within(panel()).getByText(shown)).toBeInTheDocument();
   }
 });
 

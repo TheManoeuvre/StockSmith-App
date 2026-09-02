@@ -164,3 +164,23 @@ async def test_the_filter_narrows_the_page_and_the_count_survives_it(session):
     assert filtered.total == 1
     assert filtered.incomplete_total == 1
     assert [item.id for item in filtered.items] == [gap.id]
+
+
+async def test_search_matches_name_or_sku_and_the_counts_follow(session):
+    profile = await _profile(session)
+    keyring = await _costed_product(session, "Oak Leaf Keyring", profile=profile)
+    coaster = await _costed_product(session, "Slate Coaster", profile=None)  # a COGS gap
+    await session.commit()
+
+    by_name = await list_products(limit=200, offset=0, q="keyring", session=session)
+    assert [i.id for i in by_name.items] == [keyring.id]
+    assert by_name.total == 1
+    # incomplete_total is scoped by the search too — the coaster is filtered out.
+    assert by_name.incomplete_total == 0
+
+    by_sku = await list_products(limit=200, offset=0, q=coaster.sku, session=session)
+    assert [i.id for i in by_sku.items] == [coaster.id]
+    assert by_sku.total == 1
+    assert by_sku.incomplete_total == 1
+
+    assert (await list_products(limit=200, offset=0, q="nothing matches this", session=session)).total == 0

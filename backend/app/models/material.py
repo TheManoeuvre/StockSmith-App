@@ -161,6 +161,13 @@ class Material(Base):
         return self.colour
 
     @property
+    def colour_hex(self) -> str | None:
+        """The reference row's hex code, if it has one. No legacy fallback — the free-text
+        `colour` column never stored a separate hex, so a material still on that path just
+        has no swatch colour to show."""
+        return self.colour_ref.hex_code if self.colour_ref is not None else None
+
+    @property
     def manufacturer_name(self) -> str | None:
         return self.manufacturer.name if self.manufacturer else None
 

@@ -86,13 +86,16 @@ class MaterialStockHistoryRead(BaseModel):
     """A single row in a material's unified stock timeline, merged and ordered
     chronologically. Used by GET /materials/{id}/stock-history.
 
-    Three kinds. 'purchase' is a delivery that happened, dated when it arrived, and those
-    plus the 'adjustment' rows account for current_qty exactly. 'purchase_outstanding' is
-    what is still on order — shown on the same timeline because that is where someone looks
-    for it, but deliberately a different kind, because it has not moved any stock."""
+    Five kinds. 'purchase' is a delivery that happened, dated when it arrived, and those
+    plus 'adjustment'/'build'/'scrap' rows account for current_qty exactly.
+    'purchase_outstanding' is what is still on order — shown on the same timeline because
+    that is where someone looks for it, but deliberately a different kind, because it has
+    not moved any stock. 'build' and 'scrap' are adjustments written by services/builds.py
+    (successful build consumption / failed-build scrap), split out of the generic
+    'adjustment' bucket so the timeline says what actually happened."""
 
     id: int
-    kind: Literal["purchase", "purchase_outstanding", "adjustment"]
+    kind: Literal["purchase", "purchase_outstanding", "adjustment", "build", "scrap"]
     at: datetime
     qty: Decimal
     total_cost: Decimal | None
@@ -105,6 +108,8 @@ class MaterialStockHistoryRead(BaseModel):
     product_name: str | None
     variant_id: int | None
     order_id: int | None
+    # Set for 'purchase'/'purchase_outstanding' rows only — links the row to its PO.
+    purchase_id: int | None
 
 
 class PurchaseRead(BaseModel):

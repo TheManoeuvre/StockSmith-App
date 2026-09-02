@@ -8,6 +8,7 @@ import { SaveButton } from "../common/SaveButton";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { BomLineTable } from "../products/BomLineTable";
+import { SettingsCard } from "./SettingsCard";
 
 const toLines = (rows: { material_id: number; qty_required: string }[]): KittingBomLine[] =>
   rows.map((l) => ({ material_id: l.material_id, qty_required: l.qty_required }));
@@ -54,15 +55,10 @@ export function DefaultKittingBomSettings() {
   };
 
   return (
-    <div className="flex flex-col gap-3 rounded border border-slate-300 p-3">
-      <div>
-        <h2 className="font-medium">Default kitting BOM</h2>
-        <p className="text-sm text-slate-500">
-          Packaging materials (box, label, tape) automatically added to every new product's kitting BOM when it's
-          created — pick materials you already track stock for. This is a one-time snapshot: changing it here only
-          affects products created afterward, not ones that already exist.
-        </p>
-      </div>
+    <SettingsCard
+      title="Default kitting BOM"
+      help="Packaging materials (box, label, tape) automatically added to every new product's kitting BOM when it's created — pick materials you already track stock for. This is a one-time snapshot: changing it here only affects products created afterward, not ones that already exist."
+    >
       {materials && materials.length > 8 && (
         <input
           className="w-64 rounded border border-slate-300 px-2 py-1 text-sm"
@@ -97,6 +93,6 @@ export function DefaultKittingBomSettings() {
         </SaveButton>
       </div>
       <ErrorBanner error={saveMutation.error} />
-    </div>
+    </SettingsCard>
   );
 }

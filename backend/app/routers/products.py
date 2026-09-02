@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -331,6 +331,8 @@ async def list_products(
     # for the same reason as the category filter above: the list is paginated, so filtering
     # in the client would only ever narrow the current page and leave `total` wrong.
     cogs_incomplete: bool = False,
+    # Free-text search over name and SKU. Server-side, same reasoning as the filters above.
+    q: str | None = None,
     session: AsyncSession = Depends(get_db),
 ) -> ProductPage:
     # Built before the count/page queries because the cogs_incomplete filter reads from it.
@@ -352,6 +354,12 @@ async def list_products(
         count_query = count_query.where(Product.product_category_id == product_category_id)
         incomplete_count_query = incomplete_count_query.where(Product.product_category_id == product_category_id)
         query = query.where(Product.product_category_id == product_category_id)
+    if q and q.strip():
+        needle = f"%{q.strip()}%"
+        search = or_(Product.name.ilike(needle), Product.sku.ilike(needle))
+        count_query = count_query.where(search)
+        incomplete_count_query = incomplete_count_query.where(search)
+        query = query.where(search)
     # Counted before the gap filter narrows anything, so the toggle can show how many
     # products it would reveal while it's still switched off.
     incomplete_total = await session.scalar(incomplete_count_query)

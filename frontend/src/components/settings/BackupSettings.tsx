@@ -5,7 +5,9 @@ import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { pickDirectory } from "../../lib/tauri";
 import { ErrorBanner } from "../common/ErrorBanner";
+import { FieldRow } from "../common/FieldRow";
 import { SaveButton } from "../common/SaveButton";
+import { SettingsCard } from "./SettingsCard";
 import { BackupList } from "./BackupList";
 import { RestoreOutcomeBanner } from "./RestoreOutcomeBanner";
 import { RestorePanel } from "./RestorePanel";
@@ -121,8 +123,7 @@ export function BackupSettings() {
     // The plain fallback line covers the case where the query has given up without surfacing an
     // Error object — saying nothing at all is the one outcome that isn't allowed here.
     return (
-      <div className="flex flex-col gap-3 rounded border border-slate-300 p-3">
-        <h2 className="font-medium">Backups</h2>
+      <SettingsCard title="Backups">
         {settingsError ? (
           <ErrorBanner error={settingsError} />
         ) : (
@@ -130,16 +131,15 @@ export function BackupSettings() {
             Couldn't load backup settings — check the connection to the backend.
           </p>
         )}
-      </div>
+      </SettingsCard>
     );
   }
 
   if (!settings.supported) {
     return (
-      <div className="flex flex-col gap-3 rounded border border-slate-300 p-3">
-        <h2 className="font-medium">Backup &amp; restore</h2>
+      <SettingsCard title="Backup & restore">
         <p className="text-sm text-slate-500">{settings.unsupported_reason}</p>
-      </div>
+      </SettingsCard>
     );
   }
 
@@ -147,16 +147,10 @@ export function BackupSettings() {
     <div className="flex flex-col gap-4">
       <RestoreOutcomeBanner />
 
-      <div className="flex flex-col gap-3 rounded border border-slate-300 p-3">
-        <div>
-          <h2 className="font-medium">Backups</h2>
-          <p className="text-sm text-slate-500">
-            A backup is a single zip holding your database and every product image. Marketplace
-            connections are deliberately left out, so restoring onto a different computer means
-            reconnecting Etsy and eBay — nothing else is lost.
-          </p>
-        </div>
-
+      <SettingsCard
+        title="Backups"
+        help="A backup is a single zip holding your database and every product image. Marketplace connections are deliberately left out, so restoring onto a different computer means reconnecting Etsy and eBay — nothing else is lost."
+      >
         <div className="flex items-center gap-3">
           <button
             onClick={() => runMutation.mutate()}
@@ -176,11 +170,9 @@ export function BackupSettings() {
           </p>
         )}
         <ErrorBanner error={runError} />
-      </div>
+      </SettingsCard>
 
-      <div className="flex flex-col gap-3 rounded border border-slate-300 p-3">
-        <h2 className="font-medium">Schedule</h2>
-
+      <SettingsCard title="Schedule">
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
@@ -190,9 +182,8 @@ export function BackupSettings() {
           Back up automatically every day
         </label>
 
-        <div className="grid grid-cols-2 gap-3 sm:max-w-md">
-          <label className="flex flex-col gap-1 text-sm">
-            Time of day
+        <div className="flex flex-col gap-2">
+          <FieldRow label="Time of day">
             <select
               className="rounded border border-slate-300 px-2 py-1"
               value={form.scheduledHour}
@@ -205,18 +196,17 @@ export function BackupSettings() {
                 </option>
               ))}
             </select>
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            Backups to keep
+          </FieldRow>
+          <FieldRow label="Backups to keep">
             <input
               type="number"
               min="1"
               max="100"
-              className="rounded border border-slate-300 px-2 py-1"
+              className="w-24 rounded border border-slate-300 px-2 py-1 text-right tabular-nums"
               value={form.retentionCount}
               onChange={(e) => setField("retentionCount", e.target.value)}
             />
-          </label>
+          </FieldRow>
         </div>
         <p className="text-xs text-slate-500">
           Runs while StockSmith is open. If the computer was asleep at the scheduled time, the backup
@@ -264,12 +254,11 @@ export function BackupSettings() {
           </SaveButton>
         </div>
         <ErrorBanner error={saveMutation.error} />
-      </div>
+      </SettingsCard>
 
-      <div className="flex flex-col gap-3 rounded border border-slate-300 p-3">
-        <h2 className="font-medium">Available backups</h2>
+      <SettingsCard title="Available backups">
         <BackupList />
-      </div>
+      </SettingsCard>
 
       <RestorePanel />
     </div>

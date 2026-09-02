@@ -59,10 +59,18 @@ interface DirtyEntry {
   dirty: boolean;
 }
 
+/** How the slide-over footer's Save / Revert reaches an individual buffered editor. */
+export interface CommitActions {
+  save: () => void;
+  revert: () => void;
+}
+
 export class DirtyRegistry {
   private entries = new Map<string, DirtyEntry>();
+  private commits = new Map<string, CommitActions>();
   private listeners = new Set<() => void>();
   private snapshot: string[] = [];
+  private commitSnapshot: string[] = [];
 
   set(path: string, label: string, dirty: boolean): void {
     const existing = this.entries.get(path);
@@ -73,6 +81,31 @@ export class DirtyRegistry {
 
   remove(path: string): void {
     if (this.entries.delete(path)) this.publish();
+  }
+
+  /** An editor with a registered commit is one the footer Save can drive; a command form
+   *  (record-a-build, stock adjustment) registers dirtiness but no commit. */
+  setCommit(path: string, actions: CommitActions): void {
+    this.commits.set(path, actions);
+    this.publish();
+  }
+
+  removeCommit(path: string): void {
+    if (this.commits.delete(path)) this.publish();
+  }
+
+  /** Fires save() on every dirty editor under `prefix` that registered a commit. */
+  commitDirtyUnder(prefix = ""): void {
+    for (const [path, entry] of this.entries) {
+      if (entry.dirty && path.startsWith(prefix)) this.commits.get(path)?.save();
+    }
+  }
+
+  /** Discards edits on every dirty editor under `prefix` that registered a commit. */
+  revertDirtyUnder(prefix = ""): void {
+    for (const [path, entry] of this.entries) {
+      if (entry.dirty && path.startsWith(prefix)) this.commits.get(path)?.revert();
+    }
   }
 
   isDirtyUnder(prefix = ""): boolean {
@@ -103,15 +136,23 @@ export class DirtyRegistry {
    */
   getSnapshot = (): string[] => this.snapshot;
 
+  /** Dirty paths that also carry a commit — what the footer's Save/status reflects. */
+  getCommitSnapshot = (): string[] => this.commitSnapshot;
+
   private publish(): void {
-    const next: string[] = [];
+    const nextDirty: string[] = [];
+    const nextCommittable: string[] = [];
     for (const [path, entry] of this.entries) {
-      if (entry.dirty) next.push(path);
+      if (!entry.dirty) continue;
+      nextDirty.push(path);
+      if (this.commits.has(path)) nextCommittable.push(path);
     }
-    next.sort();
-    const unchanged = next.length === this.snapshot.length && next.every((p, i) => p === this.snapshot[i]);
-    if (unchanged) return;
-    this.snapshot = next;
+    nextDirty.sort();
+    nextCommittable.sort();
+    const eq = (a: string[], b: string[]) => a.length === b.length && a.every((p, i) => p === b[i]);
+    if (eq(nextDirty, this.snapshot) && eq(nextCommittable, this.commitSnapshot)) return;
+    this.snapshot = nextDirty;
+    this.commitSnapshot = nextCommittable;
     for (const listener of this.listeners) listener();
   }
 }
@@ -168,4 +209,50 @@ export function useAnyDirty(prefix = ""): { isDirty: boolean; labels: string[] }
   const registry = useContext(RegistryContext);
   useSyncExternalStore(registry.subscribe, registry.getSnapshot, registry.getSnapshot);
   return { isDirty: registry.isDirtyUnder(prefix), labels: registry.dirtyLabelsUnder(prefix) };
+}
+
+/** Subscribing read of just the editors the footer Save can commit — excludes command
+ *  forms (record-a-build, stock adjustment) which are dirty-tracked but self-submitting. */
+export function useCommittableDirty(prefix = ""): { isDirty: boolean } {
+  const registry = useContext(RegistryContext);
+  const paths = useSyncExternalStore(
+    registry.subscribe,
+    registry.getCommitSnapshot,
+    registry.getCommitSnapshot,
+  );
+  return { isDirty: paths.some((p) => p.startsWith(prefix)) };
+}
+
+/**
+ * Set on the subtree whose per-editor Save buttons are replaced by one footer Save (the
+ * product slide-over). Editors read it to hide their own button and register a commit.
+ */
+export const SlideOverManagedContext = createContext(false);
+
+/**
+ * Called by a buffered editor alongside useEditableCopy. Inside a slide-over that manages
+ * saving centrally it registers `actions` so the footer's Save/Revert can drive this editor,
+ * and returns `true` so the editor hides its own Save button. Outside such a slide-over it is
+ * inert and returns `false` (the editor keeps its own button — how these components are also
+ * mounted standalone, in tests and elsewhere).
+ */
+export function useManagedSave(localKey: string, actions: CommitActions): boolean {
+  const managed = useContext(SlideOverManagedContext);
+  const registry = useContext(RegistryContext);
+  const parent = useContext(PathContext);
+  const path = `${parent}${localKey}`;
+
+  const actionsRef = useRef(actions);
+  actionsRef.current = actions;
+
+  useEffect(() => {
+    if (!managed) return;
+    registry.setCommit(path, {
+      save: () => actionsRef.current.save(),
+      revert: () => actionsRef.current.revert(),
+    });
+    return () => registry.removeCommit(path);
+  }, [managed, registry, path]);
+
+  return managed;
 }

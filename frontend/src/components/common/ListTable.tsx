@@ -35,6 +35,8 @@ export function GroupHeaderRow({
   count,
   colSpan,
   capitalize = false,
+  collapsed,
+  onToggle,
 }: {
   label: string;
   count: number;
@@ -42,17 +44,41 @@ export function GroupHeaderRow({
   /** Some legacy category values are stored lowercase — see docs/backlog.md's note on
    *  `LegacyMaterialCategory`. Capitalised for display until that data is cleaned up. */
   capitalize?: boolean;
+  /** Pass both to make the header a collapse toggle for its group. Callers that omit them
+   *  get the original static row unchanged. */
+  collapsed?: boolean;
+  onToggle?: () => void;
 }) {
+  const countText = `${count} ${count === 1 ? "item" : "items"}`;
   return (
     <tr className="bg-slate-100">
       <th
         colSpan={colSpan}
-        className={`p-2 text-left text-[11.5px] font-semibold text-slate-700 ${capitalize ? "capitalize" : ""}`}
+        className={`text-left text-[11.5px] font-semibold text-slate-700 ${capitalize ? "capitalize" : ""} ${onToggle ? "" : "p-2"}`}
       >
-        {label}
-        <span className="ml-2 text-[10.5px] font-normal text-slate-500">
-          {count} {count === 1 ? "item" : "items"}
-        </span>
+        {onToggle ? (
+          <button
+            type="button"
+            onClick={onToggle}
+            aria-expanded={!collapsed}
+            className="flex w-full items-center gap-1.5 p-2 hover:bg-slate-200/70"
+          >
+            <span className="w-2 text-[9px] text-slate-500">
+              {collapsed ? "▸" : "▾"}
+            </span>
+            <span>{label}</span>
+            <span className="text-[10.5px] font-normal text-slate-500">
+              {countText}
+            </span>
+          </button>
+        ) : (
+          <>
+            {label}
+            <span className="ml-2 text-[10.5px] font-normal text-slate-500">
+              {countText}
+            </span>
+          </>
+        )}
       </th>
     </tr>
   );

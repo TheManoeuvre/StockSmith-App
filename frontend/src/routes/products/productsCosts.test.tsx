@@ -140,27 +140,35 @@ it("leaves a product with no packaging alone", async () => {
   expect(screen.queryByText(/no profile/)).not.toBeInTheDocument();
 });
 
-it("announces the gap count without the filter having to be switched on first", async () => {
+it("announces the gap count on the Cost gaps tab without it having to be switched on first", async () => {
   await renderList({ items: [product()], total: 1, incomplete_total: 6 });
 
-  const toggle = screen.getByLabelText(/Incomplete COGS only/);
-  expect(toggle).not.toBeChecked();
-  expect(screen.getByTitle(/no shipping profile, or no materials cost/)).toHaveTextContent("6");
+  expect(screen.getByRole("button", { name: /cost gaps/i })).toHaveTextContent("6");
 });
 
-it("hides the toggle entirely when there is nothing to act on", async () => {
+it("hides the Cost gaps tab entirely when there is nothing to act on", async () => {
   // A permanent "0" is what teaches people to stop reading a counter.
   await renderList({ items: [product()], total: 1, incomplete_total: 0 });
 
-  expect(screen.queryByLabelText(/Incomplete COGS only/)).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /cost gaps/i })).not.toBeInTheDocument();
 });
 
 it("asks the server to narrow the list, not the current page", async () => {
   await renderList({ items: [product()], total: 1, incomplete_total: 6 });
 
-  await userEvent.click(screen.getByLabelText(/Incomplete COGS only/));
+  await userEvent.click(screen.getByRole("button", { name: /cost gaps/i }));
 
   // Server-side: the list is paginated, so a client-side filter would narrow one page and
   // leave the total wrong.
   await waitFor(() => expect(calls.some((c) => c.path.includes("cogs_incomplete=true"))).toBe(true));
+});
+
+it("sends the search term to the server", async () => {
+  await renderList({ items: [product()], total: 1, incomplete_total: 0 });
+
+  await userEvent.type(screen.getByPlaceholderText("Search name, SKU…"), "doorbell");
+
+  // Debounced into the query key, then a real request — search has to reach the server
+  // because the list is paginated.
+  await waitFor(() => expect(calls.some((c) => c.path.includes("q=doorbell"))).toBe(true));
 });

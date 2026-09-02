@@ -1,10 +1,13 @@
+import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useMaterialCategories } from "../../hooks/useMaterialCategories";
 import { buildsApi, productsApi, stockAdjustmentsApi } from "../../api/products";
 import { materialsApi } from "../../api/materials";
+import { variantsApi } from "../../api/variants";
 import type { ProductStockEvent } from "../../api/types";
 import { ErrorBanner } from "../common/ErrorBanner";
+import { formatDayMonth, sellableSummary } from "../../lib/format";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 
 interface BuildForm {
@@ -22,16 +25,43 @@ interface AdjustForm {
   adjVariantId: number | "";
   adjMode: "adjust" | "set";
   adjValue: string;
+  /** A preset from ADJUST_REASONS, or "" for the unpicked state. */
   adjReason: string;
+  /** Free text, only when adjReason is OTHER_REASON. */
+  adjReasonOther: string;
 }
 
-const EMPTY_ADJUST_FORM: AdjustForm = { adjVariantId: "", adjMode: "adjust", adjValue: "", adjReason: "" };
+const EMPTY_ADJUST_FORM: AdjustForm = {
+  adjVariantId: "",
+  adjMode: "adjust",
+  adjValue: "",
+  adjReason: "",
+  adjReasonOther: "",
+};
+
+// Built-stock adjustment presets, mirroring the Materials Stock tab. "Other…" reveals a
+// free-text detail field so anything unusual is still one dropdown away.
+const ADJUST_REASONS = [
+  "Failed print / scrapped",
+  "Built to stock",
+  "Sample / giveaway",
+  "Correction",
+  "Other…",
+] as const;
+const OTHER_REASON = "Other…";
 
 const EVENT_LABELS: Record<ProductStockEvent["event_type"], string> = {
   build_success: "Build",
   build_failed: "Failed build",
   adjustment: "Adjustment",
   order_fulfillment: "Order shipped",
+};
+
+const EVENT_BADGE: Record<ProductStockEvent["event_type"], string> = {
+  build_success: "bg-blue-100 text-blue-800",
+  build_failed: "bg-rose-100 text-rose-800",
+  adjustment: "bg-slate-100 text-slate-700",
+  order_fulfillment: "bg-amber-100 text-amber-800",
 };
 
 export function StockSection({
@@ -44,6 +74,11 @@ export function StockSection({
   initialVariantId?: number;
 }) {
   const queryClient = useQueryClient();
+  const [historyExpanded, setHistoryExpanded] = useState(false);
+  const { data: product } = useQuery({
+    queryKey: ["products", productId],
+    queryFn: () => productsApi.get(productId),
+  });
   const { data: variants } = useQuery({
     queryKey: ["products", productId, "variants"],
     queryFn: () => productsApi.listVariants(productId),
@@ -108,8 +143,16 @@ export function StockSection({
   const setConsumption = (updater: (prev: Record<number, boolean>) => Record<number, boolean>) =>
     setBuildForm((prev) => ({ ...prev, consumption: updater(prev.consumption) }));
 
-  const selectedVariant = variants?.find((v) => v.id === variantId);
-  const resolvedBom = hasActiveVariants ? selectedVariant?.effective_bom ?? [] : bom ?? [];
+  // listVariants doesn't carry effective_bom — only the single-get does — so without this the
+  // "which materials were scrapped?" checkboxes never had rows to show for a variant build.
+  const { data: fullSelectedVariant } = useQuery({
+    queryKey: ["variants", variantId],
+    queryFn: () => variantsApi.get(Number(variantId)),
+    enabled: hasActiveVariants && variantId !== "",
+  });
+  const resolvedBom = hasActiveVariants
+    ? fullSelectedVariant?.effective_bom ?? bom ?? []
+    : bom ?? [];
   const materialById = useMemo(() => new Map((materials ?? []).map((m) => [m.id, m])), [materials]);
   const { categories, byName: categoriesByName } = useMaterialCategories();
   const qtyFailedNum = Number(qtyFailed) || 0;
@@ -162,13 +205,16 @@ export function StockSection({
     seed: EMPTY_ADJUST_FORM,
     seedKey: "const",
   });
-  const { adjVariantId, adjMode, adjValue, adjReason } = adjForm;
+  const { adjVariantId, adjMode, adjValue, adjReason, adjReasonOther } = adjForm;
   const setAdjField = <K extends keyof AdjustForm>(field: K, next: AdjustForm[K]) =>
     setAdjForm((prev) => ({ ...prev, [field]: next }));
   const setAdjVariantId = (next: number | "") => setAdjField("adjVariantId", next);
   const setAdjMode = (next: "adjust" | "set") => setAdjField("adjMode", next);
   const setAdjValue = (next: string) => setAdjField("adjValue", next);
   const setAdjReason = (next: string) => setAdjField("adjReason", next);
+  const setAdjReasonOther = (next: string) => setAdjField("adjReasonOther", next);
+  const effectiveAdjReason =
+    adjReason === OTHER_REASON ? adjReasonOther.trim() : adjReason;
 
   const adjustMutation = useMutation({
     mutationFn: () =>
@@ -177,7 +223,7 @@ export function StockSection({
         variant_id: hasActiveVariants ? Number(adjVariantId) : null,
         mode: adjMode,
         value: Number(adjValue),
-        reason: adjReason,
+        reason: effectiveAdjReason,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["products", productId] });
@@ -193,27 +239,78 @@ export function StockSection({
   const canRecordBuild =
     (Number(qtyBuilt) > 0 || qtyFailedNum > 0) && (!hasActiveVariants || variantId !== "");
   const canAdjust =
-    adjValue.trim() !== "" && adjReason.trim() !== "" && (!hasActiveVariants || adjVariantId !== "");
+    adjValue.trim() !== "" && effectiveAdjReason !== "" && (!hasActiveVariants || adjVariantId !== "");
+
+  // The read-only figure block at the top of the tab — all client-derived, same inputs the
+  // product header uses. Free stock is on-hand less what open orders have already claimed;
+  // "once purchases land" only shows when inbound POs actually raise the ceiling.
+  const onHand = hasActiveVariants
+    ? activeVariants.reduce((sum, v) => sum + v.current_stock, 0)
+    : product?.current_stock ?? 0;
+  const allocated = hasActiveVariants
+    ? activeVariants.reduce((sum, v) => sum + v.allocated_qty, 0)
+    : product?.allocated_qty ?? 0;
+  const sellable = product
+    ? sellableSummary(product, {
+        pushBuildableCapacity: product.push_buildable_capacity,
+        platformCeilingQty: product.platform_ceiling_qty,
+      })
+    : null;
 
   const variantName = (id: number | null) => variants?.find((v) => v.id === id)?.variant_name ?? "—";
 
-  const eventDetail = (e: ProductStockEvent) => {
+  const eventComment = (e: ProductStockEvent) => {
     switch (e.event_type) {
       case "build_success":
-        return e.build_qty_failed ? `${e.build_qty_built} built (${e.build_qty_failed} also failed this run)` : `${e.build_qty_built} built`;
+        return e.build_qty_failed
+          ? `${e.build_qty_built} built (${e.build_qty_failed} also failed this run)`
+          : `${e.build_qty_built} built`;
       case "build_failed":
         return `${e.build_qty_failed} failed`;
       case "adjustment":
         return e.adjustment_mode === "set" ? `Set to ${e.adjustment_target_qty}` : e.reason;
       case "order_fulfillment":
-        return e.order_external_order_id ? `Order ${e.order_external_order_id}` : `Order #${e.order_id}`;
+        return e.order_id != null ? (
+          <Link
+            to="/orders/$orderId"
+            params={{ orderId: String(e.order_id) }}
+            className="underline"
+          >
+            {e.order_external_order_id
+              ? `Order ${e.order_external_order_id}`
+              : `Order #${e.order_id}`}
+          </Link>
+        ) : (
+          (e.order_external_order_id ?? "—")
+        );
       default:
         return "—";
     }
   };
 
+  const visibleHistory =
+    history && (historyExpanded ? history : history.slice(0, 10));
+
   return (
     <div className="flex flex-col gap-6">
+      {sellable && (
+        <div className="flex flex-col gap-2 rounded bg-white p-4 text-sm shadow-sm">
+          <FigureRow
+            label="Free stock"
+            sub="on hand less what open orders have claimed"
+            value={onHand - allocated}
+          />
+          <FigureRow label="Reserved to orders" value={allocated} />
+          <FigureRow
+            label="Buildable from materials"
+            value={sellable.buildable == null ? "—" : sellable.buildable}
+          />
+          {sellable.expected != null && sellable.expected !== sellable.headline && (
+            <FigureRow label="Once purchases land" value={sellable.expected} />
+          )}
+        </div>
+      )}
+
       <div className="flex flex-col gap-3">
         <h3 className="text-md font-semibold">Record a build</h3>
         <form
@@ -305,7 +402,7 @@ export function StockSection({
       </div>
 
       <div className="flex flex-col gap-3">
-        <h3 className="text-md font-semibold">Stock adjustment</h3>
+        <h3 className="text-md font-semibold">Adjust built stock</h3>
         <form
           className="flex flex-wrap items-end gap-2 rounded bg-white p-4 shadow-sm"
           onSubmit={(e) => {
@@ -355,16 +452,34 @@ export function StockSection({
               onChange={(e) => setAdjValue(e.target.value)}
             />
           </label>
-          <label className="flex flex-col gap-1 flex-1">
+          <label className="flex flex-col gap-1">
             <span className="text-sm">Reason</span>
-            <input
+            <select
               required
               className="rounded border border-slate-300 px-2 py-1"
-              placeholder="Breakage, recount, …"
               value={adjReason}
               onChange={(e) => setAdjReason(e.target.value)}
-            />
+            >
+              <option value="">Pick a reason…</option>
+              {ADJUST_REASONS.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </select>
           </label>
+          {adjReason === OTHER_REASON && (
+            <label className="flex flex-1 flex-col gap-1">
+              <span className="text-sm">Reason detail</span>
+              <input
+                required
+                className="rounded border border-slate-300 px-2 py-1"
+                placeholder="Breakage, recount, …"
+                value={adjReasonOther}
+                onChange={(e) => setAdjReasonOther(e.target.value)}
+              />
+            </label>
+          )}
           <button
             type="submit"
             disabled={!canAdjust || adjustMutation.isPending}
@@ -373,6 +488,12 @@ export function StockSection({
             Save
           </button>
         </form>
+        {adjValue.trim() !== "" && product && !hasActiveVariants && (
+          <p className="text-xs text-slate-500">
+            On hand {onHand} →{" "}
+            {adjMode === "set" ? Number(adjValue) : onHand + Number(adjValue)}
+          </p>
+        )}
         {adjMode === "set" && (
           <p className="text-xs text-slate-500">
             Setting an exact amount records a physical count, so this stops showing as due and its
@@ -390,28 +511,69 @@ export function StockSection({
               <th className="p-2">Date</th>
               <th className="p-2">Type</th>
               {hasAnyVariants && <th className="p-2">Variant</th>}
-              <th className="p-2">Qty change</th>
+              <th className="p-2">Delta</th>
               <th className="p-2">Balance</th>
-              <th className="p-2">Detail</th>
+              <th className="p-2">Comment</th>
             </tr>
           </thead>
           <tbody>
-            {history?.map((e) => (
-              <tr key={e.id} className="border-b border-slate-100">
-                <td className="p-2">{new Date(e.created_at).toLocaleString()}</td>
-                <td className="p-2">{EVENT_LABELS[e.event_type]}</td>
-                {hasAnyVariants && <td className="p-2">{variantName(e.variant_id)}</td>}
+            {visibleHistory?.map((e) => (
+              <tr key={e.id} className="border-b border-slate-100 last:border-0">
+                <td className="p-2 text-slate-500">{formatDayMonth(e.created_at)}</td>
                 <td className="p-2">
+                  <span
+                    className={`rounded px-2 py-0.5 text-xs ${EVENT_BADGE[e.event_type]}`}
+                  >
+                    {EVENT_LABELS[e.event_type]}
+                  </span>
+                </td>
+                {hasAnyVariants && (
+                  <td className="p-2">{variantName(e.variant_id)}</td>
+                )}
+                <td
+                  className={`p-2 tabular-nums ${e.qty_delta > 0 ? "text-green-700" : e.qty_delta < 0 ? "text-red-600" : "text-slate-500"}`}
+                >
                   {e.qty_delta > 0 ? "+" : ""}
                   {e.qty_delta}
                 </td>
-                <td className="p-2">{e.running_balance}</td>
-                <td className="p-2">{eventDetail(e)}</td>
+                <td className="p-2 tabular-nums">{e.running_balance}</td>
+                <td className="p-2">{eventComment(e)}</td>
               </tr>
             ))}
           </tbody>
         </table>
+        {history && (historyExpanded || history.length > 10) && (
+          <button
+            type="button"
+            onClick={() => setHistoryExpanded((v) => !v)}
+            className="self-start rounded border border-slate-300 px-3 py-1.5 text-sm"
+          >
+            {historyExpanded ? "Show fewer" : "Show full history"}
+          </button>
+        )}
       </div>
+    </div>
+  );
+}
+
+/** One line in the top figures block: wide left title (with an optional sub-line),
+ *  right-aligned value. */
+function FigureRow({
+  label,
+  sub,
+  value,
+}: {
+  label: string;
+  sub?: string;
+  value: string | number;
+}) {
+  return (
+    <div className="flex items-baseline justify-between gap-4">
+      <span className="text-slate-600">
+        {label}
+        {sub && <span className="ml-2 text-xs text-slate-400">{sub}</span>}
+      </span>
+      <span className="shrink-0 text-right tabular-nums font-medium">{value}</span>
     </div>
   );
 }

@@ -3,6 +3,7 @@ import { appSettingsApi, type CurrencyCode } from "../../api/appSettings";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { SaveIndicator } from "../common/SaveIndicator";
+import { SettingsCard } from "./SettingsCard";
 
 const CURRENCY_LABELS: Record<CurrencyCode, string> = {
   GBP: "£ GBP",
@@ -24,14 +25,10 @@ export function CurrencySettings() {
   const saveStatus = useSaveStatus(updateMutation.status);
 
   return (
-    <div className="flex flex-col gap-3 rounded border border-slate-300 p-3">
-      <div>
-        <h2 className="font-medium">Default currency</h2>
-        <p className="text-sm text-slate-500">
-          Pre-fills the currency on a new manual order — you can still change it per order. No conversion is
-          applied anywhere; this is a label only.
-        </p>
-      </div>
+    <SettingsCard
+      title="Default currency"
+      help="Pre-fills the currency on a new manual order — you can still change it per order. No conversion is applied anywhere; this is a label only."
+    >
       {/* Left on auto-save: a three-option select shows its whole value set, and undoing a
           mis-click costs one more click. What it lacked was any sign it had saved at all. */}
       <div className="flex items-center gap-2">
@@ -50,6 +47,6 @@ export function CurrencySettings() {
         <SaveIndicator status={saveStatus} />
       </div>
       <ErrorBanner error={updateMutation.error} />
-    </div>
+    </SettingsCard>
   );
 }

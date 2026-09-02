@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.deps import get_db, require_auth
 from app.models.material import Material
@@ -46,7 +47,19 @@ async def _name_lookups(session: AsyncSession, lines: list[StockTakeLine]) -> tu
     product_ids = {line.product_id for line in lines if line.product_id}
     variant_ids = {line.variant_id for line in lines if line.variant_id}
     materials = (
-        {m.id: m for m in (await session.execute(select(Material).where(Material.id.in_(material_ids)))).scalars()}
+        {
+            m.id: m
+            # group_lines reads material_type_name for the sub-group heading; without eager
+            # loading that's a lazy load mid-iteration, which async SQLAlchemy can't do
+            # (MissingGreenlet). category_ref is already lazy="selectin" on the model.
+            for m in (
+                await session.execute(
+                    select(Material)
+                    .options(selectinload(Material.material_type))
+                    .where(Material.id.in_(material_ids))
+                )
+            ).scalars()
+        }
         if material_ids
         else {}
     )

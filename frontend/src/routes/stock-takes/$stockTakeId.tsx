@@ -1,42 +1,32 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useCallback, useMemo, useState } from "react";
 import { stockTakesApi } from "../../api/stockTakes";
 import type { StockTakeDetail, StockTakeLine } from "../../api/types";
+import { Badge } from "../../components/common/Badge";
 import { ConfirmDialog } from "../../components/common/ConfirmDialog";
 import { DetailPanel } from "../../components/common/DetailPanel";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
-import { SaveButton } from "../../components/common/SaveButton";
+import { Stat } from "../../components/common/Stat";
 import { StockTakeCsvPanel } from "../../components/stockTakes/StockTakeCsvPanel";
 import {
   countedInGroup,
   groupLabel,
   groupLines,
 } from "../../components/stockTakes/groupLines";
-import type { TabDef } from "../../components/common/Tabs";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
-import { useSaveStatus } from "../../hooks/useSaveStatus";
+import {
+  SlideOverManagedContext,
+  useCommittableDirty,
+  useDirtyRegistryApi,
+  useManagedSave,
+} from "../../hooks/useDirtyRegistry";
 import { useSiblingNav } from "../../hooks/useSiblingNav";
-import { roundQty } from "../../lib/format";
-
-const TAB_IDS = ["count", "review"] as const;
-type TabId = (typeof TAB_IDS)[number];
+import { formatDayMonth, roundQty } from "../../lib/format";
 
 export const Route = createFileRoute("/stock-takes/$stockTakeId")({
-  component: StockTakeDetailPage,
-  // Same reasoning as the product page: keeping the tab in the URL makes switching one a
-  // real router navigation, so the root unsaved-changes blocker covers leaving a
-  // half-entered count sheet without this page knowing the guard exists.
-  validateSearch: (search: Record<string, unknown>): { tab?: TabId } => {
-    const tab = search.tab;
-    return TAB_IDS.includes(tab as TabId) ? { tab: tab as TabId } : {};
-  },
+  component: StockTakeDetailRoute,
 });
-
-const TABS: TabDef[] = [
-  { id: "count", label: "Count sheet" },
-  { id: "review", label: "Review" },
-];
 
 /** Counts as typed, keyed by line id. Strings because they're bound to text inputs — "" is
  * a cleared count, which is a different thing from "0". */
@@ -52,12 +42,21 @@ function toForm(take: StockTakeDetail | undefined): CountForm | undefined {
   );
 }
 
+// The footer replaces the inline Save-counts bar with one managed Save/Revert; the context
+// is provided a layer above the body so the count-sheet's useManagedSave can read it.
+function StockTakeDetailRoute() {
+  return (
+    <SlideOverManagedContext.Provider value={true}>
+      <StockTakeDetailPage />
+    </SlideOverManagedContext.Provider>
+  );
+}
+
 function StockTakeDetailPage() {
   const { stockTakeId } = Route.useParams();
   const id = Number(stockTakeId);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const activeTab = Route.useSearch().tab ?? "count";
 
   const { data: take } = useQuery({
     queryKey: ["stock-takes", id],
@@ -100,8 +99,8 @@ function StockTakeDetailPage() {
   const {
     value: counts,
     setValue: setCounts,
-    isDirty,
     markSaved,
+    revert: revertCounts,
   } = useEditableCopy<CountForm>({
     key: "count-sheet",
     label: "Stock take counts",
@@ -133,30 +132,19 @@ function StockTakeDetailPage() {
       invalidate();
     },
   });
-  const saveStatus = useSaveStatus(saveMutation.status);
+  useManagedSave("count-sheet", {
+    save: () => saveMutation.mutate(),
+    revert: revertCounts,
+  });
+  const { isDirty: committableDirty } = useCommittableDirty();
+  const registry = useDirtyRegistryApi();
 
   const approveMutation = useMutation({
     mutationFn: () => stockTakesApi.approve(id),
     onSuccess: () => {
       setConfirmingApprove(false);
       invalidate();
-      navigate({
-        to: "/stock-takes/$stockTakeId",
-        search: { tab: "review" },
-        params: { stockTakeId },
-      });
     },
-  });
-
-  const resolveMutation = useMutation({
-    mutationFn: ({
-      lineId,
-      action,
-    }: {
-      lineId: number;
-      action: "accept_counted" | "accept_system" | "reset";
-    }) => stockTakesApi.resolveLine(id, lineId, action),
-    onSuccess: () => invalidate(),
   });
 
   if (!take) {
@@ -168,12 +156,38 @@ function StockTakeDetailPage() {
   }
 
   const isOpen = take.status === "open";
-  const pendingApproval = take.lines.filter(
-    (l) => l.status === "counted",
+  const countedLines = take.lines.filter((l) => l.status === "counted");
+  const pendingApproval = countedLines.length;
+  // Split the counted lines by whether the number entered differs from the snapshot, so the
+  // approve dialog can say what will actually be written rather than implying a no-op.
+  const changingLines = countedLines.filter(
+    (l) =>
+      l.counted_qty !== null &&
+      Number(l.counted_qty) !== Number(l.expected_qty),
   ).length;
+  const confirmingLines = pendingApproval - changingLines;
   const blanks = take.lines.filter(
     (l) => l.counted_qty === null && l.status === "pending",
   ).length;
+
+  const productLines = take.lines.filter(
+    (l) => l.product_id !== null || l.variant_id !== null,
+  ).length;
+  const appliedLines = take.lines.filter((l) => l.status === "applied").length;
+
+  const plural = (n: number, one: string, many: string) => (n === 1 ? one : many);
+  const approveBody =
+    pendingApproval === 0
+      ? `Nothing has been counted, so approving closes the take without changing any stock. ` +
+        `${blanks} blank ${plural(blanks, "line is", "lines are")} left alone.`
+      : `Approving writes your counts to stock. Of ${pendingApproval} counted ` +
+        `${plural(pendingApproval, "line", "lines")}, ${changingLines} ` +
+        `${plural(changingLines, "adjusts", "adjust")} the recorded quantity and ${confirmingLines} ` +
+        `${plural(confirmingLines, "confirms", "confirm")} it unchanged. ${blanks} blank ` +
+        `${plural(blanks, "line is", "lines are")} left alone — not adjusted, not marked counted. ` +
+        `Any line whose system stock has moved since the take started, or that has units allocated ` +
+        `to open orders, is flagged for you to settle rather than adjusted automatically. The take ` +
+        `closes either way.`;
 
   return (
     <DetailPanel
@@ -181,58 +195,100 @@ function StockTakeDetailPage() {
       onClose={closePanel}
       onPrev={prevId ? goPrev : undefined}
       onNext={nextId ? goNext : undefined}
-      tabs={TABS}
-      activeTab={activeTab}
-      onTabChange={(tab) =>
-        navigate({
-          to: "/stock-takes/$stockTakeId",
-          search: { tab: tab as TabId },
-          params: { stockTakeId },
-        })
+      footer={
+        isOpen ? (
+          <div className="flex items-center justify-between gap-3">
+            <button
+              onClick={() => setConfirmingApprove(true)}
+              disabled={committableDirty}
+              title={committableDirty ? "Save your counts first" : undefined}
+              className="rounded border border-slate-300 px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Review and approve
+            </button>
+            <div className="flex items-center gap-2">
+              <span className="text-[12px] text-slate-500">
+                {committableDirty ? "Unsaved changes" : "No changes"}
+              </span>
+              <button
+                type="button"
+                disabled={!committableDirty}
+                onClick={() => registry.revertDirtyUnder("")}
+                className="rounded border border-slate-300 px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Revert
+              </button>
+              <button
+                type="button"
+                disabled={!committableDirty}
+                onClick={() => registry.commitDirtyUnder("")}
+                className="rounded bg-slate-900 px-4 py-1.5 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Save counts
+              </button>
+            </div>
+          </div>
+        ) : undefined
       }
     >
       <div className="flex flex-col gap-4">
-        <div>
-          <p className="text-sm text-slate-500">
-            {take.scope_description}. Started{" "}
-            {new Date(take.started_at).toLocaleDateString()}
+        <div className="flex flex-col gap-3">
+          <p className="text-[12.5px] text-slate-500">
+            {take.scope_description} · started {formatDayMonth(take.started_at)} ·{" "}
             {isOpen ? (
-              <>
-                {" "}
-                —{" "}
-                <span className="text-amber-800">
-                  open {take.open_days} day{take.open_days === 1 ? "" : "s"}
-                </span>
-                . The longer it stays open, the more lines will have moved by
-                the time you approve.
-              </>
+              <span className="text-amber-700">
+                open {take.open_days} day{take.open_days === 1 ? "" : "s"}
+              </span>
             ) : (
-              <>
-                {" "}
-                — closed{" "}
-                {take.closed_at
-                  ? new Date(take.closed_at).toLocaleDateString()
-                  : ""}
-                .
-              </>
+              <>closed {take.closed_at ? formatDayMonth(take.closed_at) : ""}</>
             )}
           </p>
+          <div className="grid grid-cols-4 gap-3">
+            <Stat
+              label="Counted"
+              value={`${take.counted_count} / ${take.line_count}`}
+              sub={`${productLines} product · ${take.line_count - productLines} material`}
+            />
+            <Stat
+              label={isOpen ? "To apply" : "Applied"}
+              value={String(isOpen ? pendingApproval : appliedLines)}
+              sub={isOpen ? "on approval" : "written to stock"}
+            />
+            <Stat
+              label="Needs review"
+              value={String(take.conflict_count)}
+              sub="moved since snapshot"
+              valueClassName={take.conflict_count > 0 ? "text-amber-700" : undefined}
+            />
+            <Stat
+              label="Pending"
+              value={String(take.pending_count)}
+              sub="not counted yet"
+            />
+          </div>
         </div>
 
-        {activeTab === "count" && (
-          <>
-            {isOpen && (
-              <StockTakeCsvPanel stockTakeId={id} onImported={invalidate} />
-            )}
-            {/* Scrolls inside its own container rather than pushing the page sideways — this
-              is the widest table in the app. */}
-            <div className="overflow-x-auto">
-              <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">
+        {take.conflict_count > 0 && (
+          <Link
+            to="/stock-takes/unresolved"
+            className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+          >
+            {take.conflict_count} line{take.conflict_count === 1 ? "" : "s"} flagged for review
+            — settle {take.conflict_count === 1 ? "it" : "them"} on Unresolved variances →
+          </Link>
+        )}
+
+        {isOpen && <StockTakeCsvPanel stockTakeId={id} onImported={invalidate} />}
+        {/* Scrolls inside its own container rather than pushing the page sideways — this
+            is the widest table in the app. */}
+        <div className="overflow-x-auto">
+              <table className="w-full border-collapse overflow-hidden rounded-lg bg-white text-left text-[12.5px] shadow-sm">
                 <thead>
-                  <tr className="border-b border-slate-200">
+                  <tr className="border-b border-slate-200 bg-slate-50/60">
                     <th className="p-2">Item</th>
-                    <th className="p-2">Expected</th>
-                    <th className="p-2">Counted</th>
+                    <th className="p-2 text-right">Expected</th>
+                    <th className="p-2 text-right">Counted</th>
+                    <th className="p-2 text-right">Delta</th>
                     <th className="p-2">Status</th>
                   </tr>
                 </thead>
@@ -243,7 +299,7 @@ function StockTakeDetailPage() {
                     return (
                       <Fragment key={group.key}>
                         <tr className="border-b border-slate-200 bg-slate-50">
-                          <th colSpan={4} className="p-2 text-left font-medium">
+                          <th colSpan={5} className="p-2 text-left font-medium">
                             <button
                               type="button"
                               onClick={() =>
@@ -271,45 +327,65 @@ function StockTakeDetailPage() {
                           </th>
                         </tr>
                         {!isCollapsed &&
-                          group.lines.map((line) => (
-                            <tr
-                              key={line.id}
-                              className="border-b border-slate-100"
-                            >
-                              <td className="p-2 pl-6">{line.name}</td>
-                              <td className="p-2">
-                                {roundQty(line.expected_qty)} {line.unit}
-                                {/* The difference between a real variance and a shelf that only
-                          looks short, so it belongs next to the number being compared. */}
-                                {line.allocated_qty_at_start !== null &&
-                                  Number(line.allocated_qty_at_start) > 0 && (
-                                    <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">
-                                      {roundQty(line.allocated_qty_at_start)}{" "}
-                                      picked for orders
-                                    </span>
-                                  )}
-                              </td>
-                              <td className="p-2">
-                                <input
-                                  type="number"
-                                  min="0"
-                                  disabled={!isOpen}
-                                  className="w-24 rounded border border-slate-300 px-2 py-1 disabled:bg-slate-100"
-                                  placeholder="—"
-                                  value={counts[line.id] ?? ""}
-                                  onChange={(e) =>
-                                    setCounts((prev) => ({
-                                      ...prev,
-                                      [line.id]: e.target.value,
-                                    }))
-                                  }
-                                />
-                              </td>
-                              <td className="p-2 text-xs text-slate-500">
-                                {statusLabel(line)}
-                              </td>
-                            </tr>
-                          ))}
+                          group.lines.map((line) => {
+                            const typed = (counts[line.id] ?? "").trim();
+                            const liveDelta =
+                              typed === ""
+                                ? null
+                                : Number(typed) - Number(line.expected_qty);
+                            return (
+                              <tr
+                                key={line.id}
+                                className="border-b border-slate-100 last:border-0"
+                              >
+                                <td className="p-2 pl-6">{line.name}</td>
+                                <td className="p-2 text-right tabular-nums">
+                                  {roundQty(line.expected_qty)} {line.unit}
+                                  {/* A real variance vs. a shelf that only looks short —
+                                  belongs next to the number being compared. */}
+                                  {line.allocated_qty_at_start !== null &&
+                                    Number(line.allocated_qty_at_start) > 0 && (
+                                      <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] text-amber-800">
+                                        {roundQty(line.allocated_qty_at_start)}{" "}
+                                        picked for orders
+                                      </span>
+                                    )}
+                                </td>
+                                <td className="p-2 text-right">
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    disabled={!isOpen}
+                                    className="w-20 rounded border border-slate-300 px-2 py-1 text-right tabular-nums disabled:bg-slate-100"
+                                    placeholder="—"
+                                    value={counts[line.id] ?? ""}
+                                    onChange={(e) =>
+                                      setCounts((prev) => ({
+                                        ...prev,
+                                        [line.id]: e.target.value,
+                                      }))
+                                    }
+                                  />
+                                </td>
+                                <td
+                                  className={`p-2 text-right tabular-nums ${
+                                    liveDelta == null || liveDelta === 0
+                                      ? "text-slate-400"
+                                      : "text-amber-700"
+                                  }`}
+                                >
+                                  {liveDelta == null
+                                    ? "—"
+                                    : liveDelta > 0
+                                      ? `+${roundQty(String(liveDelta))}`
+                                      : roundQty(String(liveDelta))}
+                                </td>
+                                <td className="p-2">
+                                  <StatusBadge status={line.status} />
+                                </td>
+                              </tr>
+                            );
+                          })}
                       </Fragment>
                     );
                   })}
@@ -317,52 +393,16 @@ function StockTakeDetailPage() {
               </table>
             </div>
 
-            {isOpen && (
-              <div className="flex items-center gap-3">
-                <SaveButton
-                  isDirty={isDirty}
-                  isPending={saveMutation.isPending}
-                  status={saveStatus}
-                  onClick={() => saveMutation.mutate()}
-                >
-                  Save counts
-                </SaveButton>
-                <button
-                  onClick={() => setConfirmingApprove(true)}
-                  disabled={isDirty}
-                  title={isDirty ? "Save your counts first" : undefined}
-                  className="rounded border border-slate-300 px-4 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Review and approve
-                </button>
-              </div>
-            )}
-            <ErrorBanner error={saveMutation.error} />
-          </>
-        )}
-
-        {activeTab === "review" && (
-          <ReviewTab
-            take={take}
-            onResolve={(lineId, action) =>
-              resolveMutation.mutate({ lineId, action })
-            }
-          />
-        )}
-        <ErrorBanner error={resolveMutation.error ?? approveMutation.error} />
+        <ErrorBanner error={saveMutation.error} />
+        <ErrorBanner error={approveMutation.error} />
 
         <ConfirmDialog
           open={confirmingApprove}
           title="Approve this stock take?"
-          // Says what will happen to all three groups, because "skipped" is the one someone
-          // would otherwise assume means "counted as zero".
-          body={
-            `${pendingApproval} counted line${pendingApproval === 1 ? "" : "s"} will be applied where nothing has ` +
-            `moved since the take started. ${blanks} line${blanks === 1 ? "" : "s"} left blank will be left ` +
-            `completely alone — not adjusted, and not marked as counted. Anything that moved, or that has stock ` +
-            `picked for open orders, is flagged for you to settle rather than adjusted automatically. The take ` +
-            `closes either way.`
-          }
+          // Spells out what approving writes rather than implying a no-op: counted lines are
+          // applied (some adjust a figure, some confirm it), blanks are left alone, and moved
+          // or allocated lines are held back for review.
+          body={approveBody}
           confirmLabel="Approve"
           busy={approveMutation.isPending}
           onConfirm={() => approveMutation.mutate()}
@@ -373,145 +413,19 @@ function StockTakeDetailPage() {
   );
 }
 
-function statusLabel(line: StockTakeLine): string {
-  switch (line.status) {
-    case "pending":
-      return "not counted";
-    case "counted":
-      return "counted";
-    case "applied":
-      return "applied";
-    case "conflict":
-      return "needs review";
-    case "accepted_system":
-      return "kept system figure";
-    case "skipped":
-      return "unchanged, not re-dated";
-  }
-}
+const STATUS_META: Record<
+  StockTakeLine["status"],
+  { label: string; cls: string }
+> = {
+  pending: { label: "Not counted", cls: "bg-slate-100 text-slate-500" },
+  counted: { label: "Counted", cls: "bg-blue-100 text-blue-800" },
+  applied: { label: "Auto-applied", cls: "bg-green-100 text-green-800" },
+  conflict: { label: "Needs review", cls: "bg-amber-100 text-amber-800" },
+  accepted_system: { label: "Kept system", cls: "bg-slate-100 text-slate-600" },
+  skipped: { label: "Unchanged", cls: "bg-slate-100 text-slate-500" },
+};
 
-function ReviewTab({
-  take,
-  onResolve,
-}: {
-  take: StockTakeDetail;
-  onResolve: (
-    lineId: number,
-    action: "accept_counted" | "accept_system" | "reset",
-  ) => void;
-}) {
-  // The conflict/non-conflict split comes first — a flagged line needs settling whatever
-  // shelf it came off — and the grouping applies within each half.
-  const flagged = take.lines.filter((l) => l.status === "conflict");
-  const rest = take.lines.filter((l) => l.status !== "conflict");
-
-  return (
-    <div className="flex flex-col gap-4">
-      {flagged.length > 0 && (
-        <section>
-          <h2 className="mb-1 text-lg font-semibold">Needs review</h2>
-          <p className="mb-2 text-sm text-slate-500">
-            These weren't adjusted. Each one is two different truths rather than
-            a simple miscount, so it's your call which is right.
-          </p>
-          <div className="flex flex-col gap-2">
-            {flagged.map((line) => (
-              <div
-                key={line.id}
-                className="rounded border border-amber-300 bg-amber-50 p-3"
-              >
-                <p className="font-medium">{line.name}</p>
-                <p className="text-sm text-amber-800">{line.conflict_reason}</p>
-                <p className="mt-1 text-sm">
-                  Expected {roundQty(line.expected_qty)} · counted{" "}
-                  {line.counted_qty === null ? "—" : roundQty(line.counted_qty)}
-                  {line.system_qty_at_approval !== null && (
-                    <> · system now {roundQty(line.system_qty_at_approval)}</>
-                  )}
-                </p>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <button
-                    onClick={() => onResolve(line.id, "accept_counted")}
-                    className="rounded border border-amber-300 bg-white px-2 py-1 text-xs"
-                  >
-                    Use the counted figure
-                  </button>
-                  <button
-                    onClick={() => onResolve(line.id, "accept_system")}
-                    className="rounded border border-amber-300 bg-white px-2 py-1 text-xs"
-                  >
-                    Keep what the system says
-                  </button>
-                  <button
-                    onClick={() => onResolve(line.id, "reset")}
-                    className="rounded border border-amber-300 bg-white px-2 py-1 text-xs"
-                  >
-                    Clear and count again later
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
-      <section>
-        <h2 className="mb-2 text-lg font-semibold">Everything else</h2>
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">
-            <thead>
-              <tr className="border-b border-slate-200">
-                <th className="p-2">Item</th>
-                <th className="p-2">Expected</th>
-                <th className="p-2">Counted</th>
-                <th className="p-2">Difference</th>
-                <th className="p-2">Outcome</th>
-              </tr>
-            </thead>
-            <tbody>
-              {/* Same headings as the count sheet. Someone settling a variance is looking at
-                  the same shelves they just counted, so this reads in the same order. */}
-              {groupLines(rest).map((group) => (
-                <Fragment key={group.key}>
-                  <tr className="border-b border-slate-200 bg-slate-50">
-                    <th colSpan={5} className="p-2 text-left font-medium">
-                      <span className="mr-2 text-xs uppercase tracking-wide text-slate-400">
-                        {group.section}
-                      </span>
-                      {groupLabel(group)}
-                    </th>
-                  </tr>
-                  {group.lines.map((line) => {
-                    const delta =
-                      line.delta === null ? null : Number(line.delta);
-                    return (
-                      <tr key={line.id} className="border-b border-slate-100">
-                        <td className="p-2 pl-6">{line.name}</td>
-                        <td className="p-2">{roundQty(line.expected_qty)}</td>
-                        <td className="p-2">
-                          {line.counted_qty === null
-                            ? "—"
-                            : roundQty(line.counted_qty)}
-                        </td>
-                        <td className={`p-2 ${delta ? "text-red-600" : ""}`}>
-                          {delta === null
-                            ? "—"
-                            : delta > 0
-                              ? `+${roundQty(line.delta!)}`
-                              : roundQty(line.delta!)}
-                        </td>
-                        <td className="p-2 text-xs text-slate-500">
-                          {statusLabel(line)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
-    </div>
-  );
+function StatusBadge({ status }: { status: StockTakeLine["status"] }) {
+  const meta = STATUS_META[status];
+  return <Badge className={meta.cls}>{meta.label}</Badge>;
 }

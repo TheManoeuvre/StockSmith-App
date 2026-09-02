@@ -2,6 +2,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { listingProfilesApi, type ListingProfile, type ListingProfileWrite } from "../../api/listingProfiles";
 import type { ListingPlatform } from "../../api/types";
+import { useDirtyRegistration } from "../../hooks/useDirtyRegistry";
+import { useEditableCopy } from "../../hooks/useEditableCopy";
 import {
   EBAY_CONDITION,
   ETSY_IS_SUPPLY,
@@ -142,7 +144,7 @@ function ProfileForm({
   profile?: ListingProfile;
   onDone: () => void;
 }) {
-  const [draft, setDraft] = useState<ListingProfileWrite>({
+  const initialDraft: ListingProfileWrite = {
     name: profile?.name ?? "",
     is_default: profile?.is_default ?? false,
     etsy_taxonomy_id: profile?.etsy_taxonomy_id ?? null,
@@ -161,7 +163,23 @@ function ProfileForm({
     ebay_return_policy_id: profile?.ebay_return_policy_id ?? null,
     ebay_merchant_location_key: profile?.ebay_merchant_location_key ?? null,
     ebay_marketplace_id: profile?.ebay_marketplace_id ?? null,
+  };
+  // Buffered through useEditableCopy so a half-filled profile prompts on navigate instead of
+  // vanishing silently. seedKey is constant — one form is open at a time and it's remounted
+  // per edit, so nothing should re-seed it out from under an in-progress edit.
+  const {
+    value: draft,
+    setValue: setDraft,
+    isDirty,
+    markSaved,
+  } = useEditableCopy<ListingProfileWrite>({
+    key: "listing-profiles/form",
+    label: `${profile ? "Listing profile" : "New listing profile"}`,
+    initial: initialDraft,
+    seed: initialDraft,
+    seedKey: `${platform}:${profile?.id ?? "new"}`,
   });
+  useDirtyRegistration("listing-profiles/form", "Listing profile", isDirty);
 
   // What's stored is an id; this is the name it was chosen by, so re-opening a saved
   // profile shows a category rather than a number.
@@ -201,7 +219,12 @@ function ProfileForm({
       profile
         ? listingProfilesApi.update(platform, profile.id, draft)
         : listingProfilesApi.create(platform, draft),
-    onSuccess: onDone,
+    onSuccess: () => {
+      // Clear the dirty flag before the parent unmounts this form, so the unsaved-changes
+      // guard doesn't flash on the way out.
+      markSaved(draft);
+      onDone();
+    },
   });
 
   const set = (patch: ListingProfileWrite) => setDraft((d) => ({ ...d, ...patch }));

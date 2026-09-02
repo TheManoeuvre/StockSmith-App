@@ -647,3 +647,42 @@ async def _lookups_for(session, lines):
     from app.services.csv_io import _stock_take_lookups
 
     return await _stock_take_lookups(session, lines)
+
+
+async def test_reading_a_take_eager_loads_material_type(session):
+    """group_lines reads Material.material_type_name for the sub-group heading. The two
+    lookup helpers re-select the materials in a fresh statement, so without an explicit
+    selectinload that read is a lazy load mid-iteration — which async SQLAlchemy answers
+    with MissingGreenlet, 500-ing every take that includes a material with a material type
+    set (i.e. any filament count).
+    """
+    from app.models.material_type import MaterialType
+    from app.routers.stock_takes import _name_lookups
+    from app.schemas.stock_take import StockTakeScope
+    from app.services.csv_io import _stock_take_lookups
+    from app.services.stock_takes import create_stock_take, group_lines
+
+    session.add(GeneralSettings(id=1))
+    pla = MaterialType(name="PLA")
+    session.add(pla)
+    await session.flush()
+    black = await _material(
+        session, "Black", category="filament", unit=MaterialUnit.g, material_type_id=pla.id
+    )
+
+    take, _ = await create_stock_take(session, StockTakeScope(include_materials=True))
+    await session.commit()
+    lines = await _lines_of(session, take.id)
+
+    from sqlalchemy import inspect as sa_inspect
+
+    for lookups in (_name_lookups, _stock_take_lookups):
+        session.expire(black, ["material_type"])
+        materials, _, _ = await lookups(session, lines)
+        m = materials[black.id]
+        # The lookup's own select must have eager-loaded material_type; if it's still
+        # unloaded, group_lines' read of material_type_name is a lazy load, which async
+        # SQLAlchemy raises MissingGreenlet for (the 500 on every filament take).
+        assert "material_type" not in sa_inspect(m).unloaded
+        grouped = group_lines(lines, materials, {}, {})
+        assert any(g.subgroup == "PLA" for g in grouped)

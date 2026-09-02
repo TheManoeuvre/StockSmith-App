@@ -12,6 +12,58 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-02
+
+The second half of the redesign. 0.9.0 moved the furniture — sidebar, slide-over panels;
+this pass restyles what's inside every screen so they read as one app, and rebuilds the
+dashboard around what actually needs your attention.
+
+### Changed
+- **The dashboard is rebuilt around blocked work.** Four figures across the top —
+  blocked orders, materials at risk, overdue counts, inventory value — each a link to the
+  list it summarises. Below them, one **Blocked orders** table that merges "short on stock"
+  and "short on packaging" into a single queue, oldest first, so nothing waiting on you is
+  split across two panels. Then time-to-stockout grouped by supplier, a stock-take card
+  with a progress bar and the items due for counting, and the products whose margin has
+  moved most. The standalone "Lowest buildable products" and "Due for counting" tables are
+  gone — the first was rarely acted on, the second now lives on the stock-take card.
+- **The orders list splits into two groups instead of status tabs.** Everything still to
+  fulfil sits in **Awaiting shipment**, oldest first, pinned above **Shipped & cancelled**.
+  An order moves down only once it ships or is cancelled. The Fulfilment column already
+  tells you *why* an order is waiting (short stock, needs a build, ready to ship), which is
+  more useful than a Pending/Allocated tab.
+- **Every list and detail panel picked up the same visual grammar** — stat tiles at the
+  top of a detail view, denser tables, a single Save / Revert in the panel footer instead
+  of a Save button on every section, and clicking anywhere on a row opens it.
+- **The product panel's Bill of Materials, pricing and variant screens were reworked** for
+  the new density: tighter BOM rows, right-aligned figures, and variant material
+  substitutions shown as an inline swap rather than a second table.
+- **Recording a build as failed now asks which materials to scrap.**
+- **The stock-take approve step says what it will actually do.** Instead of implying
+  nothing changes, it now reads "Of N counted lines, X adjust the recorded quantity and Y
+  confirm it unchanged" and names how many blank lines are left alone. The separate Review
+  tab is gone — lines held back for a decision are settled on the Unresolved variances
+  page, linked from the stock-take when there are any.
+- **Settings is one consistent surface.** Every section is the same card, every form the
+  same label-left rows, and the Connection tab is a card like the rest. Editing a listing
+  profile and navigating away now warns about unsaved changes, the same as everywhere else.
+
+### Added
+- **The materials list and each material's panel show time to stockout** — weeks of cover
+  left at the current consumption rate, with finished-goods stock counted in, and a
+  warning / critical badge. Grouped by supplier so one purchase order clears a set.
+- **A material's panel lists what it's used in** — every product and variant whose recipe
+  includes it, with the quantity per build.
+- **Product images now record their pixel dimensions**, shown on the Assets tab, so you can
+  see at a glance whether an image meets a marketplace's size minimum. Non-image files
+  (design source, print files) list with a download link.
+
+### Fixed
+- **Starting a stock take that included a filament — any material with a material type set
+  — failed with "Internal server error".** The count sheet needs each material's type to
+  group it, and two of the code paths that build the sheet weren't loading it. Fixed; a
+  filament stock take works.
+
 ## [0.9.0] - 2026-09-01
 
 A new look for the whole app: navigation moves to a sidebar, and opening a product,

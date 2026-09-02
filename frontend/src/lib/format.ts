@@ -23,6 +23,12 @@ export function isLowStock(currentQty: string, reorderThreshold: string): boolea
   return threshold > 0 && Number(currentQty) <= threshold;
 }
 
+// A compact date for dense rows (stock history, PO lists): "20 Aug". No year — this is for
+// browsing recent movements, not for telling one January apart from the next.
+export function formatDayMonth(iso: string): string {
+  return new Date(iso).toLocaleDateString(undefined, { day: "2-digit", month: "short" });
+}
+
 // The quantity fields every sellable-bearing row carries. Both Product and Variant
 // satisfy it, so the one derivation below serves the product header, the variant rows
 // and the products list without any of them drifting from the others.

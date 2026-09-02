@@ -1,5 +1,8 @@
 export type MaterialUnit = "g" | "ml" | "each";
 export type AssetType = "main_image" | "listing_image" | "step" | "threemf" | "gcode";
+/** Time-to-stockout urgency from services/forecasting.py. "ok" only appears where the
+ *  caller asked for every material (the materials list/detail), not on the dashboard. */
+export type StockoutStatus = "critical" | "warning" | "insufficient_data" | "ok";
 
 export interface Material {
   id: number;
@@ -14,6 +17,9 @@ export interface Material {
   avg_unit_cost: string;
   is_active: boolean;
   colour: string | null;
+  /** Hex code of the reference colour when it has one — for the materials-list swatch. Null
+   *  for materials still on the legacy free-text colour path. */
+  colour_hex: string | null;
   material_type_id: number | null;
   material_type_name: string | null;
   barcode: string | null;
@@ -28,6 +34,21 @@ export interface Material {
   created_at: string;
   updated_at: string;
   on_order_qty: string | null;
+  /** Time-to-stockout forecast, populated on the list and single-get paths (null on a
+   *  mutation response). `weeks_of_supply` is null when there's too little sales history —
+   *  `stockout_status` is then "insufficient_data"; "ok" means healthy. See lib/forecast.ts. */
+  weeks_of_supply: string | null;
+  consumption_rate_per_week: string | null;
+  fg_buffer_weeks: string | null;
+  stockout_status: StockoutStatus | null;
+  /** Products whose build/kitting BOM names this material. Populated on the single-get only
+   *  (null in the list), for the detail panel's "Used in N products" footer. */
+  used_in_product_count: number | null;
+  /** The material's line on the currently-open stock take, if any. Populated on the
+   *  single-get only. `open_stock_take_line_status` is a StockTakeLineStatus value
+   *  ("pending" | "counted" | "applied" | "conflict" | "accepted_system" | "skipped"). */
+  open_stock_take_id: number | null;
+  open_stock_take_line_status: string | null;
   abc_class: ABCClass | null;
   stock_take_interval_days: number | null;
   last_stock_take_at: string | null;
@@ -311,11 +332,13 @@ export interface Purchase {
 export interface MaterialStockHistoryEntry {
   id: number;
   /**
-   * "purchase" is a delivery that happened; those plus "adjustment" account for the
-   * material's quantity exactly. "purchase_outstanding" is what is still on order — on the
-   * same timeline because that is where people look for it, but it has moved nothing.
+   * "purchase" is a delivery that happened; those plus "adjustment"/"build"/"scrap" account
+   * for the material's quantity exactly. "purchase_outstanding" is what is still on order —
+   * on the same timeline because that is where people look for it, but it has moved
+   * nothing. "build"/"scrap" are adjustments written by a build (successful consumption /
+   * failed-build scrap), split out of the generic "adjustment" bucket.
    */
-  kind: "purchase" | "purchase_outstanding" | "adjustment";
+  kind: "purchase" | "purchase_outstanding" | "adjustment" | "build" | "scrap";
   at: string;
   qty: string;
   total_cost: string | null;
@@ -328,6 +351,8 @@ export interface MaterialStockHistoryEntry {
   product_name: string | null;
   variant_id: number | null;
   order_id: number | null;
+  /** Set for "purchase"/"purchase_outstanding" rows only — links the row to its PO. */
+  purchase_id: number | null;
 }
 
 export interface Product {
@@ -598,6 +623,10 @@ export interface Asset {
   asset_type: AssetType;
   file_path: string;
   original_filename: string;
+  /** Pixel size for image asset types; null for CAD/gcode and image rows predating the
+   *  columns (backfilled by scripts/backfill_asset_dimensions.py). */
+  width_px: number | null;
+  height_px: number | null;
   display_order: number;
   created_at: string;
 }
