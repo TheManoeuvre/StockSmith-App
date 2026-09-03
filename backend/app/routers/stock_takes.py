@@ -64,7 +64,20 @@ async def _name_lookups(session: AsyncSession, lines: list[StockTakeLine]) -> tu
         else {}
     )
     products = (
-        {p.id: p for p in (await session.execute(select(Product).where(Product.id.in_(product_ids)))).scalars()}
+        {
+            p.id: p
+            # group_lines reads product_category_name for the group heading; Product's
+            # product_category relationship has no lazy="selectin", so without this it's a
+            # lazy load mid-iteration that async SQLAlchemy can't do (MissingGreenlet) —
+            # the same hazard the materials query above guards against.
+            for p in (
+                await session.execute(
+                    select(Product)
+                    .options(selectinload(Product.product_category))
+                    .where(Product.id.in_(product_ids))
+                )
+            ).scalars()
+        }
         if product_ids
         else {}
     )
