@@ -15,7 +15,7 @@ import pytest
 
 from app.models.product import Product
 from app.models.variant import ProductVariant
-from app.services.listing_adoption import plan_sku_alignment
+from app.services.listing_adoption import SkuAlignmentPlan, plan_sku_alignment
 from app.services.platforms.base import ClassicListingCandidate
 from app.services.platforms.ebay import (
     _TRADING_SITE_IDS,
@@ -30,7 +30,7 @@ from app.services.platforms.errors import PlatformSyncError
 _NS = {"e": "urn:ebay:apis:eBLBaseComponents"}
 
 
-def _candidate(skus, specifics, is_migrated=False):
+def _candidate(skus, specifics, is_migrated=False, listing_sku=None):
     return ClassicListingCandidate(
         external_listing_id="227269664481",
         title="Aqara G400 mount",
@@ -39,6 +39,7 @@ def _candidate(skus, specifics, is_migrated=False):
         variation_specifics=specifics,
         quantity=4,
         is_migrated=is_migrated,
+        listing_sku=listing_sku,
         detail_loaded=True,
     )
 
@@ -141,10 +142,11 @@ async def test_revise_refuses_migrated_listing():
 
 def test_plan_returns_none_when_everything_matches():
     """No-op means no live listing edit — this is what stops alignment from touching a
-    shop that needs nothing."""
+    shop that needs nothing. The listing-level SKU must already be set too, or the plan
+    fires to add it (see test_plan_adds_listing_sku_when_only_that_is_missing)."""
     product = Product(id=1, name="Mount", sku="SKU-0012")
     variants = [ProductVariant(id=10, product_id=1, variant_name="A", sku_suffix="A")]
-    candidate = _candidate(["SKU-0012-A"], [{"Colour": "Black"}])
+    candidate = _candidate(["SKU-0012-A"], [{"Colour": "Black"}], listing_sku="SKU-0012")
 
     assert plan_sku_alignment(product, variants, candidate, [(10, "SKU-0012-A")]) is None
 
@@ -153,20 +155,75 @@ def test_plan_rewrites_only_the_mapped_variation():
     """Variations the user didn't map must be echoed back unchanged, not dropped."""
     product = Product(id=1, name="Mount", sku="SKU-0012")
     variants = [ProductVariant(id=10, product_id=1, variant_name="A", sku_suffix="A")]
-    candidate = _candidate(["OLD-1", "UNTOUCHED"], [{"Colour": "Black"}, {"Colour": "White"}])
+    candidate = _candidate(
+        ["OLD-1", "UNTOUCHED"], [{"Colour": "Black"}, {"Colour": "White"}], listing_sku="SKU-0012"
+    )
 
-    assert plan_sku_alignment(product, variants, candidate, [(10, "OLD-1")]) == ["SKU-0012-A", "UNTOUCHED"]
+    plan = plan_sku_alignment(product, variants, candidate, [(10, "OLD-1")])
+    assert plan == SkuAlignmentPlan(variation_skus=["SKU-0012-A", "UNTOUCHED"], listing_sku="SKU-0012")
+
+
+def test_plan_adds_listing_sku_when_only_that_is_missing():
+    """The bug this fixes: every variation SKU already matches, but the listing itself has
+    no Item.SKU, so eBay's migration rejects it. The plan must still fire — echoing the
+    unchanged variations and setting Item.SKU from the product's own SKU."""
+    product = Product(id=1, name="Mount", sku="SKU-0012")
+    variants = [
+        ProductVariant(id=10, product_id=1, variant_name="A", sku_suffix="A"),
+        ProductVariant(id=11, product_id=1, variant_name="B", sku_suffix="B"),
+    ]
+    candidate = _candidate(
+        ["SKU-0012-A", "SKU-0012-B"], [{"Colour": "Black"}, {"Colour": "White"}], listing_sku=None
+    )
+
+    plan = plan_sku_alignment(product, variants, candidate, [(10, "SKU-0012-A"), (11, "SKU-0012-B")])
+    assert plan == SkuAlignmentPlan(variation_skus=["SKU-0012-A", "SKU-0012-B"], listing_sku="SKU-0012")
 
 
 def test_plan_handles_single_sku_listing():
     product = Product(id=1, name="Widget", sku="WIDGET")
-    assert plan_sku_alignment(product, [], _candidate(["OLD"], None), [(None, "OLD")]) == ["WIDGET"]
+    plan = plan_sku_alignment(product, [], _candidate(["OLD"], None), [(None, "OLD")])
+    assert plan == SkuAlignmentPlan(variation_skus=["WIDGET"], listing_sku=None)
 
 
 def test_plan_returns_none_when_product_has_no_sku():
     """Nothing to align to — must not propose blanking eBay's SKU."""
     product = Product(id=1, name="Widget", sku=None)
     assert plan_sku_alignment(product, [], _candidate(["OLD"], None), [(None, "OLD")]) is None
+
+
+def test_plan_multi_variation_leaves_listing_sku_alone_when_product_has_no_sku():
+    """A no-op stays a no-op: with no product SKU there's nothing to set Item.SKU to, so
+    the plan must not fire just because the listing lacks one (the router's own pre-flight
+    is what blocks the migration in that case, with an actionable message)."""
+    product = Product(id=1, name="Mount", sku=None)
+    variants = [ProductVariant(id=10, product_id=1, variant_name="A", sku_suffix="A")]
+    candidate = _candidate(["EBAY-A"], [{"Colour": "Black"}], listing_sku=None)
+
+    assert plan_sku_alignment(product, variants, candidate, [(10, "EBAY-A")]) is None
+
+
+def test_revise_xml_multi_variation_includes_listing_level_sku():
+    """eBay's bulkMigrateListing needs an Item.SKU on a multi-variation listing; when the
+    plan carries one it must land before <Variations> in the payload."""
+    specifics = [{"Colour": c} for c in ("Black", "White")]
+    candidate = _candidate(["A", "B"], specifics)
+
+    xml = EbayAdapter._build_revise_skus_xml(candidate, ["NEW-A", "NEW-B"], listing_sku="PARENT-0012")
+    root = ElementTree.fromstring(xml)
+
+    assert root.findtext("e:Item/e:SKU", "", _NS) == "PARENT-0012"
+    assert len(root.findall("e:Item/e:Variations/e:Variation", _NS)) == 2
+    # Item.SKU must precede Variations (eBay's ItemType element order).
+    children = [child.tag.split("}")[-1] for child in root.find("e:Item", _NS)]
+    assert children.index("SKU") < children.index("Variations")
+
+
+def test_revise_xml_multi_variation_omits_listing_sku_when_not_given():
+    """No listing SKU in the plan → no <Item><SKU>, leaving any existing one untouched."""
+    candidate = _candidate(["A", "B"], [{"Colour": "Black"}, {"Colour": "White"}])
+    root = ElementTree.fromstring(EbayAdapter._build_revise_skus_xml(candidate, ["NEW-A", "NEW-B"]))
+    assert root.find("e:Item/e:SKU", _NS) is None
 
 
 # --- Idempotency and error surfacing ------------------------------------------------

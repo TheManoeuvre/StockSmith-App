@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from sqlalchemy import select
@@ -19,10 +20,26 @@ from app.services.variants import compute_full_sku
 __all__ = [
     "propose_variation_mapping",
     "plan_sku_alignment",
+    "SkuAlignmentPlan",
     "apply_adoption",
     "known_stocksmith_skus",
     "find_unadopted_listings",
 ]
+
+
+@dataclass
+class SkuAlignmentPlan:
+    """What EbayAdapter.revise_listing_skus should send before migration.
+
+    `variation_skus` is the full positional list (length 1 for a single-SKU listing) —
+    every variation is always included because eBay deletes any it isn't told about.
+    `listing_sku` is the listing-level Item.SKU to set: None for a single-SKU listing
+    (there it is just variation_skus[0]), and for a multi-variation listing None means
+    "leave whatever Item.SKU is already there untouched".
+    """
+
+    variation_skus: list[str]
+    listing_sku: str | None = None
 
 
 async def known_stocksmith_skus(session: AsyncSession) -> set[str]:
@@ -171,12 +188,12 @@ def plan_sku_alignment(
     active_variants: list[ProductVariant],
     candidate: ClassicListingCandidate,
     variation_mapping: list[tuple[int | None, str]],
-) -> list[str] | None:
-    """Builds the SKU list to send to EbayAdapter.revise_listing_skus, positionally
-    aligned with candidate.variation_specifics, or None when nothing needs changing.
+) -> SkuAlignmentPlan | None:
+    """Decides the pre-migration ReviseFixedPriceItem to send, or None when nothing needs
+    changing.
 
     Returning None for a no-op matters: revising a listing is a real edit to live
-    marketplace data, so it must not fire when every SKU already matches. Pure so the
+    marketplace data, so it must not fire when everything already matches. Pure so the
     "which listing edits would we make" decision is testable without touching eBay."""
     variants_by_id = {v.id: v for v in active_variants}
     expected_by_ebay_sku: dict[str, str] = {}
@@ -191,12 +208,27 @@ def plan_sku_alignment(
         desired = expected_by_ebay_sku.get(current)
         if desired is None or desired == current:
             return None
-        return [desired]
+        return SkuAlignmentPlan(variation_skus=[desired])
 
     # Keep every variation, changing only those the mapping covers — an omitted
     # variation would be deleted by eBay (see EbayAdapter._build_revise_skus_xml).
     desired_skus = [expected_by_ebay_sku.get(sku, sku) for sku in candidate.skus]
-    return None if desired_skus == candidate.skus else desired_skus
+    variations_changed = desired_skus != candidate.skus
+
+    # The listing-level Item.SKU is a separate field a seller often leaves unset, and
+    # eBay's bulkMigrateListing rejects a multi-variation listing without one. Set it
+    # from the product's own SKU (the "main" SKU, no variant suffix). Only proposed as a
+    # change when it actually differs; when it already matches but a variation SKU is
+    # changing, the existing value is echoed back so the revise doesn't blank it.
+    main_sku = product.sku or None
+    listing_sku_change = main_sku if main_sku and main_sku != candidate.listing_sku else None
+
+    if not variations_changed and listing_sku_change is None:
+        return None
+    return SkuAlignmentPlan(
+        variation_skus=desired_skus,
+        listing_sku=listing_sku_change if listing_sku_change is not None else candidate.listing_sku,
+    )
 
 
 async def apply_adoption(

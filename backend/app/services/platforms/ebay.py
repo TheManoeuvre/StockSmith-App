@@ -161,6 +161,7 @@ def _evaluate_eligibility(
     skus: list[str],
     variation_specifics: list[dict[str, str]] | None,
     detail_loaded: bool = True,
+    listing_sku: str | None = None,
 ) -> list[str]:
     """Best-effort local pre-filter for bulkMigrateListing eligibility — NOT
     authoritative. eBay's own migration call is the real gate (see
@@ -191,6 +192,15 @@ def _evaluate_eligibility(
             reasons.append(
                 f"{missing_variation_skus} of {len(skus)} variation(s) have no SKU — every variation needs one "
                 "before the whole listing can migrate."
+            )
+        if not listing_sku:
+            # eBay's migration rejects a multi-variation listing whose Item.SKU is unset,
+            # separately from the per-variation SKUs above. Adopting with "align SKUs"
+            # enabled sets it from the product's own SKU; this reason is what tells the
+            # user why an otherwise-ready listing still won't go.
+            reasons.append(
+                "The listing itself has no SKU (Custom Label) — eBay needs one to migrate a multi-variation "
+                "listing. Adopt with 'align SKUs' enabled, or set a Custom Label on the listing in Seller Hub."
             )
 
     return reasons
@@ -1516,6 +1526,11 @@ class EbayAdapter:
         )
         quantity = int(quantity_raw) if quantity_raw and quantity_raw.isdigit() else 0
 
+        # Item.SKU always, regardless of variations: for a multi-variation listing this is
+        # a separate field from the per-variation SKUs, and eBay's migration needs it set
+        # (see ClassicListingCandidate.listing_sku).
+        listing_sku = item.findtext("e:SKU", "", _TRADING_NS).strip() or None
+
         variations_el = item.find("e:Variations", _TRADING_NS)
         skus: list[str] = []
         variation_specifics: list[dict[str, str]] | None = None
@@ -1531,10 +1546,8 @@ class EbayAdapter:
                     if name:
                         specifics[name] = value
                 variation_specifics.append(specifics)
-        else:
-            sku = item.findtext("e:SKU", "", _TRADING_NS)
-            if sku:
-                skus.append(sku)
+        elif listing_sku:
+            skus.append(listing_sku)
 
         return ClassicListingCandidate(
             external_listing_id=item_id,
@@ -1548,7 +1561,10 @@ class EbayAdapter:
             variation_specifics=variation_specifics,
             quantity=quantity,
             is_migrated=False,  # filled in by the caller cross-referencing build_listing_sku_index
-            ineligibility_reasons=_evaluate_eligibility(listing_type, skus, variation_specifics, detail_loaded),
+            listing_sku=listing_sku,
+            ineligibility_reasons=_evaluate_eligibility(
+                listing_type, skus, variation_specifics, detail_loaded, listing_sku=listing_sku
+            ),
             detail_loaded=detail_loaded,
         )
 
@@ -1589,7 +1605,9 @@ class EbayAdapter:
         return self._parse_classic_listing(item, detail_loaded=True)
 
     @staticmethod
-    def _build_revise_skus_xml(candidate: ClassicListingCandidate, new_skus: list[str]) -> str:
+    def _build_revise_skus_xml(
+        candidate: ClassicListingCandidate, new_skus: list[str], listing_sku: str | None = None
+    ) -> str:
         """Builds the ReviseFixedPriceItem body that rewrites this listing's SKU(s).
 
         SAFETY: for a multi-variation listing, eBay treats an omitted variation as one to
@@ -1599,6 +1617,13 @@ class EbayAdapter:
         way). `new_skus` is therefore required to be positionally aligned with, and the
         same length as, candidate.variation_specifics; the caller is responsible for
         that and _align_new_skus enforces it.
+
+        `listing_sku` sets the listing-level Item.SKU. Ignored for a single-SKU listing
+        (there Item.SKU *is* new_skus[0]); for a multi-variation listing it is emitted
+        alongside the Variations block — omitting it leaves any existing Item.SKU
+        untouched, and eBay's migration requires one to be present (see
+        ClassicListingCandidate.listing_sku). Placed before <Variations> to match eBay's
+        ItemType element order.
 
         Pure and static so the generated XML — the part that could silently destroy
         variations if it were wrong — is unit-testable without a network call."""
@@ -1623,17 +1648,23 @@ class EbayAdapter:
                 f"<VariationSpecifics>{name_values}</VariationSpecifics></Variation>"
             )
 
+        item_sku_xml = f"<SKU>{_xml_escape(listing_sku)}</SKU>" if listing_sku else ""
         return (
             '<?xml version="1.0" encoding="utf-8"?>'
             '<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
-            f"<Item><ItemID>{item_id}</ItemID>"
+            f"<Item><ItemID>{item_id}</ItemID>{item_sku_xml}"
             f"<Variations>{''.join(variations_xml)}</Variations>"
             "</Item>"
             "</ReviseFixedPriceItemRequest>"
         )
 
     async def revise_listing_skus(
-        self, session, connection: PlatformConnection, candidate: ClassicListingCandidate, new_skus: list[str]
+        self,
+        session,
+        connection: PlatformConnection,
+        candidate: ClassicListingCandidate,
+        new_skus: list[str],
+        listing_sku: str | None = None,
     ) -> None:
         """Rewrites a CLASSIC (not-yet-migrated) listing's SKU(s) via Trading API
         ReviseFixedPriceItem, so StockSmith's own SKUs are what the listing carries into
@@ -1657,7 +1688,7 @@ class EbayAdapter:
                 "revised through this path (see this method's docstring)."
             )
         aligned = _align_new_skus(candidate, new_skus)
-        body = self._build_revise_skus_xml(candidate, aligned)
+        body = self._build_revise_skus_xml(candidate, aligned, listing_sku)
         try:
             response = await self._authed_trading_request(
                 session, connection, "ReviseFixedPriceItem", body, timeout=_REVISE_TIMEOUT
