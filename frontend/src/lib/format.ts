@@ -4,6 +4,28 @@ export function roundQty(value: string | number | null | undefined): string {
   return Math.round(Number(value ?? 0)).toString();
 }
 
+// A quantity for dense read rows: the whole number when it is one, the trimmed decimal
+// when it genuinely has a fraction. The backend stores qty as Numeric(14,4), so a plain
+// "30" comes back as "30.0000" — showing that in a list is just noise.
+export function displayQty(value: string | number | null | undefined): string {
+  const n = Number(value ?? 0);
+  return Number.isFinite(n) ? String(n) : String(value ?? "");
+}
+
+// The unit, as a display suffix. "each" is the default and carries no suffix — spelling
+// it out on every row of a coaster order reads as clutter, not information.
+export function unitSuffix(unit: MaterialUnit | null | undefined): string {
+  return unit && unit !== "each" ? ` ${unit}` : "";
+}
+
+// displayQty + unitSuffix: "30", "100 g", "12.5 ml".
+export function qtyWithUnit(
+  value: string | number | null | undefined,
+  unit: MaterialUnit | null | undefined,
+): string {
+  return `${displayQty(value)}${unitSuffix(unit)}`;
+}
+
 // Materials measured in "each" can't have fractional quantities — you can't have half
 // a screw. Mirrors the backend's validate_qty_for_unit (app/services/validation.py).
 export function wholeNumberStepFor(unit: MaterialUnit | null | undefined): string {

@@ -28,7 +28,7 @@ import {
   useManagedSave,
 } from "../../hooks/useDirtyRegistry";
 import { formatMoney } from "../../lib/money";
-import { formatDayMonth } from "../../lib/format";
+import { displayQty, formatDayMonth } from "../../lib/format";
 
 const TAB_IDS = ["lines", "receiving"] as const;
 type TabId = (typeof TAB_IDS)[number];
@@ -190,7 +190,10 @@ function PurchaseDetail() {
           purchase.lines.map((l) => ({
             id: l.id,
             material_id: l.material_id,
-            qty: l.qty,
+            // "30.0000" -> "30". Kept in step with what the editor shows so an untouched
+            // line doesn't read as dirty; carry notes through untouched even though the
+            // editor no longer surfaces them, so an unrelated save can't wipe them.
+            qty: displayQty(l.qty),
             total_cost: l.total_cost,
             notes: l.notes,
           }))
