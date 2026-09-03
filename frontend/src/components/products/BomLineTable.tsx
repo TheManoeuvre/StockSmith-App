@@ -68,6 +68,7 @@ export function BomLineTable({
   onRemoveLine,
   showMaxFromFreeStock = true,
   isDirty = false,
+  kittingOnly = false,
   tableClassName = "w-full table-fixed border-collapse bg-white text-left text-sm shadow-sm",
 }: {
   lines: BomLineTableRow[];
@@ -79,6 +80,9 @@ export function BomLineTable({
   showMaxFromFreeStock?: boolean;
   /** Labels the total "(unsaved)" so a figure differing from the product header is explained. */
   isDirty?: boolean;
+  /** Passed straight to MaterialSelect — the kitting-BOM tables set it to hide categories not
+   *  flagged "Show in Kitting BOM list"; the build-BOM table leaves it off. */
+  kittingOnly?: boolean;
   tableClassName?: string;
 }) {
   const { perLine, total } = computeLineCosts(lines, materials);
@@ -137,6 +141,7 @@ export function BomLineTable({
                   onChange={(material_id) => onChangeLine(i, { material_id })}
                   filterText={filterText}
                   showUnitCost
+                  kittingOnly={kittingOnly}
                   className="w-full rounded border border-slate-300 px-2 py-1"
                 />
               </div>

@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -6,6 +7,8 @@ from pydantic import BaseModel, ConfigDict
 class SupplierBase(BaseModel):
     name: str
     website_url: str | None = None
+    # Weeks. None means "fall back to the shop-wide default lead time" — see the model.
+    default_lead_time_weeks: Decimal | None = None
 
 
 class SupplierCreate(SupplierBase):
@@ -19,6 +22,7 @@ class SupplierFindOrCreate(BaseModel):
 class SupplierUpdate(BaseModel):
     name: str
     website_url: str | None = None
+    default_lead_time_weeks: Decimal | None = None
 
 
 class SupplierRead(SupplierBase):

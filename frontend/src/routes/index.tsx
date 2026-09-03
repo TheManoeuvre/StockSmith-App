@@ -10,6 +10,7 @@ import { GroupHeaderRow, Th } from "../components/common/ListTable";
 import { formatDayMonth, roundQty } from "../lib/format";
 import { formatMoney } from "../lib/money";
 import {
+  formatLeadTime,
   formatWeeksShort,
   STOCKOUT_BADGE_CLASS,
   STOCKOUT_LABEL,
@@ -291,10 +292,12 @@ function Dashboard() {
                   <Th>{""}</Th>
                 </tr>
               </thead>
-              {groupBySupplier(data.low_stock_materials).map((group) => (
+              {groupBySupplier(data.low_stock_materials).map((group) => {
+                const lead = formatLeadTime(group.materials[0]?.lead_time_weeks);
+                return (
                 <tbody key={group.supplierName}>
                   <GroupHeaderRow
-                    label={group.supplierName}
+                    label={lead ? `${group.supplierName} · ${lead}` : group.supplierName}
                     count={group.materials.length}
                     colSpan={7}
                   />
@@ -333,7 +336,8 @@ function Dashboard() {
                     </tr>
                   ))}
                 </tbody>
-              ))}
+                );
+              })}
             </table>
           )}
           <ErrorBanner error={draftPurchaseMutation.error} />

@@ -57,6 +57,14 @@ class MaterialCategory(Base):
         Boolean, nullable=False, server_default=text("0")
     )
     auto_kitting_per_order: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))
+    # Whether this category's materials are offered in the kitting-BOM material pickers (product
+    # kitting BOM, variant kitting overrides, order kitting overrides). Seeded on for packaging
+    # only — the rest of the catalogue is filament, resin and hardware that never gets packed
+    # into a box, and hiding it keeps those pickers short. Purely a UI filter: nothing stops an
+    # already-saved line pointing at a material whose category is unticked.
+    show_in_kitting_bom_list: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("0")
+    )
     tracks_colour: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))
     tracks_material_type: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))
     cost_per_kg_display: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))

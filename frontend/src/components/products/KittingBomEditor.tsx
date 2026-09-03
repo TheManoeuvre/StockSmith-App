@@ -92,6 +92,7 @@ export function KittingBomEditor({ productId }: { productId: number }) {
         onChangeLine={updateLine}
         onRemoveLine={removeLine}
         isDirty={isDirty}
+        kittingOnly
       />
       <div className="flex gap-2">
         <button onClick={addLine} className="rounded border border-slate-300 px-3 py-1.5 text-sm">

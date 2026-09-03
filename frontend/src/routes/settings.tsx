@@ -142,7 +142,7 @@ function Settings() {
           />
           <ReferenceDataTable
             title="Suppliers"
-            description="Who you buy from. Renaming one updates every material and purchase that uses it."
+            description="Who you buy from. Renaming one updates every material and purchase that uses it. Default lead time feeds the materials time-to-stockout forecast — leave it blank to use the shop-wide default."
             segment="suppliers"
             queryKey={["suppliers"]}
             api={{
@@ -155,6 +155,12 @@ function Settings() {
             fields={[
               { key: "name", label: "Name" },
               { key: "website_url", label: "Website", type: "url", placeholder: "https://…" },
+              {
+                key: "default_lead_time_weeks",
+                label: "Default lead time (weeks)",
+                type: "number",
+                placeholder: "Shop default",
+              },
             ]}
             usageLabel={(n) => `${n} record${n === 1 ? "" : "s"}`}
           />
@@ -204,6 +210,7 @@ function Settings() {
               { key: "cost_per_kg_display", label: "Show cost per kg", type: "checkbox" },
               { key: "consumed_on_failed_build", label: "Consumed by failed builds", type: "checkbox" },
               { key: "auto_kitting_per_order", label: "Kitting: one per order, not per unit", type: "checkbox" },
+              { key: "show_in_kitting_bom_list", label: "Show in Kitting BOM list", type: "checkbox" },
             ]}
             usageLabel={(n) => `${n} material${n === 1 ? "" : "s"}`}
           />

@@ -27,6 +27,7 @@ import {
 } from "../../lib/format";
 import { formatUnitCost } from "../../lib/money";
 import {
+  formatLeadTime,
   formatWeeksShort,
   STOCKOUT_BADGE_CLASS,
   STOCKOUT_LABEL,
@@ -459,6 +460,9 @@ function MaterialDetail() {
               </p>
               <p className="truncate text-[12.5px] text-slate-500">
                 {material.default_supplier_name ?? "No supplier"}
+                {formatLeadTime(material.lead_time_weeks) && (
+                  <span className="text-slate-400"> · {formatLeadTime(material.lead_time_weeks)}</span>
+                )}
               </p>
             </div>
           </div>

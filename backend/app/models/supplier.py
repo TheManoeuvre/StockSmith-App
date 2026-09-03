@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, func
+from sqlalchemy import DateTime, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -12,4 +12,12 @@ class Supplier(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     website_url: Mapped[str | None] = mapped_column(String, nullable=True)
+    # How long, in weeks, this supplier typically takes to deliver after an order is placed.
+    # NULL means "no supplier-specific figure" — the forecast then falls back to the shop-wide
+    # GeneralSettings.default_lead_time_weeks. Feeds two things in services/forecasting.py: the
+    # arrival date estimated for an on-order line with no explicit expected_arrival_date, and
+    # the reorder point — a material's weeks-of-supply is judged against warning/critical
+    # thresholds *plus* its lead time, so 8 weeks of cover with a 2-week lead is treated the
+    # same as 6 weeks with none.
+    default_lead_time_weeks: Mapped[float | None] = mapped_column(Numeric(6, 2), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
