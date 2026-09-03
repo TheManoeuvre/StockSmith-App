@@ -12,6 +12,46 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-09-03
+
+Reorder timing that knows how long each supplier takes, shorter kitting-BOM material
+lists, and a round of speed and reliability fixes.
+
+### Added
+- **A supplier can carry its own lead time, and time-to-stockout uses it.** Set a
+  **Default lead time (weeks)** on any supplier in Settings → Suppliers. A material bought
+  from that supplier is then flagged for reorder that many weeks earlier — eight weeks of
+  cover from a supplier that takes two weeks to deliver now reads the same urgency as six
+  weeks from one that ships next day. The lead time shows next to the supplier on the
+  dashboard's time-to-stockout list and under the supplier in the materials list. Leave it
+  blank and the material falls back to the shop-wide default in Settings → Forecast, which
+  now applies to the reorder point as well as to estimating when an on-order purchase lands.
+
+### Changed
+- **Kitting-BOM material pickers only list packaging by default.** Each material category
+  now has a **Show in Kitting BOM list** switch (Settings → Material categories), on for
+  Packaging and off for everything else. The kitting BOM on a product, the kitting
+  overrides on a variant or an order, and the default kitting BOM in Settings now only
+  offer materials from ticked categories — no more scrolling past filament and screws to
+  find a box. Anything already on a kitting line stays selectable regardless.
+- **Assigning a product to an unrecognised order line** now groups the product dropdown by
+  category, sorted A–Z, instead of one long flat list.
+- **Choosing a replacement material** for a variant no longer offers retired (inactive)
+  materials.
+
+### Fixed
+- **Every screen loads faster.** Authenticating each API request was running a full
+  password hash on the backend, one at a time, so a screen that fires a dozen requests as
+  it opens spent several seconds waiting before any data arrived. Verified requests are now
+  remembered for the life of the backend, cutting a typical navigation from around four
+  seconds to a fraction of that.
+- **Starting a stock take that covered a product with a category set** failed with
+  "Internal server error". Fixed.
+- **Migrating a multi-variation eBay listing** that had SKUs on its variations but none on
+  the listing itself failed with "The listing SKU cannot be null or empty". StockSmith now
+  sets the listing-level SKU as part of the migration, and the listing picker explains up
+  front when a listing can't be migrated yet because it has no SKU to align.
+
 ## [0.10.0] - 2026-09-02
 
 The second half of the redesign. 0.9.0 moved the furniture — sidebar, slide-over panels;
