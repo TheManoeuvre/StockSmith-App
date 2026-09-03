@@ -145,6 +145,13 @@ class ClassicListingCandidate:
     variation_specifics: list[dict[str, str]] | None
     quantity: int
     is_migrated: bool
+    # The listing-level Item.SKU, distinct from the per-variation SKUs in `skus`. For a
+    # single-SKU listing it is the same value as skus[0]; for a multi-variation listing
+    # it is a separate field that a seller often leaves unset. eBay's bulkMigrateListing
+    # rejects a multi-variation listing with no Item.SKU ("The listing SKU cannot be null
+    # or empty", errorId 25002) even though its own migration docs only mention the
+    # per-variation ones — confirmed live. None when the listing carries no Item.SKU.
+    listing_sku: str | None = None
     ineligibility_reasons: list[str] = field(default_factory=list)
     # False when this came from a bulk list call that doesn't return per-variation
     # detail (eBay's GetMyeBaySelling ActiveList), True when it came from a per-item

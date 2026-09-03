@@ -1420,11 +1420,15 @@ async def adopt_ebay_listing(
         candidate = await _load_candidate_detail(adapter, session, connection, body.external_listing_id)
 
         skus_aligned = False
+        effective_listing_sku = candidate.listing_sku
         if body.align_skus and not candidate.is_migrated:
-            desired = listing_adoption.plan_sku_alignment(product, active_variants, candidate, variation_mapping)
-            if desired is not None:
-                await adapter.revise_listing_skus(session, connection, candidate, desired)
+            plan = listing_adoption.plan_sku_alignment(product, active_variants, candidate, variation_mapping)
+            if plan is not None:
+                await adapter.revise_listing_skus(
+                    session, connection, candidate, plan.variation_skus, plan.listing_sku
+                )
                 skus_aligned = True
+                effective_listing_sku = plan.listing_sku or effective_listing_sku
                 # The mapping the caller sent refers to the listing's pre-revision SKUs;
                 # after aligning, every unit's eBay SKU is StockSmith's own, so re-point
                 # the mapping at those to avoid reporting a conflict we just resolved.
@@ -1432,6 +1436,19 @@ async def adopt_ebay_listing(
                     (variant_id, _expected_sku(product, active_variants, variant_id) or actual)
                     for variant_id, actual in variation_mapping
                 ]
+
+        # eBay's bulkMigrateListing rejects a multi-variation listing whose Item.SKU is
+        # unset with a bare "The listing SKU cannot be null or empty" (errorId 25002).
+        # Catch it here with something the user can act on, rather than surfacing that.
+        if candidate.variation_specifics is not None and not effective_listing_sku:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "eBay needs a listing-level SKU to migrate a multi-variation listing, and this one has none. "
+                    'Give the product its own SKU and adopt again with "align SKUs" enabled, or add a Custom Label '
+                    "to the listing itself in eBay Seller Hub."
+                ),
+            )
 
         await adapter.migrate_listing(session, connection, body.external_listing_id)
     except PlatformError as e:
