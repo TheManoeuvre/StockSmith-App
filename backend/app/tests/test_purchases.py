@@ -523,6 +523,44 @@ async def test_a_part_delivered_order_forecasts_only_the_remainder(session):
     assert forecasts[material.id].on_order_qty == Decimal(60)
 
 
+async def test_receipt_endpoints_serialise_with_a_supplier(session):
+    """The receipts endpoints return the ORM Purchase straight to FastAPI, which then reads
+    purchase.supplier_name for the response. That attribute walks the supplier relationship,
+    so it has to be eager-loaded — otherwise serialising the response lazy-loads on a
+    committed async session and blows up with MissingGreenlet (a 500 to the user)."""
+    from sqlalchemy import inspect as sa_inspect
+
+    from app.models.supplier import Supplier
+    from app.routers.purchases import create_receipts
+    from app.schemas.purchase import PurchaseRead, PurchaseReceiptLineInput, PurchaseReceiptsCreate
+
+    supplier = Supplier(name="AliExpress")
+    session.add(supplier)
+    await session.flush()
+
+    material = await _material(session)
+    purchase = Purchase(status=PurchaseStatus.ordered, supplier_id=supplier.id)
+    purchase.lines = [MaterialPurchase(material_id=material.id, qty=Decimal(10), total_cost=Decimal(100))]
+    session.add(purchase)
+    await session.commit()
+    purchase_id = purchase.id
+    line_id = await _line_id(session, purchase)
+
+    result = await create_receipts(
+        purchase_id,
+        PurchaseReceiptsCreate(lines=[PurchaseReceiptLineInput(line_id=line_id, qty=Decimal(4))]),
+        session,
+    )
+    # In a live request the supplier is not already in the session's identity map, so the
+    # relationship has to come back eager-loaded — a lazy load while FastAPI serialises the
+    # response would need a greenlet it does not have and 500s. Assert it is loaded rather
+    # than relying on the identity map to paper over it in the test.
+    assert "supplier" not in sa_inspect(result).unloaded
+    rendered = PurchaseRead.model_validate(result)
+    assert rendered.supplier_name == "AliExpress"
+    assert rendered.status == PurchaseStatus.partially_received
+
+
 async def test_stock_history_reconciles_with_current_qty(session):
     """What the timeline shows and what the material says must be the same number.
 
