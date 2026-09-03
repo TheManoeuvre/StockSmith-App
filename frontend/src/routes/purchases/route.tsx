@@ -14,7 +14,7 @@ import { FilterTabs } from "../../components/common/FilterTabs";
 import { Th } from "../../components/common/ListTable";
 import { PurchaseStatusPill } from "../../components/purchases/PurchaseStatusPill";
 import { formatMoney } from "../../lib/money";
-import { formatDayMonth } from "../../lib/format";
+import { formatDayMonth, qtyWithUnit } from "../../lib/format";
 
 /**
  * Pathless layout for /purchases: the list lives here (not in index.tsx) so it stays mounted
@@ -198,19 +198,22 @@ function PurchaseRow({
       </td>
       <td className="p-2 align-top">
         {purchase.lines.map((l) => {
-          const name = materialById.get(l.material_id)?.name ?? `#${l.material_id}`;
+          const material = materialById.get(l.material_id);
+          const name = material?.name ?? `#${l.material_id}`;
           const full = Number(l.received_qty) >= Number(l.qty);
           const some = Number(l.received_qty) > 0;
           return (
             <div key={l.id} className="flex items-center gap-2 leading-tight">
               <span className="min-w-0 flex-1 truncate">{name}</span>
-              <span className="tabular-nums text-slate-400">{l.qty}</span>
+              <span className="tabular-nums text-slate-400">
+                {qtyWithUnit(l.qty, material?.unit)}
+              </span>
               <span
-                className={`w-14 text-right font-semibold tabular-nums ${
+                className={`w-16 whitespace-nowrap text-right font-semibold tabular-nums ${
                   full ? "text-emerald-700" : some ? "text-sky-700" : "text-slate-400"
                 }`}
               >
-                {l.received_qty} in
+                {qtyWithUnit(l.received_qty, material?.unit)} in
               </span>
             </div>
           );

@@ -1,5 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { sellableSummary, type SellableInput } from "./format";
+import { displayQty, qtyWithUnit, sellableSummary, type SellableInput } from "./format";
+
+describe("displayQty", () => {
+  it("drops the trailing zeros the backend's Numeric(14,4) carries", () => {
+    expect(displayQty("30.0000")).toBe("30");
+  });
+
+  it("keeps a genuine fraction", () => {
+    expect(displayQty("12.5000")).toBe("12.5");
+    expect(displayQty("13.4500")).toBe("13.45");
+  });
+
+  it("treats null/blank as zero and leaves non-numbers alone", () => {
+    expect(displayQty(null)).toBe("0");
+    expect(displayQty("")).toBe("0");
+    expect(displayQty("n/a")).toBe("n/a");
+  });
+});
+
+describe("qtyWithUnit", () => {
+  it("appends g/ml but never 'each'", () => {
+    expect(qtyWithUnit("100.0000", "g")).toBe("100 g");
+    expect(qtyWithUnit("250.0000", "ml")).toBe("250 ml");
+    expect(qtyWithUnit("10.0000", "each")).toBe("10");
+    expect(qtyWithUnit("10.0000", null)).toBe("10");
+  });
+});
 
 // Numbers from a real product ("Brick Separator Themed Bottle Opener", variant Orange):
 // 3 on hand, none reserved, 97 buildable, ceiling of 20 on the parent product.
