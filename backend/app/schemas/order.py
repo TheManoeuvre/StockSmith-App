@@ -4,7 +4,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from app.models.listing import ListingPlatform
-from app.models.order import OrderStatus
+from app.models.order import ManualOrderChannel, OrderStatus
 
 
 class OrderLineInput(BaseModel):
@@ -28,6 +28,9 @@ class OrderCreate(BaseModel):
     currency: str | None = None
     shipping_profile_id: int | None = None
     shipping_charged: Decimal | None = None
+    # The order's own channel tag — see ManualOrderChannel. Distinct from the automatic
+    # platform-sync `platform` field, which this never touches.
+    manual_channel: ManualOrderChannel | None = None
     lines: list[OrderLineInput]
 
 
@@ -88,6 +91,7 @@ class OrderRead(BaseModel):
 
     id: int
     platform: ListingPlatform | None
+    manual_channel: ManualOrderChannel | None = None
     external_order_id: str | None
     status: OrderStatus
     buyer_name: str | None

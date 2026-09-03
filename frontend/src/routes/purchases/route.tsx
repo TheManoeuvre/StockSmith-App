@@ -9,6 +9,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { materialsApi } from "../../api/materials";
 import { purchasesApi } from "../../api/purchases";
 import type { Material, Purchase, PurchaseStatus } from "../../api/types";
+import { CsvImportExport } from "../../components/common/CsvImportExport";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { FilterTabs } from "../../components/common/FilterTabs";
 import { Th } from "../../components/common/ListTable";
@@ -104,12 +105,18 @@ function PurchasesListContent() {
             {formatMoney(String(onOrderTotal), "GBP")} on order
           </p>
         </div>
-        <Link
-          to="/purchases/new"
-          className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white"
-        >
-          New purchase
-        </Link>
+        <div className="flex items-center gap-2">
+          <CsvImportExport
+            onExport={purchasesApi.exportCsv}
+            invalidateKey={["purchases"]}
+          />
+          <Link
+            to="/purchases/new"
+            className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white"
+          >
+            New purchase
+          </Link>
+        </div>
       </div>
 
       <ErrorBanner error={receiveMutation.error} />

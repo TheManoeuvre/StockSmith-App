@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { platformsApi, type SyncGap } from "../../api/platforms";
 import { getAutostartEnabled, isDesktopApp, setAutostartEnabled } from "../../lib/tauri";
 import { ErrorBanner } from "../common/ErrorBanner";
+import { Switch } from "../common/Switch";
 import { SettingsCard } from "./SettingsCard";
 
 const WINDOW_DAYS = 7;
@@ -72,23 +73,23 @@ export function BackgroundSyncSettings() {
       help="Closing the window leaves StockSmith running in the notification area, so orders keep importing and stock keeps pushing to Etsy and eBay. Use Quit on its tray icon to stop it properly."
     >
       {desktop && (
-        <label className="flex items-start gap-2 text-sm">
-          <input
-            type="checkbox"
+        <div className="flex items-start gap-2 text-sm">
+          <Switch
+            id="autostart-toggle"
             className="mt-0.5"
             checked={autostart ?? false}
             disabled={autostart === undefined || autostartMutation.isPending}
-            onChange={(e) => autostartMutation.mutate(e.target.checked)}
+            onChange={(checked) => autostartMutation.mutate(checked)}
           />
-          <span>
+          <label htmlFor="autostart-toggle">
             <span className="font-medium">Start StockSmith when I sign in to Windows</span>
             <span className="block text-slate-500">
               It opens straight to the tray without a window. Note this happens at sign-in, not at
               power-on — after a Windows Update restart it only runs once someone signs in, unless
               Windows is set to sign you back in automatically.
             </span>
-          </span>
-        </label>
+          </label>
+        </div>
       )}
 
       {writeDidNotTake && (

@@ -23,7 +23,7 @@ _ORDERS_AWAITING_INVENTORY_SQL = text(
     SELECT ol.id AS line_id, ol.order_id, ol.product_id, ol.variant_id,
            p.name AS product_name, pv.variant_name AS variant_name,
            (ol.ordered_qty - ol.allocated_qty) AS short_by,
-           o.order_placed_at
+           o.order_placed_at, o.platform AS platform
     FROM order_lines ol
     JOIN orders o ON o.id = ol.order_id
     LEFT JOIN products p ON p.id = ol.product_id
@@ -400,6 +400,7 @@ async def get_orders_awaiting_inventory(session: AsyncSession) -> list[OrderAwai
             variant_name=row.variant_name,
             short_by=int(row.short_by),
             order_placed_at=row.order_placed_at,
+            platform=row.platform,
         )
         for row in result
     ]

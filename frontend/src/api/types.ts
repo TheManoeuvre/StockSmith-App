@@ -686,6 +686,7 @@ export interface OrderAwaitingInventory {
   variant_name: string | null;
   short_by: number;
   order_placed_at: string;
+  platform: ListingPlatform | null;
 }
 
 export interface OrderAwaitingPackaging {
@@ -693,6 +694,7 @@ export interface OrderAwaitingPackaging {
   material_id: number;
   material_name: string;
   short_by: string;
+  platform: ListingPlatform | null;
   order_placed_at: string;
 }
 
@@ -721,6 +723,10 @@ export interface DashboardSummary {
 }
 
 export type ListingPlatform = "etsy" | "ebay" | "shopify";
+
+/** A manually-entered order's own channel tag — see backend ManualOrderChannel. Distinct
+ *  from ListingPlatform, which means "pulled in by marketplace sync". */
+export type ManualOrderChannel = "manual" | "etsy" | "ebay";
 export type OrderStatus = "pending" | "allocated" | "shipped" | "cancelled";
 
 export interface OrderLine {
@@ -744,6 +750,7 @@ export interface OrderLine {
 export interface Order {
   id: number;
   platform: ListingPlatform | null;
+  manual_channel: ManualOrderChannel | null;
   external_order_id: string | null;
   status: OrderStatus;
   buyer_name: string | null;

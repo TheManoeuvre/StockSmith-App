@@ -7,6 +7,7 @@ import { pickDirectory } from "../../lib/tauri";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { FieldRow } from "../common/FieldRow";
 import { SaveButton } from "../common/SaveButton";
+import { Switch } from "../common/Switch";
 import { SettingsCard } from "./SettingsCard";
 import { BackupList } from "./BackupList";
 import { RestoreOutcomeBanner } from "./RestoreOutcomeBanner";
@@ -173,14 +174,14 @@ export function BackupSettings() {
       </SettingsCard>
 
       <SettingsCard title="Schedule">
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
+        <div className="flex items-center gap-2 text-sm">
+          <Switch
+            id="scheduled-backup-toggle"
             checked={form.scheduledEnabled}
-            onChange={(e) => setField("scheduledEnabled", e.target.checked)}
+            onChange={(checked) => setField("scheduledEnabled", checked)}
           />
-          Back up automatically every day
-        </label>
+          <label htmlFor="scheduled-backup-toggle">Back up automatically every day</label>
+        </div>
 
         <div className="flex flex-col gap-2">
           <FieldRow label="Time of day">

@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { dashboardApi } from "../api/dashboard";
 import { materialsApi } from "../api/materials";
-import type { DashboardSummary, LowStockMaterial } from "../api/types";
+import type { DashboardSummary, ListingPlatform, LowStockMaterial } from "../api/types";
 import { Badge } from "../components/common/Badge";
 import { ErrorBanner } from "../components/common/ErrorBanner";
 import { GroupHeaderRow, Th } from "../components/common/ListTable";
@@ -15,6 +15,7 @@ import {
   STOCKOUT_BADGE_CLASS,
   STOCKOUT_LABEL,
 } from "../lib/forecast";
+import { PLATFORM_COLORS, PLATFORM_LABELS } from "../lib/platforms";
 
 function groupBySupplier(
   materials: LowStockMaterial[],
@@ -40,6 +41,7 @@ type BlockedRow = {
   item: string;
   shortBy: string;
   placedAt: string;
+  platform: ListingPlatform | null;
   build: { productId: number; variantId: number | null } | null;
 };
 
@@ -54,6 +56,7 @@ function blockedRows(data: DashboardSummary): BlockedRow[] {
         (o.product_name ?? "—") + (o.variant_name ? ` — ${o.variant_name}` : ""),
       shortBy: String(o.short_by),
       placedAt: o.order_placed_at,
+      platform: o.platform,
       build:
         o.product_id != null
           ? { productId: o.product_id, variantId: o.variant_id }
@@ -68,6 +71,7 @@ function blockedRows(data: DashboardSummary): BlockedRow[] {
       item: o.material_name,
       shortBy: roundQty(o.short_by),
       placedAt: o.order_placed_at,
+      platform: o.platform,
       build: null,
     });
   }
@@ -207,6 +211,7 @@ function Dashboard() {
             <thead>
               <tr className="border-b border-slate-200">
                 <Th>Order</Th>
+                <Th>Channel</Th>
                 <Th>Blocked on</Th>
                 <Th>Item</Th>
                 <Th align="right">Short by</Th>
@@ -225,6 +230,17 @@ function Dashboard() {
                     >
                       #{r.orderId}
                     </Link>
+                  </td>
+                  <td className="p-2">
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-[10.5px] font-semibold ${
+                        r.platform
+                          ? PLATFORM_COLORS[r.platform].muted
+                          : "border border-slate-200 bg-slate-50 text-slate-600"
+                      }`}
+                    >
+                      {r.platform ? PLATFORM_LABELS[r.platform] : "Manual"}
+                    </span>
                   </td>
                   <td className="p-2">
                     <span className="inline-flex items-center gap-1.5">

@@ -10,7 +10,8 @@ export function CsvImportExport({
   className = "flex flex-col gap-2",
 }: {
   onExport: () => Promise<void>;
-  onImport: (fileBytes: Uint8Array, filename: string) => Promise<CsvImportResult>;
+  /** Omit when the list has no CSV import yet — the Import button/input is hidden. */
+  onImport?: (fileBytes: Uint8Array, filename: string) => Promise<CsvImportResult>;
   invalidateKey: string | string[];
   /** Wrapper layout. Defaults to a stacked block; pass `"contents"` to let the two buttons
    *  sit directly in a parent toolbar flex row (the import-result panel then flows after it
@@ -24,6 +25,7 @@ export function CsvImportExport({
 
   const importMutation = useMutation({
     mutationFn: async (file: File) => {
+      if (!onImport) throw new Error("Import is not supported here");
       const bytes = new Uint8Array(await file.arrayBuffer());
       return onImport(bytes, file.name);
     },
@@ -43,23 +45,27 @@ export function CsvImportExport({
         >
           Export CSV
         </button>
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          className="rounded border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50"
-        >
-          Import CSV
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".csv"
-          className="hidden"
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) importMutation.mutate(file);
-            e.target.value = "";
-          }}
-        />
+        {onImport && (
+          <>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              className="rounded border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50"
+            >
+              Import CSV
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) importMutation.mutate(file);
+                e.target.value = "";
+              }}
+            />
+          </>
+        )}
       </div>
       <ErrorBanner error={exportMutation.error ?? importMutation.error} />
       {importMutation.data && (

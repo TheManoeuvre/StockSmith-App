@@ -1,6 +1,7 @@
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import Response
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -27,6 +28,7 @@ from app.schemas.order import (
 )
 from app.schemas.order_return import CancellationPreview, OrderCancelRequest
 from app.services import allocation, returns
+from app.services.csv_io import export_orders_csv
 from app.services.kitting import (
     apply_default_kitting_bom,
     get_kitting_cogs_by_order,
@@ -231,6 +233,7 @@ def _serialize_order(order: Order, kitting_cogs: Decimal | None) -> OrderRead:
     return OrderRead(
         id=order.id,
         platform=order.platform,
+        manual_channel=order.manual_channel,
         external_order_id=order.external_order_id,
         status=order.status,
         buyer_name=order.buyer_name,
@@ -307,6 +310,16 @@ async def list_orders(
     )
 
 
+@router.get("/export")
+async def export_orders(session: AsyncSession = Depends(get_db)) -> Response:
+    csv_text = await export_orders_csv(session)
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=orders.csv"},
+    )
+
+
 @router.post("", response_model=OrderRead, status_code=status.HTTP_201_CREATED)
 async def create_order(payload: OrderCreate, session: AsyncSession = Depends(get_db)) -> OrderRead:
     if not payload.lines:
@@ -352,6 +365,7 @@ async def create_order(payload: OrderCreate, session: AsyncSession = Depends(get
         shipping_charged=shipping_charged,
         subtotal=subtotal,
         grand_total=grand_total,
+        manual_channel=payload.manual_channel,
     )
     order.lines = []
     for l in payload.lines:

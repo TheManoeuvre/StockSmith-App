@@ -1019,6 +1019,7 @@ async def get_orders_awaiting_packaging(session: AsyncSession) -> list[OrderAwai
             material_name=material_names.get(material_id, "Unknown material"),
             short_by=short_by,
             order_placed_at=order.order_placed_at,
+            platform=order.platform,
         )
         for order, material_id, short_by in shortfalls
     ]
