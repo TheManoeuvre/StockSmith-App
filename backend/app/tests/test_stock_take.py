@@ -686,3 +686,40 @@ async def test_reading_a_take_eager_loads_material_type(session):
         assert "material_type" not in sa_inspect(m).unloaded
         grouped = group_lines(lines, materials, {}, {})
         assert any(g.subgroup == "PLA" for g in grouped)
+
+
+async def test_reading_a_take_eager_loads_product_category(session):
+    """group_lines reads Product.product_category_name for the group heading. Product's
+    product_category relationship has no lazy="selectin", so a lookup helper that re-selects
+    the products without an explicit selectinload turns that read into a lazy load
+    mid-iteration — MissingGreenlet, 500-ing every take that includes a categorised product.
+    csv_io._stock_take_lookups already guarded this; routers._name_lookups did not.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    from app.models.product import Product
+    from app.models.product_category import ProductCategory
+    from app.routers.stock_takes import _name_lookups
+    from app.schemas.stock_take import StockTakeScope
+    from app.services.csv_io import _stock_take_lookups
+    from app.services.stock_takes import create_stock_take, group_lines
+
+    session.add(GeneralSettings(id=1))
+    category = ProductCategory(name="Coaster")
+    session.add(category)
+    await session.flush()
+    coaster = Product(name="Slate Coaster", sku="COA-1", product_category_id=category.id, current_stock=0)
+    session.add(coaster)
+    await session.commit()
+
+    take, _ = await create_stock_take(session, StockTakeScope(include_products=True))
+    await session.commit()
+    lines = await _lines_of(session, take.id)
+
+    for lookups in (_name_lookups, _stock_take_lookups):
+        session.expire(coaster, ["product_category"])
+        _, products, _ = await lookups(session, lines)
+        p = products[coaster.id]
+        assert "product_category" not in sa_inspect(p).unloaded
+        grouped = group_lines(lines, {}, products, {})
+        assert any(g.group == "Coaster" for g in grouped)
