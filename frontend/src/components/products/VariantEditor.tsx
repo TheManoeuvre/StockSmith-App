@@ -352,6 +352,7 @@ function VariantRow({
                 materials={materials}
                 onSave={(payload) => variantsApi.replaceKittingBomOverrides(variant.id, payload)}
                 onSaved={invalidateVariants}
+                kittingOnly
               />
             </>
           )}

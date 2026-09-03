@@ -176,6 +176,7 @@ export function OrderKittingSection({ orderId, currency }: { orderId: number; cu
                     onChange={(material_id) =>
                       setExtras((prev) => prev.map((x, j) => (j === i ? { ...x, material_id } : x)))
                     }
+                    kittingOnly
                   />
                   {!material && <span className="text-xs text-slate-400">Additional line</span>}
                 </td>

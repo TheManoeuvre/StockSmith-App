@@ -24,6 +24,9 @@ class LowStockMaterial(BaseModel):
     # draw, rather than the material itself — see forecasting.py. Always 0 when
     # weeks_of_supply is None.
     fg_buffer_weeks: Decimal | None = None
+    # Lead time (weeks) applied to this material's reorder point — the supplier's own figure
+    # or the shop-wide default. Shown next to the supplier name on the dashboard.
+    lead_time_weeks: Decimal | None = None
     status: str = "insufficient_data"  # "critical" | "warning" | "insufficient_data"
 
 

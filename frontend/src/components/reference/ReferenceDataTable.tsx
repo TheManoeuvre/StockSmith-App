@@ -25,7 +25,7 @@ function fieldValue(row: ReferenceRow, key: string): string {
 export interface ReferenceField {
   key: string;
   label: string;
-  type?: "text" | "url" | "money" | "checkbox" | "select";
+  type?: "text" | "url" | "money" | "number" | "checkbox" | "select";
   placeholder?: string;
   /** For type "select". The empty option means "not set" and is sent as null. */
   options?: { value: string; label: string }[];
@@ -45,6 +45,9 @@ function serialize(fields: ReferenceField[], form: Record<string, string>): Reco
     const raw = form[field.key] ?? "";
     if (field.type === "checkbox") out[field.key] = raw === "true";
     else if (field.type === "select") out[field.key] = raw || null;
+    // Empty stays null rather than "" — the backend field is `Decimal | None`, and "" would
+    // fail validation instead of clearing it.
+    else if (field.type === "number") out[field.key] = raw.trim() === "" ? null : Number(raw);
     else out[field.key] = raw;
   }
   return out;
@@ -420,8 +423,8 @@ function ExpandedRow<T extends ReferenceRow>({
               {field.label}
               <input
                 aria-label={`${row.name} ${field.label}`}
-                type={field.type === "money" ? "number" : "text"}
-                step={field.type === "money" ? "0.01" : undefined}
+                type={field.type === "money" || field.type === "number" ? "number" : "text"}
+                step={field.type === "money" ? "0.01" : field.type === "number" ? "0.5" : undefined}
                 placeholder={field.placeholder}
                 className="rounded border border-slate-300 px-2 py-1"
                 value={form[field.key] ?? ""}

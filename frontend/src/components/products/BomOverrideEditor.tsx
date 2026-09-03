@@ -53,6 +53,7 @@ export function BomOverrideEditor({
   materials,
   onSave,
   onSaved,
+  kittingOnly = false,
 }: {
   title: string;
   seedKey: number;
@@ -66,6 +67,9 @@ export function BomOverrideEditor({
   materials: Material[];
   onSave: (payload: EffectiveLine[]) => Promise<unknown>;
   onSaved: () => void;
+  /** Passed to MaterialSelect for the swap and extra-material pickers — the kitting-BOM
+   *  override table sets it to hide categories not flagged "Show in Kitting BOM list". */
+  kittingOnly?: boolean;
 }) {
   // Derived, not stored: useEditableCopy takes it from here once per seedKey (the variant
   // id) and then ignores later changes, which is what stops a background refetch discarding
@@ -149,7 +153,10 @@ export function BomOverrideEditor({
       const defaultQty = existing?.qty_required || base?.qty_required || "0";
       if (mode === "substitute") {
         const baseMaterial = materials.find((m) => m.id === materialId);
-        const firstOther = materials.find((m) => m.id !== materialId && sameCategory(m, baseMaterial));
+        // A retired material is never a useful default replacement — skip inactive ones.
+        const firstOther = materials.find(
+          (m) => m.id !== materialId && m.is_active && sameCategory(m, baseMaterial)
+        );
         return {
           ...prev,
           [materialId]: {
@@ -286,9 +293,17 @@ export function BomOverrideEditor({
 
               {swap && (
                 <MaterialSelect
-                  materials={materials.filter((m) => m.id !== base.material_id && sameCategory(m, material))}
+                  materials={materials.filter(
+                    (m) =>
+                      m.id !== base.material_id &&
+                      sameCategory(m, material) &&
+                      // Hide retired materials, but keep one that's already the saved
+                      // substitute so the row doesn't silently re-point itself.
+                      (m.is_active || m.id === o.substitute_material_id)
+                  )}
                   value={o.substitute_material_id ?? base.material_id}
                   onChange={(id) => updateSubstituteMaterial(base.material_id, id)}
+                  kittingOnly={kittingOnly}
                   className="h-[26px] min-w-0 flex-1 rounded border border-slate-300 px-1.5 text-xs"
                 />
               )}
@@ -338,6 +353,7 @@ export function BomOverrideEditor({
                     prev.map((l, j) => (j === i ? { ...l, material_id: id } : l)),
                   )
                 }
+                kittingOnly={kittingOnly}
                 className="h-[26px] min-w-0 flex-1 rounded border border-slate-300 px-1.5 text-xs"
               />
               <input

@@ -618,6 +618,24 @@ function UnmappedLineResolver({ line }: { line: OrderLine }) {
     enabled: typeof productId === "number",
   });
 
+  // Grouped by product category (alphabetical, uncategorised last), then products A–Z within
+  // each — a flat catalogue-order list made picking the right one on a busy order slow.
+  const groupedProducts = useMemo(() => {
+    const groups = new Map<string, NonNullable<typeof products>>();
+    for (const p of products ?? []) {
+      const key = p.product_category_name ?? "";
+      const list = groups.get(key) ?? [];
+      list.push(p);
+      groups.set(key, list);
+    }
+    return Array.from(groups.keys())
+      .sort((a, b) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b)))
+      .map((key) => ({
+        label: key || "Uncategorised",
+        products: [...groups.get(key)!].sort((x, y) => x.name.localeCompare(y.name)),
+      }));
+  }, [products]);
+
   const onResolved = () => {
     queryClient.invalidateQueries({ queryKey: ["orders", line.order_id] });
     queryClient.invalidateQueries({ queryKey: ["orders"] });
@@ -655,10 +673,14 @@ function UnmappedLineResolver({ line }: { line: OrderLine }) {
           }}
         >
           <option value="">Select product…</option>
-          {products?.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
+          {groupedProducts.map((group) => (
+            <optgroup key={group.label} label={group.label}>
+              {group.products.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.name}
+                </option>
+              ))}
+            </optgroup>
           ))}
         </select>
         {variants && variants.length > 0 && (

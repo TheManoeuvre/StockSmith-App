@@ -40,6 +40,9 @@ export interface Material {
   weeks_of_supply: string | null;
   consumption_rate_per_week: string | null;
   fg_buffer_weeks: string | null;
+  /** Lead time (weeks) applied to this material's reorder point — its default supplier's
+   *  figure, or the shop-wide default. Shown under the supplier in the list. */
+  lead_time_weeks: string | null;
   stockout_status: StockoutStatus | null;
   /** Products whose build/kitting BOM names this material. Populated on the single-get only
    *  (null in the list), for the detail panel's "Used in N products" footer. */
@@ -71,6 +74,9 @@ export interface Supplier {
   /** How many records reference this. Computed per request — see the backend's list_with_usage. */
   usage_count: number;
   website_url: string | null;
+  /** Typical delivery time in weeks. Null means "use the shop-wide default lead time". Feeds
+   *  the materials time-to-stockout forecast — see lib/forecast.ts. */
+  default_lead_time_weeks: string | null;
   created_at: string;
 }
 
@@ -99,6 +105,10 @@ export interface MaterialCategory {
   consumed_on_failed_build: boolean;
   /** Auto-added once per order rather than per unit. Was hardcoded to packaging. */
   auto_kitting_per_order: boolean;
+  /** Offer this category's materials in the kitting-BOM pickers (product/variant kitting BOM,
+   *  order kitting overrides). Off for everything but packaging by default, to keep those
+   *  pickers from listing filament and hardware nobody packs. */
+  show_in_kitting_bom_list: boolean;
   tracks_colour: boolean;
   tracks_material_type: boolean;
   /** Bought by the kilo, stocked by the gram, so average cost reads x1000. */
@@ -643,6 +653,8 @@ export interface LowStockMaterial {
   consumption_rate_per_week: string | null;
   weeks_of_supply: string | null;
   fg_buffer_weeks: string | null;
+  /** Lead time (weeks) applied to this material's reorder point. Shown next to the supplier. */
+  lead_time_weeks: string | null;
   status: "critical" | "warning" | "insufficient_data";
 }
 

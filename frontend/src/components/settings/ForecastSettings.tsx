@@ -113,7 +113,8 @@ export function ForecastSettings() {
       </div>
       <p className="text-xs text-slate-500">
         Default lead time estimates when an on-order purchase will arrive if it wasn't given its own
-        expected arrival date — used so a distant order doesn't mask a material about to run out.
+        expected arrival date, and pushes a material's reorder point that far ahead of stockout so
+        there's time to restock. A supplier with its own lead time set overrides this for its materials.
       </p>
       <div className="flex items-center gap-2">
         <SaveButton

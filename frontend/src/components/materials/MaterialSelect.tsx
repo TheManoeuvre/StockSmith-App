@@ -20,6 +20,7 @@ export function MaterialSelect({
   className,
   disabled = false,
   showUnitCost = false,
+  kittingOnly = false,
 }: {
   materials: Material[];
   value: number;
@@ -30,6 +31,11 @@ export function MaterialSelect({
   /** Append "· £X/unit" to each option — used in the BOM pickers so a line's cost driver is
    *  visible before it's chosen. */
   showUnitCost?: boolean;
+  /** Restrict the list to materials whose category is flagged "Show in Kitting BOM list"
+   *  (Settings > Material categories). Used by the kitting-BOM pickers so the user isn't
+   *  scrolling past filament and hardware that never gets packed. The row's own current
+   *  selection is always kept, flagged or not, so an existing line never silently changes. */
+  kittingOnly?: boolean;
 }) {
   const { categories, byName: categoriesByName } = useMaterialCategories();
 
@@ -41,9 +47,19 @@ export function MaterialSelect({
       : ` · ${formatUnitCost(m.avg_unit_cost)}/${m.unit}`;
   };
 
-  // Never hide the row's own current selection, even if it doesn't match the filter —
-  // otherwise typing into the filter box can silently un-select an already-chosen material.
-  const visible = materials.filter((m) => matchesFilter(m, filterText) || m.id === value);
+  // Never hide the row's own current selection, even if it doesn't match the filter or the
+  // kitting-category restriction — otherwise typing into the filter box, or a line that
+  // predates the restriction, can silently un-select an already-chosen material.
+  const inKittingScope = (m: Material): boolean => {
+    if (!kittingOnly || m.id === value) return true;
+    // Unknown category (list mid-refetch) — can't tell, so keep it rather than flash the row
+    // empty. Self-corrects once categories load.
+    const cat = categoriesByName.get(m.category);
+    return cat ? cat.show_in_kitting_bom_list : true;
+  };
+  const visible = materials.filter(
+    (m) => (matchesFilter(m, filterText) || m.id === value) && inKittingScope(m)
+  );
 
   const byCategory = new Map<string, Material[]>();
   for (const m of visible) {

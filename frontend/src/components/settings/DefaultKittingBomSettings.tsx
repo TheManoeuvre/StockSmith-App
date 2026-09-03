@@ -76,6 +76,7 @@ export function DefaultKittingBomSettings() {
         // No stock context here — this list isn't attached to any product.
         showMaxFromFreeStock={false}
         isDirty={isDirty}
+        kittingOnly
         tableClassName="w-full table-fixed border-collapse bg-white text-left text-sm"
       />
       {lines.length === 0 && <p className="text-sm text-slate-400">No default kitting materials configured.</p>}

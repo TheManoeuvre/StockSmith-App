@@ -36,7 +36,8 @@ _MIN_ACTIVE_WEEKS_FOR_FORECAST = 2
 _MATERIALS_SQL = text(
     """
     SELECT m.id, m.name, m.current_qty, m.allocated_qty, m.reorder_threshold,
-           m.default_supplier_id, s.name AS supplier_name
+           m.default_supplier_id, s.name AS supplier_name,
+           s.default_lead_time_weeks AS supplier_lead_time_weeks
     FROM materials m
     LEFT JOIN suppliers s ON s.id = m.default_supplier_id
     WHERE m.is_active = true
@@ -68,6 +69,10 @@ class MaterialForecast:
     consumption_rate_per_week: Decimal | None
     weeks_of_supply: Decimal | None
     fg_buffer_weeks: Decimal | None
+    # The lead time (weeks) actually applied: the default supplier's own figure where it has
+    # one, else the shop-wide GeneralSettings.default_lead_time_weeks. Always populated — it is
+    # part of why a row is flagged, so the UI shows it next to the supplier.
+    lead_time_weeks: Decimal
     status: str  # "critical" | "warning" | "insufficient_data" | "ok" (last only with include_all)
 
 
@@ -177,11 +182,15 @@ async def _get_scrap_by_entity_material(
 
 
 async def _get_on_order_lines(
-    session: AsyncSession, default_lead_time_weeks: Decimal, today: date
+    session: AsyncSession,
+    lead_weeks_by_material: dict[int, Decimal],
+    default_lead_time_weeks: Decimal,
+    today: date,
 ) -> dict[int, list[tuple[Decimal, Decimal]]]:
     """Per material, every still-outstanding purchase line as a (arrival_weeks_from_now,
     qty) timed inflow — using the PO's own expected_arrival_date when set, else estimating
-    from order_date + the shop-wide default lead time.
+    from order_date + the material's lead time (its default supplier's, falling back to the
+    shop-wide default).
 
     The quantity is what is still to come, not what was ordered. Before receipts existed
     this could only ever be the whole line, so a part-delivered order went on forecasting
@@ -213,7 +222,8 @@ async def _get_on_order_lines(
     )
     out: dict[int, list[tuple[Decimal, Decimal]]] = defaultdict(list)
     for material_id, qty, order_date, expected_arrival_date in result:
-        arrival_date = expected_arrival_date or (order_date + timedelta(weeks=float(default_lead_time_weeks)))
+        lead_weeks = lead_weeks_by_material.get(material_id, default_lead_time_weeks)
+        arrival_date = expected_arrival_date or (order_date + timedelta(weeks=float(lead_weeks)))
         arrival_weeks = Decimal((arrival_date - today).days) / Decimal(7)
         if arrival_weeks < 0:
             arrival_weeks = Decimal(0)
@@ -288,7 +298,20 @@ async def compute_material_forecasts(
     builds = await _get_builds_by_entity(session, cutoff)
     scrap = await _get_scrap_by_entity_material(session, cutoff)
     materials = list(await session.execute(_MATERIALS_SQL))
-    on_order = await _get_on_order_lines(session, default_lead_time_weeks, now.date())
+    # The lead time each material is judged against: its default supplier's own figure where
+    # set, else the shop-wide default. Used both for on-order arrival timing and, below, to
+    # push the reorder point out — a 2-week lead makes 8 weeks of cover as urgent as 6.
+    lead_weeks_by_material: dict[int, Decimal] = {
+        m.id: (
+            Decimal(str(m.supplier_lead_time_weeks))
+            if m.supplier_lead_time_weeks is not None
+            else default_lead_time_weeks
+        )
+        for m in materials
+    }
+    on_order = await _get_on_order_lines(
+        session, lead_weeks_by_material, default_lead_time_weeks, now.date()
+    )
 
     demand_pieces: dict[int, list[_DemandPiece]] = defaultdict(list)
     active_weeks: dict[int, set[int]] = defaultdict(set)
@@ -332,6 +355,7 @@ async def compute_material_forecasts(
         on_order_qty = sum((qty for _, qty in inflows), Decimal(0))
         pieces = demand_pieces.get(m.id, [])
         sufficient_history = len(active_weeks.get(m.id, set())) >= _MIN_ACTIVE_WEEKS_FOR_FORECAST
+        lead_time_weeks = lead_weeks_by_material.get(m.id, default_lead_time_weeks)
 
         if not pieces or not sufficient_history:
             if include_all or (reorder_threshold > 0 and current_qty <= reorder_threshold):
@@ -348,6 +372,7 @@ async def compute_material_forecasts(
                         consumption_rate_per_week=None,
                         weeks_of_supply=None,
                         fg_buffer_weeks=None,
+                        lead_time_weeks=lead_time_weeks,
                         status="insufficient_data",
                     )
                 )
@@ -363,9 +388,15 @@ async def compute_material_forecasts(
         )
         consumption_rate_per_week = sum((p.rate for p in pieces), Decimal(0))
 
-        if weeks is not None and weeks <= critical_weeks:
+        # The reorder point is pushed out by the lead time: cover that runs out in less time
+        # than it takes to restock (plus the configured buffer) is already a problem, so an
+        # 8-week material with a 2-week lead is judged the same as a 6-week one with none.
+        effective_critical = critical_weeks + lead_time_weeks
+        effective_warning = warning_weeks + lead_time_weeks
+
+        if weeks is not None and weeks <= effective_critical:
             status = "critical"
-        elif weeks is not None and weeks <= warning_weeks:
+        elif weeks is not None and weeks <= effective_warning:
             status = "warning"
         elif reorder_threshold > 0 and current_qty <= reorder_threshold:
             status = "warning"  # manual floor override — forecast says fine, but the user's own floor says otherwise
@@ -387,6 +418,7 @@ async def compute_material_forecasts(
                 consumption_rate_per_week=consumption_rate_per_week,
                 weeks_of_supply=weeks,
                 fg_buffer_weeks=fg_buffer_weeks,
+                lead_time_weeks=lead_time_weeks,
                 status=status,
             )
         )
