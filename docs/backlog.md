@@ -122,12 +122,6 @@ Phase 4 of the backlog-burndown plan rejects this configuration at generation ti
 
 **Ask:** A backend endpoint that batches draft-purchase creation by supplier (one draft PO per supplier, one line per short material), plus a "draft all" action on the dashboard's stockout-by-supplier grouping.
 
-### Per-material lead-time override
-
-**Problem:** Surfaced via the design canvas, whose material Purchasing tab has an editable per-material "Lead time (days)" field. Today lead time is a single global default in Settings (`general_settings.default_lead_time_weeks`) — there's no way to say one supplier or material runs longer than the rest.
-
-**Ask:** New `lead_time_days` field on the material (or supplier) model, used by the reorder/forecast calculation in place of the global default when set. Needs a new backend field plus a small forecast-calc change.
-
 ### Material cost-trend indicator
 
 **Problem:** Surfaced via the design canvas, which shows a read-only "+1.7% since June" price-change stat on a material's Purchasing tab. Today the only record of cost history is raw stock-movement rows — there's no derived trend figure.
