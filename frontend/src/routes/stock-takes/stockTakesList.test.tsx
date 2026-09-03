@@ -32,8 +32,10 @@ function take(over: Record<string, unknown> = {}) {
     closed_at: null,
     notes: null,
     open_days: 3,
+    progress_status: "open",
     line_count: 10,
     counted_count: 4,
+    completed_count: 4,
     pending_count: 6,
     conflict_count: 0,
     ...over,
@@ -66,7 +68,17 @@ beforeEach(() =>
   setRoutes(
     routes([
       take(),
-      take({ id: 2, status: "closed", closed_at: "2026-06-02T00:00:00Z", scope_description: "Filament only" }),
+      take({
+        id: 2,
+        status: "closed",
+        progress_status: "partially_completed",
+        closed_at: "2026-06-02T00:00:00Z",
+        scope_description: "Filament only",
+        line_count: 8,
+        counted_count: 0,
+        completed_count: 6,
+        pending_count: 0,
+      }),
     ]),
   ),
 );
@@ -84,6 +96,19 @@ it("filters takes by the Open / Closed tabs", async () => {
     expect(screen.queryByText("Everything")).not.toBeInTheDocument(),
   );
   expect(screen.getByText("Filament only")).toBeInTheDocument();
+});
+
+it("shows the derived status and keeps closed-take progress non-zero", async () => {
+  await renderList();
+
+  const closedRow = screen.getByText("Filament only").closest("tr")!;
+  // Progress reflects the rows that were counted, not counted_count (which is 0 once a
+  // take closes and its counted lines move on to their outcome).
+  expect(closedRow).toHaveTextContent("6 / 8");
+  expect(closedRow).toHaveTextContent("Partially completed");
+
+  const openRow = screen.getByText("Everything").closest("tr")!;
+  expect(openRow).toHaveTextContent(/Open 3 days/);
 });
 
 it("opens a take on a row click", async () => {

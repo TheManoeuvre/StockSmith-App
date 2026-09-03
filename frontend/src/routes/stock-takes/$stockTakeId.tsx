@@ -246,7 +246,7 @@ function StockTakeDetailPage() {
           <div className="grid grid-cols-4 gap-3">
             <Stat
               label="Counted"
-              value={`${take.counted_count} / ${take.line_count}`}
+              value={`${take.completed_count} / ${take.line_count}`}
               sub={`${productLines} product · ${take.line_count - productLines} material`}
             />
             <Stat
