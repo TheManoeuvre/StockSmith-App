@@ -12,6 +12,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **The stock takes list says how a closed take actually turned out.** The status column
+  now reads **Completed** when every line was counted and applied, **Partially completed**
+  when some lines applied but others were left blank or held for review, and **Closed**
+  when the take was closed without a single line applied. Open takes still show
+  **Open N days**. The progress column no longer snaps back to `0 / N` the moment a take
+  closes — it keeps showing how many rows were counted (`37 / 40`), on the list and on the
+  take's own summary.
+
 ## [0.11.0] - 2026-09-03
 
 Reorder timing that knows how long each supplier takes, shorter kitting-BOM material

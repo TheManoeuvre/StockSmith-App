@@ -27,6 +27,7 @@ from app.schemas.stock_take import (
     LineCountUpdate,
     LineResolution,
     ScopePreview,
+    StockTakeProgress,
     StockTakeCreated,
     StockTakeDetail,
     StockTakeImportResult,
@@ -138,6 +139,25 @@ def _open_days(take: StockTake) -> int:
     return max((end - started).days, 0)
 
 
+# A line "had a count completed" if a number was entered on the sheet and the line was
+# carried forward with it — whether it applied cleanly or got flagged for review. `skipped`
+# (left blank) and `pending`/`counted`-but-nothing means it did not.
+_COUNT_COMPLETED = frozenset(
+    {StockTakeLineStatus.counted, StockTakeLineStatus.applied, StockTakeLineStatus.conflict}
+)
+
+
+def _progress_status(take: StockTake, lines: list[StockTakeLine]) -> StockTakeProgress:
+    if take.status is not StockTakeStatus.closed:
+        return StockTakeProgress.open
+    applied = sum(1 for line in lines if line.status is StockTakeLineStatus.applied)
+    if lines and applied == len(lines):
+        return StockTakeProgress.completed
+    if applied > 0:
+        return StockTakeProgress.partially_completed
+    return StockTakeProgress.closed
+
+
 def _take_fields(take: StockTake, lines: list[StockTakeLine]) -> dict:
     """The stored columns plus the counts derived from this take's lines.
 
@@ -157,8 +177,10 @@ def _take_fields(take: StockTake, lines: list[StockTakeLine]) -> dict:
         "closed_at": take.closed_at,
         "notes": take.notes,
         "open_days": _open_days(take),
+        "progress_status": _progress_status(take, lines),
         "line_count": len(lines),
         "counted_count": sum(1 for line in lines if line.status is StockTakeLineStatus.counted),
+        "completed_count": sum(1 for line in lines if line.status in _COUNT_COMPLETED),
         "pending_count": sum(1 for line in lines if line.status is StockTakeLineStatus.pending),
         "conflict_count": sum(1 for line in lines if line.status is StockTakeLineStatus.conflict),
     }

@@ -168,6 +168,13 @@ export interface DueForCountItem {
 }
 
 export type StockTakeStatus = "open" | "closed";
+/** Headline state for the list, derived server-side from the take's lines. `status` above
+ * is only ever open or closed; this splits a closed take by how much of it landed. */
+export type StockTakeProgressStatus =
+  | "open"
+  | "completed"
+  | "partially_completed"
+  | "closed";
 export type StockTakeLineStatus =
   | "pending"
   | "counted"
@@ -218,8 +225,13 @@ export interface StockTake {
   /** Visibility only — nothing expires a take. The longer one runs the more lines land in
    * manual review, which is what this is for noticing. */
   open_days: number;
+  progress_status: StockTakeProgressStatus;
   line_count: number;
   counted_count: number;
+  /** Rows that got a count and were carried through — counted, applied, or flagged.
+   * Unlike counted_count this survives approval, so a closed take's progress still reads
+   * "37 / 40" rather than snapping back to zero. */
+  completed_count: number;
   pending_count: number;
   conflict_count: number;
 }

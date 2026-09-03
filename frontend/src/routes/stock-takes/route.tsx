@@ -8,7 +8,10 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState, type MouseEvent } from "react";
 import { productCategoriesApi } from "../../api/productCategories";
 import { stockTakesApi } from "../../api/stockTakes";
-import type { StockTakeScope } from "../../api/types";
+import type {
+  StockTakeProgressStatus,
+  StockTakeScope,
+} from "../../api/types";
 import { useMaterialCategories } from "../../hooks/useMaterialCategories";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { Badge } from "../../components/common/Badge";
@@ -23,6 +26,21 @@ import { formatDayMonth } from "../../lib/format";
  * not a per-take detail) stays a plain page rendered into the same Outlet, without the panel
  * chrome. index.tsx is a trivial route now; this component is what actually renders the list.
  */
+// Non-open states only; an open take keeps its "Open N days" badge above. "Completed" =
+// every line counted and applied, "Partially completed" = some applied but others left
+// blank or flagged, "Closed" = closed without a single line applied.
+const PROGRESS_META: Record<
+  Exclude<StockTakeProgressStatus, "open">,
+  { label: string; cls: string }
+> = {
+  completed: { label: "Completed", cls: "bg-green-100 text-green-800" },
+  partially_completed: {
+    label: "Partially completed",
+    cls: "bg-blue-100 text-blue-800",
+  },
+  closed: { label: "Closed", cls: "bg-slate-100 text-slate-600" },
+};
+
 export const Route = createFileRoute("/stock-takes")({
   component: StockTakesLayout,
   // Preselects the scope picker with "due for counting only", so the dashboard's due list
@@ -319,16 +337,18 @@ function StockTakesListContent() {
                   </td>
                   <td className="p-2 text-slate-600">{t.scope_description}</td>
                   <td className="p-2">
-                    {t.status === "open" ? (
+                    {t.progress_status === "open" ? (
                       <Badge className="bg-amber-100 text-amber-800">
                         Open {t.open_days} day{t.open_days === 1 ? "" : "s"}
                       </Badge>
                     ) : (
-                      <Badge className="bg-slate-100 text-slate-600">Closed</Badge>
+                      <Badge className={PROGRESS_META[t.progress_status].cls}>
+                        {PROGRESS_META[t.progress_status].label}
+                      </Badge>
                     )}
                   </td>
                   <td className="p-2 tabular-nums">
-                    {t.counted_count} / {t.line_count}
+                    {t.completed_count} / {t.line_count}
                   </td>
                   <td className="p-2 tabular-nums">
                     {t.conflict_count > 0 ? (
