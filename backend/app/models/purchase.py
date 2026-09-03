@@ -43,7 +43,7 @@ class Purchase(Base):
     received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Optional ETA, entered by the user at PO time. When absent, the materials forecast
     # (services/forecasting.py) estimates arrival as order_date + GeneralSettings.
-    # default_lead_time_weeks instead — this column is never back-filled with that
+    # default_lead_time_days instead — this column is never back-filled with that
     # estimate, so "unknown ETA" stays distinguishable from "known ETA."
     expected_arrival_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     notes: Mapped[str | None] = mapped_column(String, nullable=True)

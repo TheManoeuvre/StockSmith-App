@@ -100,21 +100,22 @@ export function ForecastSettings() {
             onChange={(e) => setField("forecast_lookback_weeks", Number(e.target.value))}
           />
         </FieldRow>
-        <FieldRow label="Default lead time (weeks)">
+        <FieldRow label="Default lead time (business days)">
           <input
             type="number"
             min="0"
-            step="0.5"
+            step="1"
             className={numberInput}
-            value={form.default_lead_time_weeks}
-            onChange={(e) => setField("default_lead_time_weeks", e.target.value)}
+            value={form.default_lead_time_days}
+            onChange={(e) => setField("default_lead_time_days", Number(e.target.value))}
           />
         </FieldRow>
       </div>
       <p className="text-xs text-slate-500">
-        Default lead time estimates when an on-order purchase will arrive if it wasn't given its own
-        expected arrival date, and pushes a material's reorder point that far ahead of stockout so
-        there's time to restock. A supplier with its own lead time set overrides this for its materials.
+        Default lead time (in business days, Mon–Fri) estimates when an on-order purchase will
+        arrive if it wasn't given its own expected arrival date, and pushes a material's reorder
+        point that far ahead of stockout so there's time to restock. A supplier with its own lead
+        time set overrides this for its materials.
       </p>
       <div className="flex items-center gap-2">
         <SaveButton

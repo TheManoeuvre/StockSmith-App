@@ -424,7 +424,7 @@ function ExpandedRow<T extends ReferenceRow>({
               <input
                 aria-label={`${row.name} ${field.label}`}
                 type={field.type === "money" || field.type === "number" ? "number" : "text"}
-                step={field.type === "money" ? "0.01" : field.type === "number" ? "0.5" : undefined}
+                step={field.type === "money" ? "0.01" : field.type === "number" ? "1" : undefined}
                 placeholder={field.placeholder}
                 className="rounded border border-slate-300 px-2 py-1"
                 value={form[field.key] ?? ""}

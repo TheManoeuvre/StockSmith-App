@@ -60,11 +60,11 @@ class ForecastSettingsRead(BaseModel):
     forecast_warning_weeks: Decimal
     forecast_critical_weeks: Decimal
     forecast_lookback_weeks: int
-    default_lead_time_weeks: Decimal
+    default_lead_time_days: int
 
 
 class ForecastSettingsUpdate(BaseModel):
     forecast_warning_weeks: Decimal
     forecast_critical_weeks: Decimal
     forecast_lookback_weeks: int
-    default_lead_time_weeks: Decimal
+    default_lead_time_days: int

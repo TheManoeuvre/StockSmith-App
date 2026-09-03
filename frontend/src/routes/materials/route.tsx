@@ -685,8 +685,8 @@ function MaterialRow({
       </td>
       <td className="px-2 py-2 text-slate-500">
         {m.default_supplier_name ?? "—"}
-        {formatLeadTime(m.lead_time_weeks) && (
-          <span className="block text-xs text-slate-400">{formatLeadTime(m.lead_time_weeks)}</span>
+        {formatLeadTime(m.lead_time_days) && (
+          <span className="block text-xs text-slate-400">{formatLeadTime(m.lead_time_days)}</span>
         )}
       </td>
     </tr>
