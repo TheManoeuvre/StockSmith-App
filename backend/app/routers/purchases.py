@@ -24,6 +24,17 @@ from app.services.validation import validate_lines_against_units
 router = APIRouter(prefix="/purchases", tags=["purchases"], dependencies=[Depends(require_auth)])
 
 
+def _clean_supplier_order_number(value: str | None) -> str | None:
+    """Blank or whitespace-only means "no supplier reference" — store NULL, not "".
+
+    Keeps the list view's "show the supplier number if there is one" check a plain None test.
+    """
+    if value is None:
+        return None
+    trimmed = value.strip()
+    return trimmed or None
+
+
 async def _get_purchase_with_lines(session: AsyncSession, purchase_id: int) -> Purchase:
     # populate_existing forces a fresh load of `lines` even if this Purchase is already
     # in the session's identity map with a stale relationship — matters because several
@@ -81,6 +92,7 @@ async def create_purchase(payload: PurchaseCreate, session: AsyncSession = Depen
 
     purchase = Purchase(
         supplier_id=payload.supplier_id,
+        supplier_order_number=_clean_supplier_order_number(payload.supplier_order_number),
         notes=payload.notes,
         expected_arrival_date=payload.expected_arrival_date,
         **({"order_date": payload.order_date} if payload.order_date else {}),
@@ -103,6 +115,8 @@ async def get_purchase(purchase_id: int, session: AsyncSession = Depends(get_db)
 async def update_purchase(purchase_id: int, payload: PurchaseUpdate, session: AsyncSession = Depends(get_db)) -> Purchase:
     purchase = await _get_purchase_with_lines(session, purchase_id)
     for field, value in payload.model_dump(exclude_unset=True).items():
+        if field == "supplier_order_number":
+            value = _clean_supplier_order_number(value)
         setattr(purchase, field, value)
     await session.commit()
     return await _get_purchase_with_lines(session, purchase_id)

@@ -189,7 +189,18 @@ function PurchaseRow({
       className="cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50"
     >
       <td className="p-2 align-top">
-        <div className="font-medium">#{purchase.id}</div>
+        <div className="font-medium">
+          {purchase.supplier_order_number ? (
+            <>
+              {purchase.supplier_order_number}{" "}
+              <span className="font-normal text-slate-400">
+                (#{purchase.id})
+              </span>
+            </>
+          ) : (
+            <>#{purchase.id}</>
+          )}
+        </div>
         <div className="text-[11px] text-slate-400">
           placed {formatDayMonth(purchase.order_date)}
         </div>

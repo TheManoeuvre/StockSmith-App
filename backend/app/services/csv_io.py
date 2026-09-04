@@ -58,6 +58,7 @@ ORDERS_CSV_FIELDS = [
 
 PURCHASES_CSV_FIELDS = [
     "id",
+    "supplier_order_number",
     "supplier_name",
     "order_date",
     "expected_arrival_date",
@@ -352,6 +353,7 @@ async def export_purchases_csv(session: AsyncSession) -> str:
         writer.writerow(
             {
                 "id": p.id,
+                "supplier_order_number": p.supplier_order_number or "",
                 "supplier_name": p.supplier_name or "",
                 "order_date": p.order_date.isoformat(),
                 "expected_arrival_date": p.expected_arrival_date.isoformat() if p.expected_arrival_date else "",
