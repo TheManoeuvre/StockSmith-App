@@ -46,7 +46,7 @@ class GeneralSettings(Base):
     forecast_warning_weeks: Mapped[float] = mapped_column(Numeric(6, 2), nullable=False, default=6)
     forecast_critical_weeks: Mapped[float] = mapped_column(Numeric(6, 2), nullable=False, default=2)
     forecast_lookback_weeks: Mapped[int] = mapped_column(default=8, nullable=False)
-    default_lead_time_days: Mapped[int] = mapped_column(Integer, nullable=False, default=20)
+    default_lead_time_days: Mapped[int] = mapped_column(Integer, nullable=False, default=5)
     # The bottom of ABC's three levels: the tier an item gets when neither it nor its
     # category/type says otherwise. Two of them rather than one shared value because the
     # two catalogues differ in shape — see ABCScope. Both default to C, the

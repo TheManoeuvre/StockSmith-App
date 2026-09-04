@@ -40,7 +40,7 @@ def upgrade() -> None:
         "UPDATE general_settings SET default_lead_time_days = CAST(ROUND(default_lead_time_weeks * 5) AS INTEGER)"
     )
     with op.batch_alter_table('general_settings') as batch:
-        batch.alter_column('default_lead_time_days', nullable=False, server_default='20')
+        batch.alter_column('default_lead_time_days', nullable=False, server_default='5')
         batch.drop_column('default_lead_time_weeks')
 
 
