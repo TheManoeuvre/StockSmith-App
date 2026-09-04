@@ -27,7 +27,7 @@ export function DefaultKittingBomSettings() {
 
   const seed = useMemo(() => (bom ? toLines(bom) : undefined), [bom]);
   const { value: lines, setValue: setLines, isDirty, markSaved } = useEditableCopy<KittingBomLine[]>({
-    key: "default-kitting-bom",
+    key: "shipping-packaging/default-kitting-bom",
     label: "Default kitting BOM",
     initial: [],
     seed,
@@ -65,7 +65,15 @@ export function DefaultKittingBomSettings() {
   return (
     <SettingsCard
       title="Default kitting BOM"
-      help="Packaging materials (box, label, tape) automatically added to every new product's kitting BOM when it's created — pick materials you already track stock for. This is a one-time snapshot: changing it here only affects products created afterward, not ones that already exist."
+      help={
+        <>
+          Packaging materials (box, label, tape) automatically added to every new product's kitting BOM when
+          it's created — pick materials you already track stock for. This is a one-time snapshot: changing it
+          here only affects products created afterward, not ones that already exist. Whether a material is
+          consumed once per order rather than once per unit is set per material category, under Stock → Lists →
+          Material categories ("Kitting: one per order, not per unit").
+        </>
+      }
     >
       {materials && materials.length > 8 && (
         <input

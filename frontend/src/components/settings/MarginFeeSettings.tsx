@@ -24,9 +24,9 @@ const SOURCE_LABELS: Record<MarginFeeSource, string> = {
  * resolve_shipping_cost_for_fee_source maps it 1:1 onto cost_etsy/cost_ebay/cost_manual), which
  * is the other reason it can't be split per platform.
  *
- * The fee components it draws on are per-platform and live on the integration cards. The summary
- * below exists so that split doesn't read as arbitrary: you can see, from here, exactly which
- * numbers the current choice pulls in and where to go to change them.
+ * The fee components it draws on are per-platform and live further down this same page (see
+ * PlatformFeeComponents). The summary below exists so that split doesn't read as arbitrary: you
+ * can see, from here, exactly which numbers the current choice pulls in.
  */
 export function MarginFeeSettings() {
   const queryClient = useQueryClient();
@@ -122,10 +122,10 @@ function EffectiveFeeSummary({ platform }: { platform: ListingPlatform }) {
       )}
       <Link
         to="/settings"
-        search={{ tab: "integrations" }}
+        search={{ page: "pricing-fees" }}
         className="self-start text-sm text-slate-600 underline"
       >
-        Edit these under Integrations → {PLATFORM_LABELS[platform]}
+        Edit these under Pricing & fees → {PLATFORM_LABELS[platform]} fee components
       </Link>
     </div>
   );

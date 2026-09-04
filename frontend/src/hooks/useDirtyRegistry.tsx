@@ -33,14 +33,14 @@ import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalS
  *   material-details, material-adjust, material-image-url
  *   new-material                             the list page's create form
  *
- * Settings:
+ * Settings (page ids match the settings route's grouped sub-nav):
  *   connection                                        backend URL + shared password
- *   general/forecast                                  forecasting thresholds
- *   general/stock-count                               ABC tiers and count cadences
- *   default-kitting-bom                               default packaging BOM
- *   integrations/${platform}/credentials              developer app credentials
- *   integrations/${platform}/fee-components/new       add-a-fee-component form
- *   backup/settings                                   schedule and second-folder form
+ *   forecasting                                       forecasting thresholds
+ *   stock-counts                                      ABC tiers and count cadences
+ *   shipping-packaging/default-kitting-bom            default packaging BOM
+ *   stores-sync/${platform}/credentials               developer app credentials
+ *   pricing-fees/fee-components/${platform}/new       add-a-fee-component form
+ *   backup-restore/settings                           schedule and second-folder form
  *   ${resource}/new                                   reference-data create form
  *   ${resource}/row-${id}/fields                      an expanded reference-data row
  *

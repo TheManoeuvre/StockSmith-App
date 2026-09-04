@@ -8,7 +8,7 @@ vi.mock("../api/client", async () => (await import("../test/fakeBackend")).clien
 
 // The settings route reads and writes the Tauri store directly rather than through the api
 // layer, so fakeBackend doesn't cover it. Connected by default — that's the state the packaged
-// app auto-provisions into, and the one the tab ordering is designed around.
+// app auto-provisions into, and the one the page ordering is designed around.
 const tauriSettings = { backendUrl: "http://127.0.0.1:8000", sharedPassword: "hunter2" };
 vi.mock("../lib/tauri", () => ({
   getSettings: () => Promise.resolve(tauriSettings),
@@ -19,8 +19,8 @@ vi.mock("../lib/tauri", () => ({
   isHostDevice: () => Promise.resolve(true),
   backendHostname: () => Promise.resolve("127.0.0.1"),
   restartApp: () => Promise.resolve(),
-  // Not the desktop app here, so the General tab's autostart toggle stays out of the way —
-  // it is covered directly in BackgroundSyncSettings.test.tsx.
+  // Not the desktop app here, so the autostart toggle stays out of the way — it is covered
+  // directly in BackgroundSyncSettings.test.tsx.
   isDesktopApp: () => false,
   getAutostartEnabled: () => Promise.resolve(false),
   setAutostartEnabled: () => Promise.resolve(false),
@@ -149,7 +149,8 @@ async function renderSettings(initialPath = "/settings") {
   return router;
 }
 
-const tab = (name: string) => screen.getByRole("button", { name });
+/** Settings nav items are buttons too, same as the old tab strip. */
+const navItem = (name: string) => screen.getByRole("button", { name });
 
 describe("settings page", () => {
   beforeEach(() => {
@@ -158,21 +159,21 @@ describe("settings page", () => {
     tauriSettings.sharedPassword = "hunter2";
   });
 
-  describe("tab ordering and default", () => {
-    it("leads with General", async () => {
+  describe("nav ordering and default", () => {
+    it("leads with Stores & sync", async () => {
       await renderSettings();
 
       const labels = screen
         .getAllByRole("button")
         .map((b) => b.textContent)
         .filter((t): t is string => !!t);
-      expect(labels.indexOf("General")).toBeLessThan(labels.indexOf("Integrations"));
-      expect(labels.indexOf("General")).toBeLessThan(labels.indexOf("Connection"));
+      expect(labels.indexOf("Stores & sync")).toBeLessThan(labels.indexOf("Pricing & fees"));
+      expect(labels.indexOf("Stores & sync")).toBeLessThan(labels.indexOf("Connection"));
     });
 
-    it("opens on General when the connection is already provisioned", async () => {
+    it("opens on Stores & sync when the connection is already provisioned", async () => {
       await renderSettings();
-      expect(await screen.findByText("Default currency")).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "Field mapping" })).toBeInTheDocument();
     });
 
     it("opens on Connection when there is something to fill in", async () => {
@@ -185,87 +186,94 @@ describe("settings page", () => {
     });
   });
 
-  describe("tab state in the URL", () => {
-    it("honours ?tab= on load", async () => {
-      await renderSettings("/settings?tab=pricing");
+  describe("page state in the URL", () => {
+    it("honours ?page= on load", async () => {
+      await renderSettings("/settings?page=pricing-fees");
       expect(await screen.findByText("Margin estimate basis")).toBeInTheDocument();
     });
 
-    it("writes the tab to the URL when clicked", async () => {
+    it("writes the page to the URL when clicked", async () => {
       const user = userEvent.setup();
       const router = await renderSettings();
 
-      await user.click(tab("Reference data"));
+      await user.click(navItem("Lists"));
 
-      // This is what makes the root unsaved-changes blocker cover tab switches: a search-param
+      // This is what makes the root unsaved-changes blocker cover page switches: a search-param
       // change is a real navigation, so no guard code is needed on this route at all.
-      await waitFor(() => expect(router.state.location.search).toEqual({ tab: "reference" }));
+      await waitFor(() => expect(router.state.location.search).toEqual({ page: "lists" }));
     });
 
-    it("falls back to the default for an unrecognised tab", async () => {
-      await renderSettings("/settings?tab=nonsense");
-      expect(await screen.findByText("Default currency")).toBeInTheDocument();
+    it("falls back to the default for an unrecognised page", async () => {
+      await renderSettings("/settings?page=nonsense");
+      expect(await screen.findByRole("heading", { name: "Field mapping" })).toBeInTheDocument();
     });
   });
 
   describe("section placement", () => {
-    it("puts shipping profiles under Reference data, not Pricing", async () => {
+    it("puts shipping profiles under Shipping & packaging, not Pricing", async () => {
       const user = userEvent.setup();
       await renderSettings();
 
-      await user.click(tab("Reference data"));
+      await user.click(navItem("Shipping & packaging"));
       expect(await screen.findByRole("heading", { name: "Shipping profiles" })).toBeInTheDocument();
 
-      await user.click(tab("Pricing"));
+      await user.click(navItem("Pricing & fees"));
       await screen.findByText("Margin estimate basis");
       expect(screen.queryByRole("heading", { name: "Shipping profiles" })).not.toBeInTheDocument();
     });
 
-    it("gives backups their own tab", async () => {
+    it("gives backup & restore its own page", async () => {
       const user = userEvent.setup();
       await renderSettings();
 
-      await user.click(tab("Backup"));
+      await user.click(navItem("Backup & restore"));
 
       expect(await screen.findByRole("heading", { name: "Backups" })).toBeInTheDocument();
       expect(screen.getByRole("button", { name: "Back up now" })).toBeInTheDocument();
     });
 
-    it("shows reference data inline rather than linking out", async () => {
+    it("shows every reference table from the Lists page", async () => {
       const user = userEvent.setup();
       await renderSettings();
 
-      await user.click(tab("Reference data"));
+      await user.click(navItem("Lists"));
 
-      // These used to be <Link>s to standalone /manufacturers-style routes.
+      // Master/detail: one table shown at a time, picked from the left mini-nav.
       expect(await screen.findByRole("heading", { name: "Manufacturers" })).toBeInTheDocument();
-      expect(screen.getByRole("heading", { name: "Suppliers" })).toBeInTheDocument();
-      expect(screen.getByRole("heading", { name: "Material types" })).toBeInTheDocument();
-      // Colours joined the others once it stopped being free text on each material.
-      expect(screen.getByRole("heading", { name: "Colours" })).toBeInTheDocument();
-      // And categories once they stopped being a fixed enum.
-      expect(screen.getByRole("heading", { name: "Material categories" })).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: /Suppliers/ }));
+      expect(await screen.findByRole("heading", { name: "Suppliers" })).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: /Material types/ }));
+      expect(await screen.findByRole("heading", { name: "Material types" })).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: /^Colours/ }));
+      expect(await screen.findByRole("heading", { name: "Colours" })).toBeInTheDocument();
+
+      await user.click(screen.getByRole("button", { name: /Material categories/ }));
+      expect(await screen.findByRole("heading", { name: "Material categories" })).toBeInTheDocument();
     });
 
-    it("keeps the global fee basis in Pricing and the fee components on each integration", async () => {
+    it("keeps the global fee basis and both platforms' fee components together on Pricing & fees", async () => {
       const user = userEvent.setup();
       await renderSettings();
 
-      await user.click(tab("Pricing"));
+      await user.click(navItem("Pricing & fees"));
       expect(await screen.findByText("Margin estimate basis")).toBeInTheDocument();
-      // Per-platform fee tables moved out — Pricing keeps only the global lens plus a summary.
-      expect(screen.queryByRole("heading", { name: "Etsy fee components" })).not.toBeInTheDocument();
-
-      await user.click(tab("Integrations"));
       expect(await screen.findByRole("heading", { name: "Etsy fee components" })).toBeInTheDocument();
       expect(screen.getByRole("heading", { name: "eBay fee components" })).toBeInTheDocument();
+
+      // Fee components moved off the per-platform Stores & sync cards.
+      await user.click(navItem("Stores & sync"));
+      await screen.findByRole("heading", { name: "Field mapping" });
+      expect(screen.queryByRole("heading", { name: "Etsy fee components" })).not.toBeInTheDocument();
     });
   });
 
   describe("unsaved changes", () => {
     const warningField = () => screen.getByLabelText(/Warning threshold/);
 
-    /** The General tab has several cards, each with its own Save — scope to the one under test. */
+    /** Forecasting has several cards, each with its own Save — scope to the one under test. */
     const forecastCard = () => {
       const heading = screen.getByRole("heading", { name: "Materials forecasting" });
       const card = heading.closest("section");
@@ -278,6 +286,7 @@ describe("settings page", () => {
     it("enables Save only once something has actually changed", async () => {
       const user = userEvent.setup();
       await renderSettings();
+      await user.click(navItem("Forecasting"));
 
       await screen.findByRole("heading", { name: "Materials forecasting" });
       expect(saveButton()).toBeDisabled();
@@ -288,15 +297,16 @@ describe("settings page", () => {
       expect(saveButton()).toBeEnabled();
     });
 
-    it("warns before a tab switch discards a dirty settings form", async () => {
+    it("warns before a page switch discards a dirty settings form", async () => {
       const user = userEvent.setup();
       await renderSettings();
+      await user.click(navItem("Forecasting"));
 
       await screen.findByRole("heading", { name: "Materials forecasting" });
       await user.clear(warningField());
       await user.type(warningField(), "9");
 
-      await user.click(tab("Pricing"));
+      await user.click(navItem("Pricing & fees"));
 
       // The whole point of Phase 2: the blocker was already mounted at the root and already
       // covered this route — nothing here registered as dirty, so it never fired.
@@ -308,21 +318,23 @@ describe("settings page", () => {
     it("stays put when you choose to keep editing", async () => {
       const user = userEvent.setup();
       const router = await renderSettings();
+      await user.click(navItem("Forecasting"));
 
       await screen.findByRole("heading", { name: "Materials forecasting" });
       await user.clear(warningField());
       await user.type(warningField(), "9");
-      await user.click(tab("Pricing"));
+      await user.click(navItem("Pricing & fees"));
 
       await user.click(await screen.findByRole("button", { name: "Keep editing" }));
 
-      expect(router.state.location.search).toEqual({});
+      expect(router.state.location.search).toEqual({ page: "forecasting" });
       expect(warningField()).toHaveValue(9);
     });
 
-    it("lets the tab switch through once saved", async () => {
+    it("lets the page switch through once saved", async () => {
       const user = userEvent.setup();
       await renderSettings();
+      await user.click(navItem("Forecasting"));
 
       await screen.findByRole("heading", { name: "Materials forecasting" });
       await user.clear(warningField());
@@ -331,7 +343,7 @@ describe("settings page", () => {
 
       await waitFor(() => expect(saveButton()).toBeDisabled());
 
-      await user.click(tab("Pricing"));
+      await user.click(navItem("Pricing & fees"));
 
       expect(await screen.findByText("Margin estimate basis")).toBeInTheDocument();
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -339,12 +351,13 @@ describe("settings page", () => {
 
     it("warns about a half-typed connection URL", async () => {
       const user = userEvent.setup();
-      await renderSettings("/settings?tab=connection");
+      await renderSettings("/settings?page=connection");
 
-      await user.click(await screen.findByRole("button", { name: /advanced connection settings/ }));
-      await user.type(screen.getByLabelText("Backend URL"), "-typo");
+      const backendUrlField = await screen.findByLabelText("Backend URL");
+      await waitFor(() => expect(backendUrlField).toBeEnabled());
+      await user.type(backendUrlField, "-typo");
 
-      await user.click(tab("General"));
+      await user.click(navItem("Stores & sync"));
 
       expect(await screen.findByRole("dialog")).toBeInTheDocument();
       expect(dialog().getByText(/Connection settings/)).toBeInTheDocument();
@@ -360,7 +373,9 @@ describe("settings page", () => {
     };
 
     it("shows the shipped cadences, marked as defaults", async () => {
+      const user = userEvent.setup();
       await renderSettings();
+      await user.click(navItem("Stock counts"));
 
       await screen.findByRole("heading", { name: "Stock counting" });
       // Every tier gets a number whether or not one is stored — a settings screen that left
@@ -376,6 +391,7 @@ describe("settings page", () => {
         { method: "PUT" as const, path: "/settings/stock-count-settings", respond: (body) => body },
       ]);
       await renderSettings();
+      await user.click(navItem("Stock counts"));
 
       await screen.findByRole("heading", { name: "Stock counting" });
       const tierA = stockCountCard().getAllByLabelText(/Tier A/)[0];
