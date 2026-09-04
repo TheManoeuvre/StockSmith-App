@@ -9,6 +9,8 @@ from sqlalchemy.orm import selectinload
 from app.deps import get_db, require_auth
 from app.models.purchase import MaterialPurchase, Purchase, PurchaseStatus
 from app.schemas.purchase import (
+    PriceReferenceEntry,
+    PriceReferenceRequest,
     PurchaseCreate,
     PurchaseLineCloseInput,
     PurchaseLineInput,
@@ -94,6 +96,7 @@ async def create_purchase(payload: PurchaseCreate, session: AsyncSession = Depen
         supplier_id=payload.supplier_id,
         supplier_order_number=_clean_supplier_order_number(payload.supplier_order_number),
         notes=payload.notes,
+        delivery_cost=payload.delivery_cost,
         expected_arrival_date=payload.expected_arrival_date,
         **({"order_date": payload.order_date} if payload.order_date else {}),
     )
@@ -104,6 +107,67 @@ async def create_purchase(payload: PurchaseCreate, session: AsyncSession = Depen
     session.add(purchase)
     await session.commit()
     return await _get_purchase_with_lines(session, purchase.id)
+
+
+@router.post("/price-reference", response_model=list[PriceReferenceEntry])
+async def price_reference(
+    payload: PriceReferenceRequest, session: AsyncSession = Depends(get_db)
+) -> list[PriceReferenceEntry]:
+    """What each material last cost, so the new-purchase panel can flag a line priced above it.
+
+    Considers any ordered line with a positive invoiced total — not only lines that have been
+    delivered — because the invoiced line total is recorded at PO time. Prefers the most
+    recent line from `supplier_id` when one is given, falling back to the most recent from any
+    supplier. Materials with no such line are simply absent from the result.
+    """
+    if not payload.material_ids:
+        return []
+
+    result = await session.execute(
+        select(MaterialPurchase, Purchase)
+        .join(Purchase, MaterialPurchase.purchase_id == Purchase.id)
+        .where(
+            MaterialPurchase.material_id.in_(payload.material_ids),
+            MaterialPurchase.qty > 0,
+            MaterialPurchase.total_cost > 0,
+        )
+        .options(selectinload(Purchase.supplier))
+        .order_by(Purchase.order_date.desc(), Purchase.id.desc())
+    )
+
+    # Rows arrive newest-first, so the first row seen for a material is the fallback pick; it
+    # is only replaced when a later row is from the supplier asked about and the current pick
+    # is not (which then also stops any older same-supplier row from displacing it).
+    chosen: dict[int, tuple[MaterialPurchase, Purchase]] = {}
+    for line, purchase in result.all():
+        current = chosen.get(line.material_id)
+        if current is None:
+            chosen[line.material_id] = (line, purchase)
+        elif (
+            payload.supplier_id is not None
+            and current[1].supplier_id != payload.supplier_id
+            and purchase.supplier_id == payload.supplier_id
+        ):
+            chosen[line.material_id] = (line, purchase)
+
+    return [
+        PriceReferenceEntry(
+            material_id=material_id,
+            unit_cost=line.total_cost / line.qty,
+            qty=line.qty,
+            total_cost=line.total_cost,
+            supplier_id=purchase.supplier_id,
+            supplier_name=purchase.supplier_name,
+            purchase_id=purchase.id,
+            purchase_ref=purchase.supplier_order_number,
+            at=purchase.order_date,
+            same_supplier=(
+                payload.supplier_id is not None
+                and purchase.supplier_id == payload.supplier_id
+            ),
+        )
+        for material_id, (line, purchase) in chosen.items()
+    ]
 
 
 @router.get("/{purchase_id}", response_model=PurchaseRead)

@@ -24,6 +24,7 @@ class PurchaseCreate(BaseModel):
     order_date: date | None = None
     expected_arrival_date: date | None = None
     notes: str | None = None
+    delivery_cost: Decimal | None = None
     lines: list[PurchaseLineInput]
 
 
@@ -33,6 +34,30 @@ class PurchaseUpdate(BaseModel):
     order_date: date | None = None
     expected_arrival_date: date | None = None
     notes: str | None = None
+    delivery_cost: Decimal | None = None
+
+
+class PriceReferenceRequest(BaseModel):
+    """"What did we last pay for these materials?" — asked once per open new-purchase panel,
+    re-asked when the supplier or the set of materials on the draft changes."""
+
+    supplier_id: int | None = None
+    material_ids: list[int]
+
+
+class PriceReferenceEntry(BaseModel):
+    material_id: int
+    # total_cost / qty of the chosen line — the frontend does the 4dp/2dp display rounding.
+    unit_cost: Decimal
+    qty: Decimal
+    total_cost: Decimal
+    supplier_id: int | None
+    supplier_name: str | None
+    purchase_id: int
+    purchase_ref: str | None
+    at: date
+    # The chosen line's supplier matches the one asked about (vs a fallback to any supplier).
+    same_supplier: bool
 
 
 class PurchaseReceiptRead(BaseModel):
@@ -126,6 +151,7 @@ class PurchaseRead(BaseModel):
     status: PurchaseStatus
     received_at: datetime | None
     notes: str | None
+    delivery_cost: Decimal | None = None
     created_at: datetime
     updated_at: datetime
     lines: list[PurchaseLineRead] = []

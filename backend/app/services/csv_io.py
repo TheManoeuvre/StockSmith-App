@@ -65,6 +65,7 @@ PURCHASES_CSV_FIELDS = [
     "status",
     "received_at",
     "total_cost",
+    "delivery_cost",
     "notes",
 ]
 
@@ -360,6 +361,7 @@ async def export_purchases_csv(session: AsyncSession) -> str:
                 "status": p.status.value,
                 "received_at": p.received_at.isoformat() if p.received_at is not None else "",
                 "total_cost": str(total_cost),
+                "delivery_cost": str(p.delivery_cost) if p.delivery_cost is not None else "",
                 "notes": p.notes or "",
             }
         )

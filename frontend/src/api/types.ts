@@ -349,9 +349,31 @@ export interface Purchase {
   /** When the order was completed. null while anything is still outstanding. */
   received_at: string | null;
   notes: string | null;
+  /** Delivery / carriage charged on the whole order. null means none recorded — shown as
+   *  "no delivery charge", distinct from an entered "0.00". Added to the displayed order
+   *  total but never apportioned to unit costs. */
+  delivery_cost: string | null;
   created_at: string;
   updated_at: string;
   lines: PurchaseLine[];
+}
+
+/** What a material last cost, from GET/POST /purchases/price-reference — drives the
+ *  new-purchase panel's per-line "last paid" comparison. */
+export interface PriceReference {
+  material_id: number;
+  /** total_cost / qty of the chosen line. */
+  unit_cost: string;
+  qty: string;
+  total_cost: string;
+  supplier_id: number | null;
+  supplier_name: string | null;
+  purchase_id: number;
+  /** The purchase's supplier_order_number, if it had one. */
+  purchase_ref: string | null;
+  at: string;
+  /** The chosen line came from the supplier asked about (vs a fallback to any supplier). */
+  same_supplier: boolean;
 }
 
 export interface MaterialStockHistoryEntry {

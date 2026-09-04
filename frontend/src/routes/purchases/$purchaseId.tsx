@@ -53,6 +53,7 @@ interface DetailsForm {
   orderDate: string;
   expectedArrivalDate: string;
   notes: string;
+  deliveryCost: string;
 }
 
 // The slide-over replaces the per-section Save buttons with one footer Save (see
@@ -133,6 +134,7 @@ function PurchaseDetail() {
             orderDate: purchase.order_date,
             expectedArrivalDate: purchase.expected_arrival_date ?? "",
             notes: purchase.notes ?? "",
+            deliveryCost: purchase.delivery_cost ?? "",
           }
         : undefined,
     [purchase],
@@ -152,6 +154,7 @@ function PurchaseDetail() {
       orderDate: "",
       expectedArrivalDate: "",
       notes: "",
+      deliveryCost: "",
     },
     seed: detailsSeed,
     seedKey: id,
@@ -173,6 +176,7 @@ function PurchaseDetail() {
         order_date: details.orderDate || null,
         expected_arrival_date: details.expectedArrivalDate || null,
         notes: details.notes || null,
+        delivery_cost: details.deliveryCost.trim() || null,
       });
     },
     onSuccess: () => {
@@ -284,7 +288,9 @@ function PurchaseDetail() {
     );
   }
 
-  const orderTotal = purchase.lines.reduce((s, l) => s + Number(l.total_cost), 0);
+  const deliveryNum = Number(purchase.delivery_cost ?? 0);
+  const orderTotal =
+    purchase.lines.reduce((s, l) => s + Number(l.total_cost), 0) + deliveryNum;
   const outstanding = purchase.lines.filter(
     (l) => Number(l.outstanding_qty) > 0,
   ).length;
@@ -373,7 +379,11 @@ function PurchaseDetail() {
             <Stat
               label="Order total"
               value={formatMoney(String(orderTotal), "GBP")}
-              sub="ex delivery"
+              sub={
+                deliveryNum > 0
+                  ? `incl ${formatMoney(String(deliveryNum), "GBP")} delivery`
+                  : "no delivery charge"
+              }
             />
             <Stat
               label="Received"
@@ -434,6 +444,19 @@ function PurchaseDetail() {
               value={details.notes}
               onChange={(e) => setDetailsField("notes", e.target.value)}
             />
+          </FieldRow>
+          <FieldRow label="Delivery cost">
+            <div className="flex items-center gap-1">
+              <span className="text-[11px] text-slate-400">£</span>
+              <input
+                type="number"
+                step="0.01"
+                className="w-28 rounded border border-slate-300 px-2 py-1 text-right tabular-nums"
+                value={details.deliveryCost}
+                onChange={(e) => setDetailsField("deliveryCost", e.target.value)}
+                placeholder="0.00"
+              />
+            </div>
           </FieldRow>
         </form>
 
