@@ -26,12 +26,12 @@ async def set_forecast_settings(
     forecast_warning_weeks,
     forecast_critical_weeks,
     forecast_lookback_weeks: int,
-    default_lead_time_weeks,
+    default_lead_time_days: int,
 ) -> GeneralSettings:
     settings = await get_general_settings(session)
     settings.forecast_warning_weeks = forecast_warning_weeks
     settings.forecast_critical_weeks = forecast_critical_weeks
     settings.forecast_lookback_weeks = forecast_lookback_weeks
-    settings.default_lead_time_weeks = default_lead_time_weeks
+    settings.default_lead_time_days = default_lead_time_days
     await session.commit()
     return settings

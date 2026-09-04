@@ -431,7 +431,7 @@ async def compute_dashboard_summary(session: AsyncSession) -> DashboardSummary:
             consumption_rate_per_week=f.consumption_rate_per_week,
             weeks_of_supply=f.weeks_of_supply,
             fg_buffer_weeks=f.fg_buffer_weeks,
-            lead_time_weeks=f.lead_time_weeks,
+            lead_time_days=f.lead_time_days,
             status=f.status,
         )
         for f in forecasts

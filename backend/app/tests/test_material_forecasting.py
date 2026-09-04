@@ -257,10 +257,10 @@ async def _eight_weeks_of_cover(session, **material_kwargs):
 
 async def test_lead_time_pushes_the_reorder_point_out(session):
     """8 weeks of cover clears a 6-week warning threshold with no lead time — but a
-    supplier that takes 3 weeks to deliver makes those same 8 weeks a warning, because
-    the reorder point is judged lead-time-ahead of stockout."""
-    await _settings(session, forecast_warning_weeks=Decimal(6), default_lead_time_weeks=Decimal(0))
-    supplier = Supplier(name="Slow Co", default_lead_time_weeks=Decimal(3))
+    supplier that takes 15 business days (3 weeks) to deliver makes those same 8 weeks a
+    warning, because the reorder point is judged lead-time-ahead of stockout."""
+    await _settings(session, forecast_warning_weeks=Decimal(6), default_lead_time_days=0)
+    supplier = Supplier(name="Slow Co", default_lead_time_days=15)
     session.add(supplier)
     await session.flush()
     material = await _eight_weeks_of_cover(session, default_supplier_id=supplier.id)
@@ -269,23 +269,23 @@ async def test_lead_time_pushes_the_reorder_point_out(session):
     f = forecasts[material.id]
     assert f.weeks_of_supply == Decimal(8)
     assert f.status == "warning"
-    assert f.lead_time_weeks == Decimal(3)
+    assert f.lead_time_days == 15
 
 
 async def test_shop_wide_default_lead_time_applies_without_a_supplier(session):
     """No supplier on the material — the shop-wide default lead time still widens the net."""
-    await _settings(session, forecast_warning_weeks=Decimal(6), default_lead_time_weeks=Decimal(3))
+    await _settings(session, forecast_warning_weeks=Decimal(6), default_lead_time_days=15)
     material = await _eight_weeks_of_cover(session)
 
     forecasts = {f.material_id: f for f in await compute_material_forecasts(session)}
     assert forecasts[material.id].status == "warning"
-    assert forecasts[material.id].lead_time_weeks == Decimal(3)
+    assert forecasts[material.id].lead_time_days == 15
 
 
 async def test_no_lead_time_leaves_healthy_cover_unflagged(session):
     """The widening is strictly opt-in: with the shop default at 0 and no supplier figure,
     8 weeks of cover against a 6-week threshold is still healthy and not surfaced."""
-    await _settings(session, forecast_warning_weeks=Decimal(6), default_lead_time_weeks=Decimal(0))
+    await _settings(session, forecast_warning_weeks=Decimal(6), default_lead_time_days=0)
     await _eight_weeks_of_cover(session)
 
     assert await compute_material_forecasts(session) == []

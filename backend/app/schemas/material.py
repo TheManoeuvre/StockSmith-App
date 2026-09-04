@@ -106,10 +106,10 @@ class MaterialRead(MaterialBase):
     weeks_of_supply: Decimal | None = None
     consumption_rate_per_week: Decimal | None = None
     fg_buffer_weeks: Decimal | None = None
-    # Lead time (weeks) applied to this material's reorder point — its default supplier's own
-    # figure, or the shop-wide default. Shown under the supplier in the materials list. Null on
-    # a mutation response, same as the other forecast fields.
-    lead_time_weeks: Decimal | None = None
+    # Lead time (business days) applied to this material's reorder point — its default
+    # supplier's own figure, or the shop-wide default. Shown under the supplier in the
+    # materials list. Null on a mutation response, same as the other forecast fields.
+    lead_time_days: int | None = None
     stockout_status: str | None = None
     # Products whose build/kitting BOM names this material — populated on the single-get only
     # (the list leaves it null), for the detail panel's "Used in N products" footer.

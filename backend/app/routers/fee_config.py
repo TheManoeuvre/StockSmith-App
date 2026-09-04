@@ -58,7 +58,7 @@ async def get_forecast_settings(session: AsyncSession = Depends(get_db)) -> Fore
         forecast_warning_weeks=settings.forecast_warning_weeks,
         forecast_critical_weeks=settings.forecast_critical_weeks,
         forecast_lookback_weeks=settings.forecast_lookback_weeks,
-        default_lead_time_weeks=settings.default_lead_time_weeks,
+        default_lead_time_days=settings.default_lead_time_days,
     )
 
 
@@ -76,13 +76,13 @@ async def update_forecast_settings(
         payload.forecast_warning_weeks,
         payload.forecast_critical_weeks,
         payload.forecast_lookback_weeks,
-        payload.default_lead_time_weeks,
+        payload.default_lead_time_days,
     )
     return ForecastSettingsRead(
         forecast_warning_weeks=settings.forecast_warning_weeks,
         forecast_critical_weeks=settings.forecast_critical_weeks,
         forecast_lookback_weeks=settings.forecast_lookback_weeks,
-        default_lead_time_weeks=settings.default_lead_time_weeks,
+        default_lead_time_days=settings.default_lead_time_days,
     )
 
 

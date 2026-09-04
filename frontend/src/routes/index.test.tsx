@@ -37,7 +37,7 @@ function summary(over: Record<string, unknown> = {}) {
         consumption_rate_per_week: "80",
         weeks_of_supply: "1.5",
         fg_buffer_weeks: "0",
-        lead_time_weeks: "2",
+        lead_time_days: 10,
         status: "critical",
       },
     ],

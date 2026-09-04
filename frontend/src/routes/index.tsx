@@ -293,7 +293,7 @@ function Dashboard() {
                 </tr>
               </thead>
               {groupBySupplier(data.low_stock_materials).map((group) => {
-                const lead = formatLeadTime(group.materials[0]?.lead_time_weeks);
+                const lead = formatLeadTime(group.materials[0]?.lead_time_days);
                 return (
                 <tbody key={group.supplierName}>
                   <GroupHeaderRow

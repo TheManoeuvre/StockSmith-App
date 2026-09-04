@@ -39,7 +39,7 @@ function baseRoutes() {
         forecast_warning_weeks: "6",
         forecast_critical_weeks: "2",
         forecast_lookback_weeks: 8,
-        default_lead_time_weeks: "4",
+        default_lead_time_days: 20,
       }),
     },
     { method: "GET" as const, path: "/settings/margin-fee-config", respond: () => ({ fee_source: "manual" }) },

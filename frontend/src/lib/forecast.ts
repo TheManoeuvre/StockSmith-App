@@ -55,12 +55,10 @@ export function formatWeeksShort(weeksOfSupply: string | null): string {
   return `${Number(weeksOfSupply).toFixed(1)} wk`;
 }
 
-/** Supplier lead time, compact: "2 wk lead" / "1.5 wk lead", or "" when there's nothing
- *  useful to show. The reorder point is judged this far ahead of stockout, so it belongs
- *  wherever the supplier is named. */
-export function formatLeadTime(weeks: string | null | undefined): string {
-  if (weeks == null) return "";
-  const n = Number(weeks);
-  if (!Number.isFinite(n) || n <= 0) return "";
-  return `${n % 1 === 0 ? n : n.toFixed(1)} wk lead`;
+/** Supplier lead time, compact: "10 bd lead", or "" when there's nothing useful to show.
+ *  The reorder point is judged this far ahead of stockout, so it belongs wherever the
+ *  supplier is named. Business days, Mon-Fri. */
+export function formatLeadTime(days: number | null | undefined): string {
+  if (days == null || days <= 0) return "";
+  return `${days} bd lead`;
 }

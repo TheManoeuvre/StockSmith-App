@@ -115,7 +115,7 @@ def _to_material_read(
             "weeks_of_supply": forecast.weeks_of_supply if forecast else None,
             "consumption_rate_per_week": forecast.consumption_rate_per_week if forecast else None,
             "fg_buffer_weeks": forecast.fg_buffer_weeks if forecast else None,
-            "lead_time_weeks": forecast.lead_time_weeks if forecast else None,
+            "lead_time_days": forecast.lead_time_days if forecast else None,
             "stockout_status": forecast.status if forecast else None,
             "used_in_product_count": used_in_product_count,
             "open_stock_take_id": open_stock_take_line[0] if open_stock_take_line else None,

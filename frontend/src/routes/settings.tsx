@@ -156,8 +156,8 @@ function Settings() {
               { key: "name", label: "Name" },
               { key: "website_url", label: "Website", type: "url", placeholder: "https://…" },
               {
-                key: "default_lead_time_weeks",
-                label: "Default lead time (weeks)",
+                key: "default_lead_time_days",
+                label: "Default lead time (business days)",
                 type: "number",
                 placeholder: "Shop default",
               },
