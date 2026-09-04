@@ -7,6 +7,7 @@ import { SaveButton } from "../common/SaveButton";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { useManagedSave } from "../../hooks/useDirtyRegistry";
+import { useMaterialCategories } from "../../hooks/useMaterialCategories";
 import { normalizeQtyForUnit, wholeNumberStepFor } from "../../lib/format";
 import { formatMoney } from "../../lib/money";
 
@@ -71,6 +72,8 @@ export function BomOverrideEditor({
    *  override table sets it to hide categories not flagged "Show in Kitting BOM list". */
   kittingOnly?: boolean;
 }) {
+  const { kittingBomCategoryNames } = useMaterialCategories();
+
   // Derived, not stored: useEditableCopy takes it from here once per seedKey (the variant
   // id) and then ignores later changes, which is what stops a background refetch discarding
   // an in-progress edit.
@@ -181,7 +184,14 @@ export function BomOverrideEditor({
   const setAdditive = (updater: (prev: EffectiveLine[]) => EffectiveLine[]) =>
     setValue((prev) => ({ ...prev, additiveLines: updater(prev.additiveLines) }));
   const addAdditiveLine = () => {
-    const first = materials[0];
+    // On the kitting-BOM override table the picker hides categories not flagged for kitting, so
+    // defaulting to materials[0] (often filament) would show that one row out of scope. Prefer a
+    // kitting-flagged material there; fall back to materials[0] when nothing is flagged, or when
+    // this is the build-BOM table (kittingOnly off).
+    const first =
+      (kittingOnly &&
+        materials.find((m) => kittingBomCategoryNames.has(m.category))) ||
+      materials[0];
     if (!first) return;
     setAdditive((prev) => [
       ...prev,
