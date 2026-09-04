@@ -324,7 +324,10 @@ async def create_draft_purchase(
     result = await session.execute(
         select(Purchase)
         .where(Purchase.id == purchase.id)
-        .options(selectinload(Purchase.lines), selectinload(Purchase.supplier))
+        .options(
+            selectinload(Purchase.lines).selectinload(MaterialPurchase.receipts),
+            selectinload(Purchase.supplier),
+        )
     )
     return result.scalar_one()
 
