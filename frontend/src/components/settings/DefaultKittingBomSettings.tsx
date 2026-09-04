@@ -8,6 +8,7 @@ import { SaveButton } from "../common/SaveButton";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { BomLineTable } from "../products/BomLineTable";
+import { useMaterialCategories } from "../../hooks/useMaterialCategories";
 import { SettingsCard } from "./SettingsCard";
 
 const toLines = (rows: { material_id: number; qty_required: string }[]): KittingBomLine[] =>
@@ -20,6 +21,7 @@ export function DefaultKittingBomSettings() {
     queryFn: appSettingsApi.getDefaultKittingBom,
   });
   const { data: materials } = useQuery({ queryKey: ["materials"], queryFn: materialsApi.list });
+  const { kittingBomCategoryNames } = useMaterialCategories();
 
   const [filterText, setFilterText] = useState("");
 
@@ -49,7 +51,13 @@ export function DefaultKittingBomSettings() {
   const saveStatus = useSaveStatus(saveMutation.status);
 
   const addLine = () => {
-    const firstUnused = materials?.find((m) => !lines.some((l) => l.material_id === m.id));
+    // Default into a kitting-flagged category — the picker hides the rest, so landing on
+    // materials[0] (often filament) would show that row out of scope. Fall back to any unused
+    // material only when nothing is flagged yet, so the button still works.
+    const unused = (m: { id: number }) => !lines.some((l) => l.material_id === m.id);
+    const firstUnused =
+      materials?.find((m) => unused(m) && kittingBomCategoryNames.has(m.category)) ??
+      materials?.find(unused);
     if (!firstUnused) return;
     setLines((prev) => [...prev, { material_id: firstUnused.id, qty_required: "0" }]);
   };

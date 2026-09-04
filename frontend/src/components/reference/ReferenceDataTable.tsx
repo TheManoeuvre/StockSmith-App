@@ -17,6 +17,16 @@ export interface ReferenceRow {
   usage_count: number;
 }
 
+/**
+ * Singularise a table title for "Add …" / "New …" labels. Naive enough for the handful of
+ * titles this component is given ("Colours", "Suppliers", "Material categories"): strip a
+ * trailing "s", but turn "-ies" into "-y" first so "Material categories" doesn't read
+ * "material categorie".
+ */
+function singularise(title: string): string {
+  return title.replace(/ies$/i, "y").replace(/s$/i, "");
+}
+
 /** Fields are addressed by string key, which the concrete row types don't declare. */
 function fieldValue(row: ReferenceRow, key: string): string {
   const value = (row as unknown as Record<string, unknown>)[key];
@@ -238,7 +248,7 @@ function CreateForm<T extends ReferenceRow>({
     markSaved,
   } = useEditableCopy<{ name: string }>({
     key: "new",
-    label: `New ${title.toLowerCase().replace(/s$/, "")}`,
+    label: `New ${singularise(title).toLowerCase()}`,
     initial: { name: "" },
     seed: { name: "" },
     seedKey: "const",
@@ -262,9 +272,9 @@ function CreateForm<T extends ReferenceRow>({
       }}
     >
       <label className="flex flex-col gap-1">
-        <span className="text-sm">Add {title.toLowerCase().replace(/s$/, "")}</span>
+        <span className="text-sm">Add {singularise(title).toLowerCase()}</span>
         <input
-          aria-label={`New ${title.toLowerCase().replace(/s$/, "")} name`}
+          aria-label={`New ${singularise(title).toLowerCase()} name`}
           className="rounded border border-slate-300 px-2 py-1 text-sm"
           value={draft.name}
           onChange={(e) => setDraft({ name: e.target.value })}

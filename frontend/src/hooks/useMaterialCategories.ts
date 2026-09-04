@@ -28,6 +28,12 @@ export function useMaterialCategories() {
       categories,
       byName: new Map(categories.map((c) => [c.name, c])),
       byId: new Map(categories.map((c) => [c.id, c])),
+      /** Names of the categories flagged "Show in Kitting BOM list" — the set the kitting-BOM
+       *  pickers restrict to, and what a new kitting line should default into rather than
+       *  landing on filament or hardware. */
+      kittingBomCategoryNames: new Set(
+        categories.filter((c) => c.show_in_kitting_bom_list).map((c) => c.name)
+      ),
     }),
     [categories]
   );
