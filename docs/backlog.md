@@ -202,12 +202,6 @@ Category is the one with a visible cost while it stays. The column is NOT NULL w
 
 ## List & detail UX (from the design canvas)
 
-### CSV export for Orders and Purchases lists
-
-**Problem:** Surfaced via the design canvas, which shows an "Export CSV" action in the shared list header on every list screen. Materials and Products already support CSV export/import (`CsvImportExport`); Orders and Purchases don't have an equivalent today.
-
-**Ask:** Extend the existing `CsvImportExport` pattern to the Orders and Purchases list routes. Small — mostly a router endpoint plus reusing the existing frontend component.
-
 ### Configurable/hideable list columns
 
 **Problem:** Surfaced via the design canvas, which puts a "Columns" button on every list screen's toolbar (Products, Materials, Orders, Purchases). No real list view currently lets a user show/hide or reorder columns — the column set is fixed per screen.
@@ -220,23 +214,11 @@ Category is the one with a visible cost while it stays. The column is NOT NULL w
 
 **Ask:** Frontend-only — add row-cursor state and key handlers to the Products/Materials list routes, matching the pattern already used for bulk-select. Small scope, but worth doing once as a shared hook if it's wanted on more than one list.
 
-### Channel column on the dashboard's Blocked orders table
-
-**Problem:** Surfaced via the design canvas — its dashboard Blocked-orders table has a `Channel` column (Etsy / eBay / Manual pill) beside `Placed`. The real table (`src/routes/index.tsx`, `blockedRows`) can't show it: `OrderAwaitingInventory` / `OrderAwaitingPackaging` on the `/dashboard/summary` payload carry no `platform`, so there's nothing to render.
-
-**Ask:** Add `platform` to those two dashboard row schemas (`schemas/dashboard.py:44,55` — the order is already joined in the query), then a Channel column in `blockedRows` reusing `PLATFORM_COLORS` / `PLATFORM_LABELS`. Small — one field each side.
-
 ### Dashboard KPI date-range toggle
 
 **Problem:** Surfaced via the design canvas, which shows a This week / Month / Quarter toggle above the dashboard KPI cards. The real dashboard summary is fixed to "this week" with no way to see the same KPIs over a longer window.
 
 **Ask:** Extend the dashboard summary endpoint to accept a range parameter and wire a toggle to it. Small backend query change; frontend is mostly state plumbing.
-
-### Manual-order source/channel tagging
-
-**Problem:** Surfaced via the design canvas, whose manual order composer includes a "Source" field (`Manual · direct sale`, `Etsy · keyed by hand`, `eBay · keyed by hand`) so a hand-entered order can be distinguished from a pure direct sale. Today `/orders/new` has no channel field at all — every manually created order is attribution-less.
-
-**Ask:** Add a source/channel field to manual order creation, distinct from the automatic platform-sync channel tagging. Small — a new field on the order model plus a select in the `/orders/new` form.
 
 ---
 
@@ -247,21 +229,3 @@ Category is the one with a visible cost while it stays. The column is NOT NULL w
 **Problem:** When you set a colour on a material (Details tab "Colour" field, `CreatableSelect` backed by `coloursApi`), creating a new colour only records its name — `find_or_create` never sets `hex_code`. So the only way to give a colour a hex (which drives the list/detail chip) is to go to Settings → Reference data → Colours afterwards and edit the row. Nothing on the material form tells you that, or that the colour you just picked has no hex.
 
 **Ask:** On the material colour field: when the user is creating a *new* colour, also offer an optional hex input and pass it through (needs `find-or-create` / the material create/update path to accept `hex_code`, or a follow-up `PATCH /colours/{id}`). When an *existing* colour with no `hex_code` is selected, show a small inline "no colour chip set — add one" link to `/settings?tab=reference` (the Colours table). Keeps the reference table as the source of truth while removing the dead end.
-
-### Colour chip in the material slide-over hero slot
-
-**Problem:** The Materials list now shows a colour chip (from the linked colour's `hex_code`) in place of a thumbnail for materials with no uploaded image. The material detail slide-over (`routes/materials/$materialId.tsx`) still only shows the 192px hero image box with a plain "No image" placeholder — it doesn't fall back to the colour chip the way the list does.
-
-**Ask:** In the detail panel's hero area, when `material.image_path` is null but `colour_hex` is set, render the colour as a filled swatch in the same box (keep the upload/replace controls). Frontend-only — `colour_hex` is already on `MaterialRead`. Mirror the list's image → chip → neutral precedence.
-
-### Colour swatches in the Colours settings table
-
-**Problem:** Settings → Reference data → Colours (`ReferenceDataTable`, `settings.tsx:239`) lists each colour by name with an editable "Hex code" text field, but shows no visual swatch — you can't see at a glance which colours have a hex or what they look like.
-
-**Ask:** Render a small colour chip next to each colour name in that table, filled from `hex_code` (neutral/empty when unset). Likely a small `renderCell`-style addition to `ReferenceDataTable` or a colours-specific column; frontend-only, `hex_code` is already in `ColourRead`.
-
-### Settings toggles render as checkboxes, not switches
-
-**Problem:** The design canvas draws every boolean setting as a pill switch. The real settings forms (`BackgroundSyncSettings`, `BackupSettings`, `StockCountSettings`, the reference-table checkbox fields) use a bare `<input type="checkbox">`.
-
-**Ask:** A small `Switch` that renders `<input type="checkbox">` styled as a track+knob (peer-checked Tailwind, `role` unchanged so `getByRole("checkbox")` tests keep passing). Purely visual; swap it in across the settings forms.

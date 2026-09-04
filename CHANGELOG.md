@@ -12,7 +12,48 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-04
+
+Composing a purchase order is now a forecasting check rather than a data-entry form, and
+the materials panel matches the rest of the app. Plus supplier order numbers, CSV export
+for the orders and purchases lists, and a batch of reliability fixes.
+
+### Added
+- **The New purchase panel is rebuilt around "will this order cover me?"** A header with
+  three stat tiles — Lines, Order total, Cover on arrival — sits above a line editor that
+  shows each material's last paid price (`last paid £4.20 · #PO-4521 · 12 Aug`) with an
+  up/down percentage badge, and flags an input amber when the price has risen. The order
+  total tints amber and reads "N lines above last price" when any line is over what the
+  supplier last charged. A **Stock alerts** card lists every material below its reorder
+  point — chosen supplier first — with a suggested quantity and one-click **Add**. The
+  footer's **Raise purchase order** button explains, in three places, why it's disabled
+  when it is.
+- **Purchases carry a delivery & carriage charge.** A single figure per order, added to
+  the displayed order total and shown on both purchase panels and the CSV export. It is
+  informational — it is never apportioned into unit costs.
+- **Purchases record the supplier's own order number.** Free text — their PO, order or
+  invoice number — entered in the purchase slide-over. It leads the list's **Order**
+  column as `PO-4521 (#12)`, falling back to `#12` when unset, because that's the number
+  you quote when chasing a delivery. Included in the purchases CSV export.
+- **CSV export for the Orders and Purchases lists**, matching the export already on
+  Materials and Products.
+- **The dashboard's Blocked orders table has a Channel column** — an Etsy / eBay / Manual
+  pill beside the placed date.
+- **Manual orders can be tagged with a source** — `Manual · direct sale`,
+  `Etsy · keyed by hand`, `eBay · keyed by hand` — kept separate from the channel tag that
+  marketplace sync applies automatically.
+
 ### Changed
+- **The materials slide-over now works like the product slide-over.** One **Save / Revert**
+  bar in the footer with a context summary, in place of the old per-form Save button. Tabs
+  are reordered to **Details, Supplier, Stock** and open on Details; the former Counting
+  tab is folded into the foot of Details under a "Stock counting" heading (old
+  `?tab=counting` links still work). The Stock tab's adjustment form is unchanged.
+- **Supplier lead times are set in business days, not weeks.** A supplier's default lead
+  time and the shop-wide fallback (Settings → Forecast) now take a whole number of
+  Mon–Fri business days. Existing values are converted on upgrade at 5 business
+  days/week. A fresh install now defaults to 5 business days (one week) rather than the 20
+  that a mechanical conversion of the old four-week default produced.
 - **The stock takes list says how a closed take actually turned out.** The status column
   now reads **Completed** when every line was counted and applied, **Partially completed**
   when some lines applied but others were left blank or held for review, and **Closed**
@@ -20,6 +61,25 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   **Open N days**. The progress column no longer snaps back to `0 / N` the moment a take
   closes — it keeps showing how many rows were counted (`37 / 40`), on the list and on the
   take's own summary.
+- **Purchase line quantities read as whole numbers** — `30 g`, not `30.0000` — on the
+  list and seeded into the line editor. The line editor drops the per-line Notes column
+  (existing notes are still saved), narrows the Ordered box, and no longer scrolls
+  sideways on a long material name.
+- **Settings toggles render as switches** instead of bare checkboxes, across background
+  sync, backups and the reference-data tables.
+- **A material with no image falls back to its colour chip** in the slide-over hero, the
+  way the list already does, and the **Colours** settings table shows a swatch next to
+  each colour name.
+
+### Fixed
+- **"Create draft purchase" from the dashboard** returned "Internal server error" every
+  time. Fixed.
+- **Recording a delivery on a purchase that has a supplier** saved the delivery but then
+  returned "Internal server error". Fixed.
+- **New kitting-BOM lines listed filament by default**, and could show materials from
+  categories not marked **Show in Kitting BOM list**. New lines now default to a material
+  from a listed category. The "Material categories" reference table also no longer labels
+  its add button "New material categorie".
 
 ## [0.11.0] - 2026-09-03
 
