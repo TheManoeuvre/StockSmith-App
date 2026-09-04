@@ -13,7 +13,12 @@ import { DetailPanel } from "../../components/common/DetailPanel";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { CreatableSelect } from "../../components/common/CreatableSelect";
 import { Badge } from "../../components/common/Badge";
-import type { ABCClass, MaterialStockHistoryEntry, MaterialUnit } from "../../api/types";
+import type {
+  ABCClass,
+  Material,
+  MaterialStockHistoryEntry,
+  MaterialUnit,
+} from "../../api/types";
 import { StockCountFields } from "../../components/common/StockCountFields";
 import { Tabs, type TabDef } from "../../components/common/Tabs";
 import { FieldRow } from "../../components/common/FieldRow";
@@ -37,15 +42,20 @@ import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { SaveButton } from "../../components/common/SaveButton";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { useSiblingNav } from "../../hooks/useSiblingNav";
+import {
+  SlideOverManagedContext,
+  useCommittableDirty,
+  useDirtyRegistryApi,
+  useManagedSave,
+} from "../../hooks/useDirtyRegistry";
 
-const TAB_IDS = ["stock", "details", "counting", "supplier"] as const;
+const TAB_IDS = ["details", "supplier", "stock"] as const;
 type TabId = (typeof TAB_IDS)[number];
 
 const TABS: TabDef[] = [
-  { id: "stock", label: "Stock" },
   { id: "details", label: "Details" },
-  { id: "counting", label: "Counting" },
   { id: "supplier", label: "Supplier" },
+  { id: "stock", label: "Stock" },
 ];
 
 const ADJUST_REASONS = [
@@ -58,15 +68,21 @@ const ADJUST_REASONS = [
 const OTHER_REASON = "Other…";
 
 export const Route = createFileRoute("/materials/$materialId")({
-  component: MaterialDetail,
+  component: MaterialDetailRoute,
   // Same reasoning as the product page: keeping the tab in the URL makes switching one a
   // real router navigation, so the root unsaved-changes blocker covers leaving a dirty
-  // shared edit form (Details/Counting/Supplier share one save) without this page knowing
-  // the guard exists.
+  // shared edit form (Details/Supplier share one save) without this page knowing the guard
+  // exists.
   validateSearch: (search: Record<string, unknown>): { tab?: TabId } => {
-    // "purchasing" was this tab's id before it was renamed to "supplier" — keep old links working.
-    const tab = search.tab === "purchasing" ? "supplier" : search.tab;
-    return TAB_IDS.includes(tab as TabId) ? { tab: tab as TabId } : {};
+    // "purchasing" was this tab's id before it was renamed to "supplier"; "counting" was its
+    // own tab before folding into the bottom of Details — keep old links working.
+    const raw =
+      search.tab === "purchasing"
+        ? "supplier"
+        : search.tab === "counting"
+          ? "details"
+          : search.tab;
+    return TAB_IDS.includes(raw as TabId) ? { tab: raw as TabId } : {};
   },
 });
 
@@ -126,13 +142,24 @@ const EMPTY_ADJUST: AdjustForm = {
 
 const UNITS: MaterialUnit[] = ["g", "ml", "each"];
 
+// The slide-over replaces the shared edit form's own Save button with one footer Save (see
+// the footer below and useManagedSave); providing the context here — a layer above the body
+// — is what lets that form read it.
+function MaterialDetailRoute() {
+  return (
+    <SlideOverManagedContext.Provider value={true}>
+      <MaterialDetail />
+    </SlideOverManagedContext.Provider>
+  );
+}
+
 function MaterialDetail() {
   const { materialId } = Route.useParams();
   const id = Number(materialId);
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const routeNavigate = Route.useNavigate();
-  const activeTab: TabId = Route.useSearch().tab ?? "stock";
+  const activeTab: TabId = Route.useSearch().tab ?? "details";
   const setActiveTab = (tab: string) =>
     routeNavigate({ search: { tab: tab as TabId } });
   const { prevId, nextId } = useSiblingNav(
@@ -242,6 +269,7 @@ function MaterialDetail() {
     setValue: setDetails,
     isDirty: detailsDirty,
     markSaved: markDetailsSaved,
+    revert: revertDetails,
   } = useEditableCopy<MaterialDetailsForm>({
     key: "material-details",
     label: "Material details",
@@ -414,6 +442,10 @@ function MaterialDetail() {
     material?.image_path ? material.updated_at : null,
   );
   const saveDetailsStatus = useSaveStatus(saveDetailsMutation.status);
+  const detailsManaged = useManagedSave("material-details", {
+    save: () => saveDetailsMutation.mutate(),
+    revert: revertDetails,
+  });
 
   if (!material) {
     return (
@@ -438,6 +470,7 @@ function MaterialDetail() {
           </Badge>
         ) : undefined
       }
+      footer={<SlideOverFooter material={material} />}
     >
       <div className="flex flex-col gap-6">
         {/* Identity + the three headline figures — shown on every tab. */}
@@ -542,9 +575,7 @@ function MaterialDetail() {
           </div>
         )}
 
-        {(activeTab === "details" ||
-          activeTab === "supplier" ||
-          activeTab === "counting") && (
+        {(activeTab === "details" || activeTab === "supplier") && (
           <section>
             <ErrorBanner error={saveDetailsMutation.error} />
             <form
@@ -735,6 +766,33 @@ function MaterialDetail() {
                         : "products"}
                     </p>
                   </FieldRow>
+                  {/* Stock-counting settings — their own tab until the slide-over was unified
+                      with the product page, which keeps the same fields at the foot of Details. */}
+                  <div className="mt-1 flex flex-col gap-3 border-t border-slate-100 pt-3">
+                    <p className="text-sm font-medium text-slate-600">
+                      Stock counting
+                    </p>
+                    <StockCountFields
+                      layout="rows"
+                      abcClass={abcClass}
+                      intervalDays={stockTakeIntervalDays}
+                      classification={material.classification}
+                      groupLabel={`the ${category} category`}
+                      openTake={
+                        material.open_stock_take_id
+                          ? {
+                              id: material.open_stock_take_id,
+                              status:
+                                material.open_stock_take_line_status ?? "",
+                            }
+                          : null
+                      }
+                      onAbcClassChange={(next) => setField("abcClass", next)}
+                      onIntervalDaysChange={(next) =>
+                        setField("stockTakeIntervalDays", next)
+                      }
+                    />
+                  </div>
                 </>
               )}
               {activeTab === "supplier" && (
@@ -810,38 +868,19 @@ function MaterialDetail() {
                   </FieldRow>
                 </>
               )}
-              {activeTab === "counting" && (
-                <StockCountFields
-                  layout="rows"
-                  abcClass={abcClass}
-                  intervalDays={stockTakeIntervalDays}
-                  classification={material.classification}
-                  groupLabel={`the ${category} category`}
-                  openTake={
-                    material.open_stock_take_id
-                      ? {
-                          id: material.open_stock_take_id,
-                          status: material.open_stock_take_line_status ?? "",
-                        }
-                      : null
-                  }
-                  onAbcClassChange={(next) => setField("abcClass", next)}
-                  onIntervalDaysChange={(next) =>
-                    setField("stockTakeIntervalDays", next)
-                  }
-                />
+              {!detailsManaged && (
+                <div>
+                  <SaveButton
+                    type="submit"
+                    isDirty={detailsDirty}
+                    isPending={saveDetailsMutation.isPending}
+                    status={saveDetailsStatus}
+                    className="rounded bg-slate-900 px-4 py-1.5 text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    Save
+                  </SaveButton>
+                </div>
               )}
-              <div>
-                <SaveButton
-                  type="submit"
-                  isDirty={detailsDirty}
-                  isPending={saveDetailsMutation.isPending}
-                  status={saveDetailsStatus}
-                  className="rounded bg-slate-900 px-4 py-1.5 text-white disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  Save
-                </SaveButton>
-              </div>
             </form>
             {activeTab === "supplier" &&
               isLowStock(material.current_qty, material.reorder_threshold) && (
@@ -1008,6 +1047,47 @@ function MaterialDetail() {
         )}
       </div>
     </DetailPanel>
+  );
+}
+
+/** The one Save/Revert bar for the whole slide-over — commits (or discards) every buffered
+ *  editor across every tab that reported an unsaved change. The Stock tab's adjustment form
+ *  keeps its own action button and isn't touched by this. Mirrors the product slide-over. */
+function SlideOverFooter({ material }: { material: Material }) {
+  const { isDirty } = useCommittableDirty();
+  const registry = useDirtyRegistryApi();
+  const stockValue =
+    Number(material.current_qty) * Number(material.avg_unit_cost);
+
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <p className="text-[12px] text-slate-500">
+        Used in {material.used_in_product_count ?? 0}{" "}
+        {(material.used_in_product_count ?? 0) === 1 ? "product" : "products"} ·
+        stock value £{stockValue.toFixed(2)}
+      </p>
+      <div className="flex items-center gap-2">
+        <span className="text-[12px] text-slate-500">
+          {isDirty ? "Unsaved changes" : "No changes"}
+        </span>
+        <button
+          type="button"
+          disabled={!isDirty}
+          onClick={() => registry.revertDirtyUnder("")}
+          className="rounded border border-slate-300 px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Revert
+        </button>
+        <button
+          type="button"
+          disabled={!isDirty}
+          onClick={() => registry.commitDirtyUnder("")}
+          className="rounded bg-slate-900 px-4 py-1.5 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Save
+        </button>
+      </div>
+    </div>
   );
 }
 
