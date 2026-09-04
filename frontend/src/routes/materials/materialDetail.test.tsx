@@ -94,22 +94,43 @@ async function renderMaterialPage(path = "/materials/7") {
 describe("material detail", () => {
   beforeEach(() => setRoutes(materialRoutes()));
 
-  it("disables Save until a detail changes, then re-disables after saving", async () => {
+  it("disables the footer Save until a detail changes, then re-disables after saving", async () => {
     const user = userEvent.setup();
     await renderMaterialPage();
 
-    // The panel opens on the Stock tab now — the editable identity fields are under Details.
+    // The panel opens on Details, where the editable identity fields live.
     await user.click(await screen.findByRole("button", { name: "Details" }, { timeout: 5000 }));
     const nameInput = await screen.findByDisplayValue("PLA+ Filament", {}, { timeout: 5000 });
-    const save = within(nameInput.closest("form")!).getByRole("button", { name: "Save" });
+    // The shared edit form no longer carries its own Save — the slide-over has one footer
+    // Save/Revert bar, like the product slide-over.
+    expect(within(nameInput.closest("form")!).queryByRole("button", { name: "Save" })).toBeNull();
+    const save = screen.getByRole("button", { name: "Save" });
     expect(save).toBeDisabled();
+    expect(screen.getByText("No changes")).toBeInTheDocument();
 
     await user.type(nameInput, " v2");
     await waitFor(() => expect(save).toBeEnabled());
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
 
     await user.click(save);
     await waitFor(() => expect(calls.some((c) => c.method === "PATCH" && c.path === "/materials/7")).toBe(true));
     await waitFor(() => expect(save).toBeDisabled());
+  });
+
+  it("the footer Revert discards a buffered detail edit without a PATCH", async () => {
+    const user = userEvent.setup();
+    await renderMaterialPage();
+
+    await user.click(await screen.findByRole("button", { name: "Details" }, { timeout: 5000 }));
+    const nameInput = await screen.findByDisplayValue("PLA+ Filament", {}, { timeout: 5000 });
+
+    await user.type(nameInput, " v2");
+    await waitFor(() => expect(screen.getByText("Unsaved changes")).toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "Revert" }));
+    await waitFor(() => expect(screen.getByDisplayValue("PLA+ Filament")).toBeInTheDocument());
+    expect(screen.getByText("No changes")).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "PATCH" && c.path === "/materials/7")).toBe(false);
   });
 
   it("warns before navigating away from unsaved detail edits", async () => {
@@ -136,7 +157,8 @@ describe("material detail", () => {
     const user = userEvent.setup();
     await renderMaterialPage();
 
-    // The panel opens on the Stock tab, which holds the adjust form.
+    // The panel opens on Details now — the adjust form lives on the Stock tab.
+    await user.click(await screen.findByRole("button", { name: "Stock" }, { timeout: 5000 }));
     const reason = await screen.findByLabelText("Reason", {}, { timeout: 5000 });
     const adjustForm = reason.closest("form")!;
     const record = within(adjustForm).getByRole("button", { name: "Save" });
@@ -153,6 +175,7 @@ describe("material detail", () => {
     const user = userEvent.setup();
     const router = await renderMaterialPage();
 
+    await user.click(await screen.findByRole("button", { name: "Stock" }, { timeout: 5000 }));
     const reason = await screen.findByLabelText("Reason", {}, { timeout: 5000 });
     await user.selectOptions(reason, "Spool ran short");
 
