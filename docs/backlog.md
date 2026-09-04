@@ -228,4 +228,131 @@ Category is the one with a visible cost while it stays. The column is NOT NULL w
 
 **Problem:** When you set a colour on a material (Details tab "Colour" field, `CreatableSelect` backed by `coloursApi`), creating a new colour only records its name — `find_or_create` never sets `hex_code`. So the only way to give a colour a hex (which drives the list/detail chip) is to go to Settings → Reference data → Colours afterwards and edit the row. Nothing on the material form tells you that, or that the colour you just picked has no hex.
 
-**Ask:** On the material colour field: when the user is creating a *new* colour, also offer an optional hex input and pass it through (needs `find-or-create` / the material create/update path to accept `hex_code`, or a follow-up `PATCH /colours/{id}`). When an *existing* colour with no `hex_code` is selected, show a small inline "no colour chip set — add one" link to `/settings?tab=reference` (the Colours table). Keeps the reference table as the source of truth while removing the dead end.
+**Ask:** On the material colour field: when the user is creating a *new* colour, also offer an optional hex input and pass it through (needs `find-or-create` / the material create/update path to accept `hex_code`, or a follow-up `PATCH /colours/{id}`). When an *existing* colour with no `hex_code` is selected, show a small inline "no colour chip set — add one" link to `/settings?page=lists` (the Colours table). Keeps the reference table as the source of truth while removing the dead end.
+
+---
+
+## Settings redesign follow-ups (from the design canvas)
+
+The Settings page adopted the design canvas's grouped two-level nav (Selling / Stock / App)
+in place of the old six flat tabs, relocating every existing field with no functional loss.
+The mockup also proposed several genuinely new features; none of these were built, since
+they'd need real engine work beyond a settings-screen relocation. Listed roughly in the
+order the mockup implied they matter.
+
+### Background push scheduler and a pause-all kill switch
+
+**Problem:** The design canvas's "Stores & sync" page shows a "Background sync" card —
+configurable push interval (5/15/30 min, hourly, manual), "push buildable as sellable",
+"auto-relist when back in stock", "deduct stock on order vs. dispatch", and a global
+"pause all pushes" toggle. None of this exists: today's push behaviour (what triggers a
+quantity push, and when) is fixed in code, not configurable.
+
+**Ask:** A real push-eligibility/scheduling engine with these as actual settings, not just
+UI. Sizeable — touches the push pipeline directly, not just Settings.
+
+### Sync guardrails beyond the existing listing-limits system
+
+**Problem:** The mockup's "Sync limits" card shows four override-able rows: max quantity
+pushed per listing, "refuse push if change exceeds ±N units", minimum interval between
+pushes to the same listing, and an on-repeated-failure policy ("pause that listing and
+notify"). The existing `PlatformFieldLimit`/`LimitField` system (`platform_limits.py`,
+surfaced via `PlatformLimitsEditor`) already covers marketplace *content* limits (SKU
+length, title length, `quantity_max`, etc.) with exactly this override UX — "max quantity
+pushed" plausibly already maps onto `quantity_max` and should be verified before treating
+it as new. The other three rows (delta guard, interval, failure policy) have no backend
+equivalent at all.
+
+**Ask:** Confirm the `quantity_max` mapping; for the remaining three, a real push-safety
+guardrail engine wired into the actual push pipeline — settings rows with no enforcement
+behind them would be actively misleading.
+
+### Listing profile fields: Etsy renewal and eBay handling time
+
+**Problem:** The mockup's "Listing defaults" panel shows four fields; two already exist on
+`ListingProfile` (`etsy_processing_min`/`max`, `ebay_return_policy_id`) and were surfaced in
+the redesign. "Etsy renewal" (automatic/manual) and "eBay handling time" (business days) do
+not exist as columns anywhere.
+
+**Ask:** Add both as new `ListingProfile` columns (small model + migration change) once
+prioritized, sent through at draft-listing time the same way the existing fields are.
+
+### Currency: round prices to a nearest increment
+
+**Problem:** The mockup's Currency card adds a "Round prices to" dropdown (0.01/0.05/
+0.50/1.00). Investigated during the redesign: there is no single centralised
+currency-formatting call site to hang this off — `lib/money.ts`'s `formatMoney`/
+`formatUnitCost` cover some places, but roughly two dozen components still hardcode `£`
+literals directly. A rounding setting added only to the centralised helpers would be
+inconsistently applied and worse than not having it.
+
+**Ask:** First do a pass centralising money *display* through one formatter (a separate,
+smaller piece of work), then add symbol-position and rounding as settings on top of that —
+otherwise this ships half-working. Note the "Symbol position" (Before/After) field from the
+same mockup card was **not** added for the identical reason, and should be picked up
+together with this one.
+
+### Pricing & fees: target margin threshold and "include postage in COGS"
+
+**Problem:** The mockup's Margin card adds a "Target margin %" (to flag below-margin
+products amber in the product list) and an "Include postage in COGS" toggle (off treats
+postage as buyer-recovered). Neither exists: there's no margin-threshold concept feeding
+the product list's colour-coding, and postage/COGS treatment isn't currently split this way.
+Also proposed: extending the margin fee-source enum (`MarginFeeSource`, currently
+`manual | etsy | ebay`) with "whichever is cheapest" and "no channel" options, which need
+new comparison logic in fee estimation, not just new enum values.
+
+**Ask:** Three separable pieces — (1) a target-margin setting plus product-list amber-flag
+wiring, (2) a postage/COGS-split calculation change (note: relates to the existing
+[COGS backfill deferred] follow-up — 38 shipped orders already carry wrong postage/kitting
+figures), and (3) the two new fee-source comparison modes. Each is real backend logic, not
+a settings relocation.
+
+### Forecasting: count usage from sales, builds, or both
+
+**Problem:** The mockup's Forecasting card adds a "Count usage from" dropdown (Sales +
+builds / Builds only / Sales only). The forecast calculation (`services/forecasting.py`)
+has one fixed usage-rate calculation today with no channel selector.
+
+**Ask:** Extend the forecast calc to compute usage from the selected source(s) before
+adding the setting — otherwise it's a dropdown that does nothing.
+
+### Stock counts: default count scope and blind counts
+
+**Problem:** The mockup's "New counts" card adds a "Default count scope" dropdown (by
+material category / by product category / everything / only overdue) and a "Blind counts"
+toggle (hides the expected quantity from whoever is counting). Neither exists: a new stock
+take doesn't currently have a configurable default scope, and the count sheet always shows
+the expected figure.
+
+**Ask:** "Default count scope" needs checking against however a new stock take is created
+today (`routes/stock-takes`) to see whether a scope concept already exists there that this
+setting should feed, rather than inventing a disconnected one. "Blind counts" needs an
+actual UI change to the count-sheet screen to hide the expected-quantity column/field when
+the setting is on — a real feature, not a settings-page addition.
+
+### Backup: finer schedule granularity and back-up-on-quit
+
+**Problem:** The mockup's Backup card offers a schedule dropdown (Nightly at a fixed hour /
+every 6 hours / hourly / manual) and a "Back up on quit" toggle. The current
+`BackupSettings` model only supports "daily, at hour N" (`scheduled_enabled` +
+`scheduled_hour_local`) — no sub-daily cadence — and there's no app-lifecycle hook wired to
+run a backup on quit.
+
+**Ask:** A cadence concept beyond daily-at-hour in `backup_scheduler.py`, and (separately)
+verifying Tauri actually exposes a reliable on-quit hook before promising this — the app is
+also designed to keep running in the background/tray (see `BackgroundSyncSettings`), which
+may make "on quit" a rarer event than the mockup assumes.
+
+### Deep-linking into a specific Settings page/panel
+
+**Problem:** The mockup's product slide-over has a "Stores" tab with an "Open listing
+profiles" link that jumps straight to Settings → Stores & sync → Etsy → the listing-profiles
+panel. Today's Settings route only carries the top-level page in the URL
+(`?page=stores-sync`); there's no param for which platform's accordion should be expanded
+or scrolled to.
+
+**Ask:** Extend `validateSearch` with optional `platform`/`panel` params and have
+`StoresSyncPage` honour them on load (set the segmented control, expand the right
+accordion). Small, self-contained routing work — worth scoping on its own rather than
+bundling into a future settings change.

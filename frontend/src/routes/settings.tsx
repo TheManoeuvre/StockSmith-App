@@ -6,6 +6,7 @@ import { platformsApi, type PlatformEnvironment } from "../api/platforms";
 import type { ListingPlatform } from "../api/types";
 import { CONNECTABLE_PLATFORMS, PLATFORM_LABELS } from "../lib/platforms";
 import { ErrorBanner } from "../components/common/ErrorBanner";
+import { SegmentedControl } from "../components/common/SegmentedControl";
 import { PlatformSyncPanel } from "../components/settings/PlatformSyncPanel";
 import { PlatformCompatibilityPanel } from "../components/settings/PlatformCompatibilityPanel";
 import { EtsyBackfillPanel } from "../components/settings/EtsyBackfillPanel";
@@ -17,13 +18,8 @@ import { EbaySigningKeyPanel } from "../components/settings/EbaySigningKeyPanel"
 import { MarginFeeSettings } from "../components/settings/MarginFeeSettings";
 import { PlatformFeeComponents } from "../components/settings/PlatformFeeComponents";
 import { ShippingProfileSettings } from "../components/settings/ShippingProfileSettings";
-import { ReferenceDataTable } from "../components/reference/ReferenceDataTable";
-import { manufacturersApi } from "../api/manufacturers";
-import { suppliersApi } from "../api/suppliers";
-import { materialCategoriesApi } from "../api/materialCategories";
-import { materialTypesApi } from "../api/materialTypes";
-import { productCategoriesApi } from "../api/productCategories";
-import { coloursApi } from "../api/colours";
+import { SettingsCard } from "../components/settings/SettingsCard";
+import { ListsMasterDetail } from "../components/settings/ListsMasterDetail";
 import { BackgroundSyncSettings } from "../components/settings/BackgroundSyncSettings";
 import { CurrencySettings } from "../components/settings/CurrencySettings";
 import { ForecastSettings } from "../components/settings/ForecastSettings";
@@ -31,38 +27,65 @@ import { StockCountSettings } from "../components/settings/StockCountSettings";
 import { DefaultKittingBomSettings } from "../components/settings/DefaultKittingBomSettings";
 import { BackupSettings } from "../components/settings/BackupSettings";
 import { ConnectionSettings } from "../components/settings/ConnectionSettings";
-import { Tabs, type TabDef } from "../components/common/Tabs";
+import { FieldMappingTable } from "../components/settings/FieldMappingTable";
+import { SettingsNav, type SettingsNavGroup } from "../components/settings/SettingsNav";
 import { useShopIconUrl } from "../hooks/useShopIconUrl";
 import { DirtyPath } from "../hooks/useDirtyRegistry";
 
-const TAB_IDS = ["general", "integrations", "pricing", "reference", "backup", "connection"] as const;
-type TabId = (typeof TAB_IDS)[number];
+const PAGE_IDS = [
+  "stores-sync",
+  "pricing-fees",
+  "shipping-packaging",
+  "forecasting",
+  "stock-counts",
+  "lists",
+  "backup-restore",
+  "connection",
+] as const;
+type PageId = (typeof PAGE_IDS)[number];
+
+const NAV_GROUPS: SettingsNavGroup[] = [
+  {
+    label: "Selling",
+    items: [
+      { id: "stores-sync", label: "Stores & sync" },
+      { id: "pricing-fees", label: "Pricing & fees" },
+      { id: "shipping-packaging", label: "Shipping & packaging" },
+    ],
+  },
+  {
+    label: "Stock",
+    items: [
+      { id: "forecasting", label: "Forecasting" },
+      { id: "stock-counts", label: "Stock counts" },
+      { id: "lists", label: "Lists" },
+    ],
+  },
+  {
+    label: "App",
+    items: [
+      { id: "backup-restore", label: "Backup & restore" },
+      { id: "connection", label: "Connection" },
+    ],
+  },
+];
 
 export const Route = createFileRoute("/settings")({
   component: Settings,
   // Same reasoning as the product page (see routes/products/$productId.tsx): keeping the
-  // active tab in the URL makes switching tabs a real router navigation, so the root
+  // active page in the URL makes switching pages a real router navigation, so the root
   // unsaved-changes blocker covers it without this route knowing the guard exists. It also
-  // makes a section linkable, which the reference-data tab needs now that it holds the tables
+  // makes a section linkable, which Lists needs now that it holds the reference tables
   // themselves rather than links out to standalone pages.
-  validateSearch: (search: Record<string, unknown>): { tab?: TabId } => {
-    const tab = search.tab;
-    return TAB_IDS.includes(tab as TabId) ? { tab: tab as TabId } : {};
+  validateSearch: (search: Record<string, unknown>): { page?: PageId } => {
+    const page = search.page;
+    return PAGE_IDS.includes(page as PageId) ? { page: page as PageId } : {};
   },
 });
 
-const SETTINGS_TABS: TabDef[] = [
-  { id: "general", label: "General" },
-  { id: "integrations", label: "Integrations" },
-  { id: "pricing", label: "Pricing" },
-  { id: "reference", label: "Reference data" },
-  { id: "backup", label: "Backup" },
-  { id: "connection", label: "Connection" },
-];
-
 function Settings() {
   const navigate = Route.useNavigate();
-  const tabFromUrl = Route.useSearch().tab;
+  const pageFromUrl = Route.useSearch().page;
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [hasConnection, setHasConnection] = useState(true);
 
@@ -73,198 +96,94 @@ function Settings() {
     });
   }, []);
 
-  // General leads for everyone with a working connection — which, thanks to auto-provisioning,
-  // is the overwhelmingly common case. Connection only jumps the queue when there's genuinely
-  // something to fill in. The tab's own editable copy of the store lives in ConnectionSettings.
+  // Stores & sync leads for everyone with a working connection — which, thanks to
+  // auto-provisioning, is the overwhelmingly common case. Connection only jumps the queue when
+  // there's genuinely something to fill in. The page's own editable copy of the store lives in
+  // ConnectionSettings.
   const needsConnectionSetup = settingsLoaded && !hasConnection;
-  // Re-checked here rather than trusting validateSearch to have dropped an unknown value: a tab
-  // id that matches nothing renders a page with a heading and no content, which is a far worse
-  // failure than ignoring a bad URL. The default can't live in validateSearch anyway — it
-  // depends on the Tauri store, which the route loader has no access to.
-  const activeTab: TabId = TAB_IDS.includes(tabFromUrl as TabId)
-    ? (tabFromUrl as TabId)
+  // Re-checked here rather than trusting validateSearch to have dropped an unknown value: a page
+  // id that matches nothing renders a blank content pane, which is a far worse failure than
+  // ignoring a bad URL. The default can't live in validateSearch anyway — it depends on the
+  // Tauri store, which the route loader has no access to.
+  const activePage: PageId = PAGE_IDS.includes(pageFromUrl as PageId)
+    ? (pageFromUrl as PageId)
     : needsConnectionSetup
       ? "connection"
-      : "general";
-  const setActiveTab = (tab: string) => navigate({ search: { tab: tab as TabId } });
+      : "stores-sync";
+  const setActivePage = (page: string) => navigate({ search: { page: page as PageId } });
 
   return (
-    <div className="max-w-5xl flex flex-col gap-4">
-      <h1 className="text-xl font-semibold">Settings</h1>
+    <div className="flex flex-col gap-4">
+      <h1 className="text-xl font-semibold tracking-[-.35px]">Settings</h1>
 
-      <Tabs tabs={SETTINGS_TABS} active={activeTab} onChange={setActiveTab} />
+      <div className="flex items-start gap-6">
+        <SettingsNav groups={NAV_GROUPS} active={activePage} onChange={setActivePage} />
 
-      {activeTab === "connection" && <ConnectionSettings />}
-
-      {activeTab === "integrations" && (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-          {CONNECTABLE_PLATFORMS.map((platform) => (
-            <PlatformIntegrationCard key={platform} platform={platform} />
-          ))}
+        <div className="min-w-0 max-w-[840px] flex-1">
+          {activePage === "stores-sync" && <StoresSyncPage />}
+          {activePage === "pricing-fees" && <PricingFeesPage />}
+          {activePage === "shipping-packaging" && <ShippingPackagingPage />}
+          {activePage === "forecasting" && <ForecastSettings />}
+          {activePage === "stock-counts" && <StockCountSettings />}
+          {activePage === "lists" && <ListsMasterDetail />}
+          {activePage === "backup-restore" && <BackupSettings />}
+          {activePage === "connection" && <ConnectionSettings />}
         </div>
-      )}
+      </div>
+    </div>
+  );
+}
 
-      {activeTab === "pricing" && (
-        <div className="max-w-2xl flex flex-col gap-4">
-          <MarginFeeSettings />
-        </div>
-      )}
+function PricingFeesPage() {
+  return (
+    <div className="flex flex-col gap-4">
+      <MarginFeeSettings />
+      <SettingsCard title="Fee components" help="Per platform, used in the margin-after-fees figure.">
+        {CONNECTABLE_PLATFORMS.map((platform) => (
+          <PlatformFeeComponents key={platform} platform={platform} />
+        ))}
+      </SettingsCard>
+      <CurrencySettings />
+    </div>
+  );
+}
 
-      {activeTab === "general" && (
-        <div className="max-w-2xl flex flex-col gap-4">
+function ShippingPackagingPage() {
+  return (
+    <div className="flex flex-col gap-4">
+      <ShippingProfileSettings />
+      <DefaultKittingBomSettings />
+    </div>
+  );
+}
+
+function StoresSyncPage() {
+  const [platformFilter, setPlatformFilter] = useState<ListingPlatform | "all">("all");
+  const platforms = platformFilter === "all" ? CONNECTABLE_PLATFORMS : [platformFilter];
+
+  return (
+    <div className="flex flex-col gap-4">
+      <SegmentedControl
+        ariaLabel="Platform"
+        value={platformFilter}
+        onChange={setPlatformFilter}
+        options={[
+          { value: "all" as const, label: "All stores" },
+          ...CONNECTABLE_PLATFORMS.map((p) => ({ value: p, label: PLATFORM_LABELS[p] })),
+        ]}
+      />
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {platforms.map((platform) => (
+          <PlatformIntegrationCard key={platform} platform={platform} />
+        ))}
+      </div>
+
+      {platformFilter === "all" && (
+        <>
           <BackgroundSyncSettings />
-          <CurrencySettings />
-          <ForecastSettings />
-          <StockCountSettings />
-          <DefaultKittingBomSettings />
-        </div>
-      )}
-
-      {activeTab === "reference" && (
-        <div className="max-w-3xl flex flex-col gap-4">
-          <ReferenceDataTable
-            title="Manufacturers"
-            description="Who makes a material. Renaming one updates every material that uses it."
-            segment="manufacturers"
-            queryKey={["manufacturers"]}
-            api={{
-              list: manufacturersApi.list,
-              create: manufacturersApi.findOrCreate,
-              update: manufacturersApi.update,
-              remove: manufacturersApi.remove,
-              merge: manufacturersApi.merge,
-            }}
-            fields={[
-              { key: "name", label: "Name" },
-              { key: "website_url", label: "Website", type: "url", placeholder: "https://…" },
-            ]}
-            usageLabel={(n) => `${n} material${n === 1 ? "" : "s"}`}
-          />
-          <ReferenceDataTable
-            title="Suppliers"
-            description="Who you buy from. Renaming one updates every material and purchase that uses it. Default lead time feeds the materials time-to-stockout forecast — leave it blank to use the shop-wide default."
-            segment="suppliers"
-            queryKey={["suppliers"]}
-            api={{
-              list: suppliersApi.list,
-              create: suppliersApi.findOrCreate,
-              update: suppliersApi.update,
-              remove: suppliersApi.remove,
-              merge: suppliersApi.merge,
-            }}
-            fields={[
-              { key: "name", label: "Name" },
-              { key: "website_url", label: "Website", type: "url", placeholder: "https://…" },
-              {
-                key: "default_lead_time_days",
-                label: "Default lead time (business days)",
-                type: "number",
-                placeholder: "Shop default",
-              },
-            ]}
-            usageLabel={(n) => `${n} record${n === 1 ? "" : "s"}`}
-          />
-          <ReferenceDataTable
-            title="Material types"
-            description="What a material is made of. Renaming one updates every material that uses it."
-            segment="material-types"
-            queryKey={["material-types"]}
-            api={{
-              list: materialTypesApi.list,
-              create: materialTypesApi.findOrCreate,
-              update: materialTypesApi.update,
-              remove: materialTypesApi.remove,
-              merge: materialTypesApi.merge,
-            }}
-            fields={[{ key: "name", label: "Name" }]}
-            usageLabel={(n) => `${n} material${n === 1 ? "" : "s"}`}
-          />
-          <ReferenceDataTable
-            title="Material categories"
-            description="What kind of thing a material is. The checkboxes are the behaviour that used to be hardcoded to filament and packaging — set them on any category, including ones you add. Order decides how the materials list groups and sorts."
-            segment="material-categories"
-            queryKey={["material-categories"]}
-            api={{
-              list: materialCategoriesApi.list,
-              create: materialCategoriesApi.findOrCreate,
-              update: materialCategoriesApi.update,
-              remove: materialCategoriesApi.remove,
-              merge: materialCategoriesApi.merge,
-              reorder: materialCategoriesApi.reorder,
-            }}
-            fields={[
-              { key: "name", label: "Name" },
-              {
-                key: "default_unit",
-                label: "Default unit",
-                type: "select",
-                placeholder: "Leave unchanged",
-                options: [
-                  { value: "g", label: "g" },
-                  { value: "ml", label: "ml" },
-                  { value: "each", label: "each" },
-                ],
-              },
-              { key: "tracks_colour", label: "Has a colour", type: "checkbox" },
-              { key: "tracks_material_type", label: "Has a material type", type: "checkbox" },
-              { key: "cost_per_kg_display", label: "Show cost per kg", type: "checkbox" },
-              { key: "consumed_on_failed_build", label: "Consumed by failed builds", type: "checkbox" },
-              { key: "auto_kitting_per_order", label: "Kitting: one per order, not per unit", type: "checkbox" },
-              { key: "show_in_kitting_bom_list", label: "Show in Kitting BOM list", type: "checkbox" },
-            ]}
-            usageLabel={(n) => `${n} material${n === 1 ? "" : "s"}`}
-          />
-          <ReferenceDataTable
-            title="Product categories"
-            description="What kind of thing a product is. Groups products for stock-count scheduling and for scoping a stock take. Renaming one updates every product that uses it."
-            segment="product-categories"
-            queryKey={["product-categories"]}
-            api={{
-              list: productCategoriesApi.list,
-              create: productCategoriesApi.findOrCreate,
-              update: productCategoriesApi.update,
-              remove: productCategoriesApi.remove,
-              merge: productCategoriesApi.merge,
-            }}
-            fields={[{ key: "name", label: "Name" }]}
-            usageLabel={(n) => `${n} product${n === 1 ? "" : "s"}`}
-          />
-          <ReferenceDataTable
-            title="Colours"
-            description="Promoted from free text, so the same colour on several materials is one entry you can rename or merge. Duplicates like 'Black' and 'black' were folded together when this table was created."
-            segment="colours"
-            queryKey={["colours"]}
-            api={{
-              list: coloursApi.list,
-              create: coloursApi.findOrCreate,
-              update: coloursApi.update,
-              remove: coloursApi.remove,
-              merge: coloursApi.merge,
-            }}
-            fields={[
-              { key: "name", label: "Name" },
-              { key: "hex_code", label: "Hex code", placeholder: "#ff00aa" },
-            ]}
-            usageLabel={(n) => `${n} material${n === 1 ? "" : "s"}`}
-            rowLeading={(row) => (
-              <span
-                className="h-3.5 w-3.5 shrink-0 rounded-full border border-slate-300"
-                style={{ backgroundColor: row.hex_code ?? "transparent" }}
-              />
-            )}
-          />
-          {/* Shipping profiles are reference data too — a named row that products, variants and
-              orders point at. They sat under Pricing only because their eBay/Etsy cost columns
-              looked like a pricing concern; those are per-(platform × profile), so they belong
-              on the profile itself. */}
-          <ShippingProfileSettings />
-        </div>
-      )}
-
-      {activeTab === "backup" && (
-        <div className="max-w-3xl">
-          <BackupSettings />
-        </div>
+          <FieldMappingTable />
+        </>
       )}
     </div>
   );
@@ -305,72 +224,69 @@ function PlatformIntegrationCard({ platform }: { platform: ListingPlatform }) {
   const refreshStatus = () => queryClient.invalidateQueries({ queryKey: ["platforms", platform, "status"] });
 
   return (
-    // Nested so each platform's editors sit under integrations/<platform>/…, which is what lets
+    // Nested so each platform's editors sit under stores-sync/<platform>/…, which is what lets
     // a prefix veto target one card without catching the other. The trailing-slash convention in
     // isDirtyUnder keeps "ebay/" from matching a hypothetical "ebay-sandbox/".
-    <DirtyPath segment="integrations">
+    <DirtyPath segment="stores-sync">
       <DirtyPath segment={platform}>
-    <div className="flex flex-col gap-2">
-      <div className="rounded border border-slate-300 p-3">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            {platformStatus?.connected && iconUrl && (
-              <img src={iconUrl} alt="" className="h-8 w-8 rounded-full object-cover" />
-            )}
-            <div>
-              <p className="font-medium">{label}</p>
-              {platformStatus?.connected ? (
-                <p className="text-sm text-green-700">
-                  {platformStatus.shop_name ?? `Connected — account ${platformStatus.account_id}`}
-                  {platformStatus.environment === "sandbox" && (
-                    <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">
-                      Sandbox
-                    </span>
+        <div className="flex flex-col gap-2">
+          <div className="rounded-[9px] border border-slate-200 bg-white p-3" style={{ boxShadow: "0 1px 2px rgba(15,23,42,.04)" }}>
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                {platformStatus?.connected && iconUrl && (
+                  <img src={iconUrl} alt="" className="h-8 w-8 rounded-full object-cover" />
+                )}
+                <div>
+                  <p className="font-medium">{label}</p>
+                  {platformStatus?.connected ? (
+                    <p className="text-sm text-green-700">
+                      {platformStatus.shop_name ?? `Connected — account ${platformStatus.account_id}`}
+                      {platformStatus.environment === "sandbox" && (
+                        <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">
+                          Sandbox
+                        </span>
+                      )}
+                    </p>
+                  ) : (
+                    <p className="text-sm text-slate-500">Not connected</p>
                   )}
-                </p>
-              ) : (
-                <p className="text-sm text-slate-500">Not connected</p>
-              )}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={refreshStatus} className="rounded border border-slate-300 px-3 py-1.5 text-sm">
+                  Refresh
+                </button>
+                {platformStatus?.connected ? (
+                  <button
+                    onClick={() => disconnectMutation.mutate()}
+                    className="rounded border border-red-300 px-3 py-1.5 text-sm text-red-600"
+                  >
+                    Disconnect
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => connectMutation.mutate()}
+                    className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white"
+                  >
+                    Connect
+                  </button>
+                )}
+              </div>
             </div>
+            <ErrorBanner error={connectMutation.error ?? disconnectMutation.error} />
+            <PlatformCredentialsForm platform={platform} environment={environment} onEnvironmentChange={setEnvironment} />
+            {platform === "ebay" && <EbaySigningKeyPanel environment={environment} />}
+            <p className="mt-2 text-xs text-slate-400">
+              Per-profile {label} shipping costs live under Shipping & packaging.
+            </p>
           </div>
-          <div className="flex gap-2">
-            <button onClick={refreshStatus} className="rounded border border-slate-300 px-3 py-1.5 text-sm">
-              Refresh
-            </button>
-            {platformStatus?.connected ? (
-              <button
-                onClick={() => disconnectMutation.mutate()}
-                className="rounded border border-red-300 px-3 py-1.5 text-sm text-red-600"
-              >
-                Disconnect
-              </button>
-            ) : (
-              <button
-                onClick={() => connectMutation.mutate()}
-                className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white"
-              >
-                Connect
-              </button>
-            )}
-          </div>
+          {platformStatus?.connected && <PlatformCompatibilityPanel platform={platform} />}
+          {platformStatus?.connected && platform === "etsy" && <EtsyBackfillPanel />}
+          {platformStatus?.connected && <ListingProfiles platform={platform} />}
+          {platformStatus?.connected && platform === "etsy" && <EtsyProfileProposalsPanel />}
+          {platformStatus?.connected && <PlatformLimitsEditor platform={platform} />}
+          {platformStatus?.connected && <PlatformSyncPanel platform={platform} />}
         </div>
-        <ErrorBanner error={connectMutation.error ?? disconnectMutation.error} />
-        <PlatformCredentialsForm platform={platform} environment={environment} onEnvironmentChange={setEnvironment} />
-        {platform === "ebay" && <EbaySigningKeyPanel environment={environment} />}
-        {/* Keyed by platform alone, so it belongs to the platform. The global "which channel am
-            I estimating for" switch stays in Pricing — see MarginFeeSettings. */}
-        <PlatformFeeComponents platform={platform} />
-        <p className="mt-2 text-xs text-slate-400">
-          Per-profile {label} shipping costs live under Reference data → Shipping profiles.
-        </p>
-      </div>
-      {platformStatus?.connected && <PlatformCompatibilityPanel platform={platform} />}
-      {platformStatus?.connected && platform === "etsy" && <EtsyBackfillPanel />}
-      {platformStatus?.connected && <ListingProfiles platform={platform} />}
-      {platformStatus?.connected && platform === "etsy" && <EtsyProfileProposalsPanel />}
-      {platformStatus?.connected && <PlatformLimitsEditor platform={platform} />}
-      {platformStatus?.connected && <PlatformSyncPanel platform={platform} />}
-    </div>
       </DirtyPath>
     </DirtyPath>
   );

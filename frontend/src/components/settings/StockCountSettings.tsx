@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { productCategoriesApi } from "../../api/productCategories";
 import { stockCountSettingsApi } from "../../api/stockTakes";
 import type { ABCClass, StockCountSettings as Settings } from "../../api/types";
@@ -23,6 +24,8 @@ const INHERIT = "";
  */
 export function StockCountSettings() {
   const queryClient = useQueryClient();
+  const [showMaterialOverrides, setShowMaterialOverrides] = useState(false);
+  const [showProductOverrides, setShowProductOverrides] = useState(false);
   const { data } = useQuery({
     queryKey: ["settings", "stock-count-settings"],
     queryFn: stockCountSettingsApi.get,
@@ -39,7 +42,7 @@ export function StockCountSettings() {
     isSeeded,
     markSaved,
   } = useEditableCopy<Settings | null>({
-    key: "general/stock-count",
+    key: "stock-counts",
     label: "Stock counting",
     initial: null,
     seed: data,
@@ -169,7 +172,7 @@ export function StockCountSettings() {
       title="Stock counting"
       help="How often each thing should be physically counted. An item is counted at the cadence of its tier — A most often, C least — and anything past its cadence shows up as due on the dashboard. A tier set on an individual material or product wins over its category or type, which wins over the defaults below."
     >
-      <div className="flex flex-col gap-3">
+      <div className="flex flex-col gap-3 rounded-[9px] border border-[#f1f5f9] p-3">
         <h3 className="text-sm font-medium">Materials</h3>
         <label className="flex items-center gap-3 text-sm">
           <span className="w-36 shrink-0 text-slate-600">Default tier</span>
@@ -178,23 +181,32 @@ export function StockCountSettings() {
           )}
         </label>
         {renderIntervals("material")}
-        <div>
-          <p className="mb-1 text-sm">By category</p>
-          <div className="flex flex-wrap gap-3">
-            {categories.map((category) => (
-              <label key={category.id} className="flex items-center gap-1 text-sm">
-                <span className="capitalize">{category.name}</span>
-                {tierSelect(
-                  form.category_tiers.find((c) => c.category_id === category.id)?.abc_class ?? INHERIT,
-                  (next) => setCategoryTier(category.id, next),
-                )}
-              </label>
-            ))}
+        <button
+          type="button"
+          onClick={() => setShowMaterialOverrides((v) => !v)}
+          className="self-start text-sm text-slate-600 underline"
+        >
+          {showMaterialOverrides ? "Hide" : "Show"} category overrides
+        </button>
+        {showMaterialOverrides && (
+          <div>
+            <p className="mb-1 text-sm">By category</p>
+            <div className="flex flex-wrap gap-3">
+              {categories.map((category) => (
+                <label key={category.id} className="flex items-center gap-1 text-sm">
+                  <span className="capitalize">{category.name}</span>
+                  {tierSelect(
+                    form.category_tiers.find((c) => c.category_id === category.id)?.abc_class ?? INHERIT,
+                    (next) => setCategoryTier(category.id, next),
+                  )}
+                </label>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
-      <div className="flex flex-col gap-3 border-t border-slate-200 pt-3">
+      <div className="flex flex-col gap-3 rounded-[9px] border border-[#f1f5f9] p-3">
         <h3 className="text-sm font-medium">Products</h3>
         <label className="flex items-center gap-3 text-sm">
           <span className="w-36 shrink-0 text-slate-600">Default tier</span>
@@ -203,26 +215,35 @@ export function StockCountSettings() {
           )}
         </label>
         {renderIntervals("product")}
-        <div>
-          <p className="mb-1 text-sm">By product category</p>
-          {productCategories && productCategories.length > 0 ? (
-            <div className="flex flex-wrap gap-3">
-              {productCategories.map((type) => (
-                <label key={type.id} className="flex items-center gap-1 text-sm">
-                  {type.name}
-                  {tierSelect(
-                    form.product_category_tiers.find((t) => t.product_category_id === type.id)?.abc_class ?? INHERIT,
-                    (next) => setProductCategoryTier(type.id, next),
-                  )}
-                </label>
-              ))}
-            </div>
-          ) : (
-            <p className="text-xs text-slate-500">
-              No product categories yet — add some under Reference data to group products for counting.
-            </p>
-          )}
-        </div>
+        <button
+          type="button"
+          onClick={() => setShowProductOverrides((v) => !v)}
+          className="self-start text-sm text-slate-600 underline"
+        >
+          {showProductOverrides ? "Hide" : "Show"} category overrides
+        </button>
+        {showProductOverrides && (
+          <div>
+            <p className="mb-1 text-sm">By product category</p>
+            {productCategories && productCategories.length > 0 ? (
+              <div className="flex flex-wrap gap-3">
+                {productCategories.map((type) => (
+                  <label key={type.id} className="flex items-center gap-1 text-sm">
+                    {type.name}
+                    {tierSelect(
+                      form.product_category_tiers.find((t) => t.product_category_id === type.id)?.abc_class ?? INHERIT,
+                      (next) => setProductCategoryTier(type.id, next),
+                    )}
+                  </label>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-slate-500">
+                No product categories yet — add some under Stock → Lists to group products for counting.
+              </p>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex items-center gap-2">

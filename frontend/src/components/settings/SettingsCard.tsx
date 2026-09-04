@@ -19,11 +19,14 @@ export function SettingsCard({
   children: ReactNode;
 }) {
   return (
-    <section className="flex flex-col gap-3 rounded border border-slate-200 bg-white p-4">
-      <div className="flex items-start justify-between gap-3">
+    <section
+      className="flex flex-col gap-3 rounded-[9px] border border-slate-200 bg-white p-4"
+      style={{ boxShadow: "0 1px 2px rgba(15,23,42,.04)" }}
+    >
+      <div className="flex items-start justify-between gap-3 border-b border-[#f1f5f9] pb-3">
         <div>
           <h2 className="font-medium">{title}</h2>
-          {help && <p className="text-sm text-slate-500">{help}</p>}
+          {help && <p className="text-[11.5px] leading-relaxed text-slate-500">{help}</p>}
         </div>
         {action}
       </div>

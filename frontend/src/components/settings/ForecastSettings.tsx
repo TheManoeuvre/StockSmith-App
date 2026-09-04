@@ -30,7 +30,7 @@ export function ForecastSettings() {
     isSeeded,
     markSaved,
   } = useEditableCopy<ForecastSettingsValue | null>({
-    key: "general/forecast",
+    key: "forecasting",
     label: "Materials forecasting",
     initial: null,
     seed: data,

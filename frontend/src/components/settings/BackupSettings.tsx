@@ -64,7 +64,7 @@ export function BackupSettings() {
     isDirty,
     markSaved,
   } = useEditableCopy<ScheduleForm>({
-    key: "backup/settings",
+    key: "backup-restore/settings",
     label: "Backup settings",
     initial: EMPTY_FORM,
     seed,
