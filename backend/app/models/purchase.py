@@ -52,6 +52,11 @@ class Purchase(Base):
     # estimate, so "unknown ETA" stays distinguishable from "known ETA."
     expected_arrival_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     notes: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Delivery / carriage charged on the order as a whole. NULL means "no delivery charge
+    # recorded" — a distinct state from 0.00 (the UI says "no delivery charge" for NULL and
+    # "incl £X delivery" once a figure is entered). Shown on the order total only; it is not
+    # apportioned to unit costs, so services/costing.py never reads it.
+    delivery_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

@@ -1,5 +1,5 @@
 import { api, downloadCsv } from "./client";
-import type { Purchase, PurchaseStatus } from "./types";
+import type { PriceReference, Purchase, PurchaseStatus } from "./types";
 
 export interface PurchaseLineInput {
   /**
@@ -20,6 +20,7 @@ export interface PurchaseCreateInput {
   order_date?: string | null;
   expected_arrival_date?: string | null;
   notes?: string | null;
+  delivery_cost?: string | null;
   lines: PurchaseLineInput[];
 }
 
@@ -29,6 +30,7 @@ export interface PurchaseUpdateInput {
   order_date?: string | null;
   expected_arrival_date?: string | null;
   notes?: string | null;
+  delivery_cost?: string | null;
 }
 
 export interface ReceiptLineInput {
@@ -68,4 +70,12 @@ export const purchasesApi = {
   receive: (id: number) => api.post<Purchase>(`/purchases/${id}/receive`),
   unreceive: (id: number) => api.post<Purchase>(`/purchases/${id}/unreceive`),
   exportCsv: () => downloadCsv("/purchases/export", "purchases.csv"),
+
+  /** What each material last cost — feeds the new-purchase panel's per-line comparison.
+   *  Prefers the most recent line from `supplierId`, falling back to any supplier. */
+  priceReference: (supplierId: number | null, materialIds: number[]) =>
+    api.post<PriceReference[]>("/purchases/price-reference", {
+      supplier_id: supplierId,
+      material_ids: materialIds,
+    }),
 };

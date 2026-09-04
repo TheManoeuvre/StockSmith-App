@@ -47,6 +47,7 @@ function purchase(over: Record<string, unknown> = {}) {
     status: "ordered",
     received_at: null,
     notes: null,
+    delivery_cost: null,
     created_at: "2026-08-21",
     updated_at: "2026-08-21",
     lines: [line()],

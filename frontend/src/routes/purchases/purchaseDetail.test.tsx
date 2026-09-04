@@ -31,6 +31,7 @@ function purchase(over: Record<string, unknown> = {}) {
     status: "ordered",
     received_at: null,
     notes: null,
+    delivery_cost: null,
     created_at: "2026-08-21",
     updated_at: "2026-08-21",
     lines: [
@@ -132,6 +133,36 @@ it("records the supplier's order number through the footer Save", async () => {
           c.path === "/purchases/5" &&
           (c.body as { supplier_order_number?: string }).supplier_order_number ===
             "PO-4521",
+      ),
+    ).toBe(true),
+  );
+});
+
+it("folds a recorded delivery cost into the order total", async () => {
+  await renderDetail({ delivery_cost: "5.00" });
+  // Line total £20.00 + £5.00 delivery.
+  expect(await screen.findByText("£25.00")).toBeInTheDocument();
+  expect(await screen.findByText("incl £5.00 delivery")).toBeInTheDocument();
+});
+
+it("saves an edited delivery cost through the footer Save", async () => {
+  const user = userEvent.setup();
+  await renderDetail();
+
+  const field = await screen.findByPlaceholderText("0.00");
+  await user.type(field, "7.5");
+
+  const save = screen.getByRole("button", { name: "Save" });
+  await waitFor(() => expect(save).toBeEnabled());
+  await user.click(save);
+
+  await waitFor(() =>
+    expect(
+      calls.some(
+        (c) =>
+          c.method === "PATCH" &&
+          c.path === "/purchases/5" &&
+          (c.body as { delivery_cost?: string }).delivery_cost === "7.5",
       ),
     ).toBe(true),
   );

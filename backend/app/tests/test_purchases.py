@@ -19,8 +19,19 @@ from app.models.material import Material, MaterialAdjustmentMode, MaterialUnit
 from app.models.material_category import MaterialCategory
 from app.models.product import Product, ProductMaterial
 from app.models.purchase import MaterialPurchase, Purchase, PurchaseStatus
-from app.routers.purchases import delete_purchase, receive_purchase, replace_purchase_lines
-from app.schemas.purchase import PurchaseLineInput
+from app.routers.purchases import (
+    create_purchase,
+    delete_purchase,
+    receive_purchase,
+    replace_purchase_lines,
+    update_purchase,
+)
+from app.schemas.purchase import (
+    PurchaseCreate,
+    PurchaseLineInput,
+    PurchaseRead,
+    PurchaseUpdate,
+)
 from app.services import purchase_receipts
 from app.services.costing import create_adjustment, get_on_order_qty_by_material
 from app.services.material_categories import legacy_value_for
@@ -644,3 +655,37 @@ async def test_stock_history_reconciles_with_current_qty(session):
     assert "adjustment" not in by_kind or all(
         r["reason"] == "spillage" for r in by_kind["adjustment"]
     )
+
+
+async def test_delivery_cost_round_trips(session):
+    """delivery_cost is accepted on create, editable on PATCH, and left alone when a PATCH
+    doesn't mention it (proves the schema default doesn't overwrite it via exclude_unset)."""
+    material = await _material(session)
+
+    created = await create_purchase(
+        PurchaseCreate(
+            delivery_cost=Decimal("12.50"),
+            lines=[PurchaseLineInput(material_id=material.id, qty=Decimal(10), total_cost=Decimal(100))],
+        ),
+        session,
+    )
+    assert PurchaseRead.model_validate(created).delivery_cost == Decimal("12.50")
+
+    zeroed = await update_purchase(created.id, PurchaseUpdate(delivery_cost=Decimal("0")), session)
+    assert PurchaseRead.model_validate(zeroed).delivery_cost == Decimal("0")
+
+    untouched = await update_purchase(created.id, PurchaseUpdate(notes="chasing it"), session)
+    body = PurchaseRead.model_validate(untouched)
+    assert body.delivery_cost == Decimal("0")
+    assert body.notes == "chasing it"
+
+
+async def test_delivery_cost_defaults_to_null(session):
+    material = await _material(session)
+    created = await create_purchase(
+        PurchaseCreate(
+            lines=[PurchaseLineInput(material_id=material.id, qty=Decimal(1), total_cost=Decimal(5))],
+        ),
+        session,
+    )
+    assert PurchaseRead.model_validate(created).delivery_cost is None
