@@ -41,6 +41,7 @@ function purchase(over: Record<string, unknown> = {}) {
     id: 1,
     supplier_id: 3,
     supplier_name: "Polymax",
+    supplier_order_number: null,
     order_date: "2026-08-21",
     expected_arrival_date: "2026-08-27",
     status: "ordered",
@@ -102,6 +103,14 @@ it("filters the list by status tab", async () => {
 
   await waitFor(() => expect(screen.queryByText("#1")).not.toBeInTheDocument());
   expect(screen.getByText("#2")).toBeInTheDocument();
+});
+
+it("leads with the supplier's order number, keeping our id alongside", async () => {
+  setRoutes(routes([purchase({ supplier_order_number: "PO-4521" })]));
+  await renderList();
+
+  const row = screen.getByText("PO-4521").closest("tr")!;
+  expect(within(row).getByText("(#1)")).toBeInTheDocument();
 });
 
 it("receives an ordered purchase from the row action", async () => {

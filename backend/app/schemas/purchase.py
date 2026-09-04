@@ -20,6 +20,7 @@ class PurchaseLineInput(BaseModel):
 
 class PurchaseCreate(BaseModel):
     supplier_id: int | None = None
+    supplier_order_number: str | None = None
     order_date: date | None = None
     expected_arrival_date: date | None = None
     notes: str | None = None
@@ -28,6 +29,7 @@ class PurchaseCreate(BaseModel):
 
 class PurchaseUpdate(BaseModel):
     supplier_id: int | None = None
+    supplier_order_number: str | None = None
     order_date: date | None = None
     expected_arrival_date: date | None = None
     notes: str | None = None
@@ -118,6 +120,7 @@ class PurchaseRead(BaseModel):
     id: int
     supplier_id: int | None
     supplier_name: str | None = None
+    supplier_order_number: str | None = None
     order_date: date
     expected_arrival_date: date | None = None
     status: PurchaseStatus

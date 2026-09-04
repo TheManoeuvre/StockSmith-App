@@ -27,6 +27,11 @@ class Purchase(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     supplier_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id", ondelete="SET NULL"), nullable=True)
+    # The supplier's own reference for this order (their PO/order/invoice number), as printed
+    # on their paperwork. Free text — every supplier formats it differently — and optional.
+    # The UI leads with it on the list because it is the number a human quotes when chasing a
+    # delivery; our own `id` stays the stable key everything else joins on.
+    supplier_order_number: Mapped[str | None] = mapped_column(String, nullable=True)
     order_date: Mapped[date] = mapped_column(Date, server_default=func.current_date())
     # Derived, never set directly: refresh_purchase_status() in services/purchase_receipts.py
     # is the only writer, and it works the value out from the lines. Kept as a stored column

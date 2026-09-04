@@ -28,6 +28,7 @@ function NewPurchase() {
 
   const [supplier, setSupplier] = useState("");
   const [supplierId, setSupplierId] = useState<number | null>(null);
+  const [supplierOrderNumber, setSupplierOrderNumber] = useState("");
   const [orderDate, setOrderDate] = useState("");
   const [expectedArrivalDate, setExpectedArrivalDate] = useState("");
   const [notes, setNotes] = useState("");
@@ -42,6 +43,7 @@ function NewPurchase() {
       }
       return purchasesApi.create({
         supplier_id: resolvedSupplierId,
+        supplier_order_number: supplierOrderNumber.trim() || null,
         order_date: orderDate || null,
         expected_arrival_date: expectedArrivalDate || null,
         notes: notes || null,
@@ -69,6 +71,14 @@ function NewPurchase() {
               value={supplier}
               onChange={setSupplier}
               onResolved={setSupplierId}
+            />
+          </FieldRow>
+          <FieldRow label="Supplier order #">
+            <input
+              className="w-full rounded border border-slate-300 px-2 py-1"
+              value={supplierOrderNumber}
+              onChange={(e) => setSupplierOrderNumber(e.target.value)}
+              placeholder="Their PO / order number"
             />
           </FieldRow>
           <FieldRow label="Order date">

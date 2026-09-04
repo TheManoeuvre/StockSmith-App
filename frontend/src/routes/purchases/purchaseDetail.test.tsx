@@ -25,6 +25,7 @@ function purchase(over: Record<string, unknown> = {}) {
     id: 5,
     supplier_id: 3,
     supplier_name: "Polymax",
+    supplier_order_number: null,
     order_date: "2026-08-21",
     expected_arrival_date: "2026-08-27",
     status: "ordered",
@@ -110,6 +111,38 @@ it("commits a header edit through the one footer Save", async () => {
       calls.some((c) => c.method === "PATCH" && c.path === "/purchases/5"),
     ).toBe(true),
   );
+});
+
+it("records the supplier's order number through the footer Save", async () => {
+  const user = userEvent.setup();
+  await renderDetail();
+
+  const field = await screen.findByPlaceholderText("Their PO / order number");
+  await user.type(field, "  PO-4521  ");
+
+  const save = screen.getByRole("button", { name: "Save" });
+  await waitFor(() => expect(save).toBeEnabled());
+  await user.click(save);
+
+  await waitFor(() =>
+    expect(
+      calls.some(
+        (c) =>
+          c.method === "PATCH" &&
+          c.path === "/purchases/5" &&
+          (c.body as { supplier_order_number?: string }).supplier_order_number ===
+            "PO-4521",
+      ),
+    ).toBe(true),
+  );
+});
+
+it("shows an existing supplier order number in the header", async () => {
+  await renderDetail({ supplier_order_number: "PO-4521" });
+  expect(await screen.findByText(/Order PO-4521/)).toBeInTheDocument();
+  expect(
+    (await screen.findByPlaceholderText("Their PO / order number")) as HTMLInputElement,
+  ).toHaveValue("PO-4521");
 });
 
 it("the footer Revert drops a header edit with no request", async () => {

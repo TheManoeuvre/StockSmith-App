@@ -49,6 +49,7 @@ export const Route = createFileRoute("/purchases/$purchaseId")({
 interface DetailsForm {
   supplier: string;
   supplierId: number | null;
+  supplierOrderNumber: string;
   orderDate: string;
   expectedArrivalDate: string;
   notes: string;
@@ -128,6 +129,7 @@ function PurchaseDetail() {
         ? {
             supplier: purchase.supplier_name ?? "",
             supplierId: purchase.supplier_id,
+            supplierOrderNumber: purchase.supplier_order_number ?? "",
             orderDate: purchase.order_date,
             expectedArrivalDate: purchase.expected_arrival_date ?? "",
             notes: purchase.notes ?? "",
@@ -146,6 +148,7 @@ function PurchaseDetail() {
     initial: {
       supplier: "",
       supplierId: null,
+      supplierOrderNumber: "",
       orderDate: "",
       expectedArrivalDate: "",
       notes: "",
@@ -166,6 +169,7 @@ function PurchaseDetail() {
       }
       return purchasesApi.update(id, {
         supplier_id: resolvedSupplierId,
+        supplier_order_number: details.supplierOrderNumber.trim() || null,
         order_date: details.orderDate || null,
         expected_arrival_date: details.expectedArrivalDate || null,
         notes: details.notes || null,
@@ -349,6 +353,9 @@ function PurchaseDetail() {
                 {purchase.supplier_name ?? "No supplier"}
               </p>
               <p className="truncate text-[12.5px] text-slate-500">
+                {purchase.supplier_order_number
+                  ? `Order ${purchase.supplier_order_number} · `
+                  : ""}
                 Placed {formatDayMonth(purchase.order_date)}
                 {purchase.expected_arrival_date
                   ? ` · due ${formatDayMonth(purchase.expected_arrival_date)}`
@@ -391,6 +398,16 @@ function PurchaseDetail() {
               value={details.supplier}
               onChange={(v) => setDetailsField("supplier", v)}
               onResolved={(v) => setDetailsField("supplierId", v)}
+            />
+          </FieldRow>
+          <FieldRow label="Supplier order #">
+            <input
+              className="w-full rounded border border-slate-300 px-2 py-1"
+              value={details.supplierOrderNumber}
+              onChange={(e) =>
+                setDetailsField("supplierOrderNumber", e.target.value)
+              }
+              placeholder="Their PO / order number"
             />
           </FieldRow>
           <FieldRow label="Order date">

@@ -561,6 +561,34 @@ async def test_receipt_endpoints_serialise_with_a_supplier(session):
     assert rendered.status == PurchaseStatus.partially_received
 
 
+async def test_supplier_order_number_round_trips_and_blanks_to_null(session):
+    """The supplier's own PO number is stored as given, and a blank/whitespace entry is
+    stored as NULL so the list's "is there a supplier number?" check stays a plain None
+    test rather than also having to treat "" as absent."""
+    from app.routers.purchases import create_purchase, update_purchase
+    from app.schemas.purchase import PurchaseCreate, PurchaseLineInput, PurchaseRead, PurchaseUpdate
+
+    material = await _material(session)
+
+    created = await create_purchase(
+        PurchaseCreate(
+            supplier_order_number="  PO-4521  ",
+            lines=[PurchaseLineInput(material_id=material.id, qty=Decimal(10), total_cost=Decimal(100))],
+        ),
+        session,
+    )
+    assert PurchaseRead.model_validate(created).supplier_order_number == "PO-4521"
+
+    cleared = await update_purchase(created.id, PurchaseUpdate(supplier_order_number="   "), session)
+    assert PurchaseRead.model_validate(cleared).supplier_order_number is None
+
+    # An update that doesn't mention the field leaves it alone.
+    reset = await update_purchase(created.id, PurchaseUpdate(supplier_order_number="INV-9"), session)
+    assert PurchaseRead.model_validate(reset).supplier_order_number == "INV-9"
+    untouched = await update_purchase(created.id, PurchaseUpdate(notes="hi"), session)
+    assert PurchaseRead.model_validate(untouched).supplier_order_number == "INV-9"
+
+
 async def test_stock_history_reconciles_with_current_qty(session):
     """What the timeline shows and what the material says must be the same number.
 

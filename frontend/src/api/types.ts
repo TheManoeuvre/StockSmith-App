@@ -340,6 +340,9 @@ export interface Purchase {
   id: number;
   supplier_id: number | null;
   supplier_name: string | null;
+  /** The supplier's own reference for this order (their PO/order/invoice number), free
+   *  text. Null when not recorded. Shown as the primary order number on the list. */
+  supplier_order_number: string | null;
   order_date: string;
   expected_arrival_date: string | null;
   status: PurchaseStatus;
