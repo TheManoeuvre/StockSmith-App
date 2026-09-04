@@ -668,6 +668,12 @@ function MaterialDetail() {
                             alt={material.name}
                             className="h-full w-full object-cover"
                           />
+                        ) : material.colour_hex ? (
+                          <div
+                            className="h-[60px] w-[60px] rounded"
+                            style={{ backgroundColor: material.colour_hex }}
+                            title={material.colour ?? undefined}
+                          />
                         ) : (
                           <span className="text-[10px] text-slate-400">
                             no image

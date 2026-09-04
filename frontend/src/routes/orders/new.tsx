@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { productsApi } from "../../api/products";
 import { ordersApi, type OrderLineInput } from "../../api/orders";
+import type { ManualOrderChannel } from "../../api/types";
 import { appSettingsApi, type CurrencyCode } from "../../api/appSettings";
 import { shippingProfilesApi } from "../../api/shippingProfiles";
 import { OrderLineEditor } from "../../components/orders/OrderLineEditor";
@@ -19,6 +20,12 @@ const CURRENCY_LABELS: Record<CurrencyCode, string> = {
   USD: "$ USD",
   EUR: "€ EUR",
 };
+
+const MANUAL_CHANNEL_OPTIONS: { value: ManualOrderChannel; label: string }[] = [
+  { value: "manual", label: "Manual · direct sale" },
+  { value: "etsy", label: "Etsy · keyed by hand" },
+  { value: "ebay", label: "eBay · keyed by hand" },
+];
 
 function NewOrder() {
   const navigate = useNavigate();
@@ -45,6 +52,7 @@ function NewOrder() {
   const [currency, setCurrency] = useState<string>("");
   const [shippingProfileId, setShippingProfileId] = useState("");
   const [shippingCharged, setShippingCharged] = useState("");
+  const [manualChannel, setManualChannel] = useState<ManualOrderChannel>("manual");
 
   // Pre-fills the currency from the shop-wide default the first time it loads — the user
   // can still change it per order afterward, and this effect never overwrites that choice.
@@ -65,6 +73,7 @@ function NewOrder() {
           ? Number(shippingProfileId)
           : null,
         shipping_charged: shippingCharged || null,
+        manual_channel: manualChannel,
         lines,
       }),
     onSuccess: (order) => {
@@ -108,6 +117,22 @@ function NewOrder() {
               {CURRENCY_OPTIONS.map((code) => (
                 <option key={code} value={code}>
                   {CURRENCY_LABELS[code]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-sm">Source</span>
+            <select
+              className="rounded border border-slate-300 px-2 py-1"
+              value={manualChannel}
+              onChange={(e) =>
+                setManualChannel(e.target.value as ManualOrderChannel)
+              }
+            >
+              {MANUAL_CHANNEL_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
                 </option>
               ))}
             </select>

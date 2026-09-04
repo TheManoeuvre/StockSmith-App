@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -17,6 +18,7 @@ from app.schemas.purchase import (
 )
 from app.services import purchase_receipts
 from app.services.costing import recompute_materials
+from app.services.csv_io import export_purchases_csv
 from app.services.validation import validate_lines_against_units
 
 router = APIRouter(prefix="/purchases", tags=["purchases"], dependencies=[Depends(require_auth)])
@@ -58,6 +60,16 @@ async def list_purchases(
         query = query.where(Purchase.status == status_filter)
     result = await session.execute(query)
     return list(result.scalars())
+
+
+@router.get("/export")
+async def export_purchases(session: AsyncSession = Depends(get_db)) -> Response:
+    csv_text = await export_purchases_csv(session)
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=purchases.csv"},
+    )
 
 
 @router.post("", response_model=PurchaseRead, status_code=status.HTTP_201_CREATED)

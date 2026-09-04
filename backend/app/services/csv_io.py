@@ -5,13 +5,16 @@ from decimal import Decimal, InvalidOperation
 from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.manufacturer import Manufacturer
 from app.models.material import Material, MaterialAdjustment, MaterialAdjustmentMode, MaterialUnit
 from app.models.material_category import MaterialCategory
 from app.models.colour import Colour
 from app.models.material_type import MaterialType
+from app.models.order import Order
 from app.models.product import Product
+from app.models.purchase import Purchase
 from app.models.supplier import Supplier
 from app.services.colours import find_or_create as find_or_create_colour
 from app.services import material_categories
@@ -36,6 +39,33 @@ MATERIALS_CSV_FIELDS = [
 ]
 
 PRODUCTS_CSV_FIELDS = ["name", "sku", "description"]
+
+ORDERS_CSV_FIELDS = [
+    "id",
+    "channel",
+    "external_order_id",
+    "status",
+    "buyer_name",
+    "order_placed_at",
+    "shipped_at",
+    "grand_total",
+    "subtotal",
+    "shipping_charged",
+    "tax_charged",
+    "currency",
+    "payment_status",
+]
+
+PURCHASES_CSV_FIELDS = [
+    "id",
+    "supplier_name",
+    "order_date",
+    "expected_arrival_date",
+    "status",
+    "received_at",
+    "total_cost",
+    "notes",
+]
 
 # Keyed on line_id, deviating from the names-not-ids rule the two exports above follow.
 # That rule exists because those files are meant to move between machines; this one is
@@ -281,6 +311,56 @@ async def export_products_csv(session: AsyncSession) -> str:
     writer.writeheader()
     for p in result.scalars():
         writer.writerow({"name": p.name, "sku": p.sku or "", "description": p.description or ""})
+    return buf.getvalue()
+
+
+async def export_orders_csv(session: AsyncSession) -> str:
+    result = await session.execute(select(Order).order_by(Order.order_placed_at.desc(), Order.id.desc()))
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=ORDERS_CSV_FIELDS)
+    writer.writeheader()
+    for o in result.scalars():
+        writer.writerow(
+            {
+                "id": o.id,
+                "channel": o.platform.value if o.platform is not None else "manual",
+                "external_order_id": o.external_order_id or "",
+                "status": o.status.value,
+                "buyer_name": o.buyer_name or "",
+                "order_placed_at": o.order_placed_at.isoformat(),
+                "shipped_at": o.shipped_at.isoformat() if o.shipped_at is not None else "",
+                "grand_total": str(o.grand_total) if o.grand_total is not None else "",
+                "subtotal": str(o.subtotal) if o.subtotal is not None else "",
+                "shipping_charged": str(o.shipping_charged) if o.shipping_charged is not None else "",
+                "tax_charged": str(o.tax_charged) if o.tax_charged is not None else "",
+                "currency": o.currency or "",
+                "payment_status": o.payment_status or "",
+            }
+        )
+    return buf.getvalue()
+
+
+async def export_purchases_csv(session: AsyncSession) -> str:
+    result = await session.execute(
+        select(Purchase).options(selectinload(Purchase.supplier), selectinload(Purchase.lines)).order_by(Purchase.order_date.desc(), Purchase.id.desc())
+    )
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=PURCHASES_CSV_FIELDS)
+    writer.writeheader()
+    for p in result.scalars():
+        total_cost = sum((Decimal(line.total_cost) for line in p.lines), Decimal(0))
+        writer.writerow(
+            {
+                "id": p.id,
+                "supplier_name": p.supplier_name or "",
+                "order_date": p.order_date.isoformat(),
+                "expected_arrival_date": p.expected_arrival_date.isoformat() if p.expected_arrival_date else "",
+                "status": p.status.value,
+                "received_at": p.received_at.isoformat() if p.received_at is not None else "",
+                "total_cost": str(total_cost),
+                "notes": p.notes or "",
+            }
+        )
     return buf.getvalue()
 
 

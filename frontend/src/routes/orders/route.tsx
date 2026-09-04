@@ -14,6 +14,7 @@ import {
 import { useState, type MouseEvent } from "react";
 import { ordersApi } from "../../api/orders";
 import type { Order, OrderStatus } from "../../api/types";
+import { CsvImportExport } from "../../components/common/CsvImportExport";
 import { Th } from "../../components/common/ListTable";
 import { formatMoney } from "../../lib/money";
 import { formatDayMonth } from "../../lib/format";
@@ -163,12 +164,18 @@ function OrdersListContent() {
             shipped
           </p>
         </div>
-        <Link
-          to="/orders/new"
-          className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white"
-        >
-          New order
-        </Link>
+        <div className="flex items-center gap-2">
+          <CsvImportExport
+            onExport={ordersApi.exportCsv}
+            invalidateKey={["orders"]}
+          />
+          <Link
+            to="/orders/new"
+            className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white"
+          >
+            New order
+          </Link>
+        </div>
       </div>
 
       <table className="w-full border-collapse overflow-hidden rounded-lg bg-white text-left text-[12.5px] shadow-sm">

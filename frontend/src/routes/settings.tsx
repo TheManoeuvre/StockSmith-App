@@ -246,6 +246,12 @@ function Settings() {
               { key: "hex_code", label: "Hex code", placeholder: "#ff00aa" },
             ]}
             usageLabel={(n) => `${n} material${n === 1 ? "" : "s"}`}
+            rowLeading={(row) => (
+              <span
+                className="h-3.5 w-3.5 shrink-0 rounded-full border border-slate-300"
+                style={{ backgroundColor: row.hex_code ?? "transparent" }}
+              />
+            )}
           />
           {/* Shipping profiles are reference data too — a named row that products, variants and
               orders point at. They sat under Pricing only because their eBay/Etsy cost columns

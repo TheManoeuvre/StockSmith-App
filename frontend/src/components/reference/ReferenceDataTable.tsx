@@ -8,6 +8,7 @@ import { ApiError } from "../../api/client";
 import { ConfirmDialog } from "../common/ConfirmDialog";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { SaveButton } from "../common/SaveButton";
+import { Switch } from "../common/Switch";
 import { SettingsCard } from "../settings/SettingsCard";
 
 export interface ReferenceRow {
@@ -87,6 +88,7 @@ export function ReferenceDataTable<T extends ReferenceRow>({
   usageLabel,
   allowDelete = true,
   extraRowActions,
+  rowLeading,
 }: {
   title: string;
   description?: string;
@@ -99,6 +101,9 @@ export function ReferenceDataTable<T extends ReferenceRow>({
   usageLabel: (count: number) => string;
   allowDelete?: boolean;
   extraRowActions?: (row: T) => React.ReactNode;
+  /** Small visual rendered before the row's name in the collapsed header — e.g. a colour
+   *  swatch. Omit for tables with nothing to show there. */
+  rowLeading?: (row: T) => React.ReactNode;
 }) {
   const { data: rows } = useQuery({ queryKey, queryFn: api.list });
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -158,7 +163,10 @@ export function ReferenceDataTable<T extends ReferenceRow>({
                     onClick={() => toggle(row.id)}
                     className="flex flex-1 items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-slate-50"
                   >
-                    <span className="font-medium">{row.name}</span>
+                    <span className="flex items-center gap-2 font-medium">
+                      {rowLeading?.(row)}
+                      {row.name}
+                    </span>
                     <span className="text-xs text-slate-400">
                       {row.usage_count > 0 ? usageLabel(row.usage_count) : "unused"}
                     </span>
@@ -383,19 +391,19 @@ function ExpandedRow<T extends ReferenceRow>({
           if (field.type === "checkbox") {
             // Label after the control, not above it — the flex-col layout the text inputs use
             // puts a tick box under its own caption, which reads as a different question.
+            const fieldId = `reference-row-${row.id}-${field.key}`;
             return (
-              <label key={field.key} className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  aria-label={`${row.name} ${field.label}`}
-                  className="rounded border-slate-300"
+              <div key={field.key} className="flex items-center gap-2 text-sm">
+                <Switch
+                  id={fieldId}
+                  ariaLabel={`${row.name} ${field.label}`}
                   checked={form[field.key] === "true"}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, [field.key]: e.target.checked ? "true" : "false" }))
+                  onChange={(checked) =>
+                    setForm((prev) => ({ ...prev, [field.key]: checked ? "true" : "false" }))
                   }
                 />
-                {field.label}
-              </label>
+                <label htmlFor={fieldId}>{field.label}</label>
+              </div>
             );
           }
           if (field.type === "select") {

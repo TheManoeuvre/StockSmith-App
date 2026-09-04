@@ -15,6 +15,18 @@ class OrderStatus(str, enum.Enum):
     cancelled = "cancelled"
 
 
+class ManualOrderChannel(str, enum.Enum):
+    """A hand-entered order's own channel label — "Manual · direct sale" vs. "Etsy · keyed
+    by hand" etc. Deliberately separate from `Order.platform`, which means "this order was
+    pulled in by marketplace sync" and several call sites (see `platform` below) key off
+    that to skip sync-owned recompute/reconciliation logic. Setting this column never
+    implies sync involvement."""
+
+    manual = "manual"
+    etsy = "etsy"
+    ebay = "ebay"
+
+
 class Order(Base):
     """A customer order, placed either manually or pulled from a marketplace (Etsy etc).
 
@@ -38,6 +50,11 @@ class Order(Base):
         portable_enum(ListingPlatform, name="listing_platform"), nullable=True
     )
     external_order_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # The manually-entered channel tag — see ManualOrderChannel. Independent of `platform`
+    # above; only ever set (or read) on orders created through the manual /orders/new flow.
+    manual_channel: Mapped[ManualOrderChannel | None] = mapped_column(
+        portable_enum(ManualOrderChannel, name="manual_order_channel"), nullable=True
+    )
     status: Mapped[OrderStatus] = mapped_column(
         portable_enum(OrderStatus, name="order_status"), nullable=False, default=OrderStatus.pending
     )

@@ -1,4 +1,4 @@
-import { api } from "./client";
+import { api, downloadCsv } from "./client";
 import type { Purchase, PurchaseStatus } from "./types";
 
 export interface PurchaseLineInput {
@@ -65,4 +65,5 @@ export const purchasesApi = {
   /** Shorthand for "all of it turned up, now" — one click from the list page. */
   receive: (id: number) => api.post<Purchase>(`/purchases/${id}/receive`),
   unreceive: (id: number) => api.post<Purchase>(`/purchases/${id}/unreceive`),
+  exportCsv: () => downloadCsv("/purchases/export", "purchases.csv"),
 };

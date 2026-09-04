@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel
 
+from app.models.listing import ListingPlatform
 from app.schemas.abc import DueForCountItemRead
 
 
@@ -53,6 +54,7 @@ class OrderAwaitingInventory(BaseModel):
     variant_name: str | None
     short_by: int
     order_placed_at: datetime
+    platform: ListingPlatform | None = None
 
 
 class OrderAwaitingPackaging(BaseModel):
@@ -61,6 +63,7 @@ class OrderAwaitingPackaging(BaseModel):
     material_name: str
     short_by: Decimal
     order_placed_at: datetime
+    platform: ListingPlatform | None = None
 
 
 class OpenStockTake(BaseModel):
