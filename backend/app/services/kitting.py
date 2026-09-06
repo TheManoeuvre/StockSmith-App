@@ -903,8 +903,15 @@ async def get_order_kitting_summary(session: AsyncSession, order_id: int) -> Ord
             unit_cost = Decimal(material.avg_unit_cost)
         else:
             unit_cost = Decimal(0)
-        effective_qty = effective.get(material_id, Decimal(0))
         consumed_qty = Decimal(ledger.consumed_qty) if ledger is not None else Decimal(0)
+        # Floor the forward-looking requirement at what's already been consumed. Consumption
+        # is monotonic (see get_kitting_cogs_by_order), so lowering or removing an override
+        # after the order shipped — or an additive override that now sits at 0 — leaves the
+        # recomputed effective total below what physically left the building for this order.
+        # Without this, such a line reports effective_qty 0 while consumed_qty stays 1, and
+        # effective_cost_total silently drops it, breaking the "effective and consumed
+        # converge once fully shipped" invariant the editor promises.
+        effective_qty = max(effective.get(material_id, Decimal(0)), consumed_qty)
         result_lines.append(
             OrderKittingRequirementLine(
                 material_id=material_id,
