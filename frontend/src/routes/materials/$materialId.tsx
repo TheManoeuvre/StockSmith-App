@@ -366,17 +366,6 @@ function MaterialDetail() {
     },
   });
 
-  const draftPurchaseMutation = useMutation({
-    mutationFn: () => materialsApi.createDraftPurchase(id),
-    onSuccess: (purchase) => {
-      queryClient.invalidateQueries({ queryKey: ["purchases"] });
-      navigate({
-        to: "/purchases/$purchaseId",
-        params: { purchaseId: String(purchase.id) },
-      });
-    },
-  });
-
   // Command form (records an adjustment), not an editor of stored state — it diffs against
   // its own defaults, so an abandoned half-typed adjustment still warns on navigate-away.
   const {
@@ -886,12 +875,21 @@ function MaterialDetail() {
               isLowStock(material.current_qty, material.reorder_threshold) && (
                 <div className="mt-2 flex items-center gap-2">
                   <button
-                    onClick={() => draftPurchaseMutation.mutate()}
+                    onClick={() =>
+                      navigate({
+                        to: "/purchases/new",
+                        search: {
+                          ...(material.default_supplier_id != null
+                            ? { supplierId: material.default_supplier_id }
+                            : {}),
+                          materialIds: [material.id],
+                        },
+                      })
+                    }
                     className="rounded border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm text-amber-800"
                   >
                     Create draft purchase
                   </button>
-                  <ErrorBanner error={draftPurchaseMutation.error} />
                 </div>
               )}
             {activeTab === "supplier" && (

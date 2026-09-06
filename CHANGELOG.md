@@ -12,6 +12,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **"Create draft purchase" on the dashboard now opens the full New purchase panel.**
+  The dashboard's "Time to stockout" section gains a per-supplier **Create draft purchase**
+  button that drafts every at-risk material from that supplier in one order; the existing
+  per-material buttons (dashboard and material detail) use the same flow. Instead of the
+  old stripped-down draft editor, they open the standard New purchase slideover with the
+  supplier and lines pre-filled — each line's quantity set to the smallest whole multiple
+  of the material's typical reorder qty that clears its warning threshold, priced at the
+  last known unit cost.
+
 ## [0.12.0] - 2026-09-04
 
 Composing a purchase order is now a forecasting check rather than a data-entry form, and

@@ -127,10 +127,6 @@ class MaterialRead(MaterialBase):
     classification: ResolvedClassificationRead | None = None
 
 
-class DraftPurchaseCreate(BaseModel):
-    qty: Decimal | None = None
-
-
 class MaterialAdjustmentCreate(BaseModel):
     mode: MaterialAdjustmentMode = MaterialAdjustmentMode.adjust
     value: Decimal

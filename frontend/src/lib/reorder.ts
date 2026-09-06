@@ -90,6 +90,48 @@ export function suggestReorderQty(m: Material): number {
   return Math.max(grain, Math.ceil(target / grain) * grain);
 }
 
+/**
+ * How much of `m` to put on a draft purchase raised straight from a "Time to stockout"
+ * alert: the lowest whole multiple of its own `typical_reorder_qty` that lifts projected
+ * cover back over the forecast warning threshold.
+ *
+ * `warningWeeks` is GeneralSettings.forecast_warning_weeks; the material's lead time is
+ * added on top, mirroring how services/forecasting.py decides "warning" in the first place,
+ * so the ordered quantity is actually enough to clear the alert rather than landing just
+ * inside it. Each unit buys `1 / rate` weeks of cover, so the shortfall in weeks times the
+ * rate is the units needed before rounding up to a whole number of typical-order steps.
+ *
+ * Falls back to `suggestReorderQty` when there's no typical reorder qty to step by, and to
+ * a plain reorder-threshold top-up when there's no consumption rate to project weeks from.
+ */
+export function qtyToClearWarning(m: Material, warningWeeks: number): number {
+  const typical = Number(m.typical_reorder_qty);
+  if (!Number.isFinite(typical) || typical <= 0) return suggestReorderQty(m);
+
+  const rate = Number(m.consumption_rate_per_week) || 0;
+  const currentWeeks =
+    m.weeks_of_supply != null ? Number(m.weeks_of_supply) : null;
+  // 5 business days per week — the same conversion services/forecasting.py uses to fold a
+  // lead time in business days into its weeks-based thresholds.
+  const leadWeeks = Math.max(0, Number(m.lead_time_days) || 0) / 5;
+  const targetWeeks = Math.max(0, warningWeeks) + leadWeeks;
+
+  let needed: number;
+  if (rate > 0 && currentWeeks != null && Number.isFinite(currentWeeks)) {
+    needed = (targetWeeks - currentWeeks) * rate;
+  } else {
+    // No usable forecast — top the on-hand/on-order position up over the manual floor.
+    const position =
+      (Number(m.current_qty) || 0) -
+      (Number(m.allocated_qty) || 0) +
+      (Number(m.on_order_qty) || 0);
+    needed = (Number(m.reorder_threshold) || 0) - position;
+  }
+
+  const multiples = Math.max(1, Math.ceil(needed / typical));
+  return multiples * typical;
+}
+
 export type CoverTone = "red" | "amber" | "green" | "muted";
 
 /** Red under 2 weeks of cover, amber under 4, green above; muted with no figure. Matches

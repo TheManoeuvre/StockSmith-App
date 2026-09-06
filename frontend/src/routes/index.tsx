@@ -1,12 +1,10 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import type { ReactNode } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { dashboardApi } from "../api/dashboard";
-import { materialsApi } from "../api/materials";
 import type { DashboardSummary, ListingPlatform, LowStockMaterial } from "../api/types";
 import { Badge } from "../components/common/Badge";
-import { ErrorBanner } from "../components/common/ErrorBanner";
-import { GroupHeaderRow, Th } from "../components/common/ListTable";
+import { Th } from "../components/common/ListTable";
 import { formatDayMonth, roundQty } from "../lib/format";
 import { formatMoney } from "../lib/money";
 import {
@@ -85,23 +83,24 @@ export const Route = createFileRoute("/")({
 
 function Dashboard() {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({
     queryKey: ["dashboard-summary"],
     queryFn: dashboardApi.summary,
   });
 
-  const draftPurchaseMutation = useMutation({
-    mutationFn: (materialId: number) =>
-      materialsApi.createDraftPurchase(materialId),
-    onSuccess: (purchase) => {
-      queryClient.invalidateQueries({ queryKey: ["purchases"] });
-      navigate({
-        to: "/purchases/$purchaseId",
-        params: { purchaseId: String(purchase.id) },
-      });
-    },
-  });
+  // Open the shared "New purchase" slideover pre-filled from a stockout alert: the supplier
+  // (taken from the group, all rows in it share one) plus every at-risk material as a line.
+  // new.tsx computes the quantities from each material's typical reorder qty.
+  const openDraftPurchase = (rows: LowStockMaterial[]) =>
+    navigate({
+      to: "/purchases/new",
+      search: {
+        ...(rows[0]?.supplier_id != null
+          ? { supplierId: rows[0].supplier_id }
+          : {}),
+        materialIds: rows.map((m) => m.id),
+      },
+    });
 
   if (isLoading) return <p>Loading dashboard…</p>;
   if (error) return <p className="text-red-600">{(error as Error).message}</p>;
@@ -312,11 +311,29 @@ function Dashboard() {
                 const lead = formatLeadTime(group.materials[0]?.lead_time_days);
                 return (
                 <tbody key={group.supplierName}>
-                  <GroupHeaderRow
-                    label={lead ? `${group.supplierName} · ${lead}` : group.supplierName}
-                    count={group.materials.length}
-                    colSpan={7}
-                  />
+                  <tr className="bg-slate-100">
+                    <th
+                      colSpan={6}
+                      className="p-2 text-left text-[11.5px] font-semibold text-slate-700"
+                    >
+                      {lead
+                        ? `${group.supplierName} · ${lead}`
+                        : group.supplierName}
+                      <span className="ml-2 text-[10.5px] font-normal text-slate-500">
+                        {group.materials.length}{" "}
+                        {group.materials.length === 1 ? "item" : "items"}
+                      </span>
+                    </th>
+                    <th className="p-2 text-right">
+                      <button
+                        onClick={() => openDraftPurchase(group.materials)}
+                        title="Draft one purchase covering every at-risk material from this supplier"
+                        className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-normal text-amber-800"
+                      >
+                        Create draft purchase
+                      </button>
+                    </th>
+                  </tr>
                   {group.materials.map((m) => (
                     <tr key={m.id} className="border-b border-slate-100">
                       <td className="p-2">{m.name}</td>
@@ -343,7 +360,7 @@ function Dashboard() {
                       </td>
                       <td className="p-2">
                         <button
-                          onClick={() => draftPurchaseMutation.mutate(m.id)}
+                          onClick={() => openDraftPurchase([m])}
                           className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800"
                         >
                           Create draft purchase
@@ -356,7 +373,6 @@ function Dashboard() {
               })}
             </table>
           )}
-          <ErrorBanner error={draftPurchaseMutation.error} />
         </Card>
 
         <div className="flex flex-col gap-6">

@@ -1,9 +1,11 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { appSettingsApi } from "../../api/appSettings";
 import { materialsApi } from "../../api/materials";
 import { purchasesApi, type PurchaseLineInput } from "../../api/purchases";
 import { suppliersApi } from "../../api/suppliers";
+import type { Material } from "../../api/types";
 import { NewPurchaseLineEditor } from "../../components/purchases/NewPurchaseLineEditor";
 import { PurchaseStockAlerts } from "../../components/purchases/PurchaseStockAlerts";
 import { DetailPanel } from "../../components/common/DetailPanel";
@@ -13,10 +15,34 @@ import { FieldRow } from "../../components/common/FieldRow";
 import { Stat } from "../../components/common/Stat";
 import { formatMoney } from "../../lib/money";
 import { displayQty, formatDayMonth, isLowStock } from "../../lib/format";
-import { coverOnArrival } from "../../lib/reorder";
+import { coverOnArrival, qtyToClearWarning } from "../../lib/reorder";
 
 export const Route = createFileRoute("/purchases/new")({
   component: NewPurchase,
+  // Optional deep-link params from the dashboard's "Time to stockout" alerts: which supplier
+  // to pre-select, and which materials to seed as order lines (quantities computed on load
+  // from each material's typical reorder qty). Anything that isn't a positive integer is
+  // dropped rather than rejected, so a stale link just opens an empty new-purchase panel.
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { supplierId?: number; materialIds?: number[] } => {
+    const supplierId = Number(search.supplierId);
+    const raw = search.materialIds;
+    const list = Array.isArray(raw)
+      ? raw
+      : typeof raw === "number"
+        ? [raw]
+        : typeof raw === "string" && raw.length > 0
+          ? raw.split(",")
+          : [];
+    const materialIds = list
+      .map((v) => Number(v))
+      .filter((n) => Number.isInteger(n) && n > 0);
+    return {
+      ...(Number.isInteger(supplierId) && supplierId > 0 ? { supplierId } : {}),
+      ...(materialIds.length > 0 ? { materialIds } : {}),
+    };
+  },
 });
 
 const money = (n: number) => formatMoney(String(n), "GBP");
@@ -24,6 +50,8 @@ const money = (n: number) => formatMoney(String(n), "GBP");
 function NewPurchase() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const { supplierId: seedSupplierId, materialIds: seedMaterialIds } =
+    Route.useSearch();
   const { data: materials } = useQuery({
     queryKey: ["materials"],
     queryFn: materialsApi.list,
@@ -31,6 +59,10 @@ function NewPurchase() {
   const { data: suppliers } = useQuery({
     queryKey: ["suppliers"],
     queryFn: suppliersApi.list,
+  });
+  const { data: forecastSettings } = useQuery({
+    queryKey: ["settings", "forecast-settings"],
+    queryFn: appSettingsApi.getForecastSettings,
   });
 
   const [supplier, setSupplier] = useState("");
@@ -41,6 +73,41 @@ function NewPurchase() {
   const [notes, setNotes] = useState("");
   const [deliveryCost, setDeliveryCost] = useState("");
   const [lines, setLines] = useState<PurchaseLineInput[]>([]);
+
+  // One-shot seed from the dashboard's "Create draft purchase" deep-link. Waits until
+  // materials, suppliers and forecast settings are all loaded so the supplier name and the
+  // per-line quantities resolve in one go, and runs exactly once so it never fights the
+  // user's later edits (or re-seeds on a refetch).
+  const seededFromDeepLink = useRef(false);
+  useEffect(() => {
+    if (seededFromDeepLink.current) return;
+    if (seedSupplierId == null && !seedMaterialIds?.length) return;
+    if (!materials || !suppliers || !forecastSettings) return;
+    seededFromDeepLink.current = true;
+
+    if (seedSupplierId != null) {
+      const match = suppliers.find((s) => s.id === seedSupplierId);
+      if (match) {
+        setSupplier(match.name);
+        setSupplierId(match.id);
+      }
+    }
+
+    const warningWeeks = Number(forecastSettings.forecast_warning_weeks) || 0;
+    const seededLines: PurchaseLineInput[] = (seedMaterialIds ?? [])
+      .map((mid) => materials.find((m) => m.id === mid))
+      .filter((m): m is Material => m != null)
+      .map((m) => {
+        const qty = qtyToClearWarning(m, warningWeeks);
+        const unitCost = Number(m.avg_unit_cost) || 0;
+        return {
+          material_id: m.id,
+          qty: String(qty),
+          total_cost: unitCost > 0 ? (qty * unitCost).toFixed(2) : "",
+        };
+      });
+    if (seededLines.length > 0) setLines(seededLines);
+  }, [seedSupplierId, seedMaterialIds, materials, suppliers, forecastSettings]);
 
   // Materials that would show in the Stock alerts card — their prices are worth pulling
   // alongside the lines' so the "at last price" figure there is the real one.
