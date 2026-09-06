@@ -37,6 +37,7 @@ export function PurchaseStockAlerts({
 
   const alerts: Alert[] = materials
     .filter((m) => {
+      if (!m.is_active) return false;
       if (onALine.has(m.id) || Number(m.reorder_threshold) <= 0) return false;
       // Below the reorder point, or forecast to run out inside the lead-time window.
       // "insufficient_data" on its own is not an alert — a well-stocked material with no
