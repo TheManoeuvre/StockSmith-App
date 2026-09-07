@@ -116,12 +116,6 @@ Phase 4 of the backlog-burndown plan rejects this configuration at generation ti
 
 ## Purchasing & reorder intelligence
 
-### Bulk "draft all purchases" for a supplier
-
-**Problem:** Surfaced while reviewing the `StockSmith.dc.html` design canvas — its dashboard stockout panel groups short materials by supplier and offers one button that drafts every short material in a group as a single purchase order. Today a purchase can only be drafted one material at a time, so clearing a supplier's whole shortfall means repeating the draft flow per material.
-
-**Ask:** A backend endpoint that batches draft-purchase creation by supplier (one draft PO per supplier, one line per short material), plus a "draft all" action on the dashboard's stockout-by-supplier grouping.
-
 ### Material cost-trend indicator
 
 **Problem:** Surfaced via the design canvas, which shows a read-only "+1.7% since June" price-change stat on a material's Purchasing tab. Today the only record of cost history is raw stock-movement rows — there's no derived trend figure.

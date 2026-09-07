@@ -1,5 +1,3 @@
-from decimal import Decimal
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
@@ -10,11 +8,10 @@ from sqlalchemy.orm import selectinload
 from app.deps import get_db, require_auth
 from app.models.colour import Colour
 from app.models.material import Material
-from app.models.purchase import MaterialPurchase, Purchase
-from app.schemas.material import DraftPurchaseCreate, MaterialAdjustmentCreate, MaterialCreate, MaterialRead, MaterialUpdate
+from app.schemas.material import MaterialAdjustmentCreate, MaterialCreate, MaterialRead, MaterialUpdate
 from app.services.colours import resolve_updates as resolve_colour_updates
 from app.services.material_categories import resolve_updates as resolve_category_updates
-from app.schemas.purchase import MaterialStockHistoryRead, PurchaseRead
+from app.schemas.purchase import MaterialStockHistoryRead
 from app.services import abc
 from app.services.costing import create_adjustment, get_on_order_qty_by_material
 from app.services.csv_io import export_materials_csv, import_materials_csv
@@ -300,36 +297,6 @@ async def get_stock_history(
 ) -> list[dict]:
     result = await session.execute(_STOCK_HISTORY_SQL, {"material_id": material_id, "limit": limit})
     return [dict(row._mapping) for row in result]
-
-
-@router.post("/{material_id}/draft-purchase", response_model=PurchaseRead, status_code=status.HTTP_201_CREATED)
-async def create_draft_purchase(
-    material_id: int, payload: DraftPurchaseCreate, session: AsyncSession = Depends(get_db)
-) -> Purchase:
-    """Creates a pending (ordered) draft Purchase pre-filled from the material's
-    remembered supplier/qty, so a low-stock alert can become a real purchase order
-    in one click — the frontend navigates to the purchase's edit page afterwards so
-    the user reviews/adjusts it before it means anything real."""
-    material = await session.get(Material, material_id)
-    if material is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Material not found")
-
-    qty = payload.qty or material.typical_reorder_qty or Decimal("1")
-
-    purchase = Purchase(supplier_id=material.default_supplier_id)
-    purchase.lines = [MaterialPurchase(material_id=material_id, qty=qty, total_cost=Decimal("0"))]
-    session.add(purchase)
-    await session.commit()
-
-    result = await session.execute(
-        select(Purchase)
-        .where(Purchase.id == purchase.id)
-        .options(
-            selectinload(Purchase.lines).selectinload(MaterialPurchase.receipts),
-            selectinload(Purchase.supplier),
-        )
-    )
-    return result.scalar_one()
 
 
 @router.post("/{material_id}/adjustments", response_model=MaterialRead)

@@ -7,6 +7,7 @@ import {
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
+import type { FakeRoute } from "../../test/fakeBackend";
 
 vi.mock("../../api/client", async () =>
   (await import("../../test/fakeBackend")).clientMock(),
@@ -127,11 +128,15 @@ function routes() {
   ];
 }
 
-async function renderNew() {
-  setRoutes(routes());
+async function renderNew(
+  opts: { path?: string; extraRoutes?: FakeRoute[] } = {},
+) {
+  setRoutes([...(opts.extraRoutes ?? []), ...routes()]);
   const router = createRouter({
     routeTree,
-    history: createMemoryHistory({ initialEntries: ["/purchases/new"] }),
+    history: createMemoryHistory({
+      initialEntries: [opts.path ?? "/purchases/new"],
+    }),
   });
   render(
     <QueryClientProvider
@@ -217,6 +222,36 @@ it("adds a recommended material from Stock alerts", async () => {
   await waitFor(() =>
     expect(screen.getByLabelText("Quantity")).toHaveValue(800),
   );
+});
+
+it("seeds the supplier and a costed line from a stockout deep-link", async () => {
+  await renderNew({
+    path: "/purchases/new?supplierId=3&materialIds=7",
+    extraRoutes: [
+      {
+        method: "GET" as const,
+        path: "/settings/forecast-settings",
+        respond: () => ({
+          forecast_warning_weeks: "6",
+          forecast_critical_weeks: "3",
+          forecast_lookback_weeks: 12,
+          default_lead_time_days: 5,
+        }),
+      },
+    ],
+  });
+
+  // Supplier pre-selected from the link.
+  await waitFor(() =>
+    expect(screen.getByLabelText("Supplier")).toHaveValue("Polymax"),
+  );
+
+  // PLA Black: 2 wk cover now, 6 wk warning + 1 wk (5-day) lead = 7 wk target, 100/wk →
+  // 500 short, rounded up to one 800-unit typical order. Costed at the £0.02 avg unit cost.
+  await waitFor(() =>
+    expect(screen.getByLabelText("Quantity")).toHaveValue(800),
+  );
+  expect(screen.getByLabelText("Line total")).toHaveValue(16);
 });
 
 it("Discard returns to the list without a request", async () => {

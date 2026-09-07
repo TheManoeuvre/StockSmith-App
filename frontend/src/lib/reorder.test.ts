@@ -4,6 +4,7 @@ import {
   coverOnArrival,
   coverTone,
   projectedOnHand,
+  qtyToClearWarning,
   reorderGranularity,
   suggestReorderQty,
 } from "./reorder";
@@ -152,6 +153,81 @@ describe("suggestReorderQty", () => {
         mat({ unit: "each", reorder_threshold: "0", current_qty: "0" }),
       ),
     ).toBe(1);
+  });
+});
+
+describe("qtyToClearWarning", () => {
+  it("orders the fewest typical-order steps that clear the warning weeks", () => {
+    // rate 100/wk, cover 2 wk now, warning 6 wk, no lead → 4 wk short × 100 = 400 needed.
+    // Typical order 200 → ceil(400 / 200) = 2 steps → 400.
+    expect(
+      qtyToClearWarning(
+        mat({
+          typical_reorder_qty: "200",
+          consumption_rate_per_week: "100",
+          weeks_of_supply: "2",
+          lead_time_days: 0,
+        }),
+        6,
+      ),
+    ).toBe(400);
+  });
+
+  it("folds the lead time into the target the same way the forecast does", () => {
+    // Same figures, but a 10-business-day lead adds 2 wk to the target (8 wk): 6 wk short
+    // × 100 = 600 → ceil(600 / 200) = 3 steps → 600.
+    expect(
+      qtyToClearWarning(
+        mat({
+          typical_reorder_qty: "200",
+          consumption_rate_per_week: "100",
+          weeks_of_supply: "2",
+          lead_time_days: 10,
+        }),
+        6,
+      ),
+    ).toBe(600);
+  });
+
+  it("falls back to suggestReorderQty when there is no typical order qty", () => {
+    // threshold 1000, on hand 240 → suggestReorderQty rounds the 760 gap up to 800.
+    expect(
+      qtyToClearWarning(
+        mat({ unit: "g", reorder_threshold: "1000", current_qty: "240" }),
+        6,
+      ),
+    ).toBe(800);
+  });
+
+  it("tops up over the reorder floor in typical steps when there is no rate", () => {
+    // No forecast: position 200, floor 1000 → 800 short → ceil(800 / 300) = 3 → 900.
+    expect(
+      qtyToClearWarning(
+        mat({
+          typical_reorder_qty: "300",
+          reorder_threshold: "1000",
+          current_qty: "200",
+          allocated_qty: "0",
+          on_order_qty: "0",
+        }),
+        6,
+      ),
+    ).toBe(900);
+  });
+
+  it("never suggests less than one typical order", () => {
+    // Already well above the target — still order one step.
+    expect(
+      qtyToClearWarning(
+        mat({
+          typical_reorder_qty: "300",
+          consumption_rate_per_week: "100",
+          weeks_of_supply: "20",
+          lead_time_days: 0,
+        }),
+        6,
+      ),
+    ).toBe(300);
   });
 });
 
