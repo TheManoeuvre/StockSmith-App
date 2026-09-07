@@ -3,9 +3,9 @@
 ## Status
 
 **Stages 1–4 implemented 2026-09-07** (PR #55). **Structural-failure marking (the Stage 4
-rider) implemented 2026-09-07** on a follow-up branch. Stages 5–7 remain pending — pick
-them up only if the Stage 2 API-usage numbers show the daily budget is still tight in
-practice. What landed:
+rider) and Stage 5 implemented 2026-09-07** on a follow-up branch. Stages 6–7 remain
+pending — pick them up only if the Stage 2 API-usage numbers show the daily budget is
+still tight in practice. What landed:
 
 - **Stage 1** — `_RATE_LIMIT_MAX_SLEEP_SECONDS` cap (120s) in both adapters; `_tick`
   bounded by `asyncio.wait_for` (`_COMMIT_SYNC_TIMEOUT_SECONDS` = 600) with a recorded
@@ -36,8 +36,16 @@ practice. What landed:
   fix. Both `docs/backlog.md` entries this completes ("…doesn't vary by variation" and
   "Periodic reconciliation for failed listing pushes", the latter via Stage 4) are
   deleted.
-
-Original plan follows.
+- **Stage 5** — `enqueue_for_material` now schedules ONE debounced job per material
+  (`_pending_materials`, `_debounced_material_diff`) instead of one debounced push per
+  affected product/variant. When it fires, `_diff_and_enqueue_material` runs a single
+  batched buildability pass (`_resolve_targets_bulk` over
+  `get_max_buildable_by_product` + `compute_variants_buildability_bulk` +
+  `compute_max_sellable_bulk`), diffs each affected listing's resolved target against
+  `last_pushed_qty`, and `_enqueue`s only the entries that moved — the same set of real
+  pushes Stage 3 alone would have produced, reached in one session instead of ~N.
+  `quiesce()` cancels the new jobs too. Callers (`costing.recompute_material`,
+  `kitting.py`) unchanged — the `session` arg is now unused (diff runs later on its own).
 
 Build plan, written 2026-09-07 after diagnosing an Etsy auto-sync stall: the sync loop
 was parked ~6 hours inside a single `asyncio.sleep(Retry-After)` after the day's Etsy API

@@ -25,9 +25,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   touches a shared material (a box, a common filament) used to re-push every listing that
   uses it, even when the number was unchanged — thousands of needless marketplace calls.
   Now a push is sent only when the quantity StockSmith would send actually differs from
-  what the marketplace already holds, and automatic pushes pause automatically as the
-  day's API usage nears the platform's budget (order sync is never paused). Each platform's
-  Sync panel shows calls-used-today against that budget.
+  what the marketplace already holds — decided in one batched pass per material rather
+  than by waking a task for every listing that could be affected — and automatic pushes
+  pause automatically as the day's API usage nears the platform's budget (order sync is
+  never paused). Each platform's Sync panel shows calls-used-today against that budget.
 - **A background sweep re-checks listing quantities and retries failed pushes.** Runs
   hourly, re-asserting any listing whose quantity hasn't been confirmed in a while and
   retrying pushes that previously errored — the periodic reconciliation the push path

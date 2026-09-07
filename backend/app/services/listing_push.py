@@ -41,6 +41,17 @@ _PUSH_ENABLED_PLATFORMS = (ListingPlatform.etsy, ListingPlatform.ebay)
 
 _pending: dict[tuple[int, int | None], asyncio.Task] = {}
 
+# One debounced "diff, then enqueue only what changed" job per material_id (Stage 5 of
+# docs/plan-listing-push-rate-reduction.md). enqueue_for_material used to _enqueue every
+# product/variant whose BOM references the material — up to ~130 asyncio tasks + sessions
+# + full buildability passes per ordinary stock movement, almost none of which changed the
+# number any listing would actually be sent. Now one job per material does a single
+# batched buildability pass, compares each affected listing's resolved target against its
+# last_pushed_qty watermark, and only _enqueue()s the ones that genuinely moved — the same
+# set of real pushes Stage 3 alone would have let through, reached without spawning the
+# work for the rest.
+_pending_materials: dict[int, asyncio.Task] = {}
+
 # (product_id, variant_id) keys whose automatic push was skipped because the platform's
 # daily API budget was near its limit (see platform_api_usage). services/listing_reconcile
 # re-enqueues these once usage falls back under the soft limit — normally after the
@@ -146,10 +157,154 @@ async def enqueue_for_material(session: AsyncSession, material_id: int) -> None:
     """Fans a material-quantity change out to every product/variant whose build or
     kitting BOM references it — the material-consumption half of the allocated/consumed-
     means-unavailable rule (the owner-based enqueue_for_owner above only covers direct
-    Product/ProductVariant stock changes)."""
+    Product/ProductVariant stock changes).
+
+    Schedules ONE debounced job per material rather than one debounced push per affected
+    product/variant. When it fires (_diff_and_enqueue_material) it does a single batched
+    buildability pass over the affected products, diffs each affected listing's freshly
+    resolved target quantity against its last_pushed_qty watermark, and only then
+    _enqueue()s the entries that actually changed. The passed-in `session` is intentionally
+    unused: like enqueue_for_owner, this must be safe to call before the caller commits,
+    so the diff runs _DEBOUNCE_SECONDS later against its own fresh session."""
+    if material_id in _pending_materials:
+        return  # already scheduled — the diff recomputes fresh, nothing to reset
+    _pending_materials[material_id] = asyncio.create_task(_debounced_material_diff(material_id))
+
+
+async def _debounced_material_diff(material_id: int) -> None:
+    try:
+        await asyncio.sleep(_DEBOUNCE_SECONDS)
+        async with async_session_factory() as session:
+            await _diff_and_enqueue_material(session, material_id)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("Unexpected error diffing material_id=%s for listing pushes", material_id)
+    finally:
+        _pending_materials.pop(material_id, None)
+
+
+async def _diff_and_enqueue_material(session: AsyncSession, material_id: int) -> list[tuple[int, int | None]]:
+    """The batched core of enqueue_for_material: resolve every affected listing's target
+    quantity in one buildability pass and _enqueue only the (product_id, variant_id)
+    entries whose target differs from what some live listing was last sent. Returns the
+    keys it enqueued (for logging and tests)."""
     result = await session.execute(_PRODUCTS_USING_MATERIAL_SQL, {"material_id": material_id})
-    for row in result:
-        _enqueue(row.product_id, row.variant_id)
+    affected: set[tuple[int, int | None]] = {(row.product_id, row.variant_id) for row in result}
+    if not affected:
+        return []
+
+    targets = await _resolve_targets_bulk(session, affected)
+
+    product_ids = {pid for pid, _ in affected}
+    listing_rows = (
+        await session.execute(
+            select(Listing).where(
+                Listing.product_id.in_(product_ids),
+                Listing.platform.in_(_PUSH_ENABLED_PLATFORMS),
+                Listing.external_listing_id.is_not(None),
+            )
+        )
+    ).scalars()
+    listings_by_key: dict[tuple[int, int | None], list[Listing]] = {}
+    for listing in listing_rows:
+        listings_by_key.setdefault((listing.product_id, listing.variant_id), []).append(listing)
+
+    enqueued: list[tuple[int, int | None]] = []
+    for key in affected:
+        target = targets.get(key)
+        if target is None:
+            continue
+        # A listing already holding this number, or one that can't be pushed until the
+        # user fixes it on the marketplace (Stage 1 rider), is not a reason to schedule a
+        # push. Enqueue only when some pushable listing's watermark actually differs.
+        moved = any(
+            listing.structural_push_block is None and listing.last_pushed_qty != target
+            for listing in listings_by_key.get(key, [])
+        )
+        if moved:
+            _enqueue(*key)
+            enqueued.append(key)
+
+    if enqueued:
+        logger.info(
+            "Material %s change moved %d of %d affected listing target(s) — enqueued those",
+            material_id,
+            len(enqueued),
+            len(affected),
+        )
+    return enqueued
+
+
+async def _resolve_targets_bulk(
+    session: AsyncSession, keys: set[tuple[int, int | None]]
+) -> dict[tuple[int, int | None], int | None]:
+    """The push quantity resolve_push_quantity / _resolve_max_sellable computes, for a
+    whole batch of (product_id, variant_id) keys in one buildability pass instead of one
+    per key. Same inputs, same per-product push_buildable_capacity choice — kept in step
+    with _resolve_max_sellable deliberately (see resolve_push_quantity's note on why a
+    divergence would be a bug the user can't clear)."""
+    by_product: dict[int, set[int | None]] = {}
+    for pid, vid in keys:
+        by_product.setdefault(pid, set()).add(vid)
+
+    products = {
+        p.id: p
+        for p in (
+            await session.execute(select(Product).where(Product.id.in_(by_product.keys())))
+        ).scalars()
+    }
+    max_buildable_by_product = await buildability.get_max_buildable_by_product(session)
+    expected_max_buildable_by_product = await buildability.get_expected_max_buildable_by_product(session)
+
+    targets: dict[tuple[int, int | None], int | None] = {}
+    for pid, vids in by_product.items():
+        product = products.get(pid)
+        if product is None:
+            for vid in vids:
+                targets[(pid, vid)] = None
+            continue
+
+        if None in vids:
+            ms, _mr, _ems, _emr, tms, _tmr, _bom = await kitting.compute_max_sellable(
+                session,
+                pid,
+                None,
+                product.current_stock,
+                product.allocated_qty,
+                expected_max_buildable_by_product.get(pid),
+                product.platform_ceiling_qty,
+                max_buildable_by_product.get(pid),
+            )
+            targets[(pid, None)] = tms if product.push_buildable_capacity else ms
+
+        real_vids = sorted(v for v in vids if v is not None)
+        if not real_vids:
+            continue
+        variants = {
+            v.id: v
+            for v in (
+                await session.execute(select(ProductVariant).where(ProductVariant.id.in_(real_vids)))
+            ).scalars()
+        }
+        present = [variants[v] for v in real_vids if v in variants]
+        bb = await buildability.compute_variants_buildability_bulk(session, pid, [v.id for v in present])
+        ms_by_variant = await kitting.compute_max_sellable_bulk(
+            session,
+            pid,
+            present,
+            {vid: bb[vid][1] for vid in bb},
+            product.platform_ceiling_qty,
+            {vid: bb[vid][0] for vid in bb},
+        )
+        for vid in real_vids:
+            if vid not in variants:
+                targets[(pid, vid)] = None
+                continue
+            tup = ms_by_variant[vid]
+            targets[(pid, vid)] = tup[4] if product.push_buildable_capacity else tup[0]
+
+    return targets
 
 
 def _enqueue(product_id: int, variant_id: int | None) -> None:
@@ -189,7 +344,9 @@ async def quiesce(timeout: float = 5.0) -> None:
     # Deferred keys are only a hint to re-enqueue later; the next stock movement re-enqueues
     # anything real, and a restore may invalidate the product ids entirely.
     _deferred.clear()
-    tasks = list(_pending.values())
+    # The per-material diff jobs are the same kind of safe-to-drop debounce timer as the
+    # pushes themselves — cancel them too so a restore isn't raced by one firing mid-stage.
+    tasks = list(_pending.values()) + list(_pending_materials.values())
     if not tasks:
         return
     for task in tasks:
@@ -198,6 +355,7 @@ async def quiesce(timeout: float = 5.0) -> None:
     # otherwise hold the restore open for as long as that request takes to time out.
     await asyncio.wait(tasks, timeout=timeout)
     _pending.clear()
+    _pending_materials.clear()
 
 
 async def resolve_push_quantity(session: AsyncSession, product_id: int, variant_id: int | None) -> int | None:
