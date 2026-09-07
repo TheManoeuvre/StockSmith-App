@@ -184,17 +184,41 @@ async def test_an_empty_scope_is_refused_rather_than_creating_a_take_with_no_lin
 
 
 async def test_overlapping_takes_warn_and_proceed(session):
-    """A soft lock: reported, never enforced."""
+    """A *partial* overlap is a soft lock: reported, never enforced."""
     await _settings(session)
-    await _material(session, qty=Decimal(5))
+    await _material(session, qty=Decimal(5))  # category "resin"
     await session.commit()
-    first, _ = await stock_takes.create_stock_take(session, MATERIALS_ONLY)
+    resin_only = StockTakeScope(
+        include_materials=True,
+        material_category_ids=[(await _category(session, "resin")).id],
+    )
+    first, _ = await stock_takes.create_stock_take(session, resin_only)
 
+    # A wider scope that catches the same material — overlapping, but not the same scope.
     second, warnings = await stock_takes.create_stock_take(session, MATERIALS_ONLY)
 
     assert second.id != first.id
     assert len(await _lines(session, second.id)) == 1
     assert [w.other_stock_take_id for w in warnings] == [first.id]
+
+
+async def test_a_second_open_take_on_the_identical_scope_is_refused(session):
+    """An exact-scope duplicate is the start-flow double-fire (seen 2026-09-02); block it."""
+    await _settings(session)
+    await _material(session, qty=Decimal(5))
+    await session.commit()
+    first, _ = await stock_takes.create_stock_take(session, MATERIALS_ONLY)
+
+    with pytest.raises(HTTPException) as exc:
+        await stock_takes.create_stock_take(session, MATERIALS_ONLY)
+    assert exc.value.status_code == 409
+    assert f"#{first.id}" in exc.value.detail
+
+    # Once the first take is closed, the same scope is allowed again.
+    first.status = StockTakeStatus.closed
+    await session.commit()
+    again, _ = await stock_takes.create_stock_take(session, MATERIALS_ONLY)
+    assert again.id != first.id
 
 
 # --- approve ---------------------------------------------------------------------------
