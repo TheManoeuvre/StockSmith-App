@@ -2,9 +2,10 @@
 
 ## Status
 
-**Stages 1–4 implemented 2026-09-07** (same branch as the diagnosis). Stages 5–7 remain
-pending — pick them up only if the Stage 2 API-usage numbers show the daily budget is
-still tight in practice. What landed:
+**Stages 1–4 implemented 2026-09-07** (PR #55). **Structural-failure marking (the Stage 4
+rider) implemented 2026-09-07** on a follow-up branch. Stages 5–7 remain pending — pick
+them up only if the Stage 2 API-usage numbers show the daily budget is still tight in
+practice. What landed:
 
 - **Stage 1** — `_RATE_LIMIT_MAX_SLEEP_SECONDS` cap (120s) in both adapters; `_tick`
   bounded by `asyncio.wait_for` (`_COMMIT_SYNC_TIMEOUT_SECONDS` = 600) with a recorded
@@ -20,9 +21,21 @@ still tight in practice. What landed:
   Stage 3b watermark skip covers both.
 - **Stage 4** — `listing_reconcile` loop (hourly, started from lifespan + restore),
   `_MAX_PER_RUN` = 25 per platform, `_STALE_AFTER` = 12h; also drives
-  `platform_api_usage.flush()` and `listing_push.drain_deferred()`. Structural-failure
-  marking (the "quantity must be consistent across all products" rider) is **not** done —
-  still a `docs/backlog.md` entry.
+  `platform_api_usage.flush()` and `listing_push.drain_deferred()`.
+- **Stage 4 rider — structural-failure marking.** `listings.structural_push_block` /
+  `structural_push_block_at` (migration `f3b1d7e05a29`). `EtsyAdapter.push_listing_quantity`
+  raises `PlatformListingStructuralError` when its GET shows an empty `quantity_on_property`
+  alongside >1 live product (the "quantity must be consistent across all products" dead
+  end), before the PUT. `listing_push._push_one` persists the marker (message names the
+  fix) and writes **no** `PlatformListingPush` row; a later confirmed push clears it.
+  `_push_now` and `listing_reconcile._listings_to_check` skip marked listings;
+  `listing_reconcile._marked_to_reprobe` re-probes them on a 24h cadence.
+  `sync_status._failing_push_counts` excludes them and `_structurally_unpushable_counts`
+  surfaces them separately on `PlatformSyncSummary` (+ `GET /platforms/{platform}/
+  structural-push-blocks` and a Sync-panel list) so the badge points at the listing to
+  fix. Both `docs/backlog.md` entries this completes ("…doesn't vary by variation" and
+  "Periodic reconciliation for failed listing pushes", the latter via Stage 4) are
+  deleted.
 
 Original plan follows.
 

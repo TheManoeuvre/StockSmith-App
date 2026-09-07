@@ -62,6 +62,18 @@ class Listing(Base):
     # push fan-out skip the no-op GET+PUT that dominated the 2026-09-07 API-budget blowout.
     last_pushed_qty: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_pushed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Non-NULL when a quantity push can NEVER succeed with the listing configured as it is
+    # on the marketplace — currently only the Etsy "quantity doesn't vary by variation"
+    # case (services/platforms/etsy.push_listing_quantity detects it from the GET it
+    # already does). The value is a human-readable sentence naming the fix. While set:
+    # listing_push._push_now skips the listing outright (no GET, no PUT), the reconcile
+    # sweep's normal selection skips it, and sync_status._failing_push_counts leaves it
+    # out of the menu-bar badge — a structural block is something the user must fix on the
+    # marketplace, not a retry that will eventually clear. structural_push_block_at paces
+    # the reconcile sweep's slow re-probe (a fixed listing clears the marker on the next
+    # successful push). Cleared by services/listing_push._push_one on any confirmed push.
+    structural_push_block: Mapped[str | None] = mapped_column(String, nullable=True)
+    structural_push_block_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     external_title: Mapped[str | None] = mapped_column(String, nullable=True)
     external_variation: Mapped[str | None] = mapped_column(String, nullable=True)
     external_state: Mapped[str | None] = mapped_column(String, nullable=True)

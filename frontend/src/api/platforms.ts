@@ -57,6 +57,17 @@ export interface ListingPushPage {
   total: number;
 }
 
+export interface StructuralPushBlock {
+  product_id: number;
+  product_name: string | null;
+  variant_id: number | null;
+  variant_name: string | null;
+  platform: ListingPlatform;
+  external_listing_id: string | null;
+  reason: string;
+  since: string | null;
+}
+
 export interface SyncPreviewLine {
   external_line_id: string;
   sku: string | null;
@@ -124,6 +135,10 @@ export interface PlatformSyncSummary {
   // Listings whose most recent outbound quantity push failed and was never retried —
   // separate from last_sync_error, which only covers inbound order sync.
   failing_push_count: number;
+  // Listings that can't receive a push until the user changes their setup on the
+  // marketplace (an Etsy listing whose quantity doesn't vary by variation). No retry
+  // clears these, so they're pointed at, not counted with failing_push_count.
+  structurally_unpushable_count: number;
   // Marketplace API calls made to this platform so far today (UTC) and the daily budget
   // they count against. As usage nears the budget, automatic quantity pushes stand down
   // so order sync keeps its headroom.
@@ -345,6 +360,8 @@ export const platformsApi = {
     api.patch<PlatformStatus>(`/platforms/${platform}/sync-settings`, payload),
   listingPushLog: (platform: ListingPlatform, limit: number, offset: number) =>
     api.get<ListingPushPage>(`/platforms/${platform}/listing-push-log?limit=${limit}&offset=${offset}`),
+  structuralPushBlocks: (platform: ListingPlatform) =>
+    api.get<StructuralPushBlock[]>(`/platforms/${platform}/structural-push-blocks`),
   getCredentials: (platform: ListingPlatform, environment: PlatformEnvironment = "production") =>
     api.get<PlatformCredential>(`/platforms/${platform}/credentials?environment=${environment}`),
   updateCredentials: (

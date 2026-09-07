@@ -14,6 +14,7 @@ from app.models.variant import ProductVariant
 from app.services import buildability, kitting, platform_api_usage
 from app.services.platforms import get_adapter
 from app.services.platforms.base import ExternalListingRef
+from app.services.platforms.errors import PlatformListingStructuralError
 from app.services.variants import compute_full_sku
 
 logger = logging.getLogger("stocksmith.listing_push")
@@ -315,6 +316,11 @@ async def _push_now(session: AsyncSession, product_id: int, variant_id: int | No
         )
     )
     for listing in result.scalars():
+        if listing.structural_push_block is not None:
+            # A per-SKU push can't succeed until the user fixes the listing on the
+            # marketplace — don't spend a GET on it here. The reconcile sweep re-probes
+            # it slowly and clears the marker once a push goes through (Stage 1 rider).
+            continue
         if listing.last_pushed_qty == max_sellable and listing.last_pushed_at is not None:
             # The marketplace already holds this number — the common case for a
             # shared-material change fanning out to a listing it doesn't actually gate.
@@ -386,6 +392,25 @@ async def _push_one(session: AsyncSession, listing: Listing, qty: int) -> None:
         adapter = await get_adapter(session, listing.platform)
         async with _get_listing_lock(listing.platform, listing.external_listing_id):
             await adapter.push_listing_quantity(session, connection, listing_ref, sku, qty)
+    except PlatformListingStructuralError as e:
+        # The listing can't accept a per-SKU push until the user changes its setup on the
+        # marketplace. Record that on the row so the fan-out and the badge stop treating
+        # it as a retryable failure, and refresh the timestamp so the reconcile sweep's
+        # re-probe waits a full window before checking again. No PlatformListingPush row:
+        # this isn't a failed attempt to retry, it's a standing config problem, and a
+        # stream of error rows would just re-inflate the count structural marking exists
+        # to remove.
+        if listing.structural_push_block != str(e):
+            logger.warning(
+                "Etsy listing for product_id=%s variant_id=%s is structurally unpushable: %s",
+                listing.product_id,
+                listing.variant_id,
+                e,
+            )
+        listing.structural_push_block = str(e)
+        listing.structural_push_block_at = datetime.now(timezone.utc)
+        await session.commit()
+        return
     except Exception as e:
         logger.warning(
             "Listing push failed for product_id=%s variant_id=%s platform=%s: %s",
@@ -408,6 +433,18 @@ async def _push_one(session: AsyncSession, listing: Listing, qty: int) -> None:
         return
 
     now = datetime.now(timezone.utc)
+    # A push that went through means whatever structural block was recorded is gone — the
+    # user fixed the listing on the marketplace. Clear it so the fan-out picks the listing
+    # back up (Stage 1 rider: "clear the marker if a later GET shows the config was
+    # fixed"; a successful push is exactly that GET).
+    if listing.structural_push_block is not None:
+        logger.info(
+            "Structural push block cleared for product_id=%s variant_id=%s — listing now accepts per-SKU pushes",
+            listing.product_id,
+            listing.variant_id,
+        )
+        listing.structural_push_block = None
+        listing.structural_push_block_at = None
     # last_pushed_* is the authoritative "what we last sent" watermark _push_now and the
     # reconcile sweep both read; last_synced_* is kept in step for the sync-check UI, which
     # still reads it.

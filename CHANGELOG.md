@@ -32,6 +32,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   hourly, re-asserting any listing whose quantity hasn't been confirmed in a while and
   retrying pushes that previously errored — the periodic reconciliation the push path
   never had.
+- **Etsy listings that can't be stocked per-variant are now flagged, not retried forever.**
+  When an Etsy listing's quantity isn't set to vary by its variation, every variant is
+  forced to share one number and StockSmith can't update them independently — previously
+  each attempt failed with Etsy's raw error and the sync warning count kept climbing with
+  no way to clear it. StockSmith now detects this from the listing itself, names the fix
+  ("turn on 'quantities vary' for the variation on Etsy"), and points you at the specific
+  listing in the Sync panel instead of counting a retry that can never succeed. It starts
+  pushing again on its own once the listing is fixed.
 - **"Create draft purchase" on the dashboard now opens the full New purchase panel.**
   The dashboard's "Time to stockout" section gains a per-supplier **Create draft purchase**
   button that drafts every at-risk material from that supplier in one order; the existing
