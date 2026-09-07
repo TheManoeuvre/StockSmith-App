@@ -29,6 +29,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   than by waking a task for every listing that could be affected — and automatic pushes
   pause automatically as the day's API usage nears the platform's budget (order sync is
   never paused). Each platform's Sync panel shows calls-used-today against that budget.
+- **Stock going *down* still pushes within seconds; stock going *up* rides the hourly
+  sweep.** A drop in available quantity is an overselling risk and is sent promptly as
+  before. An increase carries no such urgency, so it now waits for the background
+  reconcile sweep instead of spending a near-immediate marketplace call — and a tiny
+  upward wobble (a build-then-sell oscillation around a threshold) is skipped altogether
+  unless it is at least ~10% of the current quantity or brings the listing back to full
+  stock.
 - **A background sweep re-checks listing quantities and retries failed pushes.** Runs
   hourly, re-asserting any listing whose quantity hasn't been confirmed in a while and
   retrying pushes that previously errored — the periodic reconciliation the push path

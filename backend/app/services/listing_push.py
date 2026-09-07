@@ -52,6 +52,21 @@ _pending: dict[tuple[int, int | None], asyncio.Task] = {}
 # work for the rest.
 _pending_materials: dict[int, asyncio.Task] = {}
 
+# (product_id, variant_id) keys whose only pending change is an UPWARD move against the
+# last-pushed watermark (Stage 6). A downward move risks overselling and is dispatched on
+# the normal seconds-scale debounce; an upside-only move carries no such urgency, so it is
+# parked here and picked up by the next services/listing_reconcile sweep (hourly) instead
+# of spending a near-immediate push on it. Drained by listing_reconcile._tick.
+_reconcile_soon: set[tuple[int, int | None]] = set()
+
+# Upward-only deadband (Stage 6): an upward move is only worth acting on at all when it is
+# at least this fraction of what the marketplace currently holds — otherwise a build/sell
+# oscillation around a threshold thrashes the queue with ±1 changes. Never applied to a
+# downward move, and overridden when the listing has returned to its full resolved
+# capacity (nothing is constraining it, or it is back at the platform ceiling) so a run of
+# small increments can't leave the advertised quantity permanently understated.
+_UPWARD_DEADBAND_FRACTION = 0.10
+
 # (product_id, variant_id) keys whose automatic push was skipped because the platform's
 # daily API budget was near its limit (see platform_api_usage). services/listing_reconcile
 # re-enqueues these once usage falls back under the soft limit — normally after the
@@ -194,7 +209,7 @@ async def _diff_and_enqueue_material(session: AsyncSession, material_id: int) ->
     if not affected:
         return []
 
-    targets = await _resolve_targets_bulk(session, affected)
+    targets, at_capacity = await _resolve_targets_bulk(session, affected)
 
     product_ids = {pid for pid, _ in affected}
     listing_rows = (
@@ -211,39 +226,93 @@ async def _diff_and_enqueue_material(session: AsyncSession, material_id: int) ->
         listings_by_key.setdefault((listing.product_id, listing.variant_id), []).append(listing)
 
     enqueued: list[tuple[int, int | None]] = []
+    routed_to_sweep = 0
     for key in affected:
         target = targets.get(key)
         if target is None:
             continue
-        # A listing already holding this number, or one that can't be pushed until the
-        # user fixes it on the marketplace (Stage 1 rider), is not a reason to schedule a
-        # push. Enqueue only when some pushable listing's watermark actually differs.
-        moved = any(
-            listing.structural_push_block is None and listing.last_pushed_qty != target
-            for listing in listings_by_key.get(key, [])
-        )
-        if moved:
+        # Structurally-blocked listings can't be pushed until the user fixes them on the
+        # marketplace (Stage 1 rider) — never a reason to schedule anything.
+        listings = [l for l in listings_by_key.get(key, []) if l.structural_push_block is None]
+        if not listings:
+            continue
+        decision = _direction_for(listings, target, key in at_capacity)
+        if decision == "now":
             _enqueue(*key)
             enqueued.append(key)
+        elif decision == "sweep":
+            _reconcile_soon.add(key)
+            routed_to_sweep += 1
+        # "skip" (sub-deadband upward move) — do nothing; the sweep re-asserts eventually.
 
-    if enqueued:
+    if enqueued or routed_to_sweep:
         logger.info(
-            "Material %s change moved %d of %d affected listing target(s) — enqueued those",
+            "Material %s change: %d of %d affected listing target(s) moved — %d dispatched now, %d on the slow sweep",
             material_id,
-            len(enqueued),
+            len(enqueued) + routed_to_sweep,
             len(affected),
+            len(enqueued),
+            routed_to_sweep,
         )
     return enqueued
 
 
+def _direction_for(listings: list[Listing], target: int, at_full_capacity: bool) -> str:
+    """Stage 6's per-key routing: "now" if any pushable listing needs a downward move
+    (oversell risk) or has never been pushed; "sweep" if the only moves are upward and at
+    least one clears the deadband; "skip" if every move is a sub-deadband upward nudge."""
+    downward = False
+    material_upward = False
+    for listing in listings:
+        last = listing.last_pushed_qty
+        if last is None or listing.last_pushed_at is None:
+            downward = True  # no watermark yet — get the real number out promptly
+        elif target < last:
+            downward = True
+        elif target > last and _upward_is_material(last, target, at_full_capacity):
+            material_upward = True
+    if downward:
+        return "now"
+    if material_upward:
+        return "sweep"
+    return "skip"
+
+
+def _upward_is_material(last_pushed: int, target: int, at_full_capacity: bool) -> bool:
+    """Whether an upward move from last_pushed to target is worth a push at all — the
+    Stage 6 deadband. Compared against the fully resolved push quantity (target already
+    has ceiling + packaging caps applied), never raw buildable."""
+    delta = target - last_pushed
+    if delta < 1:
+        return False
+    if at_full_capacity:
+        return True  # back to full stock / at the ceiling — always reflect it
+    if last_pushed <= 0:
+        return True  # coming back into stock from zero; the fraction test can't apply
+    return delta / last_pushed >= _UPWARD_DEADBAND_FRACTION
+
+
+def take_reconcile_soon() -> list[tuple[int, int | None]]:
+    """Drain the keys Stage 6 parked for the next reconcile sweep. Called by
+    services/listing_reconcile._tick."""
+    keys = list(_reconcile_soon)
+    _reconcile_soon.clear()
+    return keys
+
+
 async def _resolve_targets_bulk(
     session: AsyncSession, keys: set[tuple[int, int | None]]
-) -> dict[tuple[int, int | None], int | None]:
+) -> tuple[dict[tuple[int, int | None], int | None], set[tuple[int, int | None]]]:
     """The push quantity resolve_push_quantity / _resolve_max_sellable computes, for a
     whole batch of (product_id, variant_id) keys in one buildability pass instead of one
     per key. Same inputs, same per-product push_buildable_capacity choice — kept in step
     with _resolve_max_sellable deliberately (see resolve_push_quantity's note on why a
-    divergence would be a bug the user can't clear)."""
+    divergence would be a bug the user can't clear).
+
+    Returns (targets, at_full_capacity): the second set holds the keys whose resolved
+    quantity is limited by nothing (reason None) or only by the platform ceiling — i.e.
+    the item is fully stocked as far as the marketplace is concerned. Stage 6 uses it to
+    override the upward deadband."""
     by_product: dict[int, set[int | None]] = {}
     for pid, vid in keys:
         by_product.setdefault(pid, set()).add(vid)
@@ -258,6 +327,18 @@ async def _resolve_targets_bulk(
     expected_max_buildable_by_product = await buildability.get_expected_max_buildable_by_product(session)
 
     targets: dict[tuple[int, int | None], int | None] = {}
+    at_capacity: set[tuple[int, int | None]] = set()
+
+    def _record(key: tuple[int, int | None], tup, use_theoretical: bool) -> None:
+        # tup is compute_max_sellable's 7-tuple: (max_sellable, max_sellable_reason,
+        # expected_max_sellable, expected_max_sellable_reason, theoretical_max_sellable,
+        # theoretical_max_sellable_reason, kitting_bom).
+        value = tup[4] if use_theoretical else tup[0]
+        reason = tup[5] if use_theoretical else tup[1]
+        targets[key] = value
+        if reason is None or reason == "ceiling":
+            at_capacity.add(key)
+
     for pid, vids in by_product.items():
         product = products.get(pid)
         if product is None:
@@ -266,7 +347,7 @@ async def _resolve_targets_bulk(
             continue
 
         if None in vids:
-            ms, _mr, _ems, _emr, tms, _tmr, _bom = await kitting.compute_max_sellable(
+            tup = await kitting.compute_max_sellable(
                 session,
                 pid,
                 None,
@@ -276,7 +357,7 @@ async def _resolve_targets_bulk(
                 product.platform_ceiling_qty,
                 max_buildable_by_product.get(pid),
             )
-            targets[(pid, None)] = tms if product.push_buildable_capacity else ms
+            _record((pid, None), tup, product.push_buildable_capacity)
 
         real_vids = sorted(v for v in vids if v is not None)
         if not real_vids:
@@ -301,10 +382,9 @@ async def _resolve_targets_bulk(
             if vid not in variants:
                 targets[(pid, vid)] = None
                 continue
-            tup = ms_by_variant[vid]
-            targets[(pid, vid)] = tup[4] if product.push_buildable_capacity else tup[0]
+            _record((pid, vid), ms_by_variant[vid], product.push_buildable_capacity)
 
-    return targets
+    return targets, at_capacity
 
 
 def _enqueue(product_id: int, variant_id: int | None) -> None:
@@ -341,9 +421,11 @@ async def quiesce(timeout: float = 5.0) -> None:
     earlier — already an ordinary, supported state. Nothing is lost that the next stock movement
     won't re-enqueue.
     """
-    # Deferred keys are only a hint to re-enqueue later; the next stock movement re-enqueues
-    # anything real, and a restore may invalidate the product ids entirely.
+    # Deferred keys and Stage 6's sweep-soon keys are only hints to act later; the next
+    # stock movement re-derives anything real, and a restore may invalidate the product
+    # ids entirely.
     _deferred.clear()
+    _reconcile_soon.clear()
     # The per-material diff jobs are the same kind of safe-to-drop debounce timer as the
     # pushes themselves — cancel them too so a restore isn't raced by one firing mid-stage.
     tasks = list(_pending.values()) + list(_pending_materials.values())

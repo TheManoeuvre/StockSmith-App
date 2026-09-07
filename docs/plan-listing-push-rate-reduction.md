@@ -3,9 +3,10 @@
 ## Status
 
 **Stages 1–4 implemented 2026-09-07** (PR #55). **Structural-failure marking (the Stage 4
-rider) and Stage 5 implemented 2026-09-07** on a follow-up branch. Stages 6–7 remain
-pending — pick them up only if the Stage 2 API-usage numbers show the daily budget is
-still tight in practice. What landed:
+rider) and Stages 5–6 implemented 2026-09-07** on a follow-up branch. Stage 7 remains
+pending — pick it up only if the Stage 2 API-usage numbers show the daily budget is
+still tight in practice (see the Stage 7 note below for the "check first" finding).
+What landed:
 
 - **Stage 1** — `_RATE_LIMIT_MAX_SLEEP_SECONDS` cap (120s) in both adapters; `_tick`
   bounded by `asyncio.wait_for` (`_COMMIT_SYNC_TIMEOUT_SECONDS` = 600) with a recorded
@@ -46,6 +47,17 @@ still tight in practice. What landed:
   pushes Stage 3 alone would have produced, reached in one session instead of ~N.
   `quiesce()` cancels the new jobs too. Callers (`costing.recompute_material`,
   `kitting.py`) unchanged — the `session` arg is now unused (diff runs later on its own).
+- **Stage 6** — directional cadence + deadband, applied in `_diff_and_enqueue_material`.
+  `_direction_for(listings, target, at_full_capacity)` returns `"now"` (any pushable
+  listing's target is *below* its `last_pushed_qty`, or it was never pushed → oversell
+  risk, dispatch on the normal debounce via `_enqueue`), `"sweep"` (only upward moves,
+  at least one past the deadband → parked in `listing_push._reconcile_soon`, drained by
+  `listing_reconcile._tick` → `_listings_for_keys` folds them into the hourly sweep), or
+  `"skip"` (every move is a sub-deadband upward nudge). `_upward_is_material` is the
+  deadband: `delta >= 1` and (`delta / last_pushed >= _UPWARD_DEADBAND_FRACTION` (10%) or
+  `last_pushed <= 0` or the target is at full resolved capacity — resolve reason `None`
+  or `"ceiling"`, tracked by `_resolve_targets_bulk`'s second return value). Never applied
+  downward. Compared against the fully resolved push quantity, not raw buildable.
 
 Build plan, written 2026-09-07 after diagnosing an Etsy auto-sync stall: the sync loop
 was parked ~6 hours inside a single `asyncio.sleep(Retry-After)` after the day's Etsy API
