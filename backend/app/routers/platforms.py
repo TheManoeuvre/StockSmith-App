@@ -79,6 +79,7 @@ from app.services import (
     listing_push,
     listing_sync,
     order_sync,
+    platform_api_usage,
     platform_credentials,
     sync_scheduler,
     sync_status,
@@ -340,6 +341,8 @@ async def _status_from_connection(
         unpaid_hold_since=connection.unpaid_hold_since,
         needs_reconnect=needs_reconnect,
         needs_reconnect_reason=_MISSING_TRADING_SCOPE_HINT if needs_reconnect else None,
+        api_calls_today=await platform_api_usage.usage_today(session, platform),
+        api_call_budget=platform_api_usage.daily_budget(platform),
     )
 
 

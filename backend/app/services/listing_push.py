@@ -11,7 +11,7 @@ from app.models.platform_connection import PlatformConnection
 from app.models.platform_listing_push import ListingPushStatus, PlatformListingPush
 from app.models.product import Product
 from app.models.variant import ProductVariant
-from app.services import buildability, kitting
+from app.services import buildability, kitting, platform_api_usage
 from app.services.platforms import get_adapter
 from app.services.platforms.base import ExternalListingRef
 from app.services.variants import compute_full_sku
@@ -39,6 +39,19 @@ _DEBOUNCE_SECONDS = 5
 _PUSH_ENABLED_PLATFORMS = (ListingPlatform.etsy, ListingPlatform.ebay)
 
 _pending: dict[tuple[int, int | None], asyncio.Task] = {}
+
+# (product_id, variant_id) keys whose automatic push was skipped because the platform's
+# daily API budget was near its limit (see platform_api_usage). services/listing_reconcile
+# re-enqueues these once usage falls back under the soft limit — normally after the
+# UTC-day reset. A set, not a queue: the push recomputes quantity fresh at send time, so
+# order and multiplicity don't matter.
+_deferred: set[tuple[int, int | None]] = set()
+
+# _push_now skips a listing outright when its last_pushed_qty already equals the resolved
+# quantity — no GET, no PUT. There is deliberately no time-based escape hatch: a listing
+# whose number never changes is re-asserted by the periodic reconcile sweep
+# (services/listing_reconcile), which also catches marketplace-side drift. Not re-pushing
+# the same unchanged number is the entire point of the watermark.
 
 # Caps how many debounced pushes can be mid-flight (DB session open + adapter HTTP call)
 # at once. A single push can hold its session open for a while — push_listing_quantity
@@ -172,6 +185,9 @@ async def quiesce(timeout: float = 5.0) -> None:
     earlier — already an ordinary, supported state. Nothing is lost that the next stock movement
     won't re-enqueue.
     """
+    # Deferred keys are only a hint to re-enqueue later; the next stock movement re-enqueues
+    # anything real, and a restore may invalidate the product ids entirely.
+    _deferred.clear()
     tasks = list(_pending.values())
     if not tasks:
         return
@@ -299,7 +315,51 @@ async def _push_now(session: AsyncSession, product_id: int, variant_id: int | No
         )
     )
     for listing in result.scalars():
+        if listing.last_pushed_qty == max_sellable and listing.last_pushed_at is not None:
+            # The marketplace already holds this number — the common case for a
+            # shared-material change fanning out to a listing it doesn't actually gate.
+            continue
+        if await platform_api_usage.over_soft_limit(session, listing.platform):
+            # Near the daily budget — park this and let listing_reconcile drain it after
+            # the window resets, rather than spend order sync's headroom on a push.
+            _deferred.add((product_id, variant_id))
+            logger.info(
+                "Deferring automatic %s push for product_id=%s variant_id=%s — daily API budget at %d/%d",
+                listing.platform.value,
+                product_id,
+                variant_id,
+                await platform_api_usage.usage_today(session, listing.platform),
+                platform_api_usage.daily_budget(listing.platform),
+            )
+            continue
         await _push_one(session, listing, max_sellable)
+
+
+async def drain_deferred() -> int:
+    """Re-enqueue every push parked by the daily-budget gate. Called by
+    services/listing_reconcile once usage is back under the soft limit. Returns how many
+    keys were re-enqueued."""
+    if not _deferred:
+        return 0
+    keys = list(_deferred)
+    _deferred.clear()
+    for product_id, variant_id in keys:
+        _enqueue(product_id, variant_id)
+    return len(keys)
+
+
+async def reconcile_listing(session: AsyncSession, listing: Listing) -> bool:
+    """Re-resolve this listing's target quantity and push it if the marketplace has
+    drifted — the per-listing unit of the periodic reconcile sweep
+    (services/listing_reconcile). Returns False when no quantity could be computed;
+    otherwise defers to _push_one, whose adapter call GETs current inventory and only
+    writes on a real difference (a no-op still advances last_pushed_at). Awaited, not
+    debounced: the sweep is already the slow path."""
+    qty = await _resolve_max_sellable(session, listing.product_id, listing.variant_id)
+    if qty is None:
+        return False
+    await _push_one(session, listing, qty)
+    return True
 
 
 async def _push_one(session: AsyncSession, listing: Listing, qty: int) -> None:
@@ -347,8 +407,14 @@ async def _push_one(session: AsyncSession, listing: Listing, qty: int) -> None:
         await session.commit()
         return
 
+    now = datetime.now(timezone.utc)
+    # last_pushed_* is the authoritative "what we last sent" watermark _push_now and the
+    # reconcile sweep both read; last_synced_* is kept in step for the sync-check UI, which
+    # still reads it.
+    listing.last_pushed_qty = qty
+    listing.last_pushed_at = now
     listing.last_synced_qty = qty
-    listing.last_synced_at = datetime.now(timezone.utc)
+    listing.last_synced_at = now
     # A push the marketplace accepted is confirmation it holds this SKU — the same fact a
     # sync-check match establishes, arriving by a different route.
     if sku:

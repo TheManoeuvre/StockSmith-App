@@ -7,8 +7,10 @@ from xml.etree import ElementTree
 
 import httpx
 
+from app.models.listing import ListingPlatform
 from app.models.platform_connection import PlatformConnection
 from app.models.platform_credential import PlatformEnvironment
+from app.services import platform_api_usage
 from app.services.platforms.base import (
     ClassicListingCandidate,
     ExternalListingRef,
@@ -268,6 +270,14 @@ _PAGE_LIMIT = 200  # eBay's documented max page size for getOrders
 # inventory items had exercised this path until now).
 _INVENTORY_PAGE_LIMIT = 100
 _MAX_RATE_LIMIT_RETRIES = 3
+
+# Longest single back-off this adapter will ever actually sleep for on a 429. eBay sends
+# `Retry-After` on rate limits, and a daily-call-limit 429 carries the seconds until the
+# limit resets — obeying that literally can park a background loop for hours (see the
+# 2026-09-07 Etsy stall for the same failure mode). Past this cap we raise
+# PlatformRateLimitError immediately; the caller records a failed run and retries next
+# cycle. 5xx backoff is exponential and small, so it never approaches this.
+_RATE_LIMIT_MAX_SLEEP_SECONDS = 120.0
 
 # eBay answers a transient fault on its own side with a 5xx and errorId 25001
 # ("A system error has occurred. Dependent service failure") — confirmed live on
@@ -531,6 +541,14 @@ class EbayAdapter:
                 await self._do_refresh(session, connection)
                 response = await self._request_once(connection, method, url, **kwargs)
 
+            if response.status_code == 401:
+                # Survived a refresh — the connection is revoked/expired-past-refresh, not
+                # a transient fault. Raise as auth so the scheduler's consecutive-failure
+                # counter engages instead of retrying a dead connection every cycle.
+                raise PlatformAuthError(
+                    f"eBay rejected the access token on {method} {url} even after a refresh — reconnect required."
+                )
+
             # Separate budgets, so a call that hits a rate limit and then a server error
             # doesn't find one exhausted by the other — they're unrelated faults.
             rate_limit_attempts = 0
@@ -538,6 +556,11 @@ class EbayAdapter:
             while True:
                 if response.status_code == 429 and rate_limit_attempts < _MAX_RATE_LIMIT_RETRIES:
                     delay = self._retry_delay(response, rate_limit_attempts)
+                    if delay > _RATE_LIMIT_MAX_SLEEP_SECONDS:
+                        raise PlatformRateLimitError(
+                            f"eBay asked for a {delay:.0f}s back-off on {method} {url} (call limit) — "
+                            "not sleeping on it; will retry next cycle"
+                        )
                     logger.warning(
                         "eBay API rate limited on %s %s (retry %d/%d in %.1fs)",
                         method, url, rate_limit_attempts + 1, _MAX_RATE_LIMIT_RETRIES, delay,
@@ -583,15 +606,20 @@ class EbayAdapter:
         headers = {**headers, "Authorization": f"Bearer {connection.access_token}"}
         async with httpx.AsyncClient(timeout=timeout) as client:
             if not _needs_signature(url):
-                return await client.request(method, url, headers=headers, **kwargs)
-            # Signed calls take the two-step route so the Content-Digest can be computed
-            # over request.content — the exact bytes httpx will put on the wire.
-            # Re-serializing a `json=` dict a second time to hash it would be a standing
-            # risk of a digest that doesn't match the body, which eBay reports only as an
-            # opaque signature failure.
-            request = client.build_request(method, url, headers=headers, **kwargs)
-            request.headers.update(self._signature_headers(request))
-            return await client.send(request)
+                response = await client.request(method, url, headers=headers, **kwargs)
+            else:
+                # Signed calls take the two-step route so the Content-Digest can be computed
+                # over request.content — the exact bytes httpx will put on the wire.
+                # Re-serializing a `json=` dict a second time to hash it would be a standing
+                # risk of a digest that doesn't match the body, which eBay reports only as an
+                # opaque signature failure.
+                request = client.build_request(method, url, headers=headers, **kwargs)
+                request.headers.update(self._signature_headers(request))
+                response = await client.send(request)
+        # Every completed round-trip counts against eBay's daily budget, non-200s and
+        # retries included — see services/platform_api_usage.
+        platform_api_usage.record(ListingPlatform.ebay)
+        return response
 
     def _signature_headers(self, request: httpx.Request) -> dict[str, str]:
         if self.signing_key is None:
@@ -1441,17 +1469,25 @@ class EbayAdapter:
             # an Authorization: Bearer header, which is the wrong auth scheme here (see
             # _trading_headers).
             async with httpx.AsyncClient(timeout=timeout) as client:
-                return await client.request(
+                sent = await client.request(
                     "POST",
                     self.trading_base,
                     headers=self._trading_headers(connection, call_name, site_id),
                     content=xml_body,
                 )
+            # Trading API round-trips count against eBay's daily budget too.
+            platform_api_usage.record(ListingPlatform.ebay)
+            return sent
 
         response = await _send()
         if response.status_code == 401:
             await self._do_refresh(session, connection)
             response = await _send()
+        if response.status_code == 401:
+            raise PlatformAuthError(
+                f"eBay rejected the access token on Trading call {call_name} even after a refresh — "
+                "reconnect required."
+            )
         return response
 
     async def _authed_trading_request(
@@ -1479,6 +1515,11 @@ class EbayAdapter:
             while True:
                 if response.status_code == 429 and rate_limit_attempts < _MAX_RATE_LIMIT_RETRIES:
                     delay = self._retry_delay(response, rate_limit_attempts)
+                    if delay > _RATE_LIMIT_MAX_SLEEP_SECONDS:
+                        raise PlatformRateLimitError(
+                            f"eBay Trading API asked for a {delay:.0f}s back-off on {call_name} (daily "
+                            "budget) — not sleeping on it; will retry next cycle"
+                        )
                     logger.warning(
                         "eBay Trading API rate limited on %s (retry %d/%d in %.1fs)",
                         call_name,

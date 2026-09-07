@@ -653,3 +653,13 @@ async def _record_failure(session: AsyncSession, platform: ListingPlatform, mode
     )
     session.add(run)
     await session.commit()
+
+
+async def record_failed_run(platform: ListingPlatform, mode: SyncRunMode, error: Exception) -> None:
+    """Log a failed sync run from outside commit_sync/preview_sync — e.g. sync_scheduler
+    abandoning a tick that blew past its timeout, where the cancelled commit_sync coroutine
+    never reaches its own except-clause (asyncio.CancelledError is a BaseException, not an
+    Exception). Self-contained: opens its own short-lived session, like _record_failure's
+    callers already do."""
+    async with async_session_factory() as session:
+        await _record_failure(session, platform, mode, error)

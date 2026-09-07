@@ -12,7 +12,26 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **Auto-sync no longer stalls for hours when a marketplace hits its daily API limit.**
+  A burst of listing-quantity pushes could spend the whole day's Etsy API budget by
+  midday; the next order-sync tick then hit a "try again in ~2 hours" response and slept
+  on it, freezing that platform's sync — no error, no log line — until the app was
+  restarted. Sync now refuses to sleep on a multi-hour back-off, abandons any tick that
+  runs too long, and treats a stuck connection as needing re-authorisation.
+
 ### Changed
+- **Listing quantity pushes are deduplicated and rate-limited.** A stock change that
+  touches a shared material (a box, a common filament) used to re-push every listing that
+  uses it, even when the number was unchanged — thousands of needless marketplace calls.
+  Now a push is sent only when the quantity StockSmith would send actually differs from
+  what the marketplace already holds, and automatic pushes pause automatically as the
+  day's API usage nears the platform's budget (order sync is never paused). Each platform's
+  Sync panel shows calls-used-today against that budget.
+- **A background sweep re-checks listing quantities and retries failed pushes.** Runs
+  hourly, re-asserting any listing whose quantity hasn't been confirmed in a while and
+  retrying pushes that previously errored — the periodic reconciliation the push path
+  never had.
 - **"Create draft purchase" on the dashboard now opens the full New purchase panel.**
   The dashboard's "Time to stockout" section gains a per-supplier **Create draft purchase**
   button that drafts every at-risk material from that supplier in one order; the existing

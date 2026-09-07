@@ -27,6 +27,11 @@ export interface PlatformStatus {
   // app reveals the gap — hence surfacing it explicitly.
   needs_reconnect: boolean;
   needs_reconnect_reason: string | null;
+  // Marketplace API calls made to this platform so far today (UTC) and the daily budget
+  // they count against. As usage nears the budget, automatic quantity pushes (not order
+  // sync) stand down so order sync keeps its headroom.
+  api_calls_today: number;
+  api_call_budget: number;
 }
 
 export interface SyncSettingsUpdate {
@@ -119,6 +124,11 @@ export interface PlatformSyncSummary {
   // Listings whose most recent outbound quantity push failed and was never retried —
   // separate from last_sync_error, which only covers inbound order sync.
   failing_push_count: number;
+  // Marketplace API calls made to this platform so far today (UTC) and the daily budget
+  // they count against. As usage nears the budget, automatic quantity pushes stand down
+  // so order sync keeps its headroom.
+  api_calls_today: number;
+  api_call_budget: number;
 }
 
 export interface SyncGap {

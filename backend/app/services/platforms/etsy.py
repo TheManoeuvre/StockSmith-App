@@ -5,7 +5,9 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
+from app.models.listing import ListingPlatform
 from app.models.platform_connection import PlatformConnection
+from app.services import platform_api_usage
 from app.services.platforms.base import (
     ExternalListingRef,
     ExternalOrder,
@@ -83,6 +85,15 @@ _MAX_LISTING_PAGES = 20
 # Etsy's QPS window is one second, so a couple of short backoffs is usually enough to
 # clear a transient limit hit without turning a single sync click into a long stall.
 _MAX_RATE_LIMIT_RETRIES = 3
+
+# Longest single back-off this adapter will ever actually sleep for. Etsy returns
+# `Retry-After` on a *daily*-quota 429 as the seconds until the quota window resets — up
+# to ~2h — and obeying that literally, up to _MAX_RATE_LIMIT_RETRIES times, is how one
+# exhausted budget parked the whole auto-sync loop for ~6h with no failed run recorded
+# and no periodic log line (2026-09-07). Past this cap we raise PlatformRateLimitError
+# immediately instead: the caller records a failed run and the next scheduled cycle
+# retries once the window has genuinely reset.
+_RATE_LIMIT_MAX_SLEEP_SECONDS = 120.0
 
 # Retries for push_listing_quantity's 409 ("being edited by another process") — see that
 # method's docstring. A flat short delay rather than exponential backoff since this is a
@@ -252,9 +263,24 @@ class EtsyAdapter:
             await self._do_refresh(session, connection)
             response = await self._request_once(connection, method, path, **kwargs)
 
+        if response.status_code == 401:
+            # A 401 that survives a token refresh is a revoked/expired-past-refresh
+            # connection, not a transient fault — surface it as auth so the scheduler's
+            # consecutive-failure counter engages and auto-sync disables itself rather
+            # than retrying a dead connection every cycle (it used to raise a generic
+            # PlatformSyncError here, which the counter ignores).
+            raise PlatformAuthError(
+                f"Etsy rejected the access token on {method} {path} even after a refresh — reconnect required."
+            )
+
         attempt = 0
         while response.status_code == 429 and attempt < _MAX_RATE_LIMIT_RETRIES:
             delay = self._rate_limit_delay(response, attempt)
+            if delay > _RATE_LIMIT_MAX_SLEEP_SECONDS:
+                raise PlatformRateLimitError(
+                    f"Etsy asked for a {delay:.0f}s back-off on {method} {path} (daily quota) — "
+                    "not sleeping on it; will retry next cycle"
+                )
             logger.warning(
                 "Etsy API rate limited on %s %s (retry %d/%d in %.1fs)",
                 method,
@@ -287,7 +313,12 @@ class EtsyAdapter:
         headers = kwargs.pop("headers", {})
         headers = {**headers, "Authorization": f"Bearer {connection.access_token}", "x-api-key": self._api_key}
         async with httpx.AsyncClient(timeout=15.0) as client:
-            return await client.request(method, f"{API_BASE}{path}", headers=headers, **kwargs)
+            response = await client.request(method, f"{API_BASE}{path}", headers=headers, **kwargs)
+        # Every completed round-trip counts against Etsy's daily budget, non-200s and
+        # retries included (this helper is re-entered per attempt) — see
+        # services/platform_api_usage.
+        platform_api_usage.record(ListingPlatform.etsy)
+        return response
 
     async def _ensure_fresh(self, session, connection: PlatformConnection) -> None:
         expires_at = ensure_utc(connection.access_token_expires_at)
@@ -725,7 +756,12 @@ class EtsyAdapter:
                 )
             inventory = response.json()
 
+            # What the target SKU's offering should read after this push.
+            desired_qty = 1 if qty <= 0 else qty
+            desired_enabled = qty > 0
+
             matched = False
+            needs_write = False
             products_payload = []
             for product in inventory.get("products", []):
                 is_target_sku = product.get("sku") == sku and not product.get("is_deleted")
@@ -748,12 +784,10 @@ class EtsyAdapter:
                         "readiness_state_id": offering.get("readiness_state_id"),
                     }
                     if is_target_sku:
-                        if qty <= 0:
-                            offering_payload["quantity"] = 1
-                            offering_payload["is_enabled"] = False
-                        else:
-                            offering_payload["quantity"] = qty
-                            offering_payload["is_enabled"] = True
+                        if offering.get("quantity") != desired_qty or offering.get("is_enabled", True) != desired_enabled:
+                            needs_write = True
+                        offering_payload["quantity"] = desired_qty
+                        offering_payload["is_enabled"] = desired_enabled
                         matched = True
                     offerings_payload.append(offering_payload)
                 products_payload.append(
@@ -768,6 +802,20 @@ class EtsyAdapter:
 
             if not matched:
                 raise PlatformSyncError(f"No matching SKU '{sku}' found in Etsy listing {listing_id}'s inventory")
+
+            if not needs_write:
+                # Etsy already holds this quantity for this SKU — skip the PUT (which
+                # replaces the listing's whole inventory record) rather than spend a
+                # write and a slice of the daily budget re-sending an identical value.
+                # The caller still advances its own last_pushed_* watermark on a clean
+                # return, so this reads as a successful push, just a free one.
+                logger.debug(
+                    "Etsy listing %s SKU %s already at quantity=%d — skipping no-op inventory PUT",
+                    listing_id,
+                    sku,
+                    desired_qty,
+                )
+                return
 
             put_body = {
                 "products": products_payload,

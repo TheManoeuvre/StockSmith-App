@@ -34,6 +34,7 @@ from app.models.material import (
 )
 from app.models.material_category import MaterialCategory
 from app.models.material_type import MaterialType
+from app.models.platform_api_usage import PlatformApiUsage
 from app.models.platform_connection import PlatformConnection
 from app.models.platform_credential import PlatformAppCredential, PlatformEnvironment
 from app.models.platform_listing_push import ListingPushStatus, PlatformListingPush
@@ -108,6 +109,7 @@ __all__ = [
     "AllocationEvent",
     "AllocationEventType",
     "PlatformConnection",
+    "PlatformApiUsage",
     "PlatformAppCredential",
     "PlatformEnvironment",
     "PlatformListingPush",
