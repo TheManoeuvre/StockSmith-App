@@ -51,13 +51,11 @@ This matters more once the periodic reconciliation sweep below exists: a sweep t
 
 ## Stock-take workflow
 
-### No UI to cancel / abandon an open stock take
+### Row-level abandon action on the stock-takes list (optional follow-up)
 
-**Problem:** The backend already supports it — `DELETE /stock-takes/{id}` (`routers/stock_takes.py` → `services/stock_takes.delete_stock_take`) abandons an open take and refuses a closed one, and the frontend client already wraps it (`stockTakesApi.remove`, `api/stockTakes.ts`). Nothing calls `remove`: neither the list (`routes/stock-takes/route.tsx`) nor the detail slide-over (`routes/stock-takes/$stockTakeId.tsx`, whose only `ConfirmDialog` is the Approve one) has a cancel/abandon control, so an open take can only be worked to completion or left open forever.
+**Problem:** The two substantive fixes here shipped: the slide-over "Abandon stock take" action (detail footer, open takes only), and a create-time 409 when an open take already renders the identical `scope_description` — which stops the start-flow double-fire (seen 2026-09-02, takes #3/#4 six seconds apart) from producing an orphan. `create_stock_take` still *warns* on a partial overlap and proceeds; only an exact-scope match is blocked.
 
-This bit on 2026-09-02: a start-take bug created takes #3 and #4 with identical scope six seconds apart ("Materials in Filament, due for counting only"). #3 was counted against; #4 sat at 0/6 with no way to clear it from the app — it had to be deleted by hand via the API.
-
-**Ask:** Add an "Abandon stock take" action to the detail slide-over footer (open takes only), behind a `ConfirmDialog` (`tone="danger"`) since it drops any counts entered so far. On success invalidate `["stock-takes"]` and `["dashboard-summary"]` and route back to `/stock-takes`. A row-level action on the list is optional follow-up. Separately, consider a guard against creating a second open take whose scope matches an existing open one — `_open_take_warnings` (`services/stock_takes.py:203`) already computes the overlap but only *reports* it; a create-time block for an exact-scope match would stop the start-take double-fire turning into orphaned takes.
+**Ask:** Nice-to-have only — an abandon action on the list rows (`routes/stock-takes/route.tsx`) so an open take can be dropped without opening it. Also consider surfacing the exact-scope clash in the scope picker's preview panel (alongside the existing overlap warning) so the user sees it before clicking Start, rather than as an error afterward.
 
 ### An async session is unusable after a rolled-back flush error
 
