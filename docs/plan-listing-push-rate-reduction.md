@@ -3,10 +3,11 @@
 ## Status
 
 **Stages 1–4 implemented 2026-09-07** (PR #55). **Structural-failure marking (the Stage 4
-rider) and Stages 5–6 implemented 2026-09-07** on a follow-up branch. Stage 7 remains
-pending — pick it up only if the Stage 2 API-usage numbers show the daily budget is
-still tight in practice (see the Stage 7 note below for the "check first" finding).
-What landed:
+rider) and Stages 5–6 implemented 2026-09-07** on a follow-up branch. **Stage 7 is
+deliberately not implemented** — with Stages 1–6 in place the push-call volume is no
+longer close to the budget, so its per-listing constraint index isn't worth the standing
+maintenance cost (finding recorded in the Stage 7 note below). This plan is now
+considered complete. What landed:
 
 - **Stage 1** — `_RATE_LIMIT_MAX_SLEEP_SECONDS` cap (120s) in both adapters; `_tick`
   bounded by `asyncio.wait_for` (`_COMMIT_SYNC_TIMEOUT_SECONDS` = 600) with a recorded
@@ -58,6 +59,20 @@ What landed:
   `last_pushed <= 0` or the target is at full resolved capacity — resolve reason `None`
   or `"ceiling"`, tracked by `_resolve_targets_bulk`'s second return value). Never applied
   downward. Compared against the fully resolved push quantity, not raw buildable.
+- **Stage 7 — not implemented (deliberate stop).** The gate for Stage 7 is "only if the
+  Stage 2 `api_calls_today` numbers still show the daily budget is tight." The worst
+  documented morning (2026-09-07, pre-fix) spent ~2,400 Etsy calls on push fan-out —
+  ~24% of the 10,000/day budget — and that was with the *old* unconditional GET+PUT on
+  every fan-out entry. Stages 3/3c (watermark skip + no-op-PUT skip), 5 (decide before
+  enqueue), and 6 (down-now / up-on-sweep + upward deadband) each cut into that
+  independently; the plan's own table put Stage 3 alone at 10–20×. That leaves a bad
+  morning's push spend at low hundreds of calls against a 10,000/day (Etsy) / 5,000/day
+  (eBay) budget — comfortably inside the 80% soft limit with headroom for order sync,
+  per-receipt enrichment and the reconcile sweep. Stage 7 adds a per-listing
+  binding-constraint index that must be invalidated on on-hand stock changes, ceiling
+  edits, and every gating-material movement — a real standing maintenance surface — to
+  shave a call count that is no longer the constraint. Revisit only if a future
+  `platform_api_usage` reading actually shows sustained pressure from automatic pushes.
 
 Build plan, written 2026-09-07 after diagnosing an Etsy auto-sync stall: the sync loop
 was parked ~6 hours inside a single `asyncio.sleep(Retry-After)` after the day's Etsy API
