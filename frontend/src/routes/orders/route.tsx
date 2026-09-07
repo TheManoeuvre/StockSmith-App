@@ -125,8 +125,9 @@ function OrdersListContent() {
   const items = data?.items ?? [];
   const placedTs = (o: Order) => new Date(o.order_placed_at).getTime();
   // Anything still to fulfil is pinned above, oldest first — a stale order is the one that
-  // needs chasing. Shipped and cancelled fall to a second group, newest first. The oldest-
-  // first sort is within the loaded page; a true cross-page pin needs a backend sort param.
+  // needs chasing. Shipped and cancelled fall to a second group, newest first. The backend
+  // already returns rows in exactly this order (see list_orders), so the awaiting pin holds
+  // across pages; re-sorting here just keeps the grouping self-contained.
   const awaiting = items
     .filter((o) => !isDone(o))
     .sort((a, b) => placedTs(a) - placedTs(b));
