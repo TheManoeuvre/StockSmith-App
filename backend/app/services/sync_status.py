@@ -14,7 +14,7 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.listing import ListingPlatform
+from app.models.listing import Listing, ListingPlatform
 from app.models.platform_connection import PlatformConnection
 from app.models.platform_listing_push import ListingPushStatus, PlatformListingPush
 from app.models.platform_sync_run import PlatformSyncRun, SyncRunMode, SyncRunStatus
@@ -69,9 +69,16 @@ async def _failing_push_counts(session: AsyncSession) -> dict[ListingPlatform, i
     changes that product's stock, so a failure from last week can still be the live state
     of the listing. A time-boxed count would quietly drop exactly the failures that have
     gone stale, which are the ones worth surfacing.
+
+    Listings marked structurally unpushable (Listing.structural_push_block) are left out:
+    those are a marketplace-side config the user has to fix, not a retry that will clear,
+    and they get their own pointer in the UI rather than inflating this badge with a
+    number that only goes down when someone edits a listing on Etsy.
     """
     ranked = select(
         PlatformListingPush.platform.label("platform"),
+        PlatformListingPush.product_id.label("product_id"),
+        PlatformListingPush.variant_id.label("variant_id"),
         PlatformListingPush.status.label("status"),
         func.row_number()
         .over(
@@ -85,10 +92,36 @@ async def _failing_push_counts(session: AsyncSession) -> dict[ListingPlatform, i
         .label("rn"),
     ).subquery()
 
+    blocked = (
+        select(Listing.platform, Listing.product_id, Listing.variant_id)
+        .where(Listing.structural_push_block.is_not(None))
+        .subquery()
+    )
+
     result = await session.execute(
         select(ranked.c.platform, func.count())
-        .where(ranked.c.rn == 1, ranked.c.status == ListingPushStatus.error)
+        .select_from(ranked)
+        .outerjoin(
+            blocked,
+            (ranked.c.platform == blocked.c.platform)
+            & (ranked.c.product_id == blocked.c.product_id)
+            & (ranked.c.variant_id.is_not_distinct_from(blocked.c.variant_id)),
+        )
+        .where(ranked.c.rn == 1, ranked.c.status == ListingPushStatus.error, blocked.c.product_id.is_(None))
         .group_by(ranked.c.platform)
+    )
+    return {platform: count for platform, count in result.all()}
+
+
+async def _structurally_unpushable_counts(session: AsyncSession) -> dict[ListingPlatform, int]:
+    """Listings that can't receive a quantity push until the user changes their setup on
+    the marketplace (Listing.structural_push_block), per platform — surfaced separately
+    from _failing_push_counts so the menu-bar badge can point the user at the listing to
+    fix instead of counting a retry that can never succeed."""
+    result = await session.execute(
+        select(Listing.platform, func.count())
+        .where(Listing.structural_push_block.is_not(None))
+        .group_by(Listing.platform)
     )
     return {platform: count for platform, count in result.all()}
 
@@ -208,6 +241,7 @@ async def get_sync_summary(session: AsyncSession) -> list[PlatformSyncSummary]:
     }
     latest_runs = await _latest_commit_runs(session)
     failing_pushes = await _failing_push_counts(session)
+    structurally_unpushable = await _structurally_unpushable_counts(session)
 
     summaries = []
     for platform in _SUMMARISED_PLATFORMS:
@@ -234,6 +268,7 @@ async def get_sync_summary(session: AsyncSession) -> list[PlatformSyncSummary]:
                     run.error_message if run is not None and run.status == SyncRunStatus.error else None
                 ),
                 failing_push_count=failing_pushes.get(platform, 0),
+                structurally_unpushable_count=structurally_unpushable.get(platform, 0),
                 api_calls_today=api_calls_today,
                 api_call_budget=platform_api_usage.daily_budget(platform),
             )

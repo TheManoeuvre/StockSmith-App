@@ -180,6 +180,12 @@ class PlatformSyncSummary(BaseModel):
     # importing orders perfectly while silently failing to push stock back, which is the
     # overselling risk this surfaces.
     failing_push_count: int
+    # Listings that can't receive a quantity push until the user changes their setup on
+    # the marketplace itself — currently an Etsy listing whose quantity doesn't vary by
+    # variation. Counted apart from failing_push_count because no retry clears it: the
+    # badge points the user at the listing to fix rather than showing a number that only
+    # falls when someone edits a listing on Etsy.
+    structurally_unpushable_count: int = 0
     # Marketplace API calls made to this platform so far today (UTC), and the daily budget
     # they count against. Once usage nears the budget, listing_push stops sending
     # automatic quantity pushes so order sync keeps its headroom — see
@@ -236,3 +242,18 @@ class ListingPushRead(BaseModel):
 class ListingPushPage(BaseModel):
     items: list[ListingPushRead]
     total: int
+
+
+class StructuralPushBlockRead(BaseModel):
+    """A listing that can't receive a quantity push until the user changes its setup on
+    the marketplace. `reason` is a sentence naming the fix (see
+    Listing.structural_push_block)."""
+
+    product_id: int
+    product_name: str | None
+    variant_id: int | None
+    variant_name: str | None
+    platform: ListingPlatform
+    external_listing_id: str | None
+    reason: str
+    since: datetime | None

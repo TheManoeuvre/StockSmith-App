@@ -28,6 +28,7 @@ function summarise(summaries: PlatformSyncSummary[]) {
   const connected = summaries.filter((s) => s.connected);
   const errored = connected.filter((s) => s.last_sync_status === "error");
   const failingPushes = connected.reduce((total, s) => total + s.failing_push_count, 0);
+  const structuralBlocks = connected.reduce((total, s) => total + s.structurally_unpushable_count, 0);
   // The most recent successful-or-not sync across platforms — the question the label
   // answers is "how stale is my data", which is governed by whichever synced last.
   // Compared as parsed timestamps rather than raw strings, so this doesn't quietly
@@ -37,7 +38,7 @@ function summarise(summaries: PlatformSyncSummary[]) {
     if (newest === null) return s.last_sync_at;
     return new Date(s.last_sync_at) > new Date(newest) ? s.last_sync_at : newest;
   }, null);
-  return { connected, errored, failingPushes, latest };
+  return { connected, errored, failingPushes, structuralBlocks, latest };
 }
 
 export function SyncStatusIndicator() {
@@ -52,10 +53,10 @@ export function SyncStatusIndicator() {
   // "never synced" while the first request is still in flight would be actively wrong.
   if (!data) return null;
 
-  const { connected, errored, failingPushes, latest } = summarise(data);
+  const { connected, errored, failingPushes, structuralBlocks, latest } = summarise(data);
   if (connected.length === 0) return null;
 
-  const hasProblem = errored.length > 0 || failingPushes > 0;
+  const hasProblem = errored.length > 0 || failingPushes > 0 || structuralBlocks > 0;
   const problems = [
     ...errored.map((s) => `${PLATFORM_LABELS[s.platform]} sync failed: ${s.last_sync_error ?? "unknown error"}`),
     ...connected
@@ -63,6 +64,12 @@ export function SyncStatusIndicator() {
       .map(
         (s) =>
           `${PLATFORM_LABELS[s.platform]}: ${s.failing_push_count} listing(s) failed to receive a stock update`
+      ),
+    ...connected
+      .filter((s) => s.structurally_unpushable_count > 0)
+      .map(
+        (s) =>
+          `${PLATFORM_LABELS[s.platform]}: ${s.structurally_unpushable_count} listing(s) need fixing on ${PLATFORM_LABELS[s.platform]} before stock can be pushed — open Settings`
       ),
   ];
 

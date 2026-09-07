@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db, require_auth
-from app.models.listing import ListingPlatform
+from app.models.listing import Listing, ListingPlatform
 from app.models.platform_connection import PlatformConnection
 from app.models.platform_credential import PlatformAppCredential, PlatformEnvironment
 from app.models.platform_listing_push import PlatformListingPush
@@ -28,6 +28,7 @@ from app.schemas.platform import (
     PlatformCredentialWrite,
     PlatformStatus,
     PlatformSyncSummary,
+    StructuralPushBlockRead,
     SyncCommitResult,
     SyncHealth,
     SyncPreviewResult,
@@ -756,6 +757,60 @@ async def listing_push_log(
         for p in pushes
     ]
     return ListingPushPage(items=items, total=total or 0)
+
+
+@router.get(
+    "/{platform}/structural-push-blocks",
+    response_model=list[StructuralPushBlockRead],
+    dependencies=[Depends(require_auth)],
+)
+async def structural_push_blocks(
+    platform: ListingPlatform,
+    session: AsyncSession = Depends(get_db),
+) -> list[StructuralPushBlockRead]:
+    """Listings that can't receive a quantity push until the user changes their setup on
+    the marketplace (Listing.structural_push_block) — e.g. an Etsy listing whose quantity
+    doesn't vary by variation. Distinct from the push log: these accrue no error rows and
+    no retry ever clears them, so the UI points the user straight at the listing to fix."""
+    result = await session.execute(
+        select(Listing)
+        .where(Listing.platform == platform, Listing.structural_push_block.is_not(None))
+        .order_by(Listing.product_id, Listing.variant_id)
+    )
+    listings = list(result.scalars())
+
+    product_ids = {l.product_id for l in listings}
+    variant_ids = {l.variant_id for l in listings if l.variant_id is not None}
+    product_names = (
+        dict((await session.execute(select(Product.id, Product.name).where(Product.id.in_(product_ids)))).all())
+        if product_ids
+        else {}
+    )
+    variant_names = (
+        dict(
+            (
+                await session.execute(
+                    select(ProductVariant.id, ProductVariant.variant_name).where(ProductVariant.id.in_(variant_ids))
+                )
+            ).all()
+        )
+        if variant_ids
+        else {}
+    )
+
+    return [
+        StructuralPushBlockRead(
+            product_id=l.product_id,
+            product_name=product_names.get(l.product_id),
+            variant_id=l.variant_id,
+            variant_name=variant_names.get(l.variant_id) if l.variant_id is not None else None,
+            platform=l.platform,
+            external_listing_id=l.external_listing_id,
+            reason=l.structural_push_block,
+            since=l.structural_push_block_at,
+        )
+        for l in listings
+    ]
 
 
 def _proposal_schema(proposal) -> ProductBackfillProposal:

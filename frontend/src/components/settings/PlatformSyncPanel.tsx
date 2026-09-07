@@ -46,6 +46,15 @@ export function PlatformSyncPanel({ platform }: { platform: ListingPlatform }) {
   });
   const recentPushFailures = pushLogData?.items.filter((p) => p.status === "error") ?? [];
 
+  // Listings that can't receive a push until the user changes their setup on the
+  // marketplace — no error rows accrue for these and no retry clears them, so they're
+  // surfaced from their own endpoint rather than the push log above.
+  const { data: structuralBlocks = [] } = useQuery({
+    queryKey: ["platforms", platform, "structural-push-blocks"],
+    queryFn: () => platformsApi.structuralPushBlocks(platform),
+    refetchInterval: 60_000,
+  });
+
   // Shop-wide gap count. Shopify shares this panel but has no listing-gap concept, so
   // it must not fall through to either marketplace's endpoint.
   const supportsGaps = platform === "ebay" || platform === "etsy";
@@ -204,6 +213,23 @@ export function PlatformSyncPanel({ platform }: { platform: ListingPlatform }) {
         </p>
       )}
       <ErrorBanner error={syncSettingsMutation.error} />
+
+      {structuralBlocks.length > 0 && (
+        <div className="rounded border border-amber-300 bg-amber-50 p-2 text-sm text-amber-900">
+          <p className="font-medium">
+            {structuralBlocks.length} {label} listing{structuralBlocks.length === 1 ? "" : "s"} can't receive stock
+            updates until you change {structuralBlocks.length === 1 ? "it" : "them"} on {label}.
+          </p>
+          <ul className="mt-1 list-disc pl-5 text-xs">
+            {structuralBlocks.map((b) => (
+              <li key={`${b.product_id}-${b.variant_id ?? "base"}`}>
+                {b.product_name ?? `Product #${b.product_id}`}
+                {b.variant_name ? ` — ${b.variant_name}` : ""}: {b.reason}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {recentPushFailures.length > 0 && (
         <div className="rounded border border-red-200 bg-red-50 p-2 text-sm text-red-800">

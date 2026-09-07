@@ -2,9 +2,12 @@
 
 ## Status
 
-**Stages 1–4 implemented 2026-09-07** (same branch as the diagnosis). Stages 5–7 remain
-pending — pick them up only if the Stage 2 API-usage numbers show the daily budget is
-still tight in practice. What landed:
+**Stages 1–4 implemented 2026-09-07** (PR #55). **Structural-failure marking (the Stage 4
+rider) and Stages 5–6 implemented 2026-09-07** on a follow-up branch. **Stage 7 is
+deliberately not implemented** — with Stages 1–6 in place the push-call volume is no
+longer close to the budget, so its per-listing constraint index isn't worth the standing
+maintenance cost (finding recorded in the Stage 7 note below). This plan is now
+considered complete. What landed:
 
 - **Stage 1** — `_RATE_LIMIT_MAX_SLEEP_SECONDS` cap (120s) in both adapters; `_tick`
   bounded by `asyncio.wait_for` (`_COMMIT_SYNC_TIMEOUT_SECONDS` = 600) with a recorded
@@ -20,11 +23,56 @@ still tight in practice. What landed:
   Stage 3b watermark skip covers both.
 - **Stage 4** — `listing_reconcile` loop (hourly, started from lifespan + restore),
   `_MAX_PER_RUN` = 25 per platform, `_STALE_AFTER` = 12h; also drives
-  `platform_api_usage.flush()` and `listing_push.drain_deferred()`. Structural-failure
-  marking (the "quantity must be consistent across all products" rider) is **not** done —
-  still a `docs/backlog.md` entry.
-
-Original plan follows.
+  `platform_api_usage.flush()` and `listing_push.drain_deferred()`.
+- **Stage 4 rider — structural-failure marking.** `listings.structural_push_block` /
+  `structural_push_block_at` (migration `f3b1d7e05a29`). `EtsyAdapter.push_listing_quantity`
+  raises `PlatformListingStructuralError` when its GET shows an empty `quantity_on_property`
+  alongside >1 live product (the "quantity must be consistent across all products" dead
+  end), before the PUT. `listing_push._push_one` persists the marker (message names the
+  fix) and writes **no** `PlatformListingPush` row; a later confirmed push clears it.
+  `_push_now` and `listing_reconcile._listings_to_check` skip marked listings;
+  `listing_reconcile._marked_to_reprobe` re-probes them on a 24h cadence.
+  `sync_status._failing_push_counts` excludes them and `_structurally_unpushable_counts`
+  surfaces them separately on `PlatformSyncSummary` (+ `GET /platforms/{platform}/
+  structural-push-blocks` and a Sync-panel list) so the badge points at the listing to
+  fix. Both `docs/backlog.md` entries this completes ("…doesn't vary by variation" and
+  "Periodic reconciliation for failed listing pushes", the latter via Stage 4) are
+  deleted.
+- **Stage 5** — `enqueue_for_material` now schedules ONE debounced job per material
+  (`_pending_materials`, `_debounced_material_diff`) instead of one debounced push per
+  affected product/variant. When it fires, `_diff_and_enqueue_material` runs a single
+  batched buildability pass (`_resolve_targets_bulk` over
+  `get_max_buildable_by_product` + `compute_variants_buildability_bulk` +
+  `compute_max_sellable_bulk`), diffs each affected listing's resolved target against
+  `last_pushed_qty`, and `_enqueue`s only the entries that moved — the same set of real
+  pushes Stage 3 alone would have produced, reached in one session instead of ~N.
+  `quiesce()` cancels the new jobs too. Callers (`costing.recompute_material`,
+  `kitting.py`) unchanged — the `session` arg is now unused (diff runs later on its own).
+- **Stage 6** — directional cadence + deadband, applied in `_diff_and_enqueue_material`.
+  `_direction_for(listings, target, at_full_capacity)` returns `"now"` (any pushable
+  listing's target is *below* its `last_pushed_qty`, or it was never pushed → oversell
+  risk, dispatch on the normal debounce via `_enqueue`), `"sweep"` (only upward moves,
+  at least one past the deadband → parked in `listing_push._reconcile_soon`, drained by
+  `listing_reconcile._tick` → `_listings_for_keys` folds them into the hourly sweep), or
+  `"skip"` (every move is a sub-deadband upward nudge). `_upward_is_material` is the
+  deadband: `delta >= 1` and (`delta / last_pushed >= _UPWARD_DEADBAND_FRACTION` (10%) or
+  `last_pushed <= 0` or the target is at full resolved capacity — resolve reason `None`
+  or `"ceiling"`, tracked by `_resolve_targets_bulk`'s second return value). Never applied
+  downward. Compared against the fully resolved push quantity, not raw buildable.
+- **Stage 7 — not implemented (deliberate stop).** The gate for Stage 7 is "only if the
+  Stage 2 `api_calls_today` numbers still show the daily budget is tight." The worst
+  documented morning (2026-09-07, pre-fix) spent ~2,400 Etsy calls on push fan-out —
+  ~24% of the 10,000/day budget — and that was with the *old* unconditional GET+PUT on
+  every fan-out entry. Stages 3/3c (watermark skip + no-op-PUT skip), 5 (decide before
+  enqueue), and 6 (down-now / up-on-sweep + upward deadband) each cut into that
+  independently; the plan's own table put Stage 3 alone at 10–20×. That leaves a bad
+  morning's push spend at low hundreds of calls against a 10,000/day (Etsy) / 5,000/day
+  (eBay) budget — comfortably inside the 80% soft limit with headroom for order sync,
+  per-receipt enrichment and the reconcile sweep. Stage 7 adds a per-listing
+  binding-constraint index that must be invalidated on on-hand stock changes, ceiling
+  edits, and every gating-material movement — a real standing maintenance surface — to
+  shave a call count that is no longer the constraint. Revisit only if a future
+  `platform_api_usage` reading actually shows sustained pressure from automatic pushes.
 
 Build plan, written 2026-09-07 after diagnosing an Etsy auto-sync stall: the sync loop
 was parked ~6 hours inside a single `asyncio.sleep(Retry-After)` after the day's Etsy API

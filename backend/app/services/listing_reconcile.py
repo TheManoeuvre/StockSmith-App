@@ -48,6 +48,16 @@ _STALE_AFTER = timedelta(hours=12)
 # continues.
 _MAX_PER_RUN = 25
 
+# A listing marked structurally unpushable (Listing.structural_push_block — e.g. an Etsy
+# listing whose quantity doesn't vary by variation) is kept out of the normal selection
+# above: retrying it every hour just burns a GET on a call that can't succeed. But the
+# user may fix it on the marketplace at any time, so re-probe each marked listing on this
+# slower cadence; a probe that finds it fixed pushes and clears the marker
+# (services/listing_push._push_one), a probe that finds it still broken refreshes the
+# timestamp and waits another window.
+_STRUCTURAL_REPROBE_AFTER = timedelta(hours=24)
+_MAX_STRUCTURAL_REPROBE_PER_RUN = 5
+
 _task: asyncio.Task | None = None
 
 
@@ -71,7 +81,11 @@ async def _failing_targets(session, platform: ListingPlatform) -> set[tuple[int 
 
 async def _listings_to_check(session, platform: ListingPlatform, cutoff: datetime) -> list[Listing]:
     """Listings worth re-checking now: never pushed, pushed long enough ago to re-assert,
-    or whose most recent push attempt errored. Most-stale first, capped at _MAX_PER_RUN."""
+    or whose most recent push attempt errored. Most-stale first, capped at _MAX_PER_RUN.
+
+    Structurally-unpushable listings (Listing.structural_push_block) are excluded here —
+    _marked_to_reprobe handles those on a much slower cadence so an unfixable config
+    doesn't consume a slot every hour."""
     failing = await _failing_targets(session, platform)
 
     result = await session.execute(
@@ -79,6 +93,7 @@ async def _listings_to_check(session, platform: ListingPlatform, cutoff: datetim
         .where(
             Listing.platform == platform,
             Listing.external_listing_id.is_not(None),
+            Listing.structural_push_block.is_(None),
         )
         .order_by(Listing.last_pushed_at.is_(None).desc(), Listing.last_pushed_at.asc(), Listing.id.asc())
     )
@@ -93,11 +108,63 @@ async def _listings_to_check(session, platform: ListingPlatform, cutoff: datetim
     return picked
 
 
+async def _marked_to_reprobe(session, platform: ListingPlatform, now: datetime) -> list[Listing]:
+    """Structurally-unpushable listings due a slow re-probe — marked longer ago than
+    _STRUCTURAL_REPROBE_AFTER (or with no timestamp at all). Oldest mark first, capped
+    small: this is a courtesy check for "did the user fix it yet", not a retry queue."""
+    reprobe_cutoff = now - _STRUCTURAL_REPROBE_AFTER
+    result = await session.execute(
+        select(Listing)
+        .where(
+            Listing.platform == platform,
+            Listing.external_listing_id.is_not(None),
+            Listing.structural_push_block.is_not(None),
+        )
+        .order_by(Listing.structural_push_block_at.is_(None).desc(), Listing.structural_push_block_at.asc())
+    )
+    picked: list[Listing] = []
+    for listing in result.scalars():
+        if listing.structural_push_block_at is None or _as_utc(listing.structural_push_block_at) < reprobe_cutoff:
+            picked.append(listing)
+        if len(picked) >= _MAX_STRUCTURAL_REPROBE_PER_RUN:
+            break
+    return picked
+
+
 def _as_utc(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
-async def _reconcile_platform(platform: ListingPlatform) -> None:
+async def _listings_for_keys(
+    session,
+    platform: ListingPlatform,
+    keys: list[tuple[int, int | None]],
+    exclude_ids: set[int],
+) -> list[Listing]:
+    """Pushable listings on `platform` for the given (product_id, variant_id) keys — the
+    upside-only moves Stage 6 parked on this sweep (listing_push._reconcile_soon) rather
+    than dispatching immediately. Structurally-blocked ones are skipped, and anything
+    already picked by the stale/failing selection is dropped via exclude_ids."""
+    if not keys:
+        return []
+    key_set = set(keys)
+    product_ids = {pid for pid, _ in key_set}
+    result = await session.execute(
+        select(Listing).where(
+            Listing.platform == platform,
+            Listing.product_id.in_(product_ids),
+            Listing.external_listing_id.is_not(None),
+            Listing.structural_push_block.is_(None),
+        )
+    )
+    return [
+        listing
+        for listing in result.scalars()
+        if listing.id not in exclude_ids and (listing.product_id, listing.variant_id) in key_set
+    ]
+
+
+async def _reconcile_platform(platform: ListingPlatform, reconcile_soon: list[tuple[int, int | None]] = ()) -> None:
     async with async_session_factory() as session:
         connection = (
             await session.execute(
@@ -114,8 +181,18 @@ async def _reconcile_platform(platform: ListingPlatform) -> None:
             )
             return
 
-        cutoff = datetime.now(timezone.utc) - _STALE_AFTER
+        now = datetime.now(timezone.utc)
+        cutoff = now - _STALE_AFTER
         listings = await _listings_to_check(session, platform, cutoff)
+        # Fold in the slow re-probe of structurally-blocked listings — same budget guard,
+        # same per-listing loop. A push that goes through clears the marker; one that
+        # still hits the block refreshes its timestamp so it waits another window.
+        listings += await _marked_to_reprobe(session, platform, now)
+        # Stage 6: upside-only quantity moves that were routed here instead of a
+        # seconds-scale push. Appended after the stale/failing set, deduped against it.
+        listings += await _listings_for_keys(
+            session, platform, list(reconcile_soon), {l.id for l in listings}
+        )
         if not listings:
             return
 
@@ -146,8 +223,12 @@ async def _tick() -> None:
     if drained:
         logger.info("Re-enqueued %d listing push(es) that were deferred over API budget", drained)
 
+    # Drain once here, not per platform, so a key with listings on both marketplaces is
+    # offered to each _reconcile_platform call (each filters to its own).
+    reconcile_soon = listing_push.take_reconcile_soon()
+
     for platform in _PLATFORMS:
-        await _reconcile_platform(platform)
+        await _reconcile_platform(platform, reconcile_soon)
 
 
 async def _loop() -> None:

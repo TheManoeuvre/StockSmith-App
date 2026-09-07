@@ -18,7 +18,12 @@ from app.services.platforms.base import (
     UnadoptedListingCandidate,
     ensure_utc,
 )
-from app.services.platforms.errors import PlatformAuthError, PlatformRateLimitError, PlatformSyncError
+from app.services.platforms.errors import (
+    PlatformAuthError,
+    PlatformListingStructuralError,
+    PlatformRateLimitError,
+    PlatformSyncError,
+)
 
 logger = logging.getLogger("stocksmith.etsy")
 
@@ -755,6 +760,25 @@ class EtsyAdapter:
                     f"Failed to fetch Etsy listing inventory: {response.status_code} {response.text}"
                 )
             inventory = response.json()
+
+            # Structural dead end: Etsy only lets per-product quantities differ when the
+            # listing has `quantity` attached to a variation property. An empty
+            # `quantity_on_property` on a listing with more than one live product means
+            # every product is forced to share one number — updateListingInventory then
+            # 400s "quantity must be consistent across all products" for any per-SKU value
+            # that isn't already the shared one. That will fail identically on every
+            # future attempt until the seller enables it on the listing, so surface it as
+            # a distinct error the caller can mark permanently rather than one more
+            # retryable 400 (see docs/backlog.md and Listing.structural_push_block).
+            live_products = [p for p in inventory.get("products", []) if not p.get("is_deleted")]
+            if len(live_products) > 1 and not inventory.get("quantity_on_property"):
+                raise PlatformListingStructuralError(
+                    f"This Etsy listing's quantity doesn't vary by variation, so its "
+                    f"{len(live_products)} variants are forced to share one stock number "
+                    "and StockSmith can't set them independently. In Etsy, edit the "
+                    "listing and turn on “quantities vary” for the variation, "
+                    "then StockSmith will start pushing again on its own."
+                )
 
             # What the target SKU's offering should read after this push.
             desired_qty = 1 if qty <= 0 else qty

@@ -25,13 +25,29 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   touches a shared material (a box, a common filament) used to re-push every listing that
   uses it, even when the number was unchanged — thousands of needless marketplace calls.
   Now a push is sent only when the quantity StockSmith would send actually differs from
-  what the marketplace already holds, and automatic pushes pause automatically as the
-  day's API usage nears the platform's budget (order sync is never paused). Each platform's
-  Sync panel shows calls-used-today against that budget.
+  what the marketplace already holds — decided in one batched pass per material rather
+  than by waking a task for every listing that could be affected — and automatic pushes
+  pause automatically as the day's API usage nears the platform's budget (order sync is
+  never paused). Each platform's Sync panel shows calls-used-today against that budget.
+- **Stock going *down* still pushes within seconds; stock going *up* rides the hourly
+  sweep.** A drop in available quantity is an overselling risk and is sent promptly as
+  before. An increase carries no such urgency, so it now waits for the background
+  reconcile sweep instead of spending a near-immediate marketplace call — and a tiny
+  upward wobble (a build-then-sell oscillation around a threshold) is skipped altogether
+  unless it is at least ~10% of the current quantity or brings the listing back to full
+  stock.
 - **A background sweep re-checks listing quantities and retries failed pushes.** Runs
   hourly, re-asserting any listing whose quantity hasn't been confirmed in a while and
   retrying pushes that previously errored — the periodic reconciliation the push path
   never had.
+- **Etsy listings that can't be stocked per-variant are now flagged, not retried forever.**
+  When an Etsy listing's quantity isn't set to vary by its variation, every variant is
+  forced to share one number and StockSmith can't update them independently — previously
+  each attempt failed with Etsy's raw error and the sync warning count kept climbing with
+  no way to clear it. StockSmith now detects this from the listing itself, names the fix
+  ("turn on 'quantities vary' for the variation on Etsy"), and points you at the specific
+  listing in the Sync panel instead of counting a retry that can never succeed. It starts
+  pushing again on its own once the listing is fixed.
 - **"Create draft purchase" on the dashboard now opens the full New purchase panel.**
   The dashboard's "Time to stockout" section gains a per-supplier **Create draft purchase**
   button that drafts every at-risk material from that supplier in one order; the existing
