@@ -12,6 +12,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-09-07
+
 ### Fixed
 - **Auto-sync no longer stalls for hours when a marketplace hits its daily API limit.**
   A burst of listing-quantity pushes could spend the whole day's Etsy API budget by
