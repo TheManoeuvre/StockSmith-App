@@ -3,8 +3,10 @@
 Deliberately separate from GET /platforms/{platform}/status: that endpoint is
 per-platform, and answering it can trigger a best-effort Etsy shop-details HTTP fetch
 (routers/platforms._enrich_etsy_shop_details), which makes it unsuitable as something the
-UI polls on a timer. Everything here is local DB reads only — no marketplace I/O at any
-price — precisely so the indicator can refresh often without spending API budget.
+UI polls on a timer. Everything here stays local — DB reads, plus platform_api_usage.flush()
+folding in-memory call-count deltas (a handful of cheap upserts, no-op when nothing is
+pending) — never marketplace I/O, so the indicator can refresh often without spending API
+budget.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -17,6 +19,7 @@ from app.models.platform_connection import PlatformConnection
 from app.models.platform_listing_push import ListingPushStatus, PlatformListingPush
 from app.models.platform_sync_run import PlatformSyncRun, SyncRunMode, SyncRunStatus
 from app.schemas.platform import PlatformSyncSummary, SyncGap, SyncHealth
+from app.services import platform_api_usage
 from app.services.platforms.base import ensure_utc
 
 # Mirrors the frontend's CONNECTABLE_PLATFORMS — platforms with a real adapter. Shopify is
@@ -211,6 +214,7 @@ async def get_sync_summary(session: AsyncSession) -> list[PlatformSyncSummary]:
         connection = connections.get(platform)
         connected = connection is not None and connection.is_connected
         run = latest_runs.get(platform)
+        api_calls_today = await platform_api_usage.usage_today(session, platform)
         summaries.append(
             PlatformSyncSummary(
                 platform=platform,
@@ -230,6 +234,8 @@ async def get_sync_summary(session: AsyncSession) -> list[PlatformSyncSummary]:
                     run.error_message if run is not None and run.status == SyncRunStatus.error else None
                 ),
                 failing_push_count=failing_pushes.get(platform, 0),
+                api_calls_today=api_calls_today,
+                api_call_budget=platform_api_usage.daily_budget(platform),
             )
         )
     return summaries

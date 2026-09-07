@@ -45,6 +45,11 @@ class PlatformStatus(BaseModel):
     # the listing picker.
     needs_reconnect: bool = False
     needs_reconnect_reason: str | None = None
+    # Marketplace API calls made to this platform so far today (UTC) and the daily budget
+    # they count against. As usage nears the budget, automatic quantity pushes (not order
+    # sync) stand down — see services/platform_api_usage. 0/0 when disconnected.
+    api_calls_today: int = 0
+    api_call_budget: int = 0
 
 
 class EbaySigningKeyStatus(BaseModel):
@@ -175,6 +180,13 @@ class PlatformSyncSummary(BaseModel):
     # importing orders perfectly while silently failing to push stock back, which is the
     # overselling risk this surfaces.
     failing_push_count: int
+    # Marketplace API calls made to this platform so far today (UTC), and the daily budget
+    # they count against. Once usage nears the budget, listing_push stops sending
+    # automatic quantity pushes so order sync keeps its headroom — see
+    # services/platform_api_usage. Zero/None-safe: a platform with no adapter traffic today
+    # simply reads 0.
+    api_calls_today: int
+    api_call_budget: int
 
 
 class SyncGap(BaseModel):

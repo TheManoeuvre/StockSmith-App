@@ -181,6 +181,18 @@ export function PlatformSyncPanel({ platform }: { platform: ListingPlatform }) {
           )}
         </p>
       )}
+      {platformStatus?.connected && platformStatus.api_call_budget > 0 && (
+        <p className="text-xs text-slate-500">
+          {label} API calls today: {platformStatus.api_calls_today.toLocaleString()} /{" "}
+          {platformStatus.api_call_budget.toLocaleString()}
+          {platformStatus.api_calls_today >= platformStatus.api_call_budget * 0.8 && (
+            <span className="text-amber-700">
+              {" "}
+              — automatic quantity pushes are paused until usage falls; order sync is unaffected
+            </span>
+          )}
+        </p>
+      )}
       {/* The hold widens every fetch until the unpaid order resolves, so it shouldn't be
           invisible state — and a hold stuck on an order that will never settle needs a
           symptom the user can actually see. */}

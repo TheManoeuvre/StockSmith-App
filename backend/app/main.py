@@ -34,7 +34,7 @@ from app.routers import (
     system,
     variants,
 )
-from app.services import backup_scheduler, maintenance, sync_scheduler
+from app.services import backup_scheduler, listing_reconcile, maintenance, sync_scheduler
 
 logger = logging.getLogger("stocksmith")
 
@@ -43,11 +43,13 @@ logger = logging.getLogger("stocksmith")
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     sync_scheduler.start()
     backup_scheduler.start()
+    listing_reconcile.start()
     try:
         yield
     finally:
         sync_scheduler.stop()
         backup_scheduler.stop()
+        listing_reconcile.stop()
 
 
 app = FastAPI(title="StockSmith API", lifespan=lifespan)
