@@ -88,6 +88,7 @@ function StockTakeDetailPage() {
     [navigate, nextId],
   );
   const [confirmingApprove, setConfirmingApprove] = useState(false);
+  const [confirmingAbandon, setConfirmingAbandon] = useState(false);
   // Collapsed groups, by key. A two-hundred-line sheet is unusable as one list, and the
   // point of grouping it is to be able to work through one shelf at a time.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -147,6 +148,17 @@ function StockTakeDetailPage() {
     },
   });
 
+  const abandonMutation = useMutation({
+    mutationFn: () => stockTakesApi.remove(id),
+    onSuccess: () => {
+      setConfirmingAbandon(false);
+      // The take is gone — invalidate the list and dashboard, then leave the now-dead route.
+      queryClient.invalidateQueries({ queryKey: ["stock-takes"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
+      navigate({ to: "/stock-takes" });
+    },
+  });
+
   if (!take) {
     return (
       <DetailPanel title="Loading…" onClose={closePanel}>
@@ -198,14 +210,23 @@ function StockTakeDetailPage() {
       footer={
         isOpen ? (
           <div className="flex items-center justify-between gap-3">
-            <button
-              onClick={() => setConfirmingApprove(true)}
-              disabled={committableDirty}
-              title={committableDirty ? "Save your counts first" : undefined}
-              className="rounded border border-slate-300 px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              Review and approve
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setConfirmingApprove(true)}
+                disabled={committableDirty}
+                title={committableDirty ? "Save your counts first" : undefined}
+                className="rounded border border-slate-300 px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Review and approve
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmingAbandon(true)}
+                className="rounded border border-slate-300 px-3 py-1.5 text-sm text-red-700 hover:border-red-300 hover:bg-red-50"
+              >
+                Abandon stock take
+              </button>
+            </div>
             <div className="flex items-center gap-2">
               <span className="text-[12px] text-slate-500">
                 {committableDirty ? "Unsaved changes" : "No changes"}
@@ -395,6 +416,7 @@ function StockTakeDetailPage() {
 
         <ErrorBanner error={saveMutation.error} />
         <ErrorBanner error={approveMutation.error} />
+        <ErrorBanner error={abandonMutation.error} />
 
         <ConfirmDialog
           open={confirmingApprove}
@@ -407,6 +429,24 @@ function StockTakeDetailPage() {
           busy={approveMutation.isPending}
           onConfirm={() => approveMutation.mutate()}
           onCancel={() => setConfirmingApprove(false)}
+        />
+
+        <ConfirmDialog
+          open={confirmingAbandon}
+          title="Abandon this stock take?"
+          body={
+            <p>
+              This deletes the take and any counts entered so far
+              {take.completed_count > 0
+                ? ` (${take.completed_count} counted so far)`
+                : ""}
+              . Nothing is written to stock. This can't be undone.
+            </p>
+          }
+          confirmLabel="Abandon"
+          busy={abandonMutation.isPending}
+          onConfirm={() => abandonMutation.mutate()}
+          onCancel={() => setConfirmingAbandon(false)}
         />
       </div>
     </DetailPanel>

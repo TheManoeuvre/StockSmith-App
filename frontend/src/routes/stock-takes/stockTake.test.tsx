@@ -54,7 +54,7 @@ function line(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function take(lines = [line()]) {
+function take(lines = [line()], overrides: Record<string, unknown> = {}) {
   return {
     id: 1,
     status: "open",
@@ -73,6 +73,7 @@ function take(lines = [line()]) {
     pending_count: lines.filter((l) => l.counted_qty === null).length,
     conflict_count: 0,
     lines,
+    ...overrides,
   };
 }
 
@@ -299,6 +300,46 @@ describe("CSV import confirmation", () => {
     await user.click(dialog.getByRole("button", { name: "Cancel" }));
 
     expect(fetchCalls).toHaveLength(1);
+  });
+});
+
+describe("abandon", () => {
+  it("deletes the take on confirm and returns to the list", async () => {
+    const user = userEvent.setup();
+    setRoutes([
+      ...baseRoutes(),
+      { method: "DELETE" as const, path: "/stock-takes/1", respond: () => undefined },
+    ]);
+    const router = await renderAt("/stock-takes/1");
+
+    await user.click(screen.getByRole("button", { name: "Abandon stock take" }));
+    await user.click(screen.getByRole("button", { name: "Abandon" }));
+
+    await waitFor(() =>
+      expect(
+        calls.some((c) => c.method === "DELETE" && c.path === "/stock-takes/1"),
+      ).toBe(true),
+    );
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/stock-takes"),
+    );
+  });
+
+  it("offers no abandon control once the take is closed", async () => {
+    // A closed take: the footer (and its abandon button) only renders while open.
+    setRoutes(
+      baseRoutes(
+        take([line()], {
+          status: "closed",
+          closed_at: "2026-08-17T09:00:00Z",
+        }),
+      ),
+    );
+    await renderAt("/stock-takes/1");
+
+    expect(
+      screen.queryByRole("button", { name: "Abandon stock take" }),
+    ).not.toBeInTheDocument();
   });
 });
 
