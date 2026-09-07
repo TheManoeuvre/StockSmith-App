@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
-from sqlalchemy import delete, func, select
+from sqlalchemy import case, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -283,6 +283,14 @@ async def list_orders(
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_db),
 ) -> OrderPage:
+    # Orders still awaiting shipment are pinned ahead of shipped/cancelled ones regardless of
+    # date, so a stale open order can't be pushed onto a later page by a wall of newer shipped
+    # orders — the frontend paginates over this ordering and only regroups within a page.
+    # Within the awaiting block it's oldest-first (the order that most needs chasing leads);
+    # within the terminal block it's newest-first. A NULL from the group that a given CASE
+    # doesn't target only ever ties against its own group, so cross-dialect NULL sort position
+    # doesn't matter here.
+    is_terminal = Order.status.in_((OrderStatus.shipped, OrderStatus.cancelled))
     count_query = select(func.count()).select_from(Order)
     query = (
         select(Order)
@@ -291,7 +299,12 @@ async def list_orders(
             selectinload(Order.lines).selectinload(OrderLine.variant),
             selectinload(Order.shipping_profile),
         )
-        .order_by(Order.order_placed_at.desc(), Order.id.desc())
+        .order_by(
+            case((is_terminal, 1), else_=0),
+            case((~is_terminal, Order.order_placed_at)).asc(),
+            case((is_terminal, Order.order_placed_at)).desc(),
+            Order.id.desc(),
+        )
         .limit(limit)
         .offset(offset)
     )

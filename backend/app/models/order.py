@@ -39,9 +39,10 @@ class Order(Base):
     __tablename__ = "orders"
     __table_args__ = (
         UniqueConstraint("platform", "external_order_id", name="uq_orders_platform_external_id"),
-        # Matches list_orders' `ORDER BY order_placed_at DESC, id DESC` exactly — without
-        # it, that query does a full table scan plus a temp B-tree sort on every Orders
-        # page load, which only gets worse as marketplace sync accumulates order history.
+        # list_orders now sorts awaiting orders ahead of terminal ones via CASE expressions,
+        # so it can't lean on this index for the full ordering — but the index still covers
+        # the order_placed_at/id tie-breakers and keeps the count/offset scan off a full
+        # table scan as marketplace sync accumulates order history.
         Index("ix_orders_order_placed_at_id", "order_placed_at", "id"),
     )
 
