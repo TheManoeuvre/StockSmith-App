@@ -48,5 +48,13 @@ class Settings(BaseSettings):
     # the app can still boot with zero platform integrations configured.
     token_encryption_key: str | None = None
 
+    # StockSmith's own registered Pushover application token, used by the notifications
+    # dispatcher (app/services/notifications.py) to send Pushover pushes — not a per-user
+    # secret, so it's read straight from the environment (a GitHub Actions repo secret in
+    # CI/packaging, a local .env for anyone building outside that) rather than stored in the
+    # database like the per-install marketplace credentials are. Nullable so the app still
+    # boots, with Pushover delivery simply unavailable, until it's set.
+    pushover_app_api_token: str | None = None
+
 
 settings = Settings()

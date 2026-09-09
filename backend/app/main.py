@@ -20,6 +20,7 @@ from app.routers import (
     material_categories,
     material_types,
     materials,
+    notifications,
     orders,
     platform_config,
     platforms,
@@ -34,7 +35,7 @@ from app.routers import (
     system,
     variants,
 )
-from app.services import backup_scheduler, listing_reconcile, maintenance, sync_scheduler
+from app.services import backup_scheduler, listing_reconcile, maintenance, notification_scheduler, sync_scheduler
 
 logger = logging.getLogger("stocksmith")
 
@@ -44,12 +45,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     sync_scheduler.start()
     backup_scheduler.start()
     listing_reconcile.start()
+    notification_scheduler.start()
     try:
         yield
     finally:
         sync_scheduler.stop()
         backup_scheduler.stop()
         listing_reconcile.stop()
+        notification_scheduler.stop()
 
 
 app = FastAPI(title="StockSmith API", lifespan=lifespan)
@@ -145,6 +148,8 @@ app.include_router(stock_adjustments.router, prefix="/api/v1")
 app.include_router(stock_takes.router, prefix="/api/v1")
 app.include_router(backups.router, prefix="/api/v1")
 app.include_router(restore.router, prefix="/api/v1")
+app.include_router(notifications.settings_router, prefix="/api/v1")
+app.include_router(notifications.router, prefix="/api/v1")
 
 # Intentionally *not* under /api/v1: a client polling for the end of a restore has to reach this
 # while everything under that prefix is answering 503. See app/routers/system.py.

@@ -22,6 +22,7 @@ from app.db import engine
 from app.models.backup_settings import BackupSettings
 from app.services import paths
 from app.services.backup_archive import BackupError, Manifest, build_archive, read_manifest
+from app.services.notification_alerts import raise_backup_failed_alert, raise_secondary_backup_unreachable_alert
 
 logger = logging.getLogger("stocksmith.backup")
 
@@ -191,6 +192,7 @@ async def run_backup(session: AsyncSession, *, kind: str = "manual") -> BackupFi
         config.last_run_status = "error"
         config.last_run_error = str(exc)
         await session.commit()
+        await raise_backup_failed_alert(session, str(exc))
         raise
     finally:
         tmp_snapshot.unlink(missing_ok=True)
@@ -210,6 +212,7 @@ async def run_backup(session: AsyncSession, *, kind: str = "manual") -> BackupFi
             # how someone ends up believing in off-host copies they don't have.
             logger.warning("Could not copy backup to secondary directory: %s", exc)
             config.secondary_dir_last_error = str(exc)
+            await raise_secondary_backup_unreachable_alert(session, str(exc))
 
     config.last_run_at = datetime.now(timezone.utc)
     config.last_run_status = "ok"
