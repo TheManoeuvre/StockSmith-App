@@ -36,6 +36,18 @@
       "runtimeExecutable": "cmd.exe",
       "runtimeArgs": ["/c", "cd /d D:\\Projects\\StockSmith\\.claude\\worktrees\\compassionate-proskuriakova-cc5829\\backend && C:\\Users\\Benja\\AppData\\Local\\Microsoft\\WinGet\\Packages\\astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe\\uv.exe run uvicorn app.main:app --host 127.0.0.1 --port 8020 --reload"],
       "port": 8020
+    },
+    {
+      "name": "frontend-notifications-ui",
+      "runtimeExecutable": "cmd.exe",
+      "runtimeArgs": ["/c", "set PATH=C:\\PROGRA~1\\nodejs;%PATH% && cd /d D:\\Projects\\StockSmith\\.claude\\worktrees\\create-draft-purchase-error-5a6088\\frontend && C:\\PROGRA~1\\nodejs\\npm.cmd run dev -- --port 1450 --strictPort"],
+      "port": 1450
+    },
+    {
+      "name": "backend-notifications-ui",
+      "runtimeExecutable": "cmd.exe",
+      "runtimeArgs": ["/c", "cd /d D:\\Projects\\StockSmith\\.claude\\worktrees\\create-draft-purchase-error-5a6088\\backend && C:\\Users\\Benja\\AppData\\Local\\Microsoft\\WinGet\\Packages\\astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe\\uv.exe run uvicorn app.main:app --host 127.0.0.1 --port 8030 --reload"],
+      "port": 8030
     }
   ]
 }

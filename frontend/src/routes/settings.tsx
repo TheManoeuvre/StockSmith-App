@@ -26,6 +26,7 @@ import { ForecastSettings } from "../components/settings/ForecastSettings";
 import { StockCountSettings } from "../components/settings/StockCountSettings";
 import { DefaultKittingBomSettings } from "../components/settings/DefaultKittingBomSettings";
 import { BackupSettings } from "../components/settings/BackupSettings";
+import { NotificationSettings } from "../components/settings/NotificationSettings";
 import { ConnectionSettings } from "../components/settings/ConnectionSettings";
 import { FieldMappingTable } from "../components/settings/FieldMappingTable";
 import { SettingsNav, type SettingsNavGroup } from "../components/settings/SettingsNav";
@@ -40,6 +41,7 @@ const PAGE_IDS = [
   "stock-counts",
   "lists",
   "backup-restore",
+  "notifications",
   "connection",
 ] as const;
 type PageId = (typeof PAGE_IDS)[number];
@@ -65,6 +67,7 @@ const NAV_GROUPS: SettingsNavGroup[] = [
     label: "App",
     items: [
       { id: "backup-restore", label: "Backup & restore" },
+      { id: "notifications", label: "Notifications" },
       { id: "connection", label: "Connection" },
     ],
   },
@@ -127,6 +130,7 @@ function Settings() {
           {activePage === "stock-counts" && <StockCountSettings />}
           {activePage === "lists" && <ListsMasterDetail />}
           {activePage === "backup-restore" && <BackupSettings />}
+          {activePage === "notifications" && <NotificationSettings />}
           {activePage === "connection" && <ConnectionSettings />}
         </div>
       </div>
