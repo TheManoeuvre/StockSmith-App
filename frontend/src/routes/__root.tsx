@@ -1,6 +1,7 @@
 import { createRootRoute, Link, Outlet, useMatchRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { SyncStatusIndicator } from "../components/common/SyncStatusIndicator";
+import { NotificationCenter } from "../components/common/NotificationCenter";
 import { MaintenanceOverlay } from "../components/common/MaintenanceOverlay";
 import { UnsavedChangesDialog } from "../components/common/UnsavedChangesDialog";
 import { DirtyRegistryProvider } from "../hooks/useDirtyRegistry";
@@ -142,6 +143,7 @@ function RootChrome() {
         </nav>
         <div className="flex-1" />
         <div className="flex flex-col gap-px border-t border-slate-200 pt-1.5">
+          <NotificationCenter />
           <SyncStatusIndicator />
           <NavButton item={{ label: "Settings", to: "/settings", tone: "neutral" }} />
         </div>
