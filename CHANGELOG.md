@@ -12,6 +12,19 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-11
+
+### Added
+- **In-app, Windows-toast and Pushover notifications.** A bell-style **Alerts** item in
+  the sidebar shows a live unread count and a dropdown of recent notifications, with
+  mark-read and mark-all-read. A new **Notifications** settings page controls delivery
+  channels (Windows toast; Pushover mobile push, with test/replace/remove), quiet hours,
+  the daily/weekly shipped-order summary schedule, and per-alert-type delivery mode
+  (right away, digest, or off). Alerts hook into existing conditions rather than
+  duplicating their logic — platform auth/rate-limit errors, backup failures, low-stock
+  and stockout forecasts, orders awaiting inventory, and a platform nearing its daily API
+  call budget — plus a daily/weekly summary of shipped orders' profit and COGS.
+
 ## [0.12.1] - 2026-09-07
 
 ### Fixed
