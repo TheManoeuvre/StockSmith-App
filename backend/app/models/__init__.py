@@ -34,6 +34,18 @@ from app.models.material import (
 )
 from app.models.material_category import MaterialCategory
 from app.models.material_type import MaterialType
+from app.models.notification import (
+    ALERT_TYPES,
+    DEFAULT_IMMEDIATE_ALERT_TYPES,
+    Notification,
+    NotificationAlertState,
+    NotificationCategory,
+    NotificationDeliveryMode,
+    NotificationSettings,
+    NotificationTypeSettings,
+    NotificationUrgency,
+    SummaryFrequency,
+)
 from app.models.platform_api_usage import PlatformApiUsage
 from app.models.platform_connection import PlatformConnection
 from app.models.platform_credential import PlatformAppCredential, PlatformEnvironment
@@ -131,4 +143,14 @@ __all__ = [
     "ShippingProfile",
     "GeneralSettings",
     "CurrencyCode",
+    "Notification",
+    "NotificationAlertState",
+    "NotificationCategory",
+    "NotificationDeliveryMode",
+    "NotificationSettings",
+    "NotificationTypeSettings",
+    "NotificationUrgency",
+    "SummaryFrequency",
+    "ALERT_TYPES",
+    "DEFAULT_IMMEDIATE_ALERT_TYPES",
 ]

@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.backup_settings import BackupSettings
 from app.models.general_settings import CurrencyCode, GeneralSettings
 from app.models.material_category import MaterialCategory
+from app.models.notification import ALERT_TYPES, DEFAULT_IMMEDIATE_ALERT_TYPES, NotificationDeliveryMode, NotificationSettings, NotificationTypeSettings
 from app.models.platform_fee import FeeBasis, MarginFeeConfig, MarginFeeSource, PlatformFeeComponent
 from app.services.material_categories import DEFAULT_CATEGORIES
 
@@ -119,6 +120,33 @@ async def _ensure_backup_settings(session: AsyncSession) -> None:
         session.add(BackupSettings(id=1))
 
 
+async def _ensure_notification_settings(session: AsyncSession) -> None:
+    existing = await session.execute(select(NotificationSettings).where(NotificationSettings.id == 1))
+    if existing.scalar_one_or_none() is None:
+        session.add(NotificationSettings(id=1))
+
+
+async def _ensure_notification_type_settings(session: AsyncSession) -> None:
+    """Seeds all 9 alert types — immediate for the ones that most directly need a human's
+    attention right away, digest for the rest. See DEFAULT_IMMEDIATE_ALERT_TYPES."""
+    existing = await session.execute(select(NotificationTypeSettings.alert_type))
+    existing_types = {row.alert_type for row in existing}
+    for alert_type in ALERT_TYPES:
+        if alert_type in existing_types:
+            continue
+        session.add(
+            NotificationTypeSettings(
+                alert_type=alert_type,
+                enabled=True,
+                delivery_mode=(
+                    NotificationDeliveryMode.immediate
+                    if alert_type in DEFAULT_IMMEDIATE_ALERT_TYPES
+                    else NotificationDeliveryMode.digest
+                ),
+            )
+        )
+
+
 async def _ensure_margin_fee_config(session: AsyncSession) -> None:
     existing = await session.execute(select(MarginFeeConfig).where(MarginFeeConfig.id == 1))
     if existing.scalar_one_or_none() is None:
@@ -155,6 +183,8 @@ async def ensure_seed_data(session: AsyncSession) -> None:
     """Idempotent — safe to call on every startup, only inserts what's missing."""
     await _ensure_general_settings(session)
     await _ensure_backup_settings(session)
+    await _ensure_notification_settings(session)
+    await _ensure_notification_type_settings(session)
     await _ensure_margin_fee_config(session)
     await _ensure_platform_fee_components(session)
     await _ensure_material_categories(session)
