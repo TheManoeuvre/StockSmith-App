@@ -31,11 +31,11 @@ function groupBySupplier(
   return groups;
 }
 
-/** One blocked-orders row, whichever array it came from. */
-type BlockedRow = {
+/** One row in either the "Orders awaiting products" or "Blocked orders" table. */
+type FulfillmentRow = {
   key: string;
   orderId: number;
-  blockedOn: "Short stock" | "Short packaging";
+  shortOn: "Stock" | "Packaging" | "No BOM defined";
   item: string;
   shortBy: string;
   placedAt: string;
@@ -43,13 +43,16 @@ type BlockedRow = {
   build: { productId: number; variantId: number | null } | null;
 };
 
-function blockedRows(data: DashboardSummary): BlockedRow[] {
-  const rows: BlockedRow[] = [];
+/** Order lines short on stock or packaging they could still be built/assembled from — the
+ * common, expected case for a maker. Excludes lines with no BOM at all (see blockedRows). */
+function awaitingProductRows(data: DashboardSummary): FulfillmentRow[] {
+  const rows: FulfillmentRow[] = [];
   for (const o of data.orders_awaiting_inventory) {
+    if (!o.has_bom) continue;
     rows.push({
       key: `inv-${o.line_id}`,
       orderId: o.order_id,
-      blockedOn: "Short stock",
+      shortOn: "Stock",
       item:
         (o.product_name ?? "—") + (o.variant_name ? ` — ${o.variant_name}` : ""),
       shortBy: String(o.short_by),
@@ -65,12 +68,37 @@ function blockedRows(data: DashboardSummary): BlockedRow[] {
     rows.push({
       key: `pkg-${o.order_id}-${o.material_id}-${i}`,
       orderId: o.order_id,
-      blockedOn: "Short packaging",
+      shortOn: "Packaging",
       item: o.material_name,
       shortBy: roundQty(o.short_by),
       placedAt: o.order_placed_at,
       platform: o.platform,
       build: null,
+    });
+  }
+  rows.sort((a, b) => a.placedAt.localeCompare(b.placedAt));
+  return rows;
+}
+
+/** Order lines with no BOM at all to ever build more from — a genuine blocker, not just a
+ * wait for materials. Rare; kept separate from the routine "awaiting products" queue. */
+function blockedRows(data: DashboardSummary): FulfillmentRow[] {
+  const rows: FulfillmentRow[] = [];
+  for (const o of data.orders_awaiting_inventory) {
+    if (o.has_bom) continue;
+    rows.push({
+      key: `blocked-${o.line_id}`,
+      orderId: o.order_id,
+      shortOn: "No BOM defined",
+      item:
+        (o.product_name ?? "—") + (o.variant_name ? ` — ${o.variant_name}` : ""),
+      shortBy: String(o.short_by),
+      placedAt: o.order_placed_at,
+      platform: o.platform,
+      build:
+        o.product_id != null
+          ? { productId: o.product_id, variantId: o.variant_id }
+          : null,
     });
   }
   rows.sort((a, b) => a.placedAt.localeCompare(b.placedAt));
@@ -106,10 +134,11 @@ function Dashboard() {
   if (error) return <p className="text-red-600">{(error as Error).message}</p>;
   if (!data) return null;
 
-  const awaitingInventory = data.orders_awaiting_inventory.length;
+  const awaitingInventory = data.orders_awaiting_inventory.filter((o) => o.has_bom).length;
   const awaitingPackaging = data.orders_awaiting_packaging.length;
-  const blockedCount = awaitingInventory + awaitingPackaging;
-  const rows = blockedRows(data);
+  const awaitingCount = awaitingInventory + awaitingPackaging;
+  const rows = awaitingProductRows(data);
+  const blocked = blockedRows(data);
 
   const criticalCount = data.low_stock_materials.filter(
     (m) => m.status === "critical",
@@ -129,12 +158,12 @@ function Dashboard() {
           className="block rounded-lg transition hover:shadow-md"
         >
           <KpiCard
-            label="Blocked orders"
-            value={String(blockedCount)}
+            label="Orders awaiting products"
+            value={String(awaitingCount)}
             unit="right now"
             note={`${awaitingInventory} short on stock · ${awaitingPackaging} short on packaging`}
             accent={
-              blockedCount > 0 ? "border-l-red-500" : "border-l-slate-400"
+              awaitingCount > 0 ? "border-l-amber-500" : "border-l-slate-400"
             }
           />
         </Link>
@@ -193,8 +222,86 @@ function Dashboard() {
         </Link>
       </div>
 
+      {blocked.length > 0 && (
+        <Card
+          title="Blocked orders"
+          hint="No BOM defined to build more from — this won't resolve on its own."
+          action={
+            <Link to="/orders" className="text-xs text-blue-700 hover:underline">
+              Open Orders →
+            </Link>
+          }
+        >
+          <table className="w-full border-collapse text-left text-[12.5px]">
+            <thead>
+              <tr className="border-b border-slate-200">
+                <Th>Order</Th>
+                <Th>Channel</Th>
+                <Th>Item</Th>
+                <Th align="right">Short by</Th>
+                <Th>Placed</Th>
+                <Th>{""}</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {blocked.map((r) => (
+                <tr key={r.key} className="border-b border-slate-100">
+                  <td className="p-2">
+                    <Link
+                      to="/orders/$orderId"
+                      params={{ orderId: String(r.orderId) }}
+                      className="text-slate-900 underline"
+                    >
+                      #{r.orderId}
+                    </Link>
+                  </td>
+                  <td className="p-2">
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-[10.5px] font-semibold ${
+                        r.platform
+                          ? PLATFORM_COLORS[r.platform].muted
+                          : "border border-slate-200 bg-slate-50 text-slate-600"
+                      }`}
+                    >
+                      {r.platform ? PLATFORM_LABELS[r.platform] : "Manual"}
+                    </span>
+                  </td>
+                  <td className="p-2">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
+                      {r.item}
+                    </span>
+                  </td>
+                  <td className="p-2 text-right text-red-600 tabular-nums">
+                    {r.shortBy}
+                  </td>
+                  <td className="p-2">{formatDayMonth(r.placedAt)}</td>
+                  <td className="p-2">
+                    {r.build && (
+                      <Link
+                        to="/products/$productId"
+                        params={{ productId: String(r.build.productId) }}
+                        search={{
+                          tab: "stock",
+                          ...(r.build.variantId != null
+                            ? { variantId: r.build.variantId }
+                            : {}),
+                        }}
+                        className="rounded border border-red-300 bg-red-50 px-2 py-1 text-xs text-red-800"
+                      >
+                        Define BOM
+                      </Link>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
+
       <Card
-        title="Blocked orders"
+        title="Orders awaiting products"
         action={
           <Link to="/orders" className="text-xs text-blue-700 hover:underline">
             Open Orders →
@@ -203,7 +310,7 @@ function Dashboard() {
       >
         {rows.length === 0 ? (
           <p className="text-sm text-slate-500">
-            No blocked orders — everything on order can be fulfilled from stock.
+            Nothing waiting — everything on order can be fulfilled from stock.
           </p>
         ) : (
           <table className="w-full border-collapse text-left text-[12.5px]">
@@ -211,7 +318,7 @@ function Dashboard() {
               <tr className="border-b border-slate-200">
                 <Th>Order</Th>
                 <Th>Channel</Th>
-                <Th>Blocked on</Th>
+                <Th>Short on</Th>
                 <Th>Item</Th>
                 <Th align="right">Short by</Th>
                 <Th>Placed</Th>
@@ -245,16 +352,14 @@ function Dashboard() {
                     <span className="inline-flex items-center gap-1.5">
                       <span
                         className={`h-1.5 w-1.5 rounded-full ${
-                          r.blockedOn === "Short stock"
-                            ? "bg-red-500"
-                            : "bg-amber-500"
+                          r.shortOn === "Stock" ? "bg-amber-500" : "bg-blue-500"
                         }`}
                       />
-                      {r.blockedOn}
+                      {r.shortOn}
                     </span>
                   </td>
                   <td className="p-2">{r.item}</td>
-                  <td className="p-2 text-right text-red-600 tabular-nums">
+                  <td className="p-2 text-right text-amber-700 tabular-nums">
                     {r.shortBy}
                   </td>
                   <td className="p-2">{formatDayMonth(r.placedAt)}</td>

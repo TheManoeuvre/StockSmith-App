@@ -101,7 +101,7 @@ async def _forecasts_stub(statuses: list[str]):
 
 
 class TestOrderUnfulfillableDedup:
-    def _awaiting(self, line_id: int) -> OrderAwaitingInventory:
+    def _awaiting(self, line_id: int, *, has_bom: bool = True) -> OrderAwaitingInventory:
         return OrderAwaitingInventory(
             line_id=line_id,
             order_id=100 + line_id,
@@ -112,6 +112,7 @@ class TestOrderUnfulfillableDedup:
             short_by=3,
             order_placed_at=datetime.now(timezone.utc),
             platform=None,
+            has_bom=has_bom,
         )
 
     async def test_fires_once_then_stays_quiet_while_still_short(self, session, monkeypatch):
@@ -139,6 +140,71 @@ class TestOrderUnfulfillableDedup:
         await notification_alerts.check_order_unfulfillable_alerts(session)
 
         assert len(await _notification_titles(session)) == 2
+
+    async def test_has_bom_line_never_dispatches_as_blocked(self, session, monkeypatch):
+        await _set_type(session, NotificationCategory.order_unfulfillable)
+        await _set_type(session, NotificationCategory.order_blocked)
+        monkeypatch.setattr(
+            notification_alerts, "get_orders_awaiting_inventory", lambda s: _awaiting_stub([self._awaiting(3)])
+        )
+
+        await notification_alerts.check_order_unfulfillable_alerts(session)
+
+        result = await session.execute(select(Notification))
+        [notification] = result.scalars().all()
+        assert notification.category == NotificationCategory.order_unfulfillable
+        assert notification.title == "Order awaiting product"
+
+
+class TestOrderBlockedDedup:
+    def _blocked(self, line_id: int) -> OrderAwaitingInventory:
+        return OrderAwaitingInventory(
+            line_id=line_id,
+            order_id=200 + line_id,
+            product_id=1,
+            variant_id=None,
+            product_name="No-BOM Widget",
+            variant_name=None,
+            short_by=2,
+            order_placed_at=datetime.now(timezone.utc),
+            platform=None,
+            has_bom=False,
+        )
+
+    async def test_fires_as_order_blocked_not_order_unfulfillable(self, session, monkeypatch):
+        await _set_type(session, NotificationCategory.order_unfulfillable)
+        await _set_type(session, NotificationCategory.order_blocked)
+        monkeypatch.setattr(
+            notification_alerts, "get_orders_awaiting_inventory", lambda s: _awaiting_stub([self._blocked(1)])
+        )
+
+        await notification_alerts.check_order_unfulfillable_alerts(session)
+
+        result = await session.execute(select(Notification))
+        [notification] = result.scalars().all()
+        assert notification.category == NotificationCategory.order_blocked
+        assert notification.title == "Order blocked — no BOM defined"
+
+    async def test_fires_once_then_stays_quiet_while_still_blocked(self, session, monkeypatch):
+        await _set_type(session, NotificationCategory.order_blocked)
+        monkeypatch.setattr(
+            notification_alerts, "get_orders_awaiting_inventory", lambda s: _awaiting_stub([self._blocked(2)])
+        )
+
+        await notification_alerts.check_order_unfulfillable_alerts(session)
+        await notification_alerts.check_order_unfulfillable_alerts(session)
+
+        assert len(await _notification_titles(session)) == 1
+
+    async def test_disabled_type_never_fires(self, session, monkeypatch):
+        await _set_type(session, NotificationCategory.order_blocked, enabled=False)
+        monkeypatch.setattr(
+            notification_alerts, "get_orders_awaiting_inventory", lambda s: _awaiting_stub([self._blocked(3)])
+        )
+
+        await notification_alerts.check_order_unfulfillable_alerts(session)
+
+        assert await _notification_titles(session) == []
 
 
 async def _awaiting_stub(items):

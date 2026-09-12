@@ -713,6 +713,9 @@ export interface OrderAwaitingInventory {
   short_by: number;
   order_placed_at: string;
   platform: ListingPlatform | null;
+  /** False means there's no BOM (and it's not a bundle) to ever build more from — a genuine
+   * blocker, not just a wait for stock. See the dashboard's "Blocked orders" section. */
+  has_bom: boolean;
 }
 
 export interface OrderAwaitingPackaging {

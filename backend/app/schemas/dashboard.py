@@ -55,6 +55,12 @@ class OrderAwaitingInventory(BaseModel):
     short_by: int
     order_placed_at: datetime
     platform: ListingPlatform | None = None
+    # False means the product has no BOM at all (and isn't a bundle, which is fulfilled from
+    # its components' stock rather than a BOM) — so this shortfall can never close by
+    # building more. That's the genuinely blocked case, distinct from the common/expected
+    # "short on stock but buildable" one. Defaults True so an older client payload without
+    # this field still reads as the ordinary case rather than a false alarm.
+    has_bom: bool = True
 
 
 class OrderAwaitingPackaging(BaseModel):

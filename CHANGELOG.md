@@ -12,6 +12,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **The dashboard's "Blocked orders" is now "Orders awaiting products".** Waiting on stock
+  or packaging you can still build/assemble more of is the normal, expected state for a
+  maker — it no longer shows in red or pages you outside quiet hours. **"Blocked orders"**
+  is now reserved for the rarer, genuinely stuck case: an order for a product with no BOM
+  (or kitting BOM) at all, so the shortfall can never close on its own. That case gets its
+  own dashboard table, nav badge colour, and notification type ("Order blocked — no BOM
+  defined"), separate from the routine "Order awaiting product" alert.
+
 ## [0.13.0] - 2026-09-11
 
 ### Added

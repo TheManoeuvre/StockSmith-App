@@ -60,6 +60,7 @@ function summary(over: Record<string, unknown> = {}) {
         variant_name: null,
         short_by: 3,
         order_placed_at: "2026-08-20T09:00:00Z",
+        has_bom: true,
       },
     ],
     orders_awaiting_packaging: [
@@ -126,34 +127,34 @@ beforeEach(() => setRoutes([]));
 
 it("renders the four KPI tiles off the summary", async () => {
   await renderDashboard();
-  expect(screen.getAllByText("Blocked orders").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("Orders awaiting products").length).toBeGreaterThan(0);
   expect(screen.getByText("Materials at risk")).toBeInTheDocument();
   expect(screen.getByText("Overdue counts")).toBeInTheDocument();
   expect(screen.getByText("Inventory value")).toBeInTheDocument();
   expect(screen.getByText("£1234.50")).toBeInTheDocument();
 });
 
-it("navigates to Orders when the Blocked orders tile is clicked", async () => {
+it("navigates to Orders when the Orders awaiting products tile is clicked", async () => {
   const user = userEvent.setup();
   const router = await renderDashboard();
 
   // The KPI tile label; the first match is the clickable tile.
-  await user.click(screen.getAllByText("Blocked orders")[0]);
+  await user.click(screen.getAllByText("Orders awaiting products")[0]);
 
   await waitFor(() =>
     expect(router.state.location.pathname).toBe("/orders"),
   );
 });
 
-it("merges short-stock and short-packaging rows into the Blocked orders table", async () => {
+it("merges short-stock and short-packaging rows into the Orders awaiting products table", async () => {
   await renderDashboard();
-  expect(await screen.findByText("Short stock")).toBeInTheDocument();
-  expect(screen.getByText("Short packaging")).toBeInTheDocument();
+  expect(await screen.findByText("Stock")).toBeInTheDocument();
+  expect(screen.getByText("Packaging")).toBeInTheDocument();
   expect(screen.getAllByText("Widget A").length).toBeGreaterThan(0);
   expect(screen.getByText("Small box")).toBeInTheDocument();
   // Oldest-placed first: the short-packaging order (18 Aug) above the short-stock one (20 Aug).
-  const labels = screen.getAllByText(/Short (stock|packaging)/);
-  expect(labels[0]).toHaveTextContent("Short packaging");
+  const labels = screen.getAllByText(/^(Stock|Packaging)$/);
+  expect(labels[0]).toHaveTextContent("Packaging");
 });
 
 it("shows the stock-take progress line and a due-for-count entry", async () => {
@@ -163,14 +164,35 @@ it("shows the stock-take progress line and a due-for-count entry", async () => {
   expect(screen.getByText("12 days over")).toBeInTheDocument();
 });
 
-it("hides the Blocked orders table and margin card when their data is empty", async () => {
+it("hides the Orders awaiting products table and margin card when their data is empty", async () => {
   await renderDashboard({
     orders_awaiting_inventory: [],
     orders_awaiting_packaging: [],
     margin_alerts: [],
   });
   expect(
-    await screen.findByText(/No blocked orders/),
+    await screen.findByText(/Nothing waiting/),
   ).toBeInTheDocument();
   expect(screen.queryByText("Margin moved")).not.toBeInTheDocument();
+});
+
+it("shows the Blocked orders table only for lines with no BOM", async () => {
+  await renderDashboard({
+    orders_awaiting_inventory: [
+      {
+        line_id: 2,
+        order_id: 103,
+        product_id: 11,
+        variant_id: null,
+        product_name: "No-BOM Widget",
+        variant_name: null,
+        short_by: 2,
+        order_placed_at: "2026-08-19T09:00:00Z",
+        has_bom: false,
+      },
+    ],
+  });
+  expect(await screen.findByText("Blocked orders")).toBeInTheDocument();
+  expect(screen.getByText("No-BOM Widget")).toBeInTheDocument();
+  expect(screen.getByText("Define BOM")).toBeInTheDocument();
 });

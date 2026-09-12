@@ -1,4 +1,4 @@
-"""Alert detection for the 9 configurable notification types.
+"""Alert detection for the 10 configurable notification types.
 
 Two call shapes, matching how each signal actually arrives:
 
@@ -33,6 +33,7 @@ logger = logging.getLogger("stocksmith.notification_alerts")
 
 _MATERIAL_FORECAST_KEY = "material_forecast_status"
 _ORDER_UNFULFILLABLE_KEY = "order_unfulfillable"
+_ORDER_BLOCKED_KEY = "order_blocked"
 _PENDING_ORDER_THRESHOLD_KEY = "pending_order_threshold"
 _API_SOFT_LIMIT_KEY = "marketplace_api_soft_limit"
 _API_HARD_LIMIT_KEY = "marketplace_api_hard_limit"
@@ -194,38 +195,66 @@ async def check_material_forecast_alerts(session: AsyncSession) -> None:
 
 
 async def check_order_unfulfillable_alerts(session: AsyncSession) -> None:
-    """Fires once per order line the moment it becomes unfulfillable, then stays quiet for
-    that line until it's resolved (allocated or cancelled) and, if it happens again, goes
-    short a second time."""
+    """Fires once per order line the moment it starts awaiting product (has_bom=True, the
+    common/expected case for a maker) or becomes genuinely blocked (has_bom=False — no BOM
+    or kitting BOM exists to ever build more), then stays quiet for that line until it's
+    resolved (allocated or cancelled) and, if it happens again, goes short a second time.
+    The two cases dispatch under separate categories/keys so a routine restock wait never
+    shares a dedup slot — or urgency — with a real blocker."""
     type_settings = await get_type_settings_map(session)
-    config = type_settings.get(NotificationCategory.order_unfulfillable)
-    if config is None or not config.enabled:
+    awaiting_config = type_settings.get(NotificationCategory.order_unfulfillable)
+    blocked_config = type_settings.get(NotificationCategory.order_blocked)
+    awaiting_on = awaiting_config is not None and awaiting_config.enabled
+    blocked_on = blocked_config is not None and blocked_config.enabled
+    if not awaiting_on and not blocked_on:
         return
 
     awaiting = await get_orders_awaiting_inventory(session)
-    previous_keys = set((await _load_alert_state_map(session, _ORDER_UNFULFILLABLE_KEY)).keys())
-    current_keys: set[str] = set()
+    previous_awaiting_keys = set((await _load_alert_state_map(session, _ORDER_UNFULFILLABLE_KEY)).keys())
+    previous_blocked_keys = set((await _load_alert_state_map(session, _ORDER_BLOCKED_KEY)).keys())
+    current_awaiting_keys: set[str] = set()
+    current_blocked_keys: set[str] = set()
 
     for line in awaiting:
         key = str(line.line_id)
-        current_keys.add(key)
-        if key in previous_keys:
-            continue
         product_label = line.variant_name and f"{line.product_name} ({line.variant_name})" or line.product_name
-        await dispatch_notification(
-            session,
-            category=NotificationCategory.order_unfulfillable,
-            urgency=NotificationUrgency.immediate,
-            title="Order can't be fully allocated",
-            body=f"Order #{line.order_id} — {product_label or 'a line'} is short by {line.short_by}.",
-            delivery_mode=config.delivery_mode,
-            related_entity_type="order",
-            related_entity_id=line.order_id,
-        )
-        await _set_alert_state(session, _ORDER_UNFULFILLABLE_KEY, key, "alerted")
 
-    for resolved_key in previous_keys - current_keys:
+        if line.has_bom:
+            current_awaiting_keys.add(key)
+            if awaiting_on and key not in previous_awaiting_keys:
+                await dispatch_notification(
+                    session,
+                    category=NotificationCategory.order_unfulfillable,
+                    urgency=NotificationUrgency.digest,
+                    title="Order awaiting product",
+                    body=f"Order #{line.order_id} — {product_label or 'a line'} is short by {line.short_by}.",
+                    delivery_mode=awaiting_config.delivery_mode,
+                    related_entity_type="order",
+                    related_entity_id=line.order_id,
+                )
+                await _set_alert_state(session, _ORDER_UNFULFILLABLE_KEY, key, "alerted")
+        else:
+            current_blocked_keys.add(key)
+            if blocked_on and key not in previous_blocked_keys:
+                await dispatch_notification(
+                    session,
+                    category=NotificationCategory.order_blocked,
+                    urgency=NotificationUrgency.immediate,
+                    title="Order blocked — no BOM defined",
+                    body=(
+                        f"Order #{line.order_id} — {product_label or 'a line'} is short by "
+                        f"{line.short_by} and has no BOM to build more from."
+                    ),
+                    delivery_mode=blocked_config.delivery_mode,
+                    related_entity_type="order",
+                    related_entity_id=line.order_id,
+                )
+                await _set_alert_state(session, _ORDER_BLOCKED_KEY, key, "alerted")
+
+    for resolved_key in previous_awaiting_keys - current_awaiting_keys:
         await _clear_alert_state(session, _ORDER_UNFULFILLABLE_KEY, resolved_key)
+    for resolved_key in previous_blocked_keys - current_blocked_keys:
+        await _clear_alert_state(session, _ORDER_BLOCKED_KEY, resolved_key)
 
 
 async def check_pending_order_threshold(session: AsyncSession) -> None:
