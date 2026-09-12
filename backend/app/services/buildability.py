@@ -23,7 +23,13 @@ _ORDERS_AWAITING_INVENTORY_SQL = text(
     SELECT ol.id AS line_id, ol.order_id, ol.product_id, ol.variant_id,
            p.name AS product_name, pv.variant_name AS variant_name,
            (ol.ordered_qty - ol.allocated_qty) AS short_by,
-           o.order_placed_at, o.platform AS platform
+           o.order_placed_at, o.platform AS platform,
+           COALESCE(
+               p.is_bundle
+               OR EXISTS (SELECT 1 FROM product_materials pm WHERE pm.product_id = ol.product_id)
+               OR EXISTS (SELECT 1 FROM product_variant_materials pvm WHERE pvm.variant_id = ol.variant_id),
+               false
+           ) AS has_bom
     FROM order_lines ol
     JOIN orders o ON o.id = ol.order_id
     LEFT JOIN products p ON p.id = ol.product_id
@@ -388,7 +394,12 @@ async def compute_variants_buildability_bulk(
 
 async def get_orders_awaiting_inventory(session: AsyncSession) -> list[OrderAwaitingInventory]:
     """Open order lines that can't be fully allocated from current free stock, most-shorted
-    first — surfaced on the dashboard with a "Build now" action per the allocation feature."""
+    first — surfaced on the dashboard with a "Build now" action per the allocation feature.
+
+    has_bom distinguishes the ordinary, expected case (short on stock but there's a BOM to
+    build more from) from the genuinely blocked one (no BOM/kitting BOM exists at all, so
+    the shortfall can never close on its own) — see NotificationCategory.order_blocked and
+    the dashboard's "Blocked orders" section, which is reserved for has_bom=False lines."""
     result = await session.execute(_ORDERS_AWAITING_INVENTORY_SQL)
     return [
         OrderAwaitingInventory(
@@ -401,6 +412,7 @@ async def get_orders_awaiting_inventory(session: AsyncSession) -> list[OrderAwai
             short_by=int(row.short_by),
             order_placed_at=row.order_placed_at,
             platform=row.platform,
+            has_bom=bool(row.has_bom),
         )
         for row in result
     ]

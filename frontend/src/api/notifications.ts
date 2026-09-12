@@ -5,6 +5,7 @@ export type NotificationCategory =
   | "material_forecast_critical"
   | "material_forecast_warning"
   | "order_unfulfillable"
+  | "order_blocked"
   | "pending_order_threshold"
   | "backup_failed"
   | "secondary_backup_unreachable"

@@ -11,12 +11,20 @@ from app.services.crypto import EncryptedString
 class NotificationCategory(str, enum.Enum):
     """One value per alert type the app can raise, plus `daily_summary` for the periodic
     order-summary notification (which isn't user-configurable per-type the way the other
-    nine are — see NotificationSettings.daily_summary_* instead)."""
+    ten are — see NotificationSettings.daily_summary_* instead)."""
 
     marketplace_sync_failure = "marketplace_sync_failure"
     material_forecast_critical = "material_forecast_critical"
     material_forecast_warning = "material_forecast_warning"
+    # Fires for an order line that's short on finished-goods stock but has a BOM (or is a
+    # bundle) it could still be built/assembled from — the common, expected case for a
+    # maker. Kept lower-urgency than order_blocked below; see check_order_unfulfillable_alerts.
     order_unfulfillable = "order_unfulfillable"
+    # Fires for an order line that's short on stock AND has no BOM/kitting BOM at all to
+    # ever close that shortfall by building more — a real blocker, not just a wait for
+    # materials. Distinct from order_unfulfillable so the two can carry different default
+    # urgency/delivery without one drowning out the other.
+    order_blocked = "order_blocked"
     pending_order_threshold = "pending_order_threshold"
     backup_failed = "backup_failed"
     secondary_backup_unreachable = "secondary_backup_unreachable"
@@ -25,13 +33,14 @@ class NotificationCategory(str, enum.Enum):
     daily_summary = "daily_summary"
 
 
-# The 9 user-configurable alert types — every NotificationCategory except daily_summary,
+# The 10 user-configurable alert types — every NotificationCategory except daily_summary,
 # which always fires (see services/notification_summary.py).
 ALERT_TYPES: tuple[NotificationCategory, ...] = (
     NotificationCategory.marketplace_sync_failure,
     NotificationCategory.material_forecast_critical,
     NotificationCategory.material_forecast_warning,
     NotificationCategory.order_unfulfillable,
+    NotificationCategory.order_blocked,
     NotificationCategory.pending_order_threshold,
     NotificationCategory.backup_failed,
     NotificationCategory.secondary_backup_unreachable,
@@ -39,14 +48,16 @@ ALERT_TYPES: tuple[NotificationCategory, ...] = (
     NotificationCategory.marketplace_api_hard_limit,
 )
 
-# Seed defaults: the five alert types that most directly need a human's attention right
-# away default to immediate; the rest (which are naturally either high-volume or
-# lower-urgency) default to batching into the digest.
+# Seed defaults: the alert types that most directly need a human's attention right away
+# default to immediate; the rest (which are naturally either high-volume or lower-urgency)
+# default to batching into the digest. order_unfulfillable (short on stock, but buildable)
+# is expected/routine for a maker and defaults to digest; order_blocked (no BOM to build
+# from at all) is the real emergency and defaults to immediate.
 DEFAULT_IMMEDIATE_ALERT_TYPES: frozenset[NotificationCategory] = frozenset(
     {
         NotificationCategory.marketplace_sync_failure,
         NotificationCategory.material_forecast_critical,
-        NotificationCategory.order_unfulfillable,
+        NotificationCategory.order_blocked,
         NotificationCategory.backup_failed,
         NotificationCategory.marketplace_api_hard_limit,
     }
@@ -185,7 +196,7 @@ class NotificationAlertState(Base):
     line every 15 minutes would re-alert every 15 minutes forever.
 
     alert_key is a short internal namespace string (e.g. "material_forecast_status",
-    "order_unfulfillable") rather than the NotificationCategory enum — some alert
+    "order_unfulfillable", "order_blocked") rather than the NotificationCategory enum — some alert
     conditions (the material forecast) share one status field across two categories
     (critical/warning), so the dedup key needs to be coarser than the category that ends up
     dispatched. entity_key is the stringified id of whatever the alert is about (material

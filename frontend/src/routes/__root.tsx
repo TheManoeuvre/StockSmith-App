@@ -80,18 +80,29 @@ function useNavBadges() {
     queryFn: () => purchasesApi.list(),
   });
 
-  const blockedOrders =
-    (summary?.orders_awaiting_inventory?.length ?? 0) + (summary?.orders_awaiting_packaging?.length ?? 0);
+  // Awaiting products: short on stock/packaging but there's a BOM to build more from — the
+  // common, expected case, so it only ever gets the calmer "warm" tone. Blocked: no BOM at
+  // all to build from, a real problem — reserved for "hot".
+  const blockedOrders = summary?.orders_awaiting_inventory?.filter((o) => !o.has_bom).length ?? 0;
+  const awaitingOrders =
+    (summary?.orders_awaiting_inventory?.filter((o) => o.has_bom).length ?? 0) +
+    (summary?.orders_awaiting_packaging?.length ?? 0);
   const riskMaterials = summary?.low_stock_materials?.length ?? 0;
   const dueForCount = summary?.items_due_for_count_total ?? 0;
   const outstandingPurchases = purchases?.filter((p) => p.received_at === null).length ?? 0;
 
   return {
-    dashboard: { badge: blockedOrders + riskMaterials, tone: (blockedOrders > 0 ? "hot" : "warm") as NavBadgeTone },
+    dashboard: {
+      badge: awaitingOrders + blockedOrders + riskMaterials,
+      tone: (blockedOrders > 0 ? "hot" : awaitingOrders + riskMaterials > 0 ? "warm" : "neutral") as NavBadgeTone,
+    },
     materials: { badge: riskMaterials, tone: "warm" as NavBadgeTone },
     products: { badge: summary?.active_product_count ?? 0, tone: "neutral" as NavBadgeTone },
     purchases: { badge: outstandingPurchases, tone: (outstandingPurchases > 0 ? "warm" : "neutral") as NavBadgeTone },
-    orders: { badge: blockedOrders, tone: "hot" as NavBadgeTone },
+    orders: {
+      badge: awaitingOrders + blockedOrders,
+      tone: (blockedOrders > 0 ? "hot" : awaitingOrders > 0 ? "warm" : "neutral") as NavBadgeTone,
+    },
     stockTake: { badge: dueForCount, tone: (dueForCount > 0 ? "warm" : "neutral") as NavBadgeTone },
   };
 }

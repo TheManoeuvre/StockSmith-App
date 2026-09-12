@@ -16,7 +16,7 @@ import { SegmentedControl } from "../common/SegmentedControl";
 import { Switch } from "../common/Switch";
 import { SettingsCard } from "./SettingsCard";
 
-// Display order for the 9 configurable alert types — grouped by what they're about rather
+// Display order for the 10 configurable alert types — grouped by what they're about rather
 // than the backend's alphabetical-by-enum-value ordering, which interleaves unrelated
 // concerns (the two marketplace-API-limit types would otherwise sit next to backup alerts).
 const ALERT_TYPE_ORDER: NotificationCategory[] = [
@@ -26,6 +26,7 @@ const ALERT_TYPE_ORDER: NotificationCategory[] = [
   "material_forecast_warning",
   "material_forecast_critical",
   "order_unfulfillable",
+  "order_blocked",
   "pending_order_threshold",
   "backup_failed",
   "secondary_backup_unreachable",
@@ -37,7 +38,8 @@ const ALERT_TYPE_LABELS: Record<NotificationCategory, string> = {
   marketplace_api_hard_limit: "Marketplace API usage — limit hit",
   material_forecast_warning: "Material running low (warning)",
   material_forecast_critical: "Material running low (critical)",
-  order_unfulfillable: "Order can't be fulfilled",
+  order_unfulfillable: "Order awaiting product",
+  order_blocked: "Order blocked — no BOM defined",
   pending_order_threshold: "Pending orders over threshold",
   backup_failed: "Backup failed",
   secondary_backup_unreachable: "Secondary backup location unreachable",
