@@ -16,16 +16,28 @@ Build with:
 Output lands at dist/stocksmith-backend.exe (single file).
 """
 
+import os
+
+datas = [
+    ("alembic.ini", "."),
+    ("alembic/env.py", "alembic"),
+    ("alembic/script.py.mako", "alembic"),
+    ("alembic/versions", "alembic/versions"),
+]
+
+# release.yml writes this from the PUSHOVER_APP_API_TOKEN repo secret immediately before
+# this build, so it only exists in CI — an ordinary local `build.ps1` run has no such
+# file, and the packaged exe it produces simply has Pushover delivery unavailable, same
+# as an unconfigured dev .env. See app.bootstrap._load_packaged_pushover_token, which
+# reads this back out of the frozen bundle at startup.
+if os.path.exists(".env.packaging"):
+    datas.append((".env.packaging", "."))
+
 a = Analysis(
     ["app/__main__.py"],
     pathex=[],
     binaries=[],
-    datas=[
-        ("alembic.ini", "."),
-        ("alembic/env.py", "alembic"),
-        ("alembic/script.py.mako", "alembic"),
-        ("alembic/versions", "alembic/versions"),
-    ],
+    datas=datas,
     hiddenimports=[
         # Uvicorn resolves these by string name at runtime — PyInstaller's static
         # import scan can't see them.
