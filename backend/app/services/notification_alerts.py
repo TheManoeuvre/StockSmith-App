@@ -27,7 +27,12 @@ from app.models.order import Order, OrderStatus
 from app.services import platform_api_usage
 from app.services.buildability import get_orders_awaiting_inventory
 from app.services.forecasting import compute_material_forecasts
-from app.services.notifications import dispatch_notification, get_notification_settings, get_type_settings_map
+from app.services.notifications import (
+    dispatch_notification,
+    get_notification_settings,
+    get_type_settings_map,
+    resolve_alerts,
+)
 
 logger = logging.getLogger("stocksmith.notification_alerts")
 
@@ -184,6 +189,22 @@ async def check_material_forecast_alerts(session: AsyncSession) -> None:
                     related_entity_type="material",
                     related_entity_id=forecast.material_id,
                 )
+            elif forecast.status not in ("critical", "warning") and prior_status in ("critical", "warning"):
+                # Back to healthy — any unread alert raised while this material was low no
+                # longer reflects reality, so mark it read rather than leaving it for a
+                # human to dismiss by hand.
+                await resolve_alerts(
+                    session,
+                    category=NotificationCategory.material_forecast_critical,
+                    related_entity_type="material",
+                    related_entity_id=forecast.material_id,
+                )
+                await resolve_alerts(
+                    session,
+                    category=NotificationCategory.material_forecast_warning,
+                    related_entity_type="material",
+                    related_entity_id=forecast.material_id,
+                )
             await _set_alert_state(session, _MATERIAL_FORECAST_KEY, key, forecast.status)
 
     # Materials no longer forecast at all (deactivated, deleted) — drop their remembered
@@ -258,6 +279,10 @@ async def check_pending_order_threshold(session: AsyncSession) -> None:
             body=f"{count} orders are pending — above the configured threshold of {threshold}.",
             delivery_mode=config.delivery_mode,
         )
+    elif not is_over and was_over:
+        # Backlog dropped back under threshold — the standing alert no longer reflects
+        # reality.
+        await resolve_alerts(session, category=NotificationCategory.pending_order_threshold)
     await _set_alert_state(session, _PENDING_ORDER_THRESHOLD_KEY, entity_key, "over" if is_over else "under")
 
 

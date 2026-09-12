@@ -145,6 +145,81 @@ async def _awaiting_stub(items):
     return list(items)
 
 
+class TestAutoResolve:
+    async def test_order_unfulfillable_notification_marked_read_once_order_is_allocated(self, session):
+        from app.models.product import Product
+        from app.services import allocation
+
+        product = Product(name="Widget", sku="SKU-AR", current_stock=0, allocated_qty=0)
+        session.add(product)
+        await session.flush()
+        order = Order(status=OrderStatus.pending)
+        session.add(order)
+        await session.flush()
+        line = OrderLine(
+            order_id=order.id, product_id=product.id, ordered_qty=2, allocated_qty=0, shipped_qty=0, needs_mapping=False
+        )
+        session.add(line)
+        await session.commit()
+
+        notification = await notifications.dispatch_notification(
+            session,
+            category=NotificationCategory.order_unfulfillable,
+            urgency=NotificationUrgency.immediate,
+            title="Order can't be fully allocated",
+            body="short by 2",
+            delivery_mode=NotificationDeliveryMode.immediate,
+            related_entity_type="order",
+            related_entity_id=order.id,
+        )
+        assert notification.read_at is None
+
+        # Stock arrives and the order gets (re)allocated — it's no longer blocked.
+        product.current_stock = 2
+        await session.commit()
+        await allocation.allocate_order(session, order)
+
+        await session.refresh(notification)
+        assert notification.read_at is not None
+
+    async def test_material_forecast_notification_marked_read_once_back_to_ok(self, session, monkeypatch):
+        await _set_type(session, NotificationCategory.material_forecast_critical)
+        await _set_type(session, NotificationCategory.material_forecast_warning)
+
+        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s: _forecasts_stub(["critical"]))
+        await notification_alerts.check_material_forecast_alerts(session)
+        result = await session.execute(select(Notification).where(Notification.category == NotificationCategory.material_forecast_critical))
+        notification = result.scalar_one()
+        assert notification.read_at is None
+
+        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s: _forecasts_stub(["ok"]))
+        await notification_alerts.check_material_forecast_alerts(session)
+
+        await session.refresh(notification)
+        assert notification.read_at is not None
+
+    async def test_pending_order_threshold_notification_marked_read_once_back_under(self, session):
+        await _set_type(session, NotificationCategory.pending_order_threshold)
+        settings = await notifications.get_notification_settings(session)
+        settings.pending_order_threshold = 1
+        await session.commit()
+
+        session.add(Order(status=OrderStatus.pending))
+        await session.commit()
+        await notification_alerts.check_pending_order_threshold(session)
+        result = await session.execute(select(Notification).where(Notification.category == NotificationCategory.pending_order_threshold))
+        notification = result.scalar_one()
+        assert notification.read_at is None
+
+        order = (await session.execute(select(Order))).scalars().first()
+        order.status = OrderStatus.shipped
+        await session.commit()
+        await notification_alerts.check_pending_order_threshold(session)
+
+        await session.refresh(notification)
+        assert notification.read_at is not None
+
+
 class TestQuietHours:
     def _settings(self, **overrides) -> NotificationSettings:
         base = dict(quiet_hours_enabled=True, quiet_hours_start=22, quiet_hours_end=7)
