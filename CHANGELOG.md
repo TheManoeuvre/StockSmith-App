@@ -12,6 +12,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-09-12
+
 ### Changed
 - **The dashboard's "Blocked orders" is now "Orders awaiting products".** Waiting on stock
   or packaging you can still build/assemble more of is the normal, expected state for a
@@ -20,6 +22,13 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (or kitting BOM) at all, so the shortfall can never close on its own. That case gets its
   own dashboard table, nav badge colour, and notification type ("Order blocked — no BOM
   defined"), separate from the routine "Order awaiting product" alert.
+
+### Fixed
+- **Alerts now clear themselves once the condition they warned about is resolved.** An
+  order-awaiting-inventory, material-forecast, or pending-order-backlog alert used to sit
+  unread until someone dismissed it by hand, even after the order was fully allocated, the
+  forecast recovered, or the backlog dropped back under threshold. Those alerts now mark
+  themselves read automatically the moment the underlying condition clears.
 
 ## [0.13.0] - 2026-09-11
 
