@@ -248,6 +248,32 @@ async def mark_read(session: AsyncSession, notification_id: int) -> Notification
     return notification
 
 
+async def resolve_alerts(
+    session: AsyncSession,
+    *,
+    category: NotificationCategory,
+    related_entity_type: str | None = None,
+    related_entity_id: int | None = None,
+) -> int:
+    """Marks unread notifications matching `category` (and, when given, the related entity)
+    as read — called when the condition that raised them has cleared on its own (an order
+    unblocked, a material forecast back to healthy, a backlog back under threshold), so a
+    resolved alert doesn't sit unread waiting for someone to dismiss it by hand."""
+    query = select(Notification).where(Notification.category == category, Notification.read_at.is_(None))
+    if related_entity_type is not None:
+        query = query.where(Notification.related_entity_type == related_entity_type)
+    if related_entity_id is not None:
+        query = query.where(Notification.related_entity_id == related_entity_id)
+    rows = list((await session.execute(query)).scalars())
+    if not rows:
+        return 0
+    now = datetime.now(timezone.utc)
+    for row in rows:
+        row.read_at = now
+    await session.commit()
+    return len(rows)
+
+
 async def mark_all_read(session: AsyncSession) -> int:
     now = datetime.now(timezone.utc)
     result = await session.execute(select(Notification).where(Notification.read_at.is_(None)))

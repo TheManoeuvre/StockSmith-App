@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.allocation_event import AllocationEvent, AllocationEventType
+from app.models.notification import NotificationCategory
 from app.models.order import Order, OrderLine, OrderStatus
 from app.models.product import Product
 from app.models.product_stock_event import ProductStockEventType
@@ -12,6 +13,7 @@ from app.models.shipping_profile import ShippingProfile
 from app.models.variant import ProductVariant
 from app.services import listing_push
 from app.services.kitting import auto_apply_multiunit_kitting_override, reconcile_order_kitting
+from app.services.notifications import resolve_alerts
 from app.services.order_costs import compute_line_cost_snapshot, default_order_shipping_profile
 from app.services.shipping_profiles import resolve_shipping_cost_for_platform
 from app.services.stock_events import record_stock_event
@@ -43,6 +45,7 @@ async def _recompute_order_status(session: AsyncSession, order: Order) -> None:
     lines = await _get_lines(session, order.id)
     if not lines:
         return
+    previous_status = order.status
     total_ordered = sum(l.ordered_qty for l in lines)
     total_shipped = sum(l.shipped_qty for l in lines)
     if total_shipped >= total_ordered:
@@ -51,6 +54,17 @@ async def _recompute_order_status(session: AsyncSession, order: Order) -> None:
         order.status = OrderStatus.allocated
     else:
         order.status = OrderStatus.pending
+
+    if previous_status == OrderStatus.pending and order.status != OrderStatus.pending:
+        # The order just became fully allocatable — any "can't be fully allocated" alert
+        # raised against it while it was short is no longer true, so it shouldn't sit
+        # unread waiting for someone to dismiss it by hand.
+        await resolve_alerts(
+            session,
+            category=NotificationCategory.order_unfulfillable,
+            related_entity_type="order",
+            related_entity_id=order.id,
+        )
 
 
 async def _allocate_line(session: AsyncSession, line: OrderLine, source: str) -> int:
