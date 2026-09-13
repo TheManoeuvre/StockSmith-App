@@ -149,6 +149,39 @@ it("splits orders into an Awaiting shipment group above a Shipped & cancelled gr
   expect(within(waitingRow).getByText("Awaiting shipment")).toBeInTheDocument();
 });
 
+it("sorts the awaiting group by soonest ship-by date, not placed date", async () => {
+  setRoutes(
+    routes([
+      order({
+        id: 900,
+        external_order_id: "E-900",
+        status: "pending",
+        order_placed_at: "2026-08-20T09:00:00Z",
+        ship_by_date: "2026-09-01T00:00:00Z",
+        lines: [line({ product_name: "Placed First, Due Later" })],
+      }),
+      order({
+        id: 901,
+        external_order_id: "E-901",
+        status: "pending",
+        order_placed_at: "2026-08-25T09:00:00Z",
+        ship_by_date: "2026-08-28T00:00:00Z",
+        lines: [line({ order_id: 901, product_name: "Placed Later, Due Sooner" })],
+      }),
+    ]),
+  );
+  await renderList();
+
+  const dueSooner = await screen.findByText("Placed Later, Due Sooner");
+  const dueLater = screen.getByText("Placed First, Due Later");
+
+  // The row placed later but due sooner comes first in the DOM.
+  expect(
+    dueSooner.compareDocumentPosition(dueLater) &
+      Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+});
+
 it("shows a derived Fulfilment state with an Allocate action for a pending order", async () => {
   const user = userEvent.setup();
   await renderList();

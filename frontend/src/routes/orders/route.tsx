@@ -141,13 +141,18 @@ function OrdersListContent() {
 
   const items = data?.items ?? [];
   const placedTs = (o: Order) => new Date(o.order_placed_at).getTime();
-  // Anything still to fulfil is pinned above, oldest first — a stale order is the one that
-  // needs chasing. Shipped and cancelled fall to a second group, newest first. The backend
-  // already returns rows in exactly this order (see list_orders), so the awaiting pin holds
-  // across pages; re-sorting here just keeps the grouping self-contained.
+  // Anything still to fulfil is pinned above, soonest-due first — the order most urgently
+  // needing chasing leads. Ties (a shared due date, or no due date at all — a manual order,
+  // or a synced one the marketplace didn't report one for) fall back to oldest-placed-first;
+  // no due date sorts as if it were furthest out, not most urgent. Shipped and cancelled
+  // fall to a second group, newest first. The backend already returns rows in exactly this
+  // order (see list_orders), so the awaiting pin holds across pages; re-sorting here just
+  // keeps the grouping self-contained.
+  const dueTs = (o: Order) =>
+    o.ship_by_date ? new Date(o.ship_by_date).getTime() : Infinity;
   const awaiting = items
     .filter((o) => !isDone(o))
-    .sort((a, b) => placedTs(a) - placedTs(b));
+    .sort((a, b) => dueTs(a) - dueTs(b) || placedTs(a) - placedTs(b));
   const done = items
     .filter(isDone)
     .sort((a, b) => placedTs(b) - placedTs(a));

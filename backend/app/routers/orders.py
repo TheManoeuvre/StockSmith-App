@@ -287,10 +287,13 @@ async def list_orders(
     # Orders still awaiting shipment are pinned ahead of shipped/cancelled ones regardless of
     # date, so a stale open order can't be pushed onto a later page by a wall of newer shipped
     # orders — the frontend paginates over this ordering and only regroups within a page.
-    # Within the awaiting block it's oldest-first (the order that most needs chasing leads);
-    # within the terminal block it's newest-first. A NULL from the group that a given CASE
-    # doesn't target only ever ties against its own group, so cross-dialect NULL sort position
-    # doesn't matter here.
+    # Within the awaiting block it's soonest-due-first (the order most urgently needing
+    # chasing leads), falling back to oldest-placed-first for orders sharing a due date or
+    # missing one entirely (a manual order, or a synced one the marketplace didn't report a
+    # ship-by date for) — NULLs sort last, after every real due date, rather than first as
+    # if they were most urgent. Within the terminal block it's newest-first. A NULL from the
+    # group that a given CASE doesn't target only ever ties against its own group, so
+    # cross-dialect NULL sort position doesn't matter for those.
     is_terminal = Order.status.in_((OrderStatus.shipped, OrderStatus.cancelled))
     count_query = select(func.count()).select_from(Order)
     query = (
@@ -302,6 +305,7 @@ async def list_orders(
         )
         .order_by(
             case((is_terminal, 1), else_=0),
+            case((~is_terminal, Order.ship_by_date)).asc().nulls_last(),
             case((~is_terminal, Order.order_placed_at)).asc(),
             case((is_terminal, Order.order_placed_at)).desc(),
             Order.id.desc(),
