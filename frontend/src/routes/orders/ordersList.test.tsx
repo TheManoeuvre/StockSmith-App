@@ -51,6 +51,7 @@ function order(over: Record<string, unknown> = {}) {
     buyer_note: null,
     order_placed_at: "2026-08-20T09:14:00Z",
     shipped_at: null,
+    ship_by_date: "2026-08-22T00:00:00Z",
     cancelled_at: null,
     notes: null,
     created_at: "2026-08-20T09:14:00Z",
