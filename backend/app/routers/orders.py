@@ -240,6 +240,7 @@ def _serialize_order(order: Order, kitting_cogs: Decimal | None) -> OrderRead:
         buyer_note=order.buyer_note,
         order_placed_at=order.order_placed_at,
         shipped_at=order.shipped_at,
+        ship_by_date=order.ship_by_date,
         cancelled_at=order.cancelled_at,
         notes=order.notes,
         created_at=order.created_at,

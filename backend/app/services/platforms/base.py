@@ -67,6 +67,12 @@ class ExternalOrder:
     last_modified: datetime
     is_cancelled: bool
     is_shipped: bool
+    # The marketplace's own fulfillment deadline — Etsy's Receipt.expected_ship_date, or
+    # the earliest lineItemFulfillmentInstructions.shipByDate across an eBay order's line
+    # items (a single order-level cutoff, since the whole parcel ships together). None
+    # when the marketplace didn't report one, which order_sync leaves untouched rather
+    # than treating as "no longer due".
+    ship_by_date: datetime | None = None
     lines: list[ExternalOrderLine] = field(default_factory=list)
     # The untouched marketplace response this was parsed from — carried through so a
     # preview/debug view can show ground truth alongside our interpretation of it. Cheap

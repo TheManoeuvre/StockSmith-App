@@ -420,8 +420,11 @@ def _apply_financials(order: Order, ext_order: ExternalOrder) -> None:
     ext_order — called both for brand-new orders and, critically, for already-imported
     ones on every later sync, since that's what lets a late change (payment settling, a
     refund) show up without waiting for the order to be re-created. Deliberately touches
-    ONLY these financial fields — buyer_name/buyer_note/notes/order_placed_at are
-    user-editable via PATCH /orders/{id} and must not be silently overwritten by a sync."""
+    ONLY these financial fields (and ship_by_date, below — not financial, but the same
+    kind of marketplace-owned, never-user-edited field) — buyer_name/buyer_note/notes/
+    order_placed_at are user-editable via PATCH /orders/{id} and must not be silently
+    overwritten by a sync."""
+    order.ship_by_date = ext_order.ship_by_date
     order.currency = ext_order.currency
     order.grand_total = _parse_price(ext_order.grand_total)
     order.subtotal = _parse_price(ext_order.subtotal)
