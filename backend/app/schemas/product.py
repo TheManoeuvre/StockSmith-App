@@ -183,6 +183,7 @@ class BulkBomAmendRequest(BaseModel):
     attribute_name: str  # matched against product.variant_attribute{1,2,3}_name
     attribute_value: str  # e.g. "Large"
     lines: list[BulkBomAmendLine]
+    is_kitting: bool = False  # amend the kitting BOM instead of the build BOM
     # Preview by default. This touches an unbounded number of variants and can overwrite
     # hand edits it has no way to distinguish from rule-generated ones, and the user is
     # already correcting a mistake — so showing the change before making it is the

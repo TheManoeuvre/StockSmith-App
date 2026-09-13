@@ -15,13 +15,14 @@ from fastapi import HTTPException
 from sqlalchemy import select
 
 import app.routers.products as products_router
+from app.models.kitting import ProductKittingMaterial, ProductVariantKittingMaterial
 from app.models.material import Material, LegacyMaterialCategory, MaterialUnit
 from app.models.material_type import MaterialType
 from app.models.product import Product, ProductMaterial
 from app.models.variant import ProductVariant, ProductVariantMaterial
 from app.schemas.product import BulkBomAmendLine, BulkBomAmendRequest
 
-FILAMENT, IVORY, OAK, GLUE = 1, 2, 3, 4
+FILAMENT, IVORY, OAK, GLUE, BOX = 1, 2, 3, 4, 5
 
 
 @pytest_asyncio.fixture
@@ -354,3 +355,82 @@ async def test_a_variant_already_correct_reports_no_change(session, product, pus
     assert result.changed_variant_count == 1  # only variant 11 actually changed
     # An unchanged variant shouldn't cost a marketplace push.
     assert ("product", 1, 10) not in pushes
+
+
+# --- Kitting BOM (is_kitting=True) ------------------------------------------------------
+
+
+async def _kitting_rows(session, variant_id):
+    return (
+        await session.execute(
+            select(ProductVariantKittingMaterial).where(
+                ProductVariantKittingMaterial.variant_id == variant_id
+            )
+        )
+    ).scalars().all()
+
+
+@pytest_asyncio.fixture
+async def kitting_bom(session, product):
+    """Adds a packaging BOM (Box) to the same product/variants used by the build-BOM
+    fixture, distinct material ids so a bug that reused the build-BOM table would be
+    caught immediately."""
+    session.add(
+        Material(id=BOX, name="Box", category=LegacyMaterialCategory.other, unit=MaterialUnit.each)
+    )
+    await session.flush()
+    session.add(ProductKittingMaterial(product_id=1, material_id=BOX, qty_required=Decimal("1")))
+    await session.commit()
+
+
+async def test_kitting_amend_is_isolated_from_build_bom(session, product, kitting_bom, pushes):
+    result = await _amend(
+        session,
+        attribute_name="Size",
+        attribute_value="Large",
+        lines=[BulkBomAmendLine(base_material_id=BOX, qty_required=Decimal("2"))],
+        apply=True,
+        is_kitting=True,
+    )
+
+    assert result.applied is True
+    for variant_id in (10, 11):
+        rows = await _kitting_rows(session, variant_id)
+        assert [(r.material_id, r.qty_required) for r in rows] == [(BOX, Decimal("2"))]
+    # The build BOM overrides table is untouched.
+    assert await _rows(session, 10) == []
+
+
+async def test_kitting_amend_rejects_a_build_bom_material_id(session, product, kitting_bom):
+    with pytest.raises(HTTPException) as exc_info:
+        await _amend(
+            session,
+            attribute_name="Size",
+            attribute_value="Large",
+            lines=[BulkBomAmendLine(base_material_id=FILAMENT, qty_required=Decimal("14"))],
+            is_kitting=True,
+        )
+    assert exc_info.value.status_code == 400
+    assert "kitting BOM" in exc_info.value.detail
+
+
+async def test_kitting_amend_preview_reports_existing_substitution(session, product, kitting_bom):
+    session.add(
+        ProductVariantKittingMaterial(
+            variant_id=10, material_id=BOX, replaces_material_id=None, qty_required=Decimal("3")
+        )
+    )
+    await session.commit()
+
+    result = await _amend(
+        session,
+        attribute_name="Size",
+        attribute_value="Large",
+        lines=[BulkBomAmendLine(base_material_id=BOX, qty_required=Decimal("5"))],
+        is_kitting=True,
+    )
+
+    by_variant = {u.variant_id: u for u in result.units}
+    change = by_variant[10].changes[0]
+    assert change.before_qty == Decimal("3")
+    assert change.after_qty == Decimal("5")
