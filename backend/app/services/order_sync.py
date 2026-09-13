@@ -441,6 +441,13 @@ def _apply_financials(order: Order, ext_order: ExternalOrder) -> None:
         order.payment_net = _parse_price(ext_order.payment_net)
         order.payment_status = ext_order.payment_status
 
+    # Only written once the adapter actually has it (fetched under the same enrich gate
+    # as the payment trio above) — never blanked out on a sync pass that skipped
+    # enrichment, the same reasoning as the guard above.
+    if ext_order.tracking_number:
+        order.tracking_number = ext_order.tracking_number
+        order.carrier = ext_order.carrier
+
     order.financials_synced_at = datetime.now(timezone.utc)
 
 
@@ -515,6 +522,7 @@ async def _upsert_lines(session: AsyncSession, order: Order, ext_order: External
                 external_line_id=ext_line.external_line_id,
                 sku=ext_line.sku,
                 needs_mapping=needs_mapping,
+                variation_text=ext_line.variation_text,
             )
         )
     await default_order_shipping_profile(session, order)

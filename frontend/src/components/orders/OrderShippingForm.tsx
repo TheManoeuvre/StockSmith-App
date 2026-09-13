@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import { ordersApi } from "../../api/orders";
 import { shippingProfilesApi } from "../../api/shippingProfiles";
 import type { Order } from "../../api/types";
+import { CopyButton } from "../common/CopyButton";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { FieldRow } from "../common/FieldRow";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
@@ -18,9 +19,9 @@ interface ShippingEdits {
 /**
  * The Shipping tab. Profile + postage-charged are editable only on a manual order that
  * hasn't shipped (marketplace orders get their shipping from sync, and a shipped order's
- * figures are frozen) — otherwise they show read-only. Carrier / tracking / ship-to /
- * postage-actually-paid are in the design but have no backend column yet, so they're
- * deferred; what the order does carry (shipped date, frozen postage cost) is shown read-only.
+ * figures are frozen) — otherwise they show read-only. Tracking number/carrier come from
+ * marketplace sync (read-only, never set for manual orders). Ship-to / postage-actually-paid
+ * are in the design but have no backend column yet, so they're still deferred.
  */
 export function OrderShippingForm({ order, onSaved }: { order: Order; onSaved: () => void }) {
   const editable = order.platform === null && order.status !== "shipped";
@@ -123,6 +124,14 @@ export function OrderShippingForm({ order, onSaved }: { order: Order; onSaved: (
         </>
       )}
 
+      {order.tracking_number && (
+        <FieldRow label="Tracking number" align="right">
+          <span className="flex items-center justify-end gap-1 tabular-nums text-slate-600">
+            {order.carrier ? `${order.carrier} · ${order.tracking_number}` : order.tracking_number}
+            <CopyButton value={order.tracking_number} label="Copy tracking number" />
+          </span>
+        </FieldRow>
+      )}
       <FieldRow label="Shipped on" align="right">
         <span className="text-slate-600">
           {order.shipped_at ? formatDayMonth(order.shipped_at) : "Not yet shipped"}

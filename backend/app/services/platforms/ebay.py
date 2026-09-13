@@ -772,10 +772,13 @@ class EbayAdapter:
         enrich = payment_state is not PaymentState.unsettled and (cutoff is None or last_modified >= cutoff)
 
         payment_fees = payment_net = payment_status = None
+        tracking_number = carrier = None
         if enrich:
             payment_fees, payment_net, payment_status = await self._fetch_transactions(
                 session, connection, order.get("orderId")
             )
+            if is_shipped:
+                tracking_number, carrier = await self._fetch_tracking(session, connection, order.get("orderId"))
 
         # priceSubtotal is the items BEFORE any discount, exactly like deliveryCost below:
         # eBay's own formula is total = (priceSubtotal - priceDiscount) + deliveryCost +
@@ -819,6 +822,8 @@ class EbayAdapter:
             payment_status=payment_status,
             payment_state=payment_state,
             financials_enriched=enrich,
+            tracking_number=tracking_number,
+            carrier=carrier,
         )
         self._warn_if_unreconciled(external)
         return external
@@ -1001,6 +1006,39 @@ class EbayAdapter:
             f"{float(net):.2f}" if net is not None else None,
             sale.get("transactionStatus"),
         )
+
+    async def _fetch_tracking(
+        self, session, connection: PlatformConnection, order_id
+    ) -> tuple[str | None, str | None]:
+        """Sell Fulfillment API's shipping_fulfillment sub-resource — a separate call
+        from the order itself, only worth making once an order is actually FULFILLED
+        (see the is_shipped gate at the call site). Mirrors _fetch_transactions: any
+        failure degrades to (None, None) rather than failing the whole sync, and gets
+        logged so a persistent failure doesn't look identical to "not shipped yet"."""
+        if order_id is None:
+            return None, None
+        response = await self._authed_request(
+            session,
+            connection,
+            "GET",
+            f"{self.api_base}/sell/fulfillment/v1/order/{order_id}/shipping_fulfillment",
+        )
+        if response.status_code != 200:
+            logger.warning(
+                "eBay tracking lookup failed for order %s: %d %s",
+                order_id,
+                response.status_code,
+                response.text[:500],
+            )
+            return None, None
+        fulfillments = response.json().get("fulfillments", [])
+        if not fulfillments:
+            return None, None
+        # An order shipped in multiple packages returns one fulfillment per shipment —
+        # StockSmith stores only a single tracking number per order (see
+        # models.order.Order.tracking_number), so the first one wins.
+        first = fulfillments[0]
+        return first.get("trackingNumber"), first.get("shippingCarrierCode")
 
     async def push_listing_quantity(
         self, session, connection: PlatformConnection, listing_ref: ExternalListingRef, sku: str | None, qty: int

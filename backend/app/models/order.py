@@ -115,6 +115,12 @@ class Order(Base):
     # snapshots on OrderLine) per an explicit product requirement.
     shipping_cost_snapshot: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
 
+    # Shipment tracking once the marketplace reports it (order_sync._apply_financials).
+    # A single pair covers the common single-package case; a rare multi-package shipment
+    # only surfaces its first tracking number here.
+    tracking_number: Mapped[str | None] = mapped_column(String, nullable=True)
+    carrier: Mapped[str | None] = mapped_column(String, nullable=True)
+
     lines: Mapped[list["OrderLine"]] = relationship(back_populates="order", cascade="all, delete-orphan")
     shipping_profile: Mapped["ShippingProfile | None"] = relationship()
 
@@ -155,6 +161,11 @@ class OrderLine(Base):
     external_line_id: Mapped[str | None] = mapped_column(String, nullable=True)
     sku: Mapped[str | None] = mapped_column(String, nullable=True)
     needs_mapping: Mapped[bool] = mapped_column(default=False, nullable=False)
+
+    # Buyer-supplied personalization/customization text for this line (Etsy transaction
+    # variations). Set once at import (see order_sync._upsert_lines) — never mutated,
+    # matching every other field on a marketplace-sourced line.
+    variation_text: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # Build-BOM cost per unit, snapshotted once at the line's first allocation (see
     # order_costs.compute_line_cost_snapshot, called from allocation._allocate_line) —

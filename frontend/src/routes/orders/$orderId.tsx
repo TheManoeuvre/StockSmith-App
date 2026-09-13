@@ -5,6 +5,7 @@ import { ordersApi } from "../../api/orders";
 import { productsApi } from "../../api/products";
 import type { Order, OrderLine } from "../../api/types";
 import { Badge } from "../../components/common/Badge";
+import { CopyButton } from "../../components/common/CopyButton";
 import { DetailPanel } from "../../components/common/DetailPanel";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { Stat } from "../../components/common/Stat";
@@ -573,6 +574,12 @@ function OrderLineRow({
             {line.product_name ?? "—"}
             {line.variant_name ? ` — ${line.variant_name}` : ""}
           </>
+        )}
+        {line.variation_text && (
+          <div className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-slate-500">
+            <span>{line.variation_text}</span>
+            <CopyButton value={line.variation_text} label="Copy personalization" />
+          </div>
         )}
       </td>
       <td className="p-2">{line.ordered_qty}</td>

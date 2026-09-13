@@ -56,6 +56,8 @@ function order(over: Record<string, unknown> = {}) {
     postage_cost_missing: false,
     sync_issue: null,
     pending_marketplace_cancellation: false,
+    tracking_number: null,
+    carrier: null,
     lines: [],
     ...over,
   };

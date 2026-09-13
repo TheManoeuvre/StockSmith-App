@@ -774,6 +774,7 @@ export interface OrderLine {
   external_line_id: string | null;
   needs_mapping: boolean;
   cost_per_unit_snapshot: string | null;
+  variation_text: string | null;
 }
 
 export interface Order {
@@ -817,6 +818,8 @@ export interface Order {
   postage_cost_missing: boolean;
   sync_issue: string | null;
   pending_marketplace_cancellation: boolean;
+  tracking_number: string | null;
+  carrier: string | null;
   lines: OrderLine[];
 }
 
