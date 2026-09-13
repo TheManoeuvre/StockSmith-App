@@ -341,7 +341,22 @@ function ProductDetail() {
 
   const importMainImageUrlMutation = useMutation({
     mutationFn: (url: string) => assetsApi.importUrl(id, url, "main_image"),
-    onSuccess: invalidateImage,
+    onSuccess: () => {
+      invalidateImage();
+      markImageImported("");
+    },
+  });
+
+  const {
+    value: imageUrlInput,
+    setValue: setImageUrlInput,
+    markSaved: markImageImported,
+  } = useEditableCopy<string>({
+    key: "product-image-url",
+    label: "Product image URL",
+    initial: "",
+    seed: "",
+    seedKey: "const",
   });
 
   const removeMainImageMutation = useMutation({
@@ -705,9 +720,26 @@ function ProductDetail() {
                         </button>
                       )}
                     </div>
-                    <p className="text-xs text-slate-400">
-                      or drag an image link onto the tile
-                    </p>
+                    <div className="flex gap-2">
+                      <input
+                        className="flex-1 rounded border border-slate-300 px-2 py-1 text-sm"
+                        placeholder="Paste image URL, or drag a link onto the image…"
+                        value={imageUrlInput}
+                        onChange={(e) => setImageUrlInput(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        disabled={!imageUrlInput.trim()}
+                        onClick={() =>
+                          importMainImageUrlMutation.mutate(
+                            imageUrlInput.trim(),
+                          )
+                        }
+                        className="rounded border border-slate-300 px-3 py-1 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Import
+                      </button>
+                    </div>
                     <ErrorBanner
                       error={
                         uploadMainImageMutation.error ??
