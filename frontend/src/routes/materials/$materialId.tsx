@@ -9,6 +9,7 @@ import { coloursApi } from "../../api/colours";
 import { pickFile } from "../../lib/tauri";
 import { useMaterialCategories } from "../../hooks/useMaterialCategories";
 import { useMaterialImageUrl } from "../../hooks/useMaterialImageUrl";
+import { ConfirmDialog } from "../../components/common/ConfirmDialog";
 import { DetailPanel } from "../../components/common/DetailPanel";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { CreatableSelect } from "../../components/common/CreatableSelect";
@@ -236,6 +237,7 @@ function MaterialDetail() {
     seedKey: "const",
   });
   const [isDragOver, setIsDragOver] = useState(false);
+  const [deactivateConfirmOpen, setDeactivateConfirmOpen] = useState(false);
 
   const detailsSeed = useMemo<MaterialDetailsForm | undefined>(
     () =>
@@ -426,6 +428,14 @@ function MaterialDetail() {
     },
   });
 
+  const toggleActiveMutation = useMutation({
+    mutationFn: (is_active: boolean) => materialsApi.update(id, { is_active }),
+    onSuccess: () => {
+      invalidateMaterial();
+      setDeactivateConfirmOpen(false);
+    },
+  });
+
   const imageUrl = useMaterialImageUrl(
     material?.image_path ? id : null,
     material?.image_path ? material.updated_at : null,
@@ -479,6 +489,7 @@ function MaterialDetail() {
                 {material.material_type_name
                   ? `${material.material_type_name} · ${material.category}`
                   : material.category}
+                {!material.is_active ? " · inactive" : ""}
               </p>
               <p className="truncate text-[12.5px] text-slate-500">
                 {material.default_supplier_name ?? "No supplier"}
@@ -540,8 +551,8 @@ function MaterialDetail() {
 
         <Tabs tabs={TABS} active={activeTab} onChange={setActiveTab} />
 
-        {activeTab === "details" && (material.barcode || material.product_url) && (
-          <div className="flex gap-2">
+        {activeTab === "details" && (
+          <div className="flex flex-wrap gap-2">
             {material.barcode && (
               <Link
                 to="/material-label/$materialId"
@@ -561,7 +572,40 @@ function MaterialDetail() {
                 Open supplier page
               </a>
             )}
+            {material.is_active ? (
+              <button
+                type="button"
+                onClick={() => setDeactivateConfirmOpen(true)}
+                disabled={toggleActiveMutation.isPending}
+                className="rounded border border-red-300 bg-white px-4 py-1.5 text-sm text-red-600 shadow-sm disabled:opacity-50"
+              >
+                Deactivate
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => toggleActiveMutation.mutate(true)}
+                disabled={toggleActiveMutation.isPending}
+                className="rounded border border-slate-300 bg-white px-4 py-1.5 text-sm shadow-sm disabled:opacity-50"
+              >
+                Reactivate
+              </button>
+            )}
           </div>
+        )}
+        {activeTab === "details" && (
+          <>
+            <ErrorBanner error={toggleActiveMutation.error} />
+            <ConfirmDialog
+              open={deactivateConfirmOpen}
+              title="Deactivate material"
+              body="Deactivate this material? It'll stop showing up in BOM and purchasing pickers, but can be reactivated later."
+              confirmLabel="Deactivate"
+              busy={toggleActiveMutation.isPending}
+              onConfirm={() => toggleActiveMutation.mutate(false)}
+              onCancel={() => setDeactivateConfirmOpen(false)}
+            />
+          </>
         )}
 
         {(activeTab === "details" || activeTab === "supplier") && (
@@ -753,6 +797,11 @@ function MaterialDetail() {
                       {(material.used_in_product_count ?? 0) === 1
                         ? "product"
                         : "products"}
+                    </p>
+                  </FieldRow>
+                  <FieldRow label="Status">
+                    <p className="text-sm text-slate-600">
+                      {material.is_active ? "Active" : "Inactive"}
                     </p>
                   </FieldRow>
                   {/* Stock-counting settings — their own tab until the slide-over was unified
