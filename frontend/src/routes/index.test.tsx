@@ -196,3 +196,58 @@ it("shows the Blocked orders table only for lines with no BOM", async () => {
   expect(screen.getByText("No-BOM Widget")).toBeInTheDocument();
   expect(screen.getByText("Define BOM")).toBeInTheDocument();
 });
+
+it("shows ranked fallback suggestions on a packaging shortfall and logs the picked one", async () => {
+  const user = userEvent.setup();
+  let usagePosted: unknown = null;
+  setRoutes([
+    { method: "GET", path: "/system/status", respond: () => ({ status: "ok" }) },
+    {
+      method: "GET",
+      path: "/dashboard/summary",
+      respond: () =>
+        summary({
+          orders_awaiting_packaging: [
+            {
+              order_id: 102,
+              material_id: 15,
+              material_name: "Small box",
+              short_by: "5",
+              order_placed_at: "2026-08-18T09:00:00Z",
+              suggested_substitutes: [
+                { material_id: 16, material_name: "Medium box", rank: 0, notes: "Fits with padding", available_qty: "20" },
+                { material_id: 17, material_name: "Large box", rank: 1, notes: null, available_qty: "3" },
+              ],
+            },
+          ],
+        }),
+    },
+    {
+      method: "POST",
+      path: "/material-substitute-usage",
+      respond: (body) => {
+        usagePosted = body;
+        return { id: 1, ...(body as object), created_at: "2026-09-14T00:00:00Z" };
+      },
+    },
+    { method: "GET", path: /.*/, respond: () => [] },
+  ]);
+  const router = createRouter({
+    routeTree,
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  });
+  render(
+    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+      <RouterProvider router={router as never} />
+    </QueryClientProvider>,
+  );
+
+  expect(await screen.findByRole("button", { name: /Medium box/ }, { timeout: 5000 })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: /Large box/ })).toBeInTheDocument();
+
+  await user.click(screen.getByRole("button", { name: /Medium box/ }));
+  await user.click(await screen.findByText("Confirm"));
+
+  await waitFor(() => expect(usagePosted).toMatchObject({ material_id: 15, substitute_material_id: 16, order_id: 102 }));
+  expect(await screen.findByText(/Logged — using Medium box instead/)).toBeInTheDocument();
+});

@@ -1,10 +1,16 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import { Fragment, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { dashboardApi } from "../api/dashboard";
-import type { DashboardSummary, ListingPlatform, LowStockMaterial } from "../api/types";
+import type {
+  DashboardSummary,
+  ListingPlatform,
+  LowStockMaterial,
+  SubstituteSuggestion,
+} from "../api/types";
 import { Badge } from "../components/common/Badge";
 import { Th } from "../components/common/ListTable";
+import { SubstituteSuggestions } from "../components/materials/SubstituteSuggestions";
 import { formatDayMonth, roundQty } from "../lib/format";
 import { formatMoney } from "../lib/money";
 import {
@@ -41,6 +47,9 @@ type FulfillmentRow = {
   placedAt: string;
   platform: ListingPlatform | null;
   build: { productId: number; variantId: number | null } | null;
+  /** Only set on a "Packaging" row — the short material, for logging a picked fallback. */
+  materialId: number | null;
+  suggestedSubstitutes: SubstituteSuggestion[];
 };
 
 /** Order lines short on stock or packaging they could still be built/assembled from — the
@@ -62,6 +71,8 @@ function awaitingProductRows(data: DashboardSummary): FulfillmentRow[] {
         o.product_id != null
           ? { productId: o.product_id, variantId: o.variant_id }
           : null,
+      materialId: null,
+      suggestedSubstitutes: [],
     });
   }
   for (const [i, o] of data.orders_awaiting_packaging.entries()) {
@@ -74,6 +85,8 @@ function awaitingProductRows(data: DashboardSummary): FulfillmentRow[] {
       placedAt: o.order_placed_at,
       platform: o.platform,
       build: null,
+      materialId: o.material_id,
+      suggestedSubstitutes: o.suggested_substitutes ?? [],
     });
   }
   rows.sort((a, b) => a.placedAt.localeCompare(b.placedAt));
@@ -99,6 +112,8 @@ function blockedRows(data: DashboardSummary): FulfillmentRow[] {
         o.product_id != null
           ? { productId: o.product_id, variantId: o.variant_id }
           : null,
+      materialId: null,
+      suggestedSubstitutes: [],
     });
   }
   rows.sort((a, b) => a.placedAt.localeCompare(b.placedAt));
@@ -327,7 +342,8 @@ function Dashboard() {
             </thead>
             <tbody>
               {rows.map((r) => (
-                <tr key={r.key} className="border-b border-slate-100">
+                <Fragment key={r.key}>
+                <tr className="border-b border-slate-100">
                   <td className="p-2">
                     <Link
                       to="/orders/$orderId"
@@ -384,6 +400,19 @@ function Dashboard() {
                     )}
                   </td>
                 </tr>
+                {r.materialId != null && r.suggestedSubstitutes.length > 0 && (
+                  <tr className="border-b border-slate-100 bg-slate-50">
+                    <td className="p-2" />
+                    <td colSpan={6} className="px-2 pb-2 pt-0">
+                      <SubstituteSuggestions
+                        materialId={r.materialId}
+                        suggestions={r.suggestedSubstitutes}
+                        orderId={r.orderId}
+                      />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
               ))}
             </tbody>
           </table>

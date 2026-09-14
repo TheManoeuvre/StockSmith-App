@@ -562,6 +562,9 @@ export interface VariantBomLine extends BomLine {
   replaces_material_id: number | null;
   line_max_buildable?: number | null;
   line_expected_max_buildable?: number | null;
+  /** Populated only when this line is the bottleneck (line_max_buildable === 0) — ranked,
+   *  human-curated fallbacks for material_id. Suggested only, never auto-applied. */
+  suggested_substitutes?: SubstituteSuggestion[];
 }
 
 export interface KittingBomLine {
@@ -729,6 +732,65 @@ export interface OrderAwaitingPackaging {
   short_by: string;
   platform: ListingPlatform | null;
   order_placed_at: string;
+  /** Ranked, human-curated fallbacks for material_id — suggested only, never auto-applied. */
+  suggested_substitutes?: SubstituteSuggestion[];
+}
+
+/** A ranked, human-curated fallback surfaced alongside a detected shortage. Never
+ *  auto-applied — picking one is always a user action, logged via material-substitute-usage. */
+export interface SubstituteSuggestion {
+  material_id: number;
+  material_name: string;
+  rank: number;
+  notes: string | null;
+  available_qty: string;
+}
+
+export interface MaterialSubstitute {
+  id: number;
+  material_id: number;
+  substitute_material_id: number;
+  substitute_material_name: string | null;
+  rank: number;
+  notes: string | null;
+  created_by: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface MaterialSubstituteInput {
+  substitute_material_id: number;
+  rank?: number;
+  notes?: string | null;
+  created_by?: string | null;
+}
+
+export interface MaterialSubstituteUpdateInput {
+  rank?: number;
+  notes?: string | null;
+  is_active?: boolean;
+}
+
+export interface MaterialSubstituteUsage {
+  id: number;
+  material_id: number;
+  substitute_material_id: number;
+  qty: string | null;
+  order_id: number | null;
+  build_id: number | null;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface MaterialSubstituteUsageInput {
+  material_id: number;
+  substitute_material_id: number;
+  qty?: string | null;
+  order_id?: number | null;
+  build_id?: number | null;
+  notes?: string | null;
+  created_by?: string | null;
 }
 
 export interface DashboardSummary {
