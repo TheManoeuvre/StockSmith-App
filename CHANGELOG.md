@@ -12,6 +12,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-09-14
+
 ### Added
 - **Routine phone alerts now clear themselves off your lock screen.** Settings →
   Notifications → Mobile push has a new "Clear routine alerts after" period in hours
