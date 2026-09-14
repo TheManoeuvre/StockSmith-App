@@ -12,6 +12,27 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-09-14
+
+### Added
+- **Order lines can now be substituted for a sibling variant** (e.g. green → blue) straight
+  from the order detail panel, as either a partial split or a whole-line swap. It's
+  reversible via Undo up until the substituted units ship, and correctly unwinds chained
+  substitutions. The linked rows now show a connector bar and colour-coded chips instead of
+  plain caption text.
+- **Materials can now declare ranked fallback substitutes** for when they run short. A
+  material's Details tab has a new fallbacks list (add, reorder, deactivate/reactivate), and
+  when a build is blocked on a bottleneck material or an order is short at pack-time, the
+  ranked suggestions now appear inline with a one-click "use this instead" that logs which
+  substitute was picked.
+- **Materials can now be deactivated and reactivated from their detail panel**, matching the
+  existing Products slide-over — previously this required the materials list's filter/bulk
+  tools.
+
+### Changed
+- The Products slide-over's Deactivate confirmation now uses the same styled dialog as
+  everywhere else in the app, instead of a plain browser confirm popup.
+
 ## [0.14.0] - 2026-09-14
 
 ### Added
