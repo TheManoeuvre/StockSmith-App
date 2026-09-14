@@ -581,8 +581,11 @@ export interface KittingBomLineRead extends KittingBomLine {
 
 export interface VariantKittingBomLine extends KittingBomLine {
   replaces_material_id: number | null;
+  /** Pooled with the material's active fallback substitutes' free stock. */
   line_max_buildable?: number | null;
   line_expected_max_buildable?: number | null;
+  /** Share of the pooled free stock that came from fallbacks rather than the material itself. */
+  line_fallback_free_qty?: string | null;
   unit_cost?: string | null;
 }
 

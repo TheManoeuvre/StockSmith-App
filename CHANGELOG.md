@@ -12,6 +12,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **A material's fallback substitutes now count towards packaging capacity.** If a
+  product's box is short but that box lists an active fallback (Materials → Details →
+  Fallbacks) with stock on the shelf, the product's sellable, expected-sellable and
+  build-to-order figures are no longer capped by the empty box — the fallback's free stock
+  is pooled in. This is only a number: nothing is reserved against the fallback, and which
+  box actually gets used is still your call at pack time. Fallbacks pool one level deep
+  (a fallback's own fallbacks don't chain in), and raw-material build capacity is
+  unchanged — it still counts only the material itself.
+
 ### Fixed
 - **Product margin now counts the postage you charge as income.** A product's profit and
   margin (Pricing tab, product header, and the Etsy vs eBay comparison) were computed on the

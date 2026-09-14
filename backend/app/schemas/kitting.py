@@ -26,8 +26,13 @@ class DefaultKittingBomLineRead(KittingBomLine):
 
 class VariantKittingBomLine(KittingBomLine):
     replaces_material_id: int | None = None
+    # Both pooled with the material's active fallbacks (models.material_substitute) —
+    # see kitting._FALLBACK_POOL_BY_MATERIAL_SQL.
     line_max_buildable: int | None = None
     line_expected_max_buildable: int | None = None
+    # How much of the pooled free stock behind line_max_buildable came from fallbacks
+    # rather than the material's own shelf, so a reader can tell the two apart.
+    line_fallback_free_qty: Decimal | None = None
     # Populated only by the capacity paths, which already SELECT the material row — lets
     # kitting.kitting_cost_per_unit_from_bom cost an already-resolved BOM without re-querying.
     unit_cost: Decimal | None = None

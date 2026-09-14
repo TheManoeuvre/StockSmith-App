@@ -32,7 +32,13 @@ from app.schemas.material_substitute import (
     MaterialSubstituteUsageCreate,
 )
 from app.services.buildability import compute_variant_buildability
-from app.services.kitting import get_orders_awaiting_packaging
+from app.services.kitting import (
+    compute_variant_kitting_capacity,
+    compute_variants_kitting_capacity_bulk,
+    get_expected_kitting_capacity_by_product,
+    get_kitting_capacity_by_product,
+    get_orders_awaiting_packaging,
+)
 from app.services.material_substitutes import get_ranked_substitutes, record_substitute_usage
 
 
@@ -240,6 +246,72 @@ async def test_kitting_packaging_shortfall_surfaces_ranked_substitutes(session):
     assert len(entry.suggested_substitutes) == 1
     assert entry.suggested_substitutes[0].material_id == bigger_box.id
     assert entry.suggested_substitutes[0].notes == "fits, just bigger"
+
+
+# ---------------------------------------------------------------------------
+# Packaging capacity pools fallbacks
+# ---------------------------------------------------------------------------
+
+
+async def _packaging_product_with_fallback(session, *, box_qty, fallback_qty):
+    """A product whose only kitting line is `box` (1 per unit), where `box` lists
+    `bigger_box` as its rank-0 fallback. Returns (product, variant, box, bigger_box)."""
+    box = await _material(session, "Small Box", category=LegacyMaterialCategory.packaging, unit=MaterialUnit.each, qty=box_qty)
+    bigger_box = await _material(
+        session, "Medium Box", category=LegacyMaterialCategory.packaging, unit=MaterialUnit.each, qty=fallback_qty
+    )
+    await session.commit()
+    await add_material_substitute(
+        box.id, MaterialSubstituteCreate(substitute_material_id=bigger_box.id, rank=0), session
+    )
+    product = Product(name="Widget", sku="W-1", current_stock=50)
+    session.add(product)
+    await session.flush()
+    session.add(ProductKittingMaterial(product_id=product.id, material_id=box.id, qty_required=Decimal(1)))
+    variant = ProductVariant(product_id=product.id, variant_name="Default", current_stock=50)
+    session.add(variant)
+    await session.commit()
+    return product, variant, box, bigger_box
+
+
+async def test_kitting_capacity_counts_active_fallback_stock_on_every_path(session):
+    """3 small boxes + 20 medium (the fallback) = 23 packable, not 3 — and the product-list
+    SQL, the per-variant path and the bulk per-variant path all say the same thing."""
+    product, variant, box, bigger_box = await _packaging_product_with_fallback(
+        session, box_qty=Decimal(3), fallback_qty=Decimal(20)
+    )
+
+    assert (await get_kitting_capacity_by_product(session))[product.id] == 23
+    assert (await get_expected_kitting_capacity_by_product(session))[product.id] == 23
+
+    capacity, expected_capacity, bom = await compute_variant_kitting_capacity(session, product.id, variant.id)
+    assert (capacity, expected_capacity) == (23, 23)
+    line = next(l for l in bom if l.material_id == box.id)
+    assert line.line_max_buildable == 23
+    assert line.line_fallback_free_qty == Decimal(20)
+
+    bulk = await compute_variants_kitting_capacity_bulk(session, product.id, [variant.id])
+    assert bulk[variant.id][:2] == (23, 23)
+
+
+async def test_kitting_capacity_ignores_deactivated_fallback_and_its_allocated_stock(session):
+    product, variant, box, bigger_box = await _packaging_product_with_fallback(
+        session, box_qty=Decimal(3), fallback_qty=Decimal(20)
+    )
+    # Reserved fallback stock isn't free to lend.
+    bigger_box.allocated_qty = Decimal(15)
+    await session.commit()
+    assert (await get_kitting_capacity_by_product(session))[product.id] == 8
+    capacity, _, _ = await compute_variant_kitting_capacity(session, product.id, variant.id)
+    assert capacity == 8
+
+    # A deactivated fallback drops out of the pool entirely.
+    sub = (await list_material_substitutes(box.id, session))[0]
+    await update_material_substitute(box.id, sub.id, MaterialSubstituteUpdate(is_active=False), session)
+    assert (await get_kitting_capacity_by_product(session))[product.id] == 3
+    capacity, _, bom = await compute_variant_kitting_capacity(session, product.id, variant.id)
+    assert capacity == 3
+    assert next(l for l in bom if l.material_id == box.id).line_fallback_free_qty == Decimal(0)
 
 
 # ---------------------------------------------------------------------------
