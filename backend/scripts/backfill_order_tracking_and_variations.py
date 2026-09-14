@@ -1,19 +1,39 @@
-"""Backfills orders.tracking_number/carrier and order_lines.variation_text for orders
-imported BEFORE those fields existed.
+"""Backfills orders.tracking_number/carrier, orders.ship_by_date and
+order_lines.variation_text for orders imported BEFORE those fields existed, or whose
+value was computed wrong at the time.
 
 Order sync only ever sets these on a fresh call to _parse_order/_parse_receipt — an
 already-imported order never revisits eBay's shipping_fulfillment sub-resource or Etsy's
-receipt shipments/variations once its lines exist (_upsert_lines only ever creates
-lines, never mutates them; _apply_financials only writes tracking_number when the
-adapter actually fetched one). Every order/line imported before this feature shipped is
-therefore permanently blank without a one-off pass like this one.
+receipt shipments/variations/expected_ship_date once its lines exist (_upsert_lines only
+ever creates lines, never mutates them). _apply_financials does refresh ship_by_date on
+every later sync, but only for orders a sync actually re-fetches (min_last_modified) —
+an order with no recent activity is skipped and stays stale. Every order/line imported
+before a feature shipped, or last touched before a parsing bug was fixed, is therefore
+permanently wrong without a one-off pass like this one.
 
-eBay: only tracking_number/carrier exist for eBay (no personalization concept), fetched
-via the same shipping_fulfillment call order_sync now makes for newly-shipped orders.
+Etsy's ship_by_date and variation_text both had real bugs, not just a "field didn't
+exist yet" gap, which is why this script's default (non---all) selection now also
+targets already-populated rows:
+  - ship_by_date used to be read from receipt.expected_ship_date, a field that does not
+    exist anywhere on Etsy's ShopReceipt schema (only ShopReceiptTransaction has it) —
+    so it was silently None on every Etsy order until the parsing fix, regardless of
+    when the order was imported.
+  - variation_text used to keep every entry in transaction.variations, including real
+    product options (Colour, Size) that Etsy returns in the same array as buyer
+    personalization — see EtsyAdapter._format_variations. A previously-populated line
+    can therefore hold a real option mislabeled as personalization, not just be blank.
 
-Etsy: a single per-receipt GET (with includes=Transactions,Shipments) covers both
-tracking (receipt.shipments) and personalization (transaction.variations) in one call,
-so both are backfilled together per order.
+eBay: no personalization concept, and its ship_by_date parsing was always correct (see
+EbayAdapter._ship_by_date_from_line_items) — but an order imported before that field
+existed, or not touched by a sync since, still has it stuck at None the same way
+tracking_number does. tracking_number comes from the shipping_fulfillment sub-resource
+(only meaningful once shipped); ship_by_date comes from a separate getOrder call
+(meaningful on any non-cancelled order) — up to two calls per order, only the ones
+actually needed.
+
+Etsy: a single per-receipt GET (with includes=Transactions,Shipments) covers tracking
+(receipt.shipments), ship_by_date and personalization (both from transactions) in one
+call, so all three are backfilled together per order.
 
 Usage, from backend/:
     # Show what would be fetched and what each marketplace says, writing nothing.
@@ -22,7 +42,8 @@ Usage, from backend/:
     # Persist it.
     uv run python -m scripts.backfill_order_tracking_and_variations --apply
 
-    # Re-fetch orders/lines that already have a value too (e.g. to pick up a correction).
+    # Re-fetch orders/lines that already have a value too (e.g. to pick up any other
+    # correction beyond the two known Etsy bugs above, which are always rechecked).
     uv run python -m scripts.backfill_order_tracking_and_variations --apply --all
 
     # Just one marketplace.
@@ -67,33 +88,60 @@ async def _backfill_ebay(session, args) -> int:
     if connection is None:
         return 0
 
-    query = select(Order).where(Order.platform == ListingPlatform.ebay, Order.status == OrderStatus.shipped)
+    query = select(Order).where(Order.platform == ListingPlatform.ebay)
     if not args.all:
-        query = query.where(Order.tracking_number.is_(None))
+        # tracking_number is only ever missing, never wrong, so it stays gated on the
+        # shipped+blank condition. ship_by_date's gap is the same "field didn't exist
+        # yet" kind as tracking (eBay's own parsing of it was always correct — see
+        # module docstring) — but unlike tracking it's meaningful on unshipped orders
+        # too, so it's checked regardless of shipped status.
+        query = query.where(
+            ((Order.status == OrderStatus.shipped) & Order.tracking_number.is_(None))
+            | ((Order.status != OrderStatus.cancelled) & Order.ship_by_date.is_(None))
+        )
     orders = (await session.execute(query.order_by(Order.id))).scalars().all()
 
     if not orders:
         print("eBay: nothing to backfill")
         return 0
 
-    print(f"eBay: {len(orders)} shipped order(s) to look up")
+    print(f"eBay: {len(orders)} order(s) to look up")
     updated = 0
     for order in orders:
-        try:
-            tracking_number, carrier = await adapter._fetch_tracking(session, connection, order.external_order_id)
-        except PlatformError as e:
-            print(f"  #{order.id} {order.external_order_id}: FAILED — {e}")
-            continue
+        changed = []
+        needs_tracking = order.status == OrderStatus.shipped and (args.all or order.tracking_number is None)
+        needs_ship_by_date = order.status != OrderStatus.cancelled and (args.all or order.ship_by_date is None)
 
-        if not tracking_number:
-            print(f"  #{order.id} {order.external_order_id}: no tracking number returned")
-            continue
+        if needs_tracking:
+            try:
+                tracking_number, carrier = await adapter._fetch_tracking(session, connection, order.external_order_id)
+            except PlatformError as e:
+                print(f"  #{order.id} {order.external_order_id}: FAILED — {e}")
+                continue
+            if tracking_number:
+                changed.append(f"tracking {carrier or '?'} {tracking_number}")
+                if args.apply:
+                    order.tracking_number = tracking_number
+                    order.carrier = carrier
 
-        print(f"  #{order.id} {order.external_order_id}: {carrier or '?'} {tracking_number}")
-        if args.apply:
-            order.tracking_number = tracking_number
-            order.carrier = carrier
-            updated += 1
+        if needs_ship_by_date:
+            try:
+                raw_order = await adapter.fetch_order(session, connection, order.external_order_id)
+            except PlatformError as e:
+                print(f"  #{order.id} {order.external_order_id}: FAILED — {e}")
+                continue
+            if raw_order is not None:
+                ship_by_date = EbayAdapter._ship_by_date_from_line_items(raw_order.get("lineItems", []))
+                if ship_by_date != order.ship_by_date:
+                    changed.append(f"ship_by_date {order.ship_by_date} -> {ship_by_date}")
+                    if args.apply:
+                        order.ship_by_date = ship_by_date
+
+        if not changed:
+            print(f"  #{order.id} {order.external_order_id}: nothing new")
+            continue
+        print(f"  #{order.id} {order.external_order_id}: " + "; ".join(changed))
+        updated += 1
     return updated
 
 
@@ -117,10 +165,18 @@ async def _backfill_etsy(session, args) -> int:
     # Decided in Python rather than SQL — "does this order have anything missing" needs
     # to look at every line, and there are far fewer orders than would justify an EXISTS
     # subquery here.
+    #
+    # ship_by_date and variation_text are always rechecked, --all or not, even when
+    # already set — both had genuine parsing bugs (see module docstring), not just a
+    # "field didn't exist yet" gap, so an existing value can be actively wrong rather
+    # than merely blank. tracking_number is the one field that's only ever missing, never
+    # wrong, so it stays gated on --all like before.
     def needs_backfill(order: Order) -> bool:
         if args.all:
             return True
         if order.status == OrderStatus.shipped and order.tracking_number is None:
+            return True
+        if order.status != OrderStatus.cancelled and order.ship_by_date is None:
             return True
         return any(line.variation_text is None for line in order.lines)
 
@@ -154,6 +210,7 @@ async def _backfill_etsy(session, args) -> int:
         receipt = results[0] if isinstance(results, list) and results else body
 
         changed = []
+        transactions = receipt.get("transactions") or []
 
         shipments = receipt.get("shipments") or []
         first_shipment = shipments[0] if shipments else {}
@@ -165,14 +222,29 @@ async def _backfill_etsy(session, args) -> int:
                 order.tracking_number = tracking_number
                 order.carrier = carrier
 
+        # Always recomputed and compared against the stored value, not just filled in
+        # when blank — expected_ship_date used to be read off the wrong object entirely
+        # (see module docstring), so an already-set ship_by_date can be wrong too, not
+        # just missing.
+        ship_by_date = EtsyAdapter._ship_by_date_from_transactions(transactions)
+        if ship_by_date != order.ship_by_date:
+            changed.append(f"ship_by_date {order.ship_by_date} -> {ship_by_date}")
+            if args.apply:
+                order.ship_by_date = ship_by_date
+
         lines_by_external_id = {line.external_line_id: line for line in order.lines}
-        for tx in receipt.get("transactions") or []:
+        for tx in transactions:
             line = lines_by_external_id.get(str(tx.get("transaction_id")))
             if line is None:
                 continue
+            # Compared against the stored value rather than gated on "is there a new
+            # value", same reason as ship_by_date above: a previously-stored
+            # variation_text can be a real product option mislabeled as personalization
+            # (see module docstring), and the corrected value for that case is None —
+            # `if variation_text:` would silently refuse to ever clear that.
             variation_text = EtsyAdapter._format_variations(tx.get("variations"))
-            if variation_text:
-                changed.append(f"line #{line.id} personalization {variation_text!r}")
+            if variation_text != line.variation_text:
+                changed.append(f"line #{line.id} personalization {line.variation_text!r} -> {variation_text!r}")
                 if args.apply:
                     line.variation_text = variation_text
 
