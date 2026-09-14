@@ -121,6 +121,9 @@ function ProductsListContent() {
   const [tab, setTab] = useState<"all" | "cost-gaps">("all");
   const [searchInput, setSearchInput] = useState("");
   const [q, setQ] = useState("");
+  // Off by default, same as the materials list's showInactive — an inactive product is
+  // hidden from the main list until asked for.
+  const [showInactive, setShowInactive] = useState(false);
   // Collapsed category groups, by label. Session-only, same as the materials list.
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
@@ -137,10 +140,11 @@ function ProductsListContent() {
   }, [searchInput]);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["products", page, tab, q],
+    queryKey: ["products", page, tab, q, showInactive],
     queryFn: () =>
       productsApi.listPaged(PRODUCTS_PAGE_SIZE, page * PRODUCTS_PAGE_SIZE, {
         cogsIncomplete: tab === "cost-gaps",
+        includeInactive: showInactive,
         q,
       }),
     placeholderData: keepPreviousData,
@@ -148,6 +152,7 @@ function ProductsListContent() {
   const products = data?.items;
   const total = data?.total ?? 0;
   const incompleteTotal = data?.incomplete_total ?? 0;
+  const inactiveTotal = data?.inactive_total ?? 0;
   // One cheap DB-backed query per connectable platform (no marketplace traffic — this
   // reads stored Listing rows). `retry: false` because a platform that isn't connected
   // 400s, which is an expected steady state here, not a transient failure worth retrying.
@@ -257,12 +262,27 @@ function ProductsListContent() {
             setPage(0);
           }}
         />
-        <input
-          className="w-56 rounded border border-slate-300 px-2.5 py-1.5 text-sm"
-          placeholder="Search name, SKU…"
-          value={searchInput}
-          onChange={(e) => setSearchInput(e.target.value)}
-        />
+        <div className="flex items-center gap-3">
+          <input
+            className="w-56 rounded border border-slate-300 px-2.5 py-1.5 text-sm"
+            placeholder="Search name, SKU…"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+          />
+          {(showInactive || inactiveTotal > 0) && (
+            <label className="flex shrink-0 cursor-pointer items-center gap-1 text-[12px] text-slate-500">
+              <input
+                type="checkbox"
+                checked={showInactive}
+                onChange={(e) => {
+                  setShowInactive(e.target.checked);
+                  setPage(0);
+                }}
+              />
+              Show inactive ({inactiveTotal})
+            </label>
+          )}
+        </div>
       </div>
 
       {showForm && (
