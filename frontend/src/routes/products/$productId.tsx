@@ -18,6 +18,7 @@ import { ProductPlatformSettingsPanel } from "../../components/products/ProductP
 import { PlatformSyncSection } from "../../components/products/PlatformSyncSection";
 import { CopyButton } from "../../components/common/CopyButton";
 import { Badge } from "../../components/common/Badge";
+import { ConfirmDialog } from "../../components/common/ConfirmDialog";
 import { DetailPanel } from "../../components/common/DetailPanel";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { FieldRow } from "../../components/common/FieldRow";
@@ -205,6 +206,7 @@ function ProductDetail() {
   });
 
   const [isDragOver, setIsDragOver] = useState(false);
+  const [deactivateConfirmOpen, setDeactivateConfirmOpen] = useState(false);
   const [showBomAmend, setShowBomAmend] = useState(false);
 
   const detailsSeed = useMemo(
@@ -315,6 +317,7 @@ function ProductDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["products", id] });
       queryClient.invalidateQueries({ queryKey: ["products"] });
+      setDeactivateConfirmOpen(false);
     },
   });
 
@@ -556,15 +559,7 @@ function ProductDetail() {
               )}
               {product.is_active ? (
                 <button
-                  onClick={() => {
-                    if (
-                      window.confirm(
-                        "Deactivate this product? It'll stop being sellable, but can be reactivated later.",
-                      )
-                    ) {
-                      toggleActiveMutation.mutate(false);
-                    }
-                  }}
+                  onClick={() => setDeactivateConfirmOpen(true)}
                   disabled={toggleActiveMutation.isPending}
                   className="rounded border border-red-300 bg-white px-4 py-1.5 text-sm text-red-600 shadow-sm disabled:opacity-50"
                 >
@@ -581,6 +576,15 @@ function ProductDetail() {
               )}
             </div>
             <ErrorBanner error={toggleActiveMutation.error} />
+            <ConfirmDialog
+              open={deactivateConfirmOpen}
+              title="Deactivate product"
+              body="Deactivate this product? It'll stop being sellable, but can be reactivated later."
+              confirmLabel="Deactivate"
+              busy={toggleActiveMutation.isPending}
+              onConfirm={() => toggleActiveMutation.mutate(false)}
+              onCancel={() => setDeactivateConfirmOpen(false)}
+            />
 
             <form
               className="flex flex-col gap-3 rounded bg-white p-4 shadow-sm"
