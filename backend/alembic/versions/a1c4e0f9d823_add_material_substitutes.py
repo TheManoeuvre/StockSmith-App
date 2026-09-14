@@ -15,7 +15,7 @@ substitution analog of material_adjustments: which material was substituted, wit
 for which order/build, and by whom.
 
 Revision ID: a1c4e0f9d823
-Revises: fdc3ea941e39
+Revises: b1e4f7a92c63
 Create Date: 2026-09-14 00:00:00.000000
 
 """
@@ -26,7 +26,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = 'a1c4e0f9d823'
-down_revision: Union[str, Sequence[str], None] = 'fdc3ea941e39'
+down_revision: Union[str, Sequence[str], None] = 'b1e4f7a92c63'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
