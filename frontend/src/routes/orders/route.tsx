@@ -16,6 +16,7 @@ import { ordersApi } from "../../api/orders";
 import type { Order, OrderStatus } from "../../api/types";
 import { CopyButton } from "../../components/common/CopyButton";
 import { CsvImportExport } from "../../components/common/CsvImportExport";
+import { FilterTabs } from "../../components/common/FilterTabs";
 import { Th } from "../../components/common/ListTable";
 import { formatMoney } from "../../lib/money";
 import { formatDayMonth } from "../../lib/format";
@@ -34,6 +35,14 @@ export const Route = createFileRoute("/orders")({
 });
 
 export const ORDERS_PAGE_SIZE = 50;
+
+type OrderTab = "awaiting" | "shipped" | "cancelled";
+
+const STATUS_TABS: { id: OrderTab; label: string }[] = [
+  { id: "awaiting", label: "Awaiting Shipment" },
+  { id: "shipped", label: "Shipped" },
+  { id: "cancelled", label: "Cancelled" },
+];
 
 export const STATUS_LABELS: Record<OrderStatus, string> = {
   pending: "Pending",
@@ -99,33 +108,30 @@ function OrdersLayout() {
 function OrdersListContent() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [tab, setTab] = useState<OrderTab>("awaiting");
   const [page, setPage] = useState(0);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["orders", page],
-    queryFn: () => ordersApi.list(ORDERS_PAGE_SIZE, page * ORDERS_PAGE_SIZE),
+    queryKey: ["orders", tab, page],
+    queryFn: () => ordersApi.list(ORDERS_PAGE_SIZE, page * ORDERS_PAGE_SIZE, tab),
     placeholderData: keepPreviousData,
   });
 
-  // Cheap totals for the subtitle — kept off the ["orders", …] key so useSiblingNav in the
-  // slide-over doesn't mistake a single-row count page for the sibling sequence.
+  // Cheap per-tab totals for the tab strip and subtitle — kept off the ["orders", …] key so
+  // useSiblingNav in the slide-over doesn't mistake a single-row count page for the sibling
+  // sequence.
   const countQueries = useQueries({
-    queries: (["all", "shipped", "cancelled"] as const).map((id) => ({
+    queries: STATUS_TABS.map(({ id }) => ({
       queryKey: ["order-counts", id],
-      queryFn: () =>
-        ordersApi
-          .list(1, 0, id === "all" ? undefined : id)
-          .then((p) => p.total),
+      queryFn: () => ordersApi.list(1, 0, id).then((p) => p.total),
     })),
   });
-  const [allCount, shippedCount, cancelledCount] = countQueries.map(
+  const [awaitingCount, shippedCount, cancelledCount] = countQueries.map(
     (q) => q.data,
   );
+  const countFor = (id: OrderTab) =>
+    ({ awaiting: awaitingCount, shipped: shippedCount, cancelled: cancelledCount })[id];
   const total = data?.total ?? 0;
-  const awaitingCount =
-    allCount != null && shippedCount != null && cancelledCount != null
-      ? allCount - shippedCount - cancelledCount
-      : null;
 
   const actionMutation = useMutation({
     mutationFn: ({ id, kind }: { id: number; kind: "allocate" | "ship" }) =>
@@ -137,32 +143,18 @@ function OrdersListContent() {
     },
   });
 
+  const changeTab = (id: string) => {
+    setTab(id as OrderTab);
+    setPage(0);
+  };
+
   if (isLoading) return <p>Loading orders…</p>;
   if (error) return <p className="text-red-600">{(error as Error).message}</p>;
 
-  const items = data?.items ?? [];
-  const placedTs = (o: Order) => new Date(o.order_placed_at).getTime();
-  // Anything still to fulfil is pinned above, soonest-due first — the order most urgently
-  // needing chasing leads. Ties (a shared due date, or no due date at all — a manual order,
-  // or a synced one the marketplace didn't report one for) fall back to oldest-placed-first;
-  // no due date sorts as if it were furthest out, not most urgent. Shipped and cancelled
-  // fall to a second group, newest first. The backend already returns rows in exactly this
-  // order (see list_orders), so the awaiting pin holds across pages; re-sorting here just
-  // keeps the grouping self-contained.
-  const dueTs = (o: Order) =>
-    o.ship_by_date ? new Date(o.ship_by_date).getTime() : Infinity;
-  const awaiting = items
-    .filter((o) => !isDone(o))
-    .sort((a, b) => dueTs(a) - dueTs(b) || placedTs(a) - placedTs(b));
-  const done = items
-    .filter(isDone)
-    .sort((a, b) => placedTs(b) - placedTs(a));
-  const rows = [...awaiting, ...done];
-
-  const groups = [
-    { label: "Awaiting shipment", note: "oldest first", rows: awaiting },
-    { label: "Shipped & cancelled", note: "newest first", rows: done },
-  ].filter((g) => g.rows.length > 0);
+  // The backend already returns rows in the right order for the active tab — soonest-due
+  // first for "awaiting" (see list_orders), newest-placed first for "shipped"/"cancelled" —
+  // so there's nothing left to re-sort client-side.
+  const rows = data?.items ?? [];
 
   const renderRow = (order: Order) => (
     <OrderRow
@@ -202,6 +194,12 @@ function OrdersListContent() {
         </div>
       </div>
 
+      <FilterTabs
+        tabs={STATUS_TABS.map((t) => ({ id: t.id, label: t.label, count: countFor(t.id) }))}
+        active={tab}
+        onChange={changeTab}
+      />
+
       <table className="w-full border-collapse overflow-hidden rounded-lg bg-white text-left text-[12.5px] shadow-sm">
         <thead>
           <tr className="border-b border-slate-200 bg-slate-50/60">
@@ -215,32 +213,17 @@ function OrdersListContent() {
             <Th>{""}</Th>
           </tr>
         </thead>
-        {groups.length === 0 ? (
-          <tbody>
+        <tbody>
+          {rows.length === 0 ? (
             <tr>
               <td colSpan={8} className="p-6 text-center text-slate-500">
                 No orders
               </td>
             </tr>
-          </tbody>
-        ) : (
-          groups.map((group) => (
-            <tbody key={group.label}>
-              <tr className="border-b border-slate-200 bg-slate-100">
-                <th
-                  colSpan={8}
-                  className="p-2 text-left text-[11.5px] font-semibold text-slate-600"
-                >
-                  {group.label}
-                  <span className="ml-2 font-normal text-slate-400">
-                    {group.rows.length} · {group.note}
-                  </span>
-                </th>
-              </tr>
-              {group.rows.map(renderRow)}
-            </tbody>
-          ))
-        )}
+          ) : (
+            rows.map(renderRow)
+          )}
+        </tbody>
       </table>
 
       <div className="flex items-center justify-between text-sm text-slate-500">
@@ -325,18 +308,20 @@ function OrderRow({
       </td>
       <td className={`p-2 align-top ${dueTone(order)}`}>{dueLabel(order)}</td>
       <td className="p-2 align-top">
-        {order.lines.map((l) => (
-          <div key={l.id} className="flex items-center gap-1.5 leading-tight">
-            <span className="font-semibold tabular-nums text-slate-600">
-              {l.ordered_qty}×
-            </span>
-            <span>
-              {l.needs_mapping
-                ? `Unmapped: ${l.sku ?? "—"}`
-                : (l.product_name ?? "—")}
-            </span>
-          </div>
-        ))}
+        {order.lines
+          .filter((l) => l.ordered_qty > 0)
+          .map((l) => (
+            <div key={l.id} className="flex items-center gap-1.5 leading-tight">
+              <span className="font-semibold tabular-nums text-slate-600">
+                {l.ordered_qty}×
+              </span>
+              <span>
+                {l.needs_mapping
+                  ? `Unmapped: ${l.sku ?? "—"}`
+                  : (l.product_name ?? "—")}
+              </span>
+            </div>
+          ))}
       </td>
       <td className="p-2 align-top">
         <span

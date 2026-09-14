@@ -86,13 +86,41 @@ function order(over: Record<string, unknown> = {}) {
   };
 }
 
-function routes(items: unknown[]) {
+function routes(items: (typeof order extends (...a: never[]) => infer R ? R : never)[]) {
+  // Mirrors the real backend's ordering (see list_orders) so tests that assert on row order
+  // don't need to duplicate it: soonest ship-by first for "awaiting", newest-placed first
+  // for the terminal tabs.
+  const byTab = (tab: "awaiting" | "shipped" | "cancelled") =>
+    items
+      .filter((o) =>
+        tab === "awaiting" ? o.status !== "shipped" && o.status !== "cancelled" : o.status === tab,
+      )
+      .sort((a, b) =>
+        tab === "awaiting"
+          ? new Date(a.ship_by_date ?? "9999").getTime() - new Date(b.ship_by_date ?? "9999").getTime()
+          : new Date(b.order_placed_at).getTime() - new Date(a.order_placed_at).getTime(),
+      );
   return [
     { method: "GET" as const, path: "/system/status", respond: () => ({ status: "ok" }) },
     {
       method: "POST" as const,
       path: /^\/orders\/\d+\/allocate$/,
       respond: () => order({ status: "allocated" }),
+    },
+    {
+      method: "GET" as const,
+      path: /^\/orders\?.*status_filter=awaiting/,
+      respond: () => ({ items: byTab("awaiting"), total: byTab("awaiting").length }),
+    },
+    {
+      method: "GET" as const,
+      path: /^\/orders\?.*status_filter=shipped/,
+      respond: () => ({ items: byTab("shipped"), total: byTab("shipped").length }),
+    },
+    {
+      method: "GET" as const,
+      path: /^\/orders\?.*status_filter=cancelled/,
+      respond: () => ({ items: byTab("cancelled"), total: byTab("cancelled").length }),
     },
     { method: "GET" as const, path: /^\/orders\?/, respond: () => ({ items, total: items.length }) },
     { method: "GET" as const, path: /.*/, respond: () => [] },
@@ -115,7 +143,8 @@ async function renderList() {
 
 beforeEach(() => setRoutes(routes([order()])));
 
-it("splits orders into an Awaiting shipment group above a Shipped & cancelled group", async () => {
+it("filters the table by status tab, defaulting to Awaiting Shipment", async () => {
+  const user = userEvent.setup();
   setRoutes(
     routes([
       order({
@@ -136,20 +165,13 @@ it("splits orders into an Awaiting shipment group above a Shipped & cancelled gr
   );
   await renderList();
 
-  const awaiting = await screen.findByText("Awaiting shipment");
-  const done = screen.getByText("Shipped & cancelled");
-  expect(awaiting).toBeInTheDocument();
-  expect(done).toBeInTheDocument();
+  expect(await screen.findByText("Waiting Planter")).toBeInTheDocument();
+  expect(screen.queryByText("Shipped Planter")).not.toBeInTheDocument();
 
-  // The awaiting group's header comes before the terminal group's header in the DOM.
-  expect(
-    awaiting.compareDocumentPosition(done) &
-      Node.DOCUMENT_POSITION_FOLLOWING,
-  ).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: /Shipped/ }));
 
-  // And each order sits under the right header.
-  const waitingRow = screen.getByText("Waiting Planter").closest("tbody")!;
-  expect(within(waitingRow).getByText("Awaiting shipment")).toBeInTheDocument();
+  expect(await screen.findByText("Shipped Planter")).toBeInTheDocument();
+  expect(screen.queryByText("Waiting Planter")).not.toBeInTheDocument();
 });
 
 it("sorts the awaiting group by soonest ship-by date, not placed date", async () => {
