@@ -7,6 +7,7 @@ from app.db import async_session_factory
 from app.models.listing import ListingPlatform
 from app.models.platform_connection import PlatformConnection
 from app.models.platform_sync_run import SyncRunMode
+from app.schemas.platform import SyncCommitResult
 from app.services import order_sync
 from app.services.notification_alerts import (
     raise_marketplace_sync_failure_alert,
@@ -121,11 +122,7 @@ async def _tick(platform: ListingPlatform) -> None:
 
     async with lock:
         try:
-            # commit_sync manages its own short-lived sessions internally (see its
-            # docstring) rather than taking one from here — deliberately, so this loop
-            # running for both platforms right at every app boot never holds a pooled
-            # connection open across the slow marketplace fetch phase.
-            await asyncio.wait_for(order_sync.commit_sync(platform), timeout=_COMMIT_SYNC_TIMEOUT_SECONDS)
+            await run_commit_sync_guarded(platform)
         except PlatformAuthError as exc:
             # commit_sync has already rolled back and logged this to PlatformSyncRun
             # (see order_sync._record_failure) — this is purely for the
@@ -136,27 +133,51 @@ async def _tick(platform: ListingPlatform) -> None:
         except PlatformRateLimitError as exc:
             await _raise_sync_failure_alert(platform, str(exc))
             return
-        except (asyncio.TimeoutError, TimeoutError):
-            # wait_for cancelled commit_sync mid-flight; the CancelledError it injected is
-            # a BaseException, so commit_sync's own `except Exception` never ran and no
-            # failed run was recorded. Record one here so the stall is visible in the sync
-            # panel and counts against get_sync_health, then let the loop carry on to its
-            # next cycle rather than staying wedged behind this tick forever.
-            logger.error(
-                "Background auto-sync for %s exceeded %ds and was abandoned — retrying next cycle",
-                platform.value,
-                _COMMIT_SYNC_TIMEOUT_SECONDS,
-            )
-            await order_sync.record_failed_run(
-                platform,
-                SyncRunMode.commit,
-                TimeoutError(f"Sync exceeded {_COMMIT_SYNC_TIMEOUT_SECONDS}s and was abandoned"),
-            )
+        except SyncAbandonedError:
+            # Already logged and recorded by run_commit_sync_guarded; let the loop carry
+            # on to its next cycle rather than staying wedged behind this tick forever.
             return
         except Exception:
             logger.exception("Background auto-sync failed for %s", platform.value)
             return
     await _reset_auth_failures(platform)
+
+
+class SyncAbandonedError(TimeoutError):
+    """commit_sync blew past _COMMIT_SYNC_TIMEOUT_SECONDS and was cancelled. The failed
+    run has already been recorded by the time this reaches a caller."""
+
+
+async def run_commit_sync_guarded(platform: ListingPlatform) -> SyncCommitResult:
+    """order_sync.commit_sync under the stall guard. Shared by the background tick and the
+    manual "Sync now" endpoint — the latter used to run unguarded, so a manual click that
+    wedged held the platform lock (and every later tick no-op'd) indefinitely, with no run
+    row to show for it. The caller is expected to hold get_lock(platform).
+
+    commit_sync manages its own short-lived sessions internally (see its docstring)
+    rather than taking one from here — deliberately, so the scheduler loop running for
+    both platforms right at every app boot never holds a pooled connection open across
+    the slow marketplace fetch phase.
+    """
+    try:
+        return await asyncio.wait_for(order_sync.commit_sync(platform), timeout=_COMMIT_SYNC_TIMEOUT_SECONDS)
+    except (asyncio.TimeoutError, TimeoutError):
+        # wait_for cancelled commit_sync mid-flight; the CancelledError it injected is a
+        # BaseException, so commit_sync's own `except Exception` never ran and its
+        # `running` row is still open. Record the failure here (which finalises that
+        # row — see order_sync._record_failure) so the stall is visible in the sync panel
+        # and counts against get_sync_health.
+        logger.error(
+            "Sync for %s exceeded %ds and was abandoned — it will start over next time",
+            platform.value,
+            _COMMIT_SYNC_TIMEOUT_SECONDS,
+        )
+        message = (
+            f"Sync exceeded {_COMMIT_SYNC_TIMEOUT_SECONDS}s and was abandoned. If this keeps happening after a "
+            "reconnect, a later sync start date will shrink the backlog it has to work through."
+        )
+        await order_sync.record_failed_run(platform, SyncRunMode.commit, TimeoutError(message))
+        raise SyncAbandonedError(message) from None
 
 
 async def _loop(platform: ListingPlatform) -> None:

@@ -44,6 +44,22 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   "Pending orders over threshold", "Marketplace API usage — approaching limit" and
   "Secondary backup location unreachable" on the double-send side, and the five
   right-away-by-default alert types on the never-sent side.
+- **Reconnecting a marketplace no longer restarts order sync from your sync start date.**
+  Disconnecting used to forget how far sync had got, so reconnecting the same shop
+  re-fetched every order back to the start date with full fee lookups — on a two-month
+  history that was an hour-long sync and over a thousand API calls to learn nothing. The
+  position now survives a disconnect and is only reset if you reconnect as a *different*
+  shop. A first-ever sync also skips fee lookups for orders it already has the breakdown for.
+- **A sync that's still running now says so.** The sync panel and the menu-bar indicator
+  show "still running" / "Syncing…" while a sync is in flight, instead of reporting the
+  previous run as the latest — which made a long first sync look like nothing was
+  happening (and tempted a restart, which threw its progress away). A sync interrupted by
+  quitting the app is now logged as such.
+- **"Sync now" can no longer hang forever.** A manual sync that stalls is abandoned and
+  logged after the same 10-minute limit the background sync already had, rather than
+  silently blocking every automatic sync behind it.
+- **Sync times in Settings are now shown in your local time zone.** They were an hour off
+  during British Summer Time.
 
 ## [0.14.1] - 2026-09-14
 

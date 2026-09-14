@@ -36,13 +36,27 @@ from app.routers import (
     system,
     variants,
 )
-from app.services import backup_scheduler, listing_reconcile, maintenance, notification_scheduler, sync_scheduler
+from app.services import (
+    backup_scheduler,
+    listing_reconcile,
+    maintenance,
+    notification_scheduler,
+    order_sync,
+    sync_scheduler,
+)
 
 logger = logging.getLogger("stocksmith")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Before the scheduler's boot tick opens a fresh `running` row, so a run the previous
+    # process died under can't be confused with this one. Best-effort: a DB hiccup here
+    # must not stop the app from starting.
+    try:
+        await order_sync.fail_orphaned_runs()
+    except Exception:
+        logger.exception("Could not close sync runs left over from a previous process")
     sync_scheduler.start()
     backup_scheduler.start()
     listing_reconcile.start()

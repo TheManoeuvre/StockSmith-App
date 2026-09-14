@@ -14,6 +14,12 @@ class SyncRunMode(str, enum.Enum):
 
 
 class SyncRunStatus(str, enum.Enum):
+    # Written when a commit-mode run starts and replaced by success/error when it ends,
+    # so a sync that is still fetching — or one that never finished because the process
+    # died under it — is visible as such rather than leaving no trace (see
+    # order_sync.commit_sync). Same length as "success", so no column widening is
+    # needed (see models.base.portable_enum).
+    running = "running"
     success = "success"
     error = "error"
 

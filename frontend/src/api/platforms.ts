@@ -17,6 +17,10 @@ export interface PlatformStatus {
   auto_sync_enabled: boolean;
   sync_interval_minutes: number;
   last_sync_attempt_at: string | null;
+  // "running" while the most recent attempt is still in flight — a first sync can
+  // legitimately take minutes, and inferring success/failure from the two timestamps
+  // alone read that as "failed".
+  last_sync_status: SyncRunStatus | null;
   last_sync_success_at: string | null;
   last_sync_error: string | null;
   // Non-null while one or more unpaid orders are holding the sync window open so they
@@ -100,11 +104,13 @@ export interface SyncCommitResult {
   order_ids: number[];
 }
 
+export type SyncRunStatus = "running" | "success" | "error";
+
 export interface SyncRunRead {
   id: number;
   platform: string;
   mode: "preview" | "commit";
-  status: "success" | "error";
+  status: SyncRunStatus;
   started_at: string;
   finished_at: string | null;
   fetched_count: number;
@@ -119,7 +125,7 @@ export interface PlatformSyncSummary {
   platform: ListingPlatform;
   connected: boolean;
   last_sync_at: string | null;
-  last_sync_status: "success" | "error" | null;
+  last_sync_status: SyncRunStatus | null;
   last_sync_error: string | null;
   // Listings whose most recent outbound quantity push failed and was never retried —
   // separate from last_sync_error, which only covers inbound order sync.

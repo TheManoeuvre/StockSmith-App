@@ -171,7 +171,9 @@ export function PlatformSyncPanel({ platform }: { platform: ListingPlatform }) {
       {platformStatus?.last_sync_attempt_at && (
         <p className="text-xs text-slate-500">
           Last sync attempt {new Date(platformStatus.last_sync_attempt_at).toLocaleString()}
-          {platformStatus.last_sync_success_at === platformStatus.last_sync_attempt_at ? (
+          {platformStatus.last_sync_status === "running" ? (
+            <span className="text-amber-700"> — still running</span>
+          ) : platformStatus.last_sync_status === "success" ? (
             <span className="text-green-700"> — succeeded</span>
           ) : (
             <span className="text-red-600"> — failed{platformStatus.last_sync_error ? `: ${platformStatus.last_sync_error}` : ""}</span>
@@ -379,7 +381,15 @@ export function PlatformSyncPanel({ platform }: { platform: ListingPlatform }) {
                     <td className="p-1.5">{new Date(run.started_at).toLocaleString()}</td>
                     <td className="p-1.5">{run.mode}</td>
                     <td className="p-1.5">
-                      <span className={run.status === "success" ? "text-green-700" : "text-red-600"}>
+                      <span
+                        className={
+                          run.status === "success"
+                            ? "text-green-700"
+                            : run.status === "running"
+                              ? "text-amber-700"
+                              : "text-red-600"
+                        }
+                      >
                         {run.status}
                       </span>
                     </td>

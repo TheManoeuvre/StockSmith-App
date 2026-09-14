@@ -1,9 +1,20 @@
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, field_validator
 
 from app.models.listing import ListingPlatform
 from app.models.platform_credential import PlatformEnvironment
+from app.models.platform_sync_run import SyncRunStatus
+
+
+def _as_utc(value: datetime | None) -> datetime | None:
+    """Re-attach UTC to a naive datetime read back from SQLite (see
+    services/platforms/base.ensure_utc for why they come back naive). Without the offset
+    the JSON carries a bare "2026-09-14T15:01:27" that the browser's Date parser treats
+    as *local* time — so a sync that ran at 16:01 BST was displayed as 15:01."""
+    if value is not None and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
 
 
 class PlatformConnectResponse(BaseModel):
@@ -31,6 +42,10 @@ class PlatformStatus(BaseModel):
     # the watermark, so without these a stuck connection would look identical to a
     # healthy but quiet one.
     last_sync_attempt_at: datetime | None
+    # The state of that most recent attempt. `running` means it is still in flight — the
+    # panel used to infer success/failure by comparing the two timestamps above, which
+    # had no way to say "still going" and read a long-running sync as "failed".
+    last_sync_status: SyncRunStatus | None = None
     last_sync_success_at: datetime | None
     last_sync_error: str | None
     # Non-null while at least one unpaid order is holding the sync window open. Surfaced
@@ -50,6 +65,15 @@ class PlatformStatus(BaseModel):
     # sync) stand down — see services/platform_api_usage. 0/0 when disconnected.
     api_calls_today: int = 0
     api_call_budget: int = 0
+
+    normalise_utc = field_validator(
+        "connected_at",
+        "last_orders_synced_at",
+        "last_refreshed_at",
+        "last_sync_attempt_at",
+        "last_sync_success_at",
+        "unpaid_hold_since",
+    )(_as_utc)
 
 
 class EbaySigningKeyStatus(BaseModel):
@@ -159,6 +183,8 @@ class SyncRunRead(BaseModel):
     shipped_count: int
     skipped_unpaid_count: int
     error_message: str | None
+
+    normalise_utc = field_validator("started_at", "finished_at")(_as_utc)
 
 
 class SyncRunPage(BaseModel):
