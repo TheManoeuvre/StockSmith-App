@@ -75,7 +75,7 @@ export interface OrderUpdateInput {
 }
 
 export const ordersApi = {
-  list: (limit: number, offset: number, status?: OrderStatus) => {
+  list: (limit: number, offset: number, status?: OrderStatus | "awaiting") => {
     const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     if (status) params.set("status_filter", status);
     return api.get<OrderPage>(`/orders?${params.toString()}`);
