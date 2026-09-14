@@ -2,6 +2,7 @@ import asyncio
 import logging
 import random
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 
 import httpx
 from sqlalchemy import or_, select
@@ -1432,10 +1433,49 @@ class EtsyAdapter:
                 f"Failed to fetch Etsy shipping profiles: {response.status_code} {response.text}"
             )
         return [
-            {"id": p.get("shipping_profile_id"), "title": p.get("title") or "Untitled profile"}
+            self.parse_shipping_profile(p)
             for p in response.json().get("results", [])
             if not p.get("is_deleted")
         ]
+
+    @staticmethod
+    def parse_shipping_profile(profile: dict) -> dict:
+        """One raw getShopShippingProfiles entry → the neutral shape the link picker and
+        the price import consume: {id, title, profile_type, origin_country_iso,
+        domestic_price, domestic_fallback}. Static and pure so the destination pick is
+        testable against a captured payload.
+
+        domestic_price is the primary_cost (single-item price the buyer pays) of the
+        destination whose destination_country_iso equals the profile's origin — that is
+        the figure a per-unit margin estimate wants. If no destination matches (an
+        origin-less profile, or one that only ships abroad) the first destination is used
+        and domestic_fallback says so, so the UI can present it as a guess rather than a
+        fact. secondary_cost (each additional item) and shipping_profile_upgrades are
+        deliberately ignored — see ShippingProfile's docstring.
+
+        A calculated profile (profile_type "calculated") has no fixed price: Etsy works it
+        out per buyer at checkout. domestic_price is None and the caller says "calculated
+        on Etsy" instead of importing anything."""
+        profile_type = profile.get("profile_type") or "manual"
+        origin = profile.get("origin_country_iso")
+        destinations = profile.get("shipping_profile_destinations") or []
+        domestic = next(
+            (d for d in destinations if origin and d.get("destination_country_iso") == origin), None
+        )
+        fallback = domestic is None and bool(destinations)
+        chosen = domestic if domestic is not None else (destinations[0] if destinations else None)
+        price = None
+        if profile_type != "calculated" and chosen is not None:
+            parsed = EtsyAdapter._parse_money(chosen.get("primary_cost"))
+            price = Decimal(parsed) if parsed is not None else None
+        return {
+            "id": profile.get("shipping_profile_id"),
+            "title": profile.get("title") or "Untitled profile",
+            "profile_type": profile_type,
+            "origin_country_iso": origin,
+            "domestic_price": price,
+            "domestic_fallback": fallback,
+        }
 
     async def fetch_return_policies(self, session, connection: PlatformConnection) -> list[dict]:
         """The shop's return policies as {id, label}.

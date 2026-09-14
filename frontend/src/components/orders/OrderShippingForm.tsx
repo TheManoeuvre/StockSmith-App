@@ -1,5 +1,6 @@
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
+import { shippingPriceForChannel } from "../../lib/shippingPrice";
 import { ordersApi } from "../../api/orders";
 import { shippingProfilesApi } from "../../api/shippingProfiles";
 import type { Order } from "../../api/types";
@@ -79,7 +80,7 @@ export function OrderShippingForm({ order, onSaved }: { order: Order; onSaved: (
                 const profile = profiles.find((p) => String(p.id) === id);
                 setValue((prev) => ({
                   profileId: id,
-                  charged: profile ? profile.price : prev.charged,
+                  charged: profile ? shippingPriceForChannel(profile, order.manual_channel) : prev.charged,
                 }));
               }}
             >

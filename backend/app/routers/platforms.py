@@ -81,6 +81,7 @@ from app.services import (
     order_sync,
     platform_api_usage,
     platform_credentials,
+    shipping_price_sync,
     sync_scheduler,
     sync_status,
 )
@@ -866,6 +867,20 @@ async def list_etsy_shipping_profiles(session: AsyncSession = Depends(get_db)) -
     except PlatformError as e:
         raise _map_platform_error(e)
     return [NamedOption(id=str(p["id"]), label=p["title"]) for p in profiles if p["id"] is not None]
+
+
+@router.get("/ebay/fulfillment-policies", response_model=list[NamedOption], dependencies=[Depends(require_auth)])
+async def list_ebay_fulfillment_policies(session: AsyncSession = Depends(get_db)) -> list[NamedOption]:
+    """The seller's postage (fulfillment) business policies, by name — so a policy id no
+    longer has to be typed in from an API response. Per marketplace: the eBay default
+    listing profile's marketplace, else EBAY_GB (see shipping_price_sync)."""
+    try:
+        policies = await shipping_price_sync.fetch_marketplace_profiles(session, ListingPlatform.ebay)
+    except shipping_price_sync.NotConnectedError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except PlatformError as e:
+        raise _map_platform_error(e)
+    return [NamedOption(id=p.id, label=p.title) for p in policies]
 
 
 @router.get("/etsy/readiness-states", response_model=list[NamedOption], dependencies=[Depends(require_auth)])

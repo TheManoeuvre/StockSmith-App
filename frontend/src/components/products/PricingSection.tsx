@@ -17,6 +17,7 @@ import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { DirtyPath, useManagedSave } from "../../hooks/useDirtyRegistry";
 import { useGuard } from "../../hooks/useUnsavedChangesGuard";
 import { formatUnitCost } from "../../lib/money";
+import { shippingPriceForChannel } from "../../lib/shippingPrice";
 
 const INITIAL_LINE_LIMIT = 5;
 
@@ -45,6 +46,12 @@ function shippingCostForFeeSource(profile: ShippingProfile, feeSource: MarginFee
   if (feeSource === "etsy") return Number(profile.cost_etsy);
   if (feeSource === "ebay") return Number(profile.cost_ebay);
   return Number(profile.cost_manual);
+}
+
+// Mirrors resolve_shipping_price_for_fee_source: the buyer price is per channel too, so a
+// profile linked to Etsy feeds Etsy's own postage price into the Etsy margin estimate.
+function shippingPriceForFeeSource(profile: ShippingProfile, feeSource: MarginFeeSource | undefined): number {
+  return Number(shippingPriceForChannel(profile, feeSource === "etsy" || feeSource === "ebay" ? feeSource : "manual"));
 }
 
 interface MarginResult {
@@ -78,7 +85,7 @@ function computeMargin(
   // order page's "No postage cost", and for the same reason: silently treating an unknown
   // as zero is exactly what let £95 of real postage sit outside reported profit.
   const postageMissing = profile === undefined;
-  const shippingPrice = profile ? Number(profile.price) : 0;
+  const shippingPrice = profile ? shippingPriceForFeeSource(profile, feeSource) : 0;
   const shipping = profile ? shippingCostForFeeSource(profile, feeSource) : 0;
   const revenue = salePrice + shippingPrice;
   const fee = (revenue * (inputs.effective_platform_fee_percent ? Number(inputs.effective_platform_fee_percent) : 0)) / 100;
@@ -266,28 +273,34 @@ function ChannelFeeComparison({
   const profile = profiles.find(
     (p) => p.id === product.effective_shipping_profile_id,
   );
-  const shippingPrice = profile ? Number(profile.price) : 0;
   const materials = product.cost_per_unit != null ? Number(product.cost_per_unit) : null;
   const packaging =
     product.kitting_cost_per_unit != null ? Number(product.kitting_cost_per_unit) : 0;
-  const postage =
-    product.effective_shipping_cost != null
-      ? Number(product.effective_shipping_cost)
-      : 0;
-  const totalCogs = materials == null ? null : materials + packaging + postage;
-  // Fee % and margin are both shares of what the buyer pays — see computeMargin.
-  const revenue = salePrice + shippingPrice;
 
-  const rows: { platform: string; components: PlatformFeeComponent[] | undefined }[] = [
-    { platform: "Etsy", components: etsyComponents },
-    { platform: "eBay", components: ebayComponents },
+  // Each channel is worked out with its own postage price and cost, not the shop-wide fee
+  // source's — that is the point of comparing them side by side. A profile linked to Etsy
+  // may charge the buyer a different amount there than on eBay.
+  const rows: {
+    platform: string;
+    channel: "etsy" | "ebay";
+    components: PlatformFeeComponent[] | undefined;
+  }[] = [
+    { platform: "Etsy", channel: "etsy", components: etsyComponents },
+    { platform: "eBay", channel: "ebay", components: ebayComponents },
   ];
+  const channelPostage = (channel: "etsy" | "ebay") => ({
+    price: profile ? Number(shippingPriceForChannel(profile, channel)) : 0,
+    cost: profile ? Number(channel === "etsy" ? profile.cost_etsy : profile.cost_ebay) : 0,
+  });
+  const pricesDiffer =
+    profile != null && channelPostage("etsy").price !== channelPostage("ebay").price;
 
   return (
     <div className="flex flex-col gap-1 rounded bg-white p-4 text-sm shadow-sm">
       <h4 className="mb-1 text-sm font-medium text-slate-600">
         Channel fees at £{salePrice.toFixed(2)}
-        {shippingPrice > 0 && ` + £${shippingPrice.toFixed(2)} postage`}
+        {profile && !pricesDiffer && channelPostage("etsy").price > 0 && ` + £${channelPostage("etsy").price.toFixed(2)} postage`}
+        {profile && pricesDiffer && " + each channel's own postage"}
       </h4>
       <table className="w-full text-left">
         <thead>
@@ -299,7 +312,7 @@ function ChannelFeeComparison({
           </tr>
         </thead>
         <tbody>
-          {rows.map(({ platform, components }) => {
+          {rows.map(({ platform, channel, components }) => {
             if (!components) {
               return (
                 <tr key={platform} className="border-t border-slate-100">
@@ -310,6 +323,10 @@ function ChannelFeeComparison({
                 </tr>
               );
             }
+            const { price: shippingPrice, cost: postage } = channelPostage(channel);
+            const totalCogs = materials == null ? null : materials + packaging + postage;
+            // Fee % and margin are both shares of what the buyer pays — see computeMargin.
+            const revenue = salePrice + shippingPrice;
             const feeAmount = effectiveFeeAmount(components, salePrice, shippingPrice);
             const feePct = (feeAmount / revenue) * 100;
             const margin =
@@ -318,7 +335,12 @@ function ChannelFeeComparison({
                 : ((revenue - totalCogs - feeAmount) / revenue) * 100;
             return (
               <tr key={platform} className="border-t border-slate-100">
-                <td className="py-1">{platform}</td>
+                <td className="py-1">
+                  {platform}
+                  {pricesDiffer && (
+                    <span className="ml-1 text-xs text-slate-400">+ £{shippingPrice.toFixed(2)} postage</span>
+                  )}
+                </td>
                 <td className="py-1 text-right tabular-nums">{feePct.toFixed(1)}%</td>
                 <td className="py-1 text-right tabular-nums">£{feeAmount.toFixed(2)}</td>
                 <td

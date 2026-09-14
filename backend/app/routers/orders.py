@@ -31,6 +31,7 @@ from app.schemas.order import (
 )
 from app.schemas.order_return import CancellationPreview, OrderCancelRequest
 from app.services import allocation, order_substitution, returns
+from app.services.shipping_profiles import resolve_shipping_price_for_platform
 from app.services.csv_io import export_orders_csv
 from app.services.kitting import (
     apply_default_kitting_bom,
@@ -426,7 +427,15 @@ async def create_order(payload: OrderCreate, session: AsyncSession = Depends(get
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail=f"Shipping profile {payload.shipping_profile_id} not found"
             )
-        shipping_charged = payload.shipping_charged if payload.shipping_charged is not None else profile.price
+        # Defaults to the profile's price for the channel the order was keyed under — an
+        # "Etsy · keyed by hand" order charges what Etsy charges, which may differ from the
+        # manual figure once the profile is linked to Etsy.
+        if payload.shipping_charged is not None:
+            shipping_charged = payload.shipping_charged
+        else:
+            channel = payload.manual_channel.value if payload.manual_channel else None
+            channel_platform = ListingPlatform(channel) if channel in ("etsy", "ebay") else None
+            shipping_charged = resolve_shipping_price_for_platform(profile, channel_platform)
     else:
         profile = None
         shipping_charged = payload.shipping_charged

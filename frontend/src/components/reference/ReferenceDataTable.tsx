@@ -37,9 +37,29 @@ export interface ReferenceField {
   key: string;
   label: string;
   type?: "text" | "url" | "money" | "number" | "checkbox" | "select";
-  placeholder?: string;
+  /** Static, or derived from the row — e.g. a per-channel price whose placeholder is the
+   *  row's own default price. */
+  placeholder?: string | ((row: ReferenceRow) => string);
   /** For type "select". The empty option means "not set" and is sent as null. */
   options?: { value: string; label: string }[];
+  /** Greys the control out and shows `hint` under it — a picker whose options come from a
+   *  marketplace that isn't connected. */
+  disabled?: boolean;
+  hint?: string;
+  /** For type "money": a blank is sent as null (the column is `Decimal | None`) instead of "". */
+  nullable?: boolean;
+  /** Rendered beside the field's label — a drift marker, a "calculated" badge. */
+  adornment?: (row: ReferenceRow, form: Record<string, string>) => React.ReactNode;
+}
+
+/** What `expandedExtras` gets to work with: the row as stored, the form as being edited,
+ *  and a way to accept a server-returned row as the new saved baseline (for an action that
+ *  writes the row itself, such as pulling a price from a marketplace). */
+export interface ExpandedRowContext<T extends ReferenceRow> {
+  row: T;
+  form: Record<string, string>;
+  setForm: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  acceptSaved: (saved: T) => void;
 }
 
 /**
@@ -59,6 +79,9 @@ function serialize(fields: ReferenceField[], form: Record<string, string>): Reco
     // Empty stays null rather than "" — the backend field is `Decimal | None`, and "" would
     // fail validation instead of clearing it.
     else if (field.type === "number") out[field.key] = raw.trim() === "" ? null : Number(raw);
+    // Same for a money field declared nullable (a per-channel price whose blank means "use
+    // the default"); a non-nullable one keeps sending "" so the backend refuses it visibly.
+    else if (field.type === "money" && field.nullable) out[field.key] = raw.trim() === "" ? null : raw;
     else out[field.key] = raw;
   }
   return out;
@@ -99,6 +122,7 @@ export function ReferenceDataTable<T extends ReferenceRow>({
   allowDelete = true,
   extraRowActions,
   rowLeading,
+  expandedExtras,
 }: {
   title: string;
   description?: string;
@@ -114,6 +138,9 @@ export function ReferenceDataTable<T extends ReferenceRow>({
   /** Small visual rendered before the row's name in the collapsed header — e.g. a colour
    *  swatch. Omit for tables with nothing to show there. */
   rowLeading?: (row: T) => React.ReactNode;
+  /** Extra content under the field grid of an expanded row, with access to the working
+   *  copy — for actions and read-only detail that belong to the row but aren't fields. */
+  expandedExtras?: (ctx: ExpandedRowContext<T>) => React.ReactNode;
 }) {
   const { data: rows } = useQuery({ queryKey, queryFn: api.list });
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -216,6 +243,7 @@ export function ReferenceDataTable<T extends ReferenceRow>({
                       allowDelete={allowDelete}
                       usageLabel={usageLabel}
                       extraRowActions={extraRowActions}
+                      expandedExtras={expandedExtras}
                       onDone={() => setExpandedId(null)}
                     />
                   </DirtyPath>
@@ -305,6 +333,7 @@ function ExpandedRow<T extends ReferenceRow>({
   allowDelete,
   usageLabel,
   extraRowActions,
+  expandedExtras,
   onDone,
 }: {
   row: T;
@@ -316,6 +345,7 @@ function ExpandedRow<T extends ReferenceRow>({
   allowDelete: boolean;
   usageLabel: (count: number) => string;
   extraRowActions?: (row: T) => React.ReactNode;
+  expandedExtras?: (ctx: ExpandedRowContext<T>) => React.ReactNode;
   onDone: () => void;
 }) {
   const queryClient = useQueryClient();
@@ -356,14 +386,16 @@ function ExpandedRow<T extends ReferenceRow>({
     queryClient.invalidateQueries({ queryKey: ["purchases"] });
   };
 
+  // Baseline from what was stored, not what was sent — the server trims names, and a
+  // trimmed value coming back would otherwise leave the row looking dirty immediately.
+  const acceptSaved = (saved: T) => {
+    markSaved(Object.fromEntries(fields.map((f) => [f.key, fieldValue(saved, f.key)])));
+    invalidate();
+  };
+
   const saveMutation = useMutation({
     mutationFn: () => api.update(row.id, serialize(fields, form)),
-    onSuccess: (saved) => {
-      // Baseline from what was stored, not what was sent — the server trims names, and a
-      // trimmed value coming back would otherwise leave the row looking dirty immediately.
-      markSaved(Object.fromEntries(fields.map((f) => [f.key, fieldValue(saved, f.key)])));
-      invalidate();
-    },
+    onSuccess: acceptSaved,
   });
   const saveStatus = useSaveStatus(saveMutation.status);
 
@@ -416,42 +448,63 @@ function ExpandedRow<T extends ReferenceRow>({
               </div>
             );
           }
+          const placeholder =
+            typeof field.placeholder === "function" ? field.placeholder(row) : field.placeholder;
+          const labelNode = (
+            <span className="flex items-center gap-2">
+              {field.label}
+              {field.adornment?.(row, form)}
+            </span>
+          );
+          const hint = field.hint && <span className="text-xs text-slate-400">{field.hint}</span>;
           if (field.type === "select") {
+            // A stored value the options don't include (a marketplace profile that has since
+            // been deleted, or a list that failed to load) is kept visible rather than
+            // silently reset to "Not set" — clearing a link should be a deliberate act.
+            const current = form[field.key] ?? "";
+            const known = (field.options ?? []).some((o) => o.value === current);
             return (
               <label key={field.key} className="flex flex-col gap-1 text-sm">
-                {field.label}
+                {labelNode}
                 <select
                   aria-label={`${row.name} ${field.label}`}
-                  className="rounded border border-slate-300 px-2 py-1"
-                  value={form[field.key] ?? ""}
+                  className="rounded border border-slate-300 px-2 py-1 disabled:bg-slate-100 disabled:text-slate-400"
+                  value={current}
+                  disabled={field.disabled}
                   onChange={(e) => setForm((prev) => ({ ...prev, [field.key]: e.target.value }))}
                 >
-                  <option value="">{field.placeholder ?? "Not set"}</option>
+                  <option value="">{placeholder ?? "Not set"}</option>
+                  {current && !known && <option value={current}>{current} (not in current list)</option>}
                   {(field.options ?? []).map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
                     </option>
                   ))}
                 </select>
+                {hint}
               </label>
             );
           }
           return (
             <label key={field.key} className="flex flex-col gap-1 text-sm">
-              {field.label}
+              {labelNode}
               <input
                 aria-label={`${row.name} ${field.label}`}
                 type={field.type === "money" || field.type === "number" ? "number" : "text"}
                 step={field.type === "money" ? "0.01" : field.type === "number" ? "1" : undefined}
-                placeholder={field.placeholder}
-                className="rounded border border-slate-300 px-2 py-1"
+                placeholder={placeholder}
+                disabled={field.disabled}
+                className="rounded border border-slate-300 px-2 py-1 disabled:bg-slate-100 disabled:text-slate-400"
                 value={form[field.key] ?? ""}
                 onChange={(e) => setForm((prev) => ({ ...prev, [field.key]: e.target.value }))}
               />
+              {hint}
             </label>
           );
         })}
       </div>
+
+      {expandedExtras?.({ row, form, setForm, acceptSaved })}
 
       {conflictRow && api.merge && (
         <div className="flex flex-wrap items-center gap-2 rounded bg-amber-50 p-2 text-sm text-amber-900">

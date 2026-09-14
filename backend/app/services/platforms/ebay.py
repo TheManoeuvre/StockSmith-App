@@ -2,6 +2,7 @@ import asyncio
 import base64
 import logging
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from urllib.parse import urlsplit
 from xml.etree import ElementTree
 
@@ -1407,6 +1408,81 @@ class EbayAdapter:
                 aspects = aspects_by_sku.get(sku, {})
                 varying[sku] = {name: values for name, values in aspects.items() if name in differing}
         return varying
+
+    # --- Business policies ----------------------------------------------------------------
+
+    async def fetch_fulfillment_policies(
+        self, session, connection: PlatformConnection, marketplace_id: str = "EBAY_GB"
+    ) -> list[dict]:
+        """The seller's fulfillment (postage) business policies for one marketplace, as
+        {id, title, cost_type, domestic_price, domestic_fallback} — the same neutral shape
+        EtsyAdapter.fetch_shipping_profiles returns, so the shipping-profile link picker and
+        the price import treat both marketplaces alike.
+
+        Sell Account API, GET /sell/account/v1/fulfillment_policy?marketplace_id=… — one
+        call, no pagination (eBay returns every policy for the marketplace in one page).
+        Business policies are per marketplace, so the caller passes the marketplace the
+        shop lists on (the eBay default listing profile's ebay_marketplace_id, else
+        EBAY_GB). Requires the sell.account scope; a 403 is reported as a reconnect
+        blocker rather than an empty list, for the same reason the Etsy call does."""
+        response = await self._authed_request(
+            session,
+            connection,
+            "GET",
+            f"{self.api_base}/sell/account/v1/fulfillment_policy",
+            params={"marketplace_id": marketplace_id},
+        )
+        if response.status_code == 403:
+            raise PlatformSyncError(
+                "eBay did not allow reading your postage policies. Reconnect eBay in Settings "
+                "to grant the account permission."
+            )
+        if response.status_code != 200:
+            raise PlatformSyncError(
+                f"Failed to fetch eBay postage policies: {response.status_code} {response.text}"
+            )
+        return [self.parse_fulfillment_policy(p) for p in response.json().get("fulfillmentPolicies", [])]
+
+    @staticmethod
+    def parse_fulfillment_policy(policy: dict) -> dict:
+        """One raw fulfillmentPolicies[] entry → {id, title, cost_type, domestic_price,
+        domestic_fallback}. Static and pure so the service pick is testable against a
+        captured payload.
+
+        The buyer price is the first (lowest sortOrder) shippingServices[] entry's
+        shippingCost.value on the DOMESTIC shippingOptions[] block — the default service a
+        buyer is quoted, and the figure a single-unit margin estimate wants. If the policy
+        has no DOMESTIC block the first block is used and domestic_fallback says so.
+        additionalShippingCost (each further item) and every other service are ignored;
+        see ShippingProfile's docstring.
+
+        costType "CALCULATED" means eBay prices postage per buyer at checkout: nothing fixed
+        to import, domestic_price is None."""
+        options = policy.get("shippingOptions") or []
+        domestic = next((o for o in options if str(o.get("optionType", "")).upper() == "DOMESTIC"), None)
+        fallback = domestic is None and bool(options)
+        chosen = domestic if domestic is not None else (options[0] if options else None)
+        cost_type = str((chosen or {}).get("costType") or "FLAT_RATE").upper()
+
+        price = None
+        if chosen is not None and cost_type != "CALCULATED":
+            services = sorted(
+                chosen.get("shippingServices") or [],
+                key=lambda svc: int(svc.get("sortOrder") or 0),
+            )
+            if services:
+                value = (services[0].get("shippingCost") or {}).get("value")
+                try:
+                    price = Decimal(str(value)) if value is not None else None
+                except (InvalidOperation, ValueError):
+                    price = None
+        return {
+            "id": policy.get("fulfillmentPolicyId"),
+            "title": policy.get("name") or "Untitled policy",
+            "cost_type": cost_type,
+            "domestic_price": price,
+            "domestic_fallback": fallback,
+        }
 
     async def fetch_classic_listings(
         self, session, connection: PlatformConnection
