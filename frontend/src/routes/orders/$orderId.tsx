@@ -42,6 +42,40 @@ export const Route = createFileRoute("/orders/$orderId")({
   },
 });
 
+// Reorders lines so a substitution's replacement line sits immediately after the line
+// it replaced, instead of wherever it happens to fall in the backend's array order.
+function sortLinesForDisplay(lines: OrderLine[]): OrderLine[] {
+  const byId = new Map(lines.map((line) => [line.id, line]));
+  const childrenByParentId = new Map<number, OrderLine[]>();
+  for (const line of lines) {
+    const parentId = line.substituted_from?.line_id;
+    if (parentId != null && byId.has(parentId)) {
+      const siblings = childrenByParentId.get(parentId) ?? [];
+      siblings.push(line);
+      childrenByParentId.set(parentId, siblings);
+    }
+  }
+
+  const visited = new Set<number>();
+  const result: OrderLine[] = [];
+  const visit = (line: OrderLine) => {
+    if (visited.has(line.id)) return;
+    visited.add(line.id);
+    result.push(line);
+    for (const child of childrenByParentId.get(line.id) ?? []) {
+      visit(child);
+    }
+  };
+
+  for (const line of lines) {
+    const parentId = line.substituted_from?.line_id;
+    if (parentId == null || !byId.has(parentId)) {
+      visit(line);
+    }
+  }
+  return result;
+}
+
 // The slide-over replaces every sub-form's own Save button with one footer Save (see
 // OrderFooter and useManagedSave); providing the context a layer above the body is what lets
 // those forms read it.
@@ -163,6 +197,8 @@ function OrderDetail() {
     { id: "shipping", label: "Shipping" },
     { id: "timeline", label: "Timeline" },
   ];
+
+  const displayLines = sortLinesForDisplay(order.lines);
 
   const items = order.lines.reduce((sum, l) => sum + l.ordered_qty, 0);
   const discount =
@@ -334,7 +370,7 @@ function OrderDetail() {
                 </tr>
               </thead>
               <tbody>
-                {order.lines.map((line) => (
+                {displayLines.map((line) => (
                   <OrderLineRow
                     key={line.id}
                     line={line}
