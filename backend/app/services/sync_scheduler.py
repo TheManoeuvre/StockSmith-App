@@ -8,7 +8,10 @@ from app.models.listing import ListingPlatform
 from app.models.platform_connection import PlatformConnection
 from app.models.platform_sync_run import SyncRunMode
 from app.services import order_sync
-from app.services.notification_alerts import raise_marketplace_sync_failure_alert
+from app.services.notification_alerts import (
+    raise_marketplace_sync_failure_alert,
+    raise_platform_reconnect_required_alert,
+)
 from app.services.platforms.errors import PlatformAuthError, PlatformRateLimitError
 
 logger = logging.getLogger("stocksmith.sync_scheduler")
@@ -65,14 +68,22 @@ async def _record_auth_failure(platform: ListingPlatform) -> None:
         if connection is None:
             return
         connection.consecutive_auth_failures += 1
+        newly_disabled = False
         if connection.consecutive_auth_failures >= _MAX_CONSECUTIVE_AUTH_FAILURES:
             connection.auto_sync_enabled = False
+            newly_disabled = True
             logger.warning(
                 "Disabling auto-sync for %s after %d consecutive auth failures — reconnect required",
                 platform.value,
                 connection.consecutive_auth_failures,
             )
         await session.commit()
+        if newly_disabled:
+            # auto_sync_enabled just flipped off, which is what makes this a one-time
+            # event: _tick bails out before ever reaching this function while the flag is
+            # False, so nothing can call this again for this platform until a reconnect
+            # (or a manual re-enable) lets the loop start ticking it again.
+            await raise_platform_reconnect_required_alert(session, platform)
 
 
 async def _reset_auth_failures(platform: ListingPlatform) -> None:

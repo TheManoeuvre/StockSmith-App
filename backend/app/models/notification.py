@@ -25,6 +25,13 @@ class NotificationCategory(str, enum.Enum):
     # materials. Distinct from order_unfulfillable so the two can carry different default
     # urgency/delivery without one drowning out the other.
     order_blocked = "order_blocked"
+    # Fires when a marketplace connection's auto-sync disables itself after repeated
+    # authentication failures (see sync_scheduler._MAX_CONSECUTIVE_AUTH_FAILURES) — the
+    # connection's refresh token has been revoked/expired and reconnecting is the only fix.
+    # Distinct from marketplace_sync_failure, which fires on every failed sync tick
+    # (including transient rate limits); this one fires exactly once, when the connection
+    # actually goes dark.
+    platform_reconnect_required = "platform_reconnect_required"
     pending_order_threshold = "pending_order_threshold"
     backup_failed = "backup_failed"
     secondary_backup_unreachable = "secondary_backup_unreachable"
@@ -41,6 +48,7 @@ ALERT_TYPES: tuple[NotificationCategory, ...] = (
     NotificationCategory.material_forecast_warning,
     NotificationCategory.order_unfulfillable,
     NotificationCategory.order_blocked,
+    NotificationCategory.platform_reconnect_required,
     NotificationCategory.pending_order_threshold,
     NotificationCategory.backup_failed,
     NotificationCategory.secondary_backup_unreachable,
@@ -58,6 +66,7 @@ DEFAULT_IMMEDIATE_ALERT_TYPES: frozenset[NotificationCategory] = frozenset(
         NotificationCategory.marketplace_sync_failure,
         NotificationCategory.material_forecast_critical,
         NotificationCategory.order_blocked,
+        NotificationCategory.platform_reconnect_required,
         NotificationCategory.backup_failed,
         NotificationCategory.marketplace_api_hard_limit,
     }
