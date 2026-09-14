@@ -140,6 +140,29 @@ Phase 4 of the backlog-burndown plan rejects this configuration at generation ti
 
 ## eBay integration hardening
 
+### eBay refunds are recognised but never recorded
+
+**Problem:** `EbayAdapter._parse_order` never sets `refunded_amount`. The adapter plainly
+knows a refund happened — `_ORDER_PAYMENT_STATES` maps `PARTIALLY_REFUNDED` to settled and
+`FULLY_REFUNDED` to reversed — it just never reads the amount, so the column stays NULL on
+every eBay order. Etsy fills it from `_sum_refunds(receipt.refunds)`.
+
+`_compute_net_profit` subtracts `Decimal(order.refunded_amount or 0)`, so a partially
+refunded eBay order counts money that went back to the buyer as profit, and the Refunded
+figure never appears on the order page. Same shape as the discount bug fixed in 0.7.2, and
+found alongside it: a field the adapter simply does not read, failing silently because a
+NULL is indistinguishable from an order that was never refunded.
+
+Not fixed with the discount because it has a different cause and a different source — the
+refund total is not in `pricingSummary` at all, so it needs a decision about where to read
+it from (the Sell Finances REFUND transactions, which `_fetch_transactions` already fetches
+and filters to SALE, look like the closest fit).
+
+**Ask:** Populate `refunded_amount` for eBay, and extend the reconciliation warning added
+in 0.7.2 to account for refunds so a mismatch keeps being noisy. Worth checking against a
+real partially-refunded order before trusting the field — the SALE-only filter in
+`_fetch_transactions` is the reason nobody noticed the REFUND rows were there.
+
 ### Turn the Offer-enrichment tests into an opt-in sandbox integration test
 
 **Problem:** The Offer-enrichment work (`EbayAdapter._enrich_with_offers` and friends) is covered by tests, but every one of them serves canned responses through a fake HTTP client (`_RoutedFakeClient`, `test_ebay_offer_enrichment.py`). No request has ever gone to a real eBay account, sandbox or production. The response shapes it parses — `offer.listing.listingStatus`, `offer.status`, `product.aspects` — come from eBay's documentation rather than from observed payloads, which is exactly the class of assumption that put "eBay's token response contains a `scope` field" (it doesn't) into a release.
