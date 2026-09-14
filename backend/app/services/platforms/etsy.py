@@ -1067,8 +1067,20 @@ class EtsyAdapter:
         """Flattens one raw Etsy listing into the shape the unadopted-listing report and
         picker use. Static and pure so the parsing is unit-testable against a captured
         payload without a session."""
+        return UnadoptedListingCandidate(
+            external_listing_id=str(listing.get("listing_id")),
+            title=listing.get("title") or "",
+            state=listing.get("state") or "unknown",
+            products=EtsyAdapter._parse_inventory_products(listing.get("inventory") or {}),
+        )
+
+    @staticmethod
+    def _parse_inventory_products(inventory: dict) -> list[ListingProductRef]:
+        """The products array of a listing's inventory, whether it arrived embedded via
+        `includes=Inventory` or from GET /listings/{id}/inventory directly — same shape
+        either way. `index` is the position in the raw array including deleted entries,
+        since that is what update_listing_skus addresses by."""
         products: list[ListingProductRef] = []
-        inventory = listing.get("inventory") or {}
         for position, product in enumerate(inventory.get("products", [])):
             if product.get("is_deleted"):
                 continue
@@ -1077,20 +1089,28 @@ class EtsyAdapter:
                 for offering in product.get("offerings", [])
                 if offering.get("is_enabled") and not offering.get("is_deleted")
             )
+            property_values = product.get("property_values", [])
             products.append(
                 ListingProductRef(
                     index=position,
                     sku=product.get("sku") or None,
-                    variation=EtsyAdapter._format_variation(product.get("property_values", [])),
+                    variation=EtsyAdapter._format_variation(property_values),
                     quantity=qty,
+                    attributes=EtsyAdapter._property_attributes(property_values),
                 )
             )
-        return UnadoptedListingCandidate(
-            external_listing_id=str(listing.get("listing_id")),
-            title=listing.get("title") or "",
-            state=listing.get("state") or "unknown",
-            products=products,
-        )
+        return products
+
+    async def fetch_listing_products(
+        self, session, connection: PlatformConnection, listing_id: str
+    ) -> list[ListingProductRef]:
+        """One listing's current products, fresh from Etsy — the variation-mapping
+        proposal matches against these rather than the unadopted-listings report so a
+        listing edited since the scan is matched as it is now."""
+        response = await self._authed_request(session, connection, "GET", f"/listings/{listing_id}/inventory")
+        if response.status_code != 200:
+            raise PlatformSyncError(f"Failed to fetch Etsy listing inventory: {response.status_code} {response.text}")
+        return self._parse_inventory_products(response.json())
 
     async def update_listing_skus(
         self, session, connection: PlatformConnection, listing_id: str, sku_by_index: dict[int, str]
@@ -1538,3 +1558,14 @@ class EtsyAdapter:
             if pv.get("property_name") and pv.get("values")
         ]
         return ", ".join(parts) if parts else None
+
+    @staticmethod
+    def _property_attributes(property_values: list[dict]) -> dict[str, str]:
+        """The structured form of _format_variation: {property_name: value}. A property
+        with several values (rare) keeps them joined the same way the display string
+        does, so the two always agree."""
+        return {
+            pv["property_name"]: ", ".join(pv["values"])
+            for pv in property_values
+            if pv.get("property_name") and pv.get("values")
+        }

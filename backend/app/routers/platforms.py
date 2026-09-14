@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import json
 import logging
 import secrets
 import time
@@ -61,6 +62,7 @@ from app.schemas.listing_adoption import (
     AdoptListingResult,
     EligibilityAnnotatedCandidate,
     EtsyAdoptListingRequest,
+    EtsyVariationMappingProposal,
     UnadoptedListing,
     UnadoptedListingProduct,
     UnadoptedListingsReport,
@@ -1399,12 +1401,18 @@ async def get_product_unmigrated_listings(
     dependencies=[Depends(require_auth)],
 )
 async def get_variation_mapping(
-    product_id: int, external_listing_id: str, session: AsyncSession = Depends(get_db)
+    product_id: int,
+    external_listing_id: str,
+    attribute_map: str | None = Query(default=None),
+    session: AsyncSession = Depends(get_db),
 ) -> VariationMappingProposal:
     """Proposes a StockSmith-variant -> eBay-SKU mapping for a selected classic
-    listing — shown by the picker's mapping-editor step before adopt is enabled."""
+    listing — shown by the picker's mapping-editor step before adopt is enabled.
+    `attribute_map` is the user's manual attribute-name pairing, re-running the
+    proposal under it; see _parse_attribute_map."""
     product = await _require_product(session, product_id)
     active_variants = await listing_sync._active_variants(session, product_id)
+    overrides = _parse_attribute_map(attribute_map)
 
     adapter, connection = await _get_ebay_adapter(session)
     try:
@@ -1412,7 +1420,37 @@ async def get_variation_mapping(
     except PlatformError as e:
         raise _map_trading_error(e)
 
-    return listing_adoption.propose_variation_mapping(product, active_variants, candidate)
+    try:
+        return listing_adoption.propose_variation_mapping(product, active_variants, candidate, overrides)
+    except listing_adoption.UnknownPlatformAttribute as e:
+        raise _unknown_platform_attribute(e)
+
+
+def _parse_attribute_map(raw: str | None) -> dict[str, str | None] | None:
+    """The picker's manual attribute-name pairing, sent as a JSON object
+    {stocksmith_attribute_name: platform_attribute_name | null} in a query string so the
+    proposal stays a cacheable GET. None (absent) means "pair them automatically"."""
+    if raw is None:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="attribute_map must be a JSON object")
+    if not isinstance(parsed, dict) or not all(
+        isinstance(k, str) and (v is None or isinstance(v, str)) for k, v in parsed.items()
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="attribute_map must map StockSmith attribute names to a platform attribute name or null",
+        )
+    return parsed
+
+
+def _unknown_platform_attribute(e: listing_adoption.UnknownPlatformAttribute) -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"The listing has no variation attribute named {e!s}",
+    )
 
 
 @router.post(
@@ -1537,7 +1575,11 @@ async def get_etsy_unadopted_listings(session: AsyncSession = Depends(get_db)) -
                 state=c.state,
                 products=[
                     UnadoptedListingProduct(
-                        index=p.index, sku=p.sku, variation=p.variation, quantity=p.quantity
+                        index=p.index,
+                        sku=p.sku,
+                        variation=p.variation,
+                        quantity=p.quantity,
+                        attributes=p.attributes,
                     )
                     for p in c.products
                 ],
@@ -1545,6 +1587,36 @@ async def get_etsy_unadopted_listings(session: AsyncSession = Depends(get_db)) -
             for c in unadopted
         ],
     )
+
+
+@router.get(
+    "/etsy/products/{product_id}/listings/{external_listing_id}/variation-mapping",
+    response_model=EtsyVariationMappingProposal,
+    dependencies=[Depends(require_auth)],
+)
+async def get_etsy_variation_mapping(
+    product_id: int,
+    external_listing_id: str,
+    attribute_map: str | None = Query(default=None),
+    session: AsyncSession = Depends(get_db),
+) -> EtsyVariationMappingProposal:
+    """The Etsy twin of get_variation_mapping: proposes a StockSmith-unit -> Etsy
+    listing-product pairing for the picker to pre-fill, re-reading the listing's
+    inventory so it matches what's on Etsy now rather than at scan time."""
+    product = await _require_product(session, product_id)
+    active_variants = await listing_sync._active_variants(session, product_id)
+    overrides = _parse_attribute_map(attribute_map)
+
+    adapter, connection = await _get_etsy_adapter(session)
+    try:
+        products = await adapter.fetch_listing_products(session, connection, external_listing_id)
+    except PlatformError as e:
+        raise _map_platform_error(e)
+
+    try:
+        return listing_adoption.propose_etsy_variation_mapping(product, active_variants, products, overrides)
+    except listing_adoption.UnknownPlatformAttribute as e:
+        raise _unknown_platform_attribute(e)
 
 
 @router.post(
