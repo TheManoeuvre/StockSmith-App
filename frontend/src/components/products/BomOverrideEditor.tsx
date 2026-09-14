@@ -1,7 +1,8 @@
 import { useMutation } from "@tanstack/react-query";
-import { useMemo } from "react";
-import type { Material } from "../../api/types";
+import { Fragment, useMemo } from "react";
+import type { Material, SubstituteSuggestion } from "../../api/types";
 import { MaterialSelect } from "../materials/MaterialSelect";
+import { SubstituteSuggestions } from "../materials/SubstituteSuggestions";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { SaveButton } from "../common/SaveButton";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
@@ -40,6 +41,9 @@ interface EffectiveLine extends OverrideableLine {
   replaces_material_id: number | null;
   line_max_buildable?: number | null;
   line_expected_max_buildable?: number | null;
+  /** Populated only when this line is the bottleneck (line_max_buildable === 0) — ranked,
+   *  human-curated fallbacks for material_id. See SubstituteSuggestions. */
+  suggested_substitutes?: SubstituteSuggestion[];
 }
 
 // Shared by VariantEditor for both the build BOM and kitting BOM override tables — same
@@ -272,9 +276,11 @@ export function BomOverrideEditor({
           const o = overrideFor(base.material_id);
           const swap = o.mode === "substitute";
           const { mat: effMat, qty: effQty, inherited } = resolveLine(base);
+          const bottleneck = bottleneckFor(base, o);
+          const suggestions = bottleneck?.line_max_buildable === 0 ? bottleneck.suggested_substitutes ?? [] : [];
           return (
+            <Fragment key={base.material_id}>
             <div
-              key={base.material_id}
               className="flex items-center gap-2 border-b border-slate-100 px-2.5 py-1.5 last:border-0"
             >
               <span
@@ -341,6 +347,12 @@ export function BomOverrideEditor({
                 {effectiveLabel(effMat, effQty)}
               </span>
             </div>
+            {suggestions.length > 0 && (
+              <div className="border-b border-slate-100 bg-slate-50 px-2.5 py-1.5 last:border-0">
+                <SubstituteSuggestions materialId={bottleneck!.material_id} suggestions={suggestions} />
+              </div>
+            )}
+            </Fragment>
           );
         })}
 

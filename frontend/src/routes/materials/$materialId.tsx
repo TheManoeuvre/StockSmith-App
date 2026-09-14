@@ -10,6 +10,7 @@ import { pickFile } from "../../lib/tauri";
 import { useMaterialCategories } from "../../hooks/useMaterialCategories";
 import { useMaterialImageUrl } from "../../hooks/useMaterialImageUrl";
 import { ConfirmDialog } from "../../components/common/ConfirmDialog";
+import { MaterialSubstitutesSection } from "../../components/materials/MaterialSubstitutesSection";
 import { DetailPanel } from "../../components/common/DetailPanel";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { CreatableSelect } from "../../components/common/CreatableSelect";
@@ -920,6 +921,9 @@ function MaterialDetail() {
                 </div>
               )}
             </form>
+            {activeTab === "details" && (
+              <MaterialSubstitutesSection materialId={id} />
+            )}
             {activeTab === "supplier" &&
               isLowStock(material.current_qty, material.reorder_threshold) && (
                 <div className="mt-2 flex items-center gap-2">
