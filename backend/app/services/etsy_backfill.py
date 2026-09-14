@@ -27,6 +27,7 @@ all, since nothing can be drafted without a description.
 
 from __future__ import annotations
 
+import html
 from dataclasses import dataclass, field
 from decimal import Decimal
 
@@ -217,8 +218,12 @@ async def build_preview(session: AsyncSession, listings: list[dict]) -> Backfill
             # rendering. Product.description is plain text, so take the plain field —
             # which Etsy documents as always populated — and leave rich text alone.
             if not _blank(description):
-                proposal.description = description
-                proposal.description_chars = len(description)
+                # Etsy's plain-text description field has been observed carrying literal
+                # HTML entities (e.g. "&#39;" for an apostrophe); decode them so the stored
+                # value is plain text, not markup.
+                unescaped = html.unescape(description)
+                proposal.description = unescaped
+                proposal.description_chars = len(unescaped)
 
         prices = _prices_by_sku(listing)
         product_variants = variants_by_product.get(product.id, [])

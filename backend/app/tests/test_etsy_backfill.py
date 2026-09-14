@@ -93,6 +93,18 @@ async def test_proposes_a_description_for_a_product_that_has_none(session):
 
 
 @pytest.mark.asyncio
+async def test_decodes_html_entities_in_the_etsy_description(session):
+    product = await _product(session)
+    await _match(session, product)
+
+    preview = await build_preview(
+        session, [listing(description="You&#39;re going to love this pot.")]
+    )
+    assert preview.products[0].description == "You're going to love this pot."
+    assert preview.products[0].description_chars == len("You're going to love this pot.")
+
+
+@pytest.mark.asyncio
 async def test_never_proposes_over_an_existing_value(session):
     """Fill blanks only. A disagreement is not a conflict - StockSmith's own value wins
     and stays, which is what makes this safe to re-run."""
