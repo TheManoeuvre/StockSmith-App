@@ -3,6 +3,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict
 
 from app.schemas.kitting import VariantKittingBomLine
+from app.schemas.material_substitute import SubstituteSuggestion
 from app.schemas.product import BomLine
 
 
@@ -28,6 +29,10 @@ class VariantBomLine(BomLine):
     replaces_material_id: int | None = None
     line_max_buildable: int | None = None
     line_expected_max_buildable: int | None = None
+    # Populated only when this line is the bottleneck (line_max_buildable == 0) — ranked,
+    # human-curated fallbacks for material_id, surfaced so a person can choose one. Never
+    # auto-applied; see app.models.material_substitute.
+    suggested_substitutes: list[SubstituteSuggestion] = []
 
 
 class VariantRead(VariantBase):

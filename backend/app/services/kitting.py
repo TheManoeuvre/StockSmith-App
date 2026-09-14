@@ -20,6 +20,7 @@ from app.schemas.dashboard import OrderAwaitingPackaging
 from app.schemas.kitting import OrderKittingOverrideLine, OrderKittingRequirementLine, OrderKittingSummary, VariantKittingBomLine
 from app.services.costing import recompute_material
 from app.services.material_categories import category_flag
+from app.services.material_substitutes import get_ranked_substitutes_by_material
 from app.services.purchase_sql import ON_ORDER_BY_MATERIAL_SQL
 
 _KITTING_CAPACITY_BY_PRODUCT_SQL = text(
@@ -1018,6 +1019,7 @@ async def get_orders_awaiting_packaging(session: AsyncSession) -> list[OrderAwai
             await session.execute(select(Material.id, Material.name).where(Material.id.in_(material_ids_needed)))
         )
     }
+    substitutes_by_material = await get_ranked_substitutes_by_material(session, material_ids_needed)
 
     result = [
         OrderAwaitingPackaging(
@@ -1027,6 +1029,7 @@ async def get_orders_awaiting_packaging(session: AsyncSession) -> list[OrderAwai
             short_by=short_by,
             order_placed_at=order.order_placed_at,
             platform=order.platform,
+            suggested_substitutes=substitutes_by_material.get(material_id, []),
         )
         for order, material_id, short_by in shortfalls
     ]

@@ -15,6 +15,7 @@ from app.schemas.dashboard import (
 )
 from app.schemas.variant import VariantBomLine
 from app.services.abc import compute_due_for_count
+from app.services.material_substitutes import get_ranked_substitutes_by_material
 from app.services.platforms.base import ensure_utc
 from app.services.purchase_sql import ON_ORDER_BY_MATERIAL_SQL
 
@@ -314,6 +315,16 @@ async def compute_variant_buildability(
         m = materials[line.material_id]
         line.line_max_buildable = int(Decimal(m.current_qty) // line.qty_required)
         line.line_expected_max_buildable = int((Decimal(m.current_qty) + Decimal(m.on_order_qty)) // line.qty_required)
+
+    # A line at 0 can't build even a single unit right now — that's the shortfall this
+    # surfaces suggestions for. Suggestions are looked up only for those lines, and only
+    # ever offered, never applied — a person still has to choose one.
+    short_material_ids = {line.material_id for line in bom if line.line_max_buildable == 0}
+    if short_material_ids:
+        substitutes_by_material = await get_ranked_substitutes_by_material(session, short_material_ids)
+        for line in bom:
+            if line.material_id in short_material_ids:
+                line.suggested_substitutes = substitutes_by_material.get(line.material_id, [])
 
     max_buildable = min(line.line_max_buildable for line in bom)
     expected_max_buildable = min(line.line_expected_max_buildable for line in bom)
