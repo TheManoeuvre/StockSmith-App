@@ -1,7 +1,8 @@
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import delete, func, select
+from fastapi.responses import Response
+from sqlalchemy import case, delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -27,6 +28,7 @@ from app.schemas.order import (
 )
 from app.schemas.order_return import CancellationPreview, OrderCancelRequest
 from app.services import allocation, returns
+from app.services.csv_io import export_orders_csv
 from app.services.kitting import (
     apply_default_kitting_bom,
     get_kitting_cogs_by_order,
@@ -168,6 +170,25 @@ def _cogs_pending(order: Order) -> bool:
     )
 
 
+def _postage_cost_missing(order: Order) -> bool:
+    """True when an order has shipped without ever recording what the postage cost — the
+    signal a UI should show instead of letting net_profit read as though postage were free.
+
+    Deliberately NOT folded into cogs_pending. That flag means "a line hasn't been allocated
+    yet", says so in its copy, and is fixed by allocating the line; this one is fixed by
+    assigning the product a shipping profile. Merging them would make both messages wrong
+    half the time.
+
+    The shipped gate is the whole rule: shipping_cost_snapshot is legitimately NULL on every
+    order that hasn't shipped, since ship_order is what freezes it. Only once the units have
+    physically left the building does a missing figure mean a real cost went unrecorded.
+
+    Should be permanently empty for orders placed after the fixes in
+    order_costs.default_order_shipping_profile landed, which makes it a standing regression
+    check on that path rather than only a disclaimer about historical rows."""
+    return order.status == OrderStatus.shipped and order.shipping_cost_snapshot is None
+
+
 async def _recompute_manual_order_totals(session: AsyncSession, order: Order) -> None:
     """Manual orders have no marketplace receipt to source subtotal/grand_total from —
     this derives them from the order's own lines whenever ordered_qty or
@@ -205,6 +226,7 @@ def _serialize_order(order: Order, kitting_cogs: Decimal | None) -> OrderRead:
             external_line_id=line.external_line_id,
             needs_mapping=line.needs_mapping,
             cost_per_unit_snapshot=line.cost_per_unit_snapshot,
+            variation_text=line.variation_text,
         )
         for line in order.lines
     ]
@@ -212,12 +234,14 @@ def _serialize_order(order: Order, kitting_cogs: Decimal | None) -> OrderRead:
     return OrderRead(
         id=order.id,
         platform=order.platform,
+        manual_channel=order.manual_channel,
         external_order_id=order.external_order_id,
         status=order.status,
         buyer_name=order.buyer_name,
         buyer_note=order.buyer_note,
         order_placed_at=order.order_placed_at,
         shipped_at=order.shipped_at,
+        ship_by_date=order.ship_by_date,
         cancelled_at=order.cancelled_at,
         notes=order.notes,
         created_at=order.created_at,
@@ -241,8 +265,11 @@ def _serialize_order(order: Order, kitting_cogs: Decimal | None) -> OrderRead:
         kitting_cogs=kitting_cogs,
         net_profit=_compute_net_profit(order, materials_cogs, kitting_cogs),
         cogs_pending=_cogs_pending(order),
+        postage_cost_missing=_postage_cost_missing(order),
         sync_issue=order.sync_issue,
         pending_marketplace_cancellation=order.pending_marketplace_cancellation,
+        tracking_number=order.tracking_number,
+        carrier=order.carrier,
         lines=lines,
     )
 
@@ -260,6 +287,17 @@ async def list_orders(
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_db),
 ) -> OrderPage:
+    # Orders still awaiting shipment are pinned ahead of shipped/cancelled ones regardless of
+    # date, so a stale open order can't be pushed onto a later page by a wall of newer shipped
+    # orders — the frontend paginates over this ordering and only regroups within a page.
+    # Within the awaiting block it's soonest-due-first (the order most urgently needing
+    # chasing leads), falling back to oldest-placed-first for orders sharing a due date or
+    # missing one entirely (a manual order, or a synced one the marketplace didn't report a
+    # ship-by date for) — NULLs sort last, after every real due date, rather than first as
+    # if they were most urgent. Within the terminal block it's newest-first. A NULL from the
+    # group that a given CASE doesn't target only ever ties against its own group, so
+    # cross-dialect NULL sort position doesn't matter for those.
+    is_terminal = Order.status.in_((OrderStatus.shipped, OrderStatus.cancelled))
     count_query = select(func.count()).select_from(Order)
     query = (
         select(Order)
@@ -268,7 +306,13 @@ async def list_orders(
             selectinload(Order.lines).selectinload(OrderLine.variant),
             selectinload(Order.shipping_profile),
         )
-        .order_by(Order.order_placed_at.desc(), Order.id.desc())
+        .order_by(
+            case((is_terminal, 1), else_=0),
+            case((~is_terminal, Order.ship_by_date)).asc().nulls_last(),
+            case((~is_terminal, Order.order_placed_at)).asc(),
+            case((is_terminal, Order.order_placed_at)).desc(),
+            Order.id.desc(),
+        )
         .limit(limit)
         .offset(offset)
     )
@@ -284,6 +328,16 @@ async def list_orders(
     return OrderPage(
         items=[_serialize_order(o, kitting_by_order.get(o.id)) for o in orders],
         total=total or 0,
+    )
+
+
+@router.get("/export")
+async def export_orders(session: AsyncSession = Depends(get_db)) -> Response:
+    csv_text = await export_orders_csv(session)
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=orders.csv"},
     )
 
 
@@ -332,6 +386,7 @@ async def create_order(payload: OrderCreate, session: AsyncSession = Depends(get
         shipping_charged=shipping_charged,
         subtotal=subtotal,
         grand_total=grand_total,
+        manual_channel=payload.manual_channel,
     )
     order.lines = []
     for l in payload.lines:

@@ -357,6 +357,15 @@ function renderFlagTable(withReorder = true) {
 describe("ReferenceDataTable field types", () => {
   beforeEach(() => setRoutes(flagRoutes()));
 
+  it("singularises an '-ies' title for the add labels rather than trimming the 's'", async () => {
+    renderFlagTable();
+
+    // "Material categories" -> "material category", not the old naive "material categorie".
+    expect(await screen.findByText("Add material category")).toBeInTheDocument();
+    expect(screen.getByLabelText("New material category name")).toBeInTheDocument();
+    expect(screen.queryByText(/categorie\b/)).not.toBeInTheDocument();
+  });
+
   it("sends a real boolean rather than the string it holds in form state", async () => {
     const user = userEvent.setup();
     renderFlagTable();

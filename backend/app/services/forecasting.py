@@ -36,12 +36,27 @@ _MIN_ACTIVE_WEEKS_FOR_FORECAST = 2
 _MATERIALS_SQL = text(
     """
     SELECT m.id, m.name, m.current_qty, m.allocated_qty, m.reorder_threshold,
-           m.default_supplier_id, s.name AS supplier_name
+           m.default_supplier_id, s.name AS supplier_name,
+           s.default_lead_time_days AS supplier_lead_time_days
     FROM materials m
     LEFT JOIN suppliers s ON s.id = m.default_supplier_id
     WHERE m.is_active = true
     """
 )
+
+_BUSINESS_DAYS_PER_WEEK = Decimal(5)
+
+
+def _add_business_days(start: date, days: int) -> date:
+    """Step forward `days` business days (Mon-Fri) from `start`, skipping weekends. `days=0`
+    returns `start` unchanged."""
+    d = start
+    remaining = days
+    while remaining > 0:
+        d += timedelta(days=1)
+        if d.weekday() < 5:
+            remaining -= 1
+    return d
 
 _ACTIVE_VARIANTS_SQL = text(
     "SELECT id, product_id, current_stock, allocated_qty FROM product_variants WHERE is_active = true"
@@ -68,7 +83,11 @@ class MaterialForecast:
     consumption_rate_per_week: Decimal | None
     weeks_of_supply: Decimal | None
     fg_buffer_weeks: Decimal | None
-    status: str  # "critical" | "warning" | "insufficient_data"
+    # The lead time (business days) actually applied: the default supplier's own figure where
+    # it has one, else the shop-wide GeneralSettings.default_lead_time_days. Always populated —
+    # it is part of why a row is flagged, so the UI shows it next to the supplier.
+    lead_time_days: int
+    status: str  # "critical" | "warning" | "insufficient_data" | "ok" (last only with include_all)
 
 
 @dataclass
@@ -177,11 +196,15 @@ async def _get_scrap_by_entity_material(
 
 
 async def _get_on_order_lines(
-    session: AsyncSession, default_lead_time_weeks: Decimal, today: date
+    session: AsyncSession,
+    lead_days_by_material: dict[int, int],
+    default_lead_time_days: int,
+    today: date,
 ) -> dict[int, list[tuple[Decimal, Decimal]]]:
     """Per material, every still-outstanding purchase line as a (arrival_weeks_from_now,
     qty) timed inflow — using the PO's own expected_arrival_date when set, else estimating
-    from order_date + the shop-wide default lead time.
+    from order_date + the material's lead time in business days, skipping weekends (its
+    default supplier's, falling back to the shop-wide default).
 
     The quantity is what is still to come, not what was ordered. Before receipts existed
     this could only ever be the whole line, so a part-delivered order went on forecasting
@@ -213,7 +236,8 @@ async def _get_on_order_lines(
     )
     out: dict[int, list[tuple[Decimal, Decimal]]] = defaultdict(list)
     for material_id, qty, order_date, expected_arrival_date in result:
-        arrival_date = expected_arrival_date or (order_date + timedelta(weeks=float(default_lead_time_weeks)))
+        lead_days = lead_days_by_material.get(material_id, default_lead_time_days)
+        arrival_date = expected_arrival_date or _add_business_days(order_date, lead_days)
         arrival_weeks = Decimal((arrival_date - today).days) / Decimal(7)
         if arrival_weeks < 0:
             arrival_weeks = Decimal(0)
@@ -264,10 +288,19 @@ def _piecewise_weeks_of_supply(
     return t_prev + (remaining / final_rate)
 
 
-async def compute_material_forecasts(session: AsyncSession) -> list[MaterialForecast]:
+async def compute_material_forecasts(
+    session: AsyncSession, *, include_all: bool = False
+) -> list[MaterialForecast]:
+    """By default returns only materials worth an alert (low, at-risk, or short on history).
+
+    Pass ``include_all=True`` to get a forecast row for *every* material — healthy ones come
+    back with ``status="ok"`` and a real ``weeks_of_supply``; ones with too little sales
+    history come back as ``"insufficient_data"``. Used by the materials list/detail, which
+    show the figure per row rather than as an alert list.
+    """
     settings = await get_general_settings(session)
     lookback_weeks = Decimal(settings.forecast_lookback_weeks)
-    default_lead_time_weeks = Decimal(str(settings.default_lead_time_weeks))
+    default_lead_time_days = settings.default_lead_time_days
     warning_weeks = Decimal(str(settings.forecast_warning_weeks))
     critical_weeks = Decimal(str(settings.forecast_critical_weeks))
 
@@ -279,7 +312,20 @@ async def compute_material_forecasts(session: AsyncSession) -> list[MaterialFore
     builds = await _get_builds_by_entity(session, cutoff)
     scrap = await _get_scrap_by_entity_material(session, cutoff)
     materials = list(await session.execute(_MATERIALS_SQL))
-    on_order = await _get_on_order_lines(session, default_lead_time_weeks, now.date())
+    # The lead time each material is judged against: its default supplier's own figure where
+    # set, else the shop-wide default. Used both for on-order arrival timing and, below, to
+    # push the reorder point out — a 10-business-day lead makes 8 weeks of cover as urgent as 6.
+    lead_days_by_material: dict[int, int] = {
+        m.id: (
+            int(m.supplier_lead_time_days)
+            if m.supplier_lead_time_days is not None
+            else default_lead_time_days
+        )
+        for m in materials
+    }
+    on_order = await _get_on_order_lines(
+        session, lead_days_by_material, default_lead_time_days, now.date()
+    )
 
     demand_pieces: dict[int, list[_DemandPiece]] = defaultdict(list)
     active_weeks: dict[int, set[int]] = defaultdict(set)
@@ -323,9 +369,10 @@ async def compute_material_forecasts(session: AsyncSession) -> list[MaterialFore
         on_order_qty = sum((qty for _, qty in inflows), Decimal(0))
         pieces = demand_pieces.get(m.id, [])
         sufficient_history = len(active_weeks.get(m.id, set())) >= _MIN_ACTIVE_WEEKS_FOR_FORECAST
+        lead_time_days = lead_days_by_material.get(m.id, default_lead_time_days)
 
         if not pieces or not sufficient_history:
-            if reorder_threshold > 0 and current_qty <= reorder_threshold:
+            if include_all or (reorder_threshold > 0 and current_qty <= reorder_threshold):
                 forecasts.append(
                     MaterialForecast(
                         material_id=m.id,
@@ -339,6 +386,7 @@ async def compute_material_forecasts(session: AsyncSession) -> list[MaterialFore
                         consumption_rate_per_week=None,
                         weeks_of_supply=None,
                         fg_buffer_weeks=None,
+                        lead_time_days=lead_time_days,
                         status="insufficient_data",
                     )
                 )
@@ -354,12 +402,23 @@ async def compute_material_forecasts(session: AsyncSession) -> list[MaterialFore
         )
         consumption_rate_per_week = sum((p.rate for p in pieces), Decimal(0))
 
-        if weeks is not None and weeks <= critical_weeks:
+        # The reorder point is pushed out by the lead time: cover that runs out in less time
+        # than it takes to restock (plus the configured buffer) is already a problem, so an
+        # 8-week material with a 10-business-day (2-week) lead is judged the same as a 6-week
+        # one with none. Business days convert to weeks at 5 business days/week to combine
+        # with the weeks-based thresholds.
+        lead_time_weeks_equivalent = Decimal(lead_time_days) / _BUSINESS_DAYS_PER_WEEK
+        effective_critical = critical_weeks + lead_time_weeks_equivalent
+        effective_warning = warning_weeks + lead_time_weeks_equivalent
+
+        if weeks is not None and weeks <= effective_critical:
             status = "critical"
-        elif weeks is not None and weeks <= warning_weeks:
+        elif weeks is not None and weeks <= effective_warning:
             status = "warning"
         elif reorder_threshold > 0 and current_qty <= reorder_threshold:
             status = "warning"  # manual floor override — forecast says fine, but the user's own floor says otherwise
+        elif include_all:
+            status = "ok"  # healthy — only surfaced when the caller wants every material
         else:
             continue  # ok — nothing to surface
 
@@ -376,6 +435,7 @@ async def compute_material_forecasts(session: AsyncSession) -> list[MaterialFore
                 consumption_rate_per_week=consumption_rate_per_week,
                 weeks_of_supply=weeks,
                 fg_buffer_weeks=fg_buffer_weeks,
+                lead_time_days=lead_time_days,
                 status=status,
             )
         )

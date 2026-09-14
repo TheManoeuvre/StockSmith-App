@@ -8,7 +8,15 @@ from pydantic import BaseModel
 
 from app.deps import require_auth, require_host
 from app.schemas.backup import BackupManifestRead
-from app.services import backup, backup_scheduler, listing_push, maintenance, restore, sync_scheduler
+from app.services import (
+    backup,
+    backup_scheduler,
+    listing_push,
+    listing_reconcile,
+    maintenance,
+    restore,
+    sync_scheduler,
+)
 from app.services.backup_archive import BackupError
 from app.services.restore import RestoreError, RestoreVersionError
 
@@ -44,6 +52,7 @@ async def _quiesce_background_work() -> None:
     maintenance.enter("restore_staged")
     sync_scheduler.stop()
     backup_scheduler.stop()
+    listing_reconcile.stop()
     await listing_push.quiesce()
 
 
@@ -51,6 +60,7 @@ def _resume_background_work() -> None:
     maintenance.exit()
     sync_scheduler.start()
     backup_scheduler.start()
+    listing_reconcile.start()
 
 
 def _to_error(exc: Exception) -> HTTPException:

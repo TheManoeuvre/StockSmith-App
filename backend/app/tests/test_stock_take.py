@@ -184,17 +184,41 @@ async def test_an_empty_scope_is_refused_rather_than_creating_a_take_with_no_lin
 
 
 async def test_overlapping_takes_warn_and_proceed(session):
-    """A soft lock: reported, never enforced."""
+    """A *partial* overlap is a soft lock: reported, never enforced."""
     await _settings(session)
-    await _material(session, qty=Decimal(5))
+    await _material(session, qty=Decimal(5))  # category "resin"
     await session.commit()
-    first, _ = await stock_takes.create_stock_take(session, MATERIALS_ONLY)
+    resin_only = StockTakeScope(
+        include_materials=True,
+        material_category_ids=[(await _category(session, "resin")).id],
+    )
+    first, _ = await stock_takes.create_stock_take(session, resin_only)
 
+    # A wider scope that catches the same material — overlapping, but not the same scope.
     second, warnings = await stock_takes.create_stock_take(session, MATERIALS_ONLY)
 
     assert second.id != first.id
     assert len(await _lines(session, second.id)) == 1
     assert [w.other_stock_take_id for w in warnings] == [first.id]
+
+
+async def test_a_second_open_take_on_the_identical_scope_is_refused(session):
+    """An exact-scope duplicate is the start-flow double-fire (seen 2026-09-02); block it."""
+    await _settings(session)
+    await _material(session, qty=Decimal(5))
+    await session.commit()
+    first, _ = await stock_takes.create_stock_take(session, MATERIALS_ONLY)
+
+    with pytest.raises(HTTPException) as exc:
+        await stock_takes.create_stock_take(session, MATERIALS_ONLY)
+    assert exc.value.status_code == 409
+    assert f"#{first.id}" in exc.value.detail
+
+    # Once the first take is closed, the same scope is allowed again.
+    first.status = StockTakeStatus.closed
+    await session.commit()
+    again, _ = await stock_takes.create_stock_take(session, MATERIALS_ONLY)
+    assert again.id != first.id
 
 
 # --- approve ---------------------------------------------------------------------------
@@ -647,3 +671,79 @@ async def _lookups_for(session, lines):
     from app.services.csv_io import _stock_take_lookups
 
     return await _stock_take_lookups(session, lines)
+
+
+async def test_reading_a_take_eager_loads_material_type(session):
+    """group_lines reads Material.material_type_name for the sub-group heading. The two
+    lookup helpers re-select the materials in a fresh statement, so without an explicit
+    selectinload that read is a lazy load mid-iteration — which async SQLAlchemy answers
+    with MissingGreenlet, 500-ing every take that includes a material with a material type
+    set (i.e. any filament count).
+    """
+    from app.models.material_type import MaterialType
+    from app.routers.stock_takes import _name_lookups
+    from app.schemas.stock_take import StockTakeScope
+    from app.services.csv_io import _stock_take_lookups
+    from app.services.stock_takes import create_stock_take, group_lines
+
+    session.add(GeneralSettings(id=1))
+    pla = MaterialType(name="PLA")
+    session.add(pla)
+    await session.flush()
+    black = await _material(
+        session, "Black", category="filament", unit=MaterialUnit.g, material_type_id=pla.id
+    )
+
+    take, _ = await create_stock_take(session, StockTakeScope(include_materials=True))
+    await session.commit()
+    lines = await _lines_of(session, take.id)
+
+    from sqlalchemy import inspect as sa_inspect
+
+    for lookups in (_name_lookups, _stock_take_lookups):
+        session.expire(black, ["material_type"])
+        materials, _, _ = await lookups(session, lines)
+        m = materials[black.id]
+        # The lookup's own select must have eager-loaded material_type; if it's still
+        # unloaded, group_lines' read of material_type_name is a lazy load, which async
+        # SQLAlchemy raises MissingGreenlet for (the 500 on every filament take).
+        assert "material_type" not in sa_inspect(m).unloaded
+        grouped = group_lines(lines, materials, {}, {})
+        assert any(g.subgroup == "PLA" for g in grouped)
+
+
+async def test_reading_a_take_eager_loads_product_category(session):
+    """group_lines reads Product.product_category_name for the group heading. Product's
+    product_category relationship has no lazy="selectin", so a lookup helper that re-selects
+    the products without an explicit selectinload turns that read into a lazy load
+    mid-iteration — MissingGreenlet, 500-ing every take that includes a categorised product.
+    csv_io._stock_take_lookups already guarded this; routers._name_lookups did not.
+    """
+    from sqlalchemy import inspect as sa_inspect
+
+    from app.models.product import Product
+    from app.models.product_category import ProductCategory
+    from app.routers.stock_takes import _name_lookups
+    from app.schemas.stock_take import StockTakeScope
+    from app.services.csv_io import _stock_take_lookups
+    from app.services.stock_takes import create_stock_take, group_lines
+
+    session.add(GeneralSettings(id=1))
+    category = ProductCategory(name="Coaster")
+    session.add(category)
+    await session.flush()
+    coaster = Product(name="Slate Coaster", sku="COA-1", product_category_id=category.id, current_stock=0)
+    session.add(coaster)
+    await session.commit()
+
+    take, _ = await create_stock_take(session, StockTakeScope(include_products=True))
+    await session.commit()
+    lines = await _lines_of(session, take.id)
+
+    for lookups in (_name_lookups, _stock_take_lookups):
+        session.expire(coaster, ["product_category"])
+        _, products, _ = await lookups(session, lines)
+        p = products[coaster.id]
+        assert "product_category" not in sa_inspect(p).unloaded
+        grouped = group_lines(lines, {}, products, {})
+        assert any(g.group == "Coaster" for g in grouped)

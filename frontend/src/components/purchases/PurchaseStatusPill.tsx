@@ -1,4 +1,5 @@
 import type { PurchaseStatus } from "../../api/types";
+import { Badge } from "../common/Badge";
 
 /**
  * The order's status, in one place.
@@ -15,5 +16,5 @@ const STYLES: Record<PurchaseStatus, { label: string; className: string }> = {
 
 export function PurchaseStatusPill({ status }: { status: PurchaseStatus }) {
   const { label, className } = STYLES[status];
-  return <span className={`rounded px-2 py-0.5 text-xs ${className}`}>{label}</span>;
+  return <Badge className={className}>{label}</Badge>;
 }

@@ -17,14 +17,13 @@ interface NewComponentForm {
 const EMPTY_COMPONENT: NewComponentForm = { name: "", basis: "sale_price_plus_shipping", rate: "", fixed: "" };
 
 /**
- * One platform's fee breakdown, shown on that platform's integration card.
+ * One platform's fee breakdown, shown on the Pricing & fees page — once per connectable
+ * platform, next to the other one, since a shop pricing a product wants to compare Etsy's
+ * and eBay's fee structure side by side rather than hunting for it on each platform's own
+ * Stores & sync accordion.
  *
- * Lives here rather than under Pricing because of the rule the settings layout follows:
- * anything keyed by platform alone belongs to that platform's integration; anything keyed by
- * (platform × another entity) belongs with the other entity — which is why per-profile eBay
- * shipping costs stay on the shipping profile; and anything keyed by nothing is a global
- * setting and stays in Pricing. That last case is the fee *source*, which picks which of these
- * breakdowns to apply shop-wide, and is not per-platform at all despite naming one.
+ * The fee *source* (which of these breakdowns is applied shop-wide) is a separate, genuinely
+ * global setting — see MarginFeeSettings — and is not per-platform at all despite naming one.
  *
  * Components are applied in display_order, each one adding to a running subtotal — which is how
  * "VAT on fees" is modelled: a fees_subtotal-basis component multiplies what came before it.
@@ -51,7 +50,7 @@ export function PlatformFeeComponents({ platform }: { platform: ListingPlatform 
     isDirty: draftDirty,
     markSaved: clearDraft,
   } = useEditableCopy<NewComponentForm>({
-    key: "fee-components/new",
+    key: `fee-components/${platform}/new`,
     label: `New ${PLATFORM_LABELS[platform]} fee component`,
     initial: EMPTY_COMPONENT,
     seed: EMPTY_COMPONENT,

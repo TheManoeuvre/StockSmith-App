@@ -168,6 +168,10 @@ export async function downloadCsv(path: string, filename: string): Promise<void>
   const anchor = document.createElement("a");
   anchor.href = objectUrl;
   anchor.download = filename;
+  document.body.appendChild(anchor);
   anchor.click();
-  URL.revokeObjectURL(objectUrl);
+  anchor.remove();
+  // Revoking on the same tick as click() can invalidate the blob URL before the
+  // browser has actually started the download.
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
 }

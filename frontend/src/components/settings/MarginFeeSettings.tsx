@@ -6,6 +6,7 @@ import { PLATFORM_LABELS } from "../../lib/platforms";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { SaveIndicator } from "../common/SaveIndicator";
+import { SettingsCard } from "./SettingsCard";
 import { BASIS_LABELS } from "./PlatformFeeComponents";
 
 const SOURCE_LABELS: Record<MarginFeeSource, string> = {
@@ -23,9 +24,9 @@ const SOURCE_LABELS: Record<MarginFeeSource, string> = {
  * resolve_shipping_cost_for_fee_source maps it 1:1 onto cost_etsy/cost_ebay/cost_manual), which
  * is the other reason it can't be split per platform.
  *
- * The fee components it draws on are per-platform and live on the integration cards. The summary
- * below exists so that split doesn't read as arbitrary: you can see, from here, exactly which
- * numbers the current choice pulls in and where to go to change them.
+ * The fee components it draws on are per-platform and live further down this same page (see
+ * PlatformFeeComponents). The summary below exists so that split doesn't read as arbitrary: you
+ * can see, from here, exactly which numbers the current choice pulls in.
  */
 export function MarginFeeSettings() {
   const queryClient = useQueryClient();
@@ -46,14 +47,15 @@ export function MarginFeeSettings() {
   const source = config?.fee_source ?? "manual";
 
   return (
-    <div className="flex flex-col gap-3 rounded border border-slate-300 p-3">
-      <div>
-        <p className="font-medium">Margin estimate basis</p>
-        <p className="text-sm text-slate-500">
-          Which channel every product's "Platform fee" is estimated for. Applies shop-wide, and also selects
-          which shipping cost each shipping profile contributes.
-        </p>
-      </div>
+    <SettingsCard
+      title="Margin estimate basis"
+      help={
+        <>
+          Which channel every product's &ldquo;Platform fee&rdquo; is estimated for. Applies
+          shop-wide, and also selects which shipping cost each shipping profile contributes.
+        </>
+      }
+    >
       {/* Auto-save: one atomic choice whose options are all visible in the control. The indicator
           matters more here than anywhere else in settings — this silently moves every margin
           figure in the app, so "did that take?" is a real question. */}
@@ -82,7 +84,7 @@ export function MarginFeeSettings() {
       ) : (
         <EffectiveFeeSummary platform={source} />
       )}
-    </div>
+    </SettingsCard>
   );
 }
 
@@ -120,10 +122,10 @@ function EffectiveFeeSummary({ platform }: { platform: ListingPlatform }) {
       )}
       <Link
         to="/settings"
-        search={{ tab: "integrations" }}
+        search={{ page: "pricing-fees" }}
         className="self-start text-sm text-slate-600 underline"
       >
-        Edit these under Integrations → {PLATFORM_LABELS[platform]}
+        Edit these under Pricing & fees → {PLATFORM_LABELS[platform]} fee components
       </Link>
     </div>
   );

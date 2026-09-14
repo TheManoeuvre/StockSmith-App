@@ -1,5 +1,12 @@
-import { api } from "./client";
-import type { Order, OrderKittingOverrideLine, OrderKittingSummary, OrderPage, OrderStatus } from "./types";
+import { api, downloadCsv } from "./client";
+import type {
+  ManualOrderChannel,
+  Order,
+  OrderKittingOverrideLine,
+  OrderKittingSummary,
+  OrderPage,
+  OrderStatus,
+} from "./types";
 
 export type ReturnDisposition = "scrap" | "return_to_stock";
 
@@ -55,6 +62,7 @@ export interface OrderCreateInput {
   currency?: string | null;
   shipping_profile_id?: number | null;
   shipping_charged?: string | null;
+  manual_channel?: ManualOrderChannel | null;
   lines: OrderLineInput[];
 }
 
@@ -90,4 +98,5 @@ export const ordersApi = {
   getKittingOverrides: (id: number) => api.get<OrderKittingSummary>(`/orders/${id}/kitting-overrides`),
   replaceKittingOverrides: (id: number, overrides: OrderKittingOverrideLine[]) =>
     api.put<OrderKittingSummary>(`/orders/${id}/kitting-overrides`, overrides),
+  exportCsv: () => downloadCsv("/orders/export", "orders.csv"),
 };

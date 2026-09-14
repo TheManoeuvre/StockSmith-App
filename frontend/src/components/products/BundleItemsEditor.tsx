@@ -7,6 +7,7 @@ import { ErrorBanner } from "../common/ErrorBanner";
 import { SaveButton } from "../common/SaveButton";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
+import { useManagedSave } from "../../hooks/useDirtyRegistry";
 
 const toLines = (rows: { component_product_id: number; qty: number }[]): BundleItem[] =>
   rows.map((l) => ({ component_product_id: l.component_product_id, qty: l.qty }));
@@ -20,7 +21,7 @@ export function BundleItemsEditor({ productId }: { productId: number }) {
   const { data: products } = useQuery({ queryKey: ["products"], queryFn: productsApi.list });
 
   const seed = useMemo(() => (bundleItems ? toLines(bundleItems) : undefined), [bundleItems]);
-  const { value: lines, setValue: setLines, isDirty, markSaved } = useEditableCopy<BundleItem[]>({
+  const { value: lines, setValue: setLines, isDirty, markSaved, revert } = useEditableCopy<BundleItem[]>({
     key: "bundle-items",
     label: "Bundle components",
     initial: [],
@@ -42,6 +43,10 @@ export function BundleItemsEditor({ productId }: { productId: number }) {
   });
 
   const saveStatus = useSaveStatus(saveMutation.status);
+  const managed = useManagedSave("bundle-items", {
+    save: () => saveMutation.mutate(),
+    revert,
+  });
 
   const updateLine = (index: number, patch: Partial<BundleItem>) => {
     setLines((prev) => prev.map((l, i) => (i === index ? { ...l, ...patch } : l)));
@@ -98,14 +103,16 @@ export function BundleItemsEditor({ productId }: { productId: number }) {
         <button onClick={addLine} className="rounded border border-slate-300 px-3 py-1.5 text-sm">
           + Add component
         </button>
-        <SaveButton
-          isDirty={isDirty}
-          isPending={saveMutation.isPending}
-          status={saveStatus}
-          onClick={() => saveMutation.mutate()}
-        >
-          Save bundle
-        </SaveButton>
+        {!managed && (
+          <SaveButton
+            isDirty={isDirty}
+            isPending={saveMutation.isPending}
+            status={saveStatus}
+            onClick={() => saveMutation.mutate()}
+          >
+            Save bundle
+          </SaveButton>
+        )}
       </div>
       <ErrorBanner error={saveMutation.error} />
     </div>

@@ -59,7 +59,13 @@ async def _load_purchase(session: AsyncSession, purchase_id: int) -> Purchase:
     result = await session.execute(
         select(Purchase)
         .where(Purchase.id == purchase_id)
-        .options(selectinload(Purchase.lines).selectinload(MaterialPurchase.receipts))
+        .options(
+            selectinload(Purchase.lines).selectinload(MaterialPurchase.receipts),
+            # The routers hand this object straight back as the response, and PurchaseRead
+            # reads purchase.supplier_name — so supplier has to be eager-loaded here or
+            # serialising the response lazy-loads on a committed async session (MissingGreenlet).
+            selectinload(Purchase.supplier),
+        )
         .execution_options(populate_existing=True)
     )
     purchase = result.scalar_one_or_none()

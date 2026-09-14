@@ -8,11 +8,23 @@ import { ApiError } from "../../api/client";
 import { ConfirmDialog } from "../common/ConfirmDialog";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { SaveButton } from "../common/SaveButton";
+import { Switch } from "../common/Switch";
+import { SettingsCard } from "../settings/SettingsCard";
 
 export interface ReferenceRow {
   id: number;
   name: string;
   usage_count: number;
+}
+
+/**
+ * Singularise a table title for "Add …" / "New …" labels. Naive enough for the handful of
+ * titles this component is given ("Colours", "Suppliers", "Material categories"): strip a
+ * trailing "s", but turn "-ies" into "-y" first so "Material categories" doesn't read
+ * "material categorie".
+ */
+function singularise(title: string): string {
+  return title.replace(/ies$/i, "y").replace(/s$/i, "");
 }
 
 /** Fields are addressed by string key, which the concrete row types don't declare. */
@@ -24,7 +36,7 @@ function fieldValue(row: ReferenceRow, key: string): string {
 export interface ReferenceField {
   key: string;
   label: string;
-  type?: "text" | "url" | "money" | "checkbox" | "select";
+  type?: "text" | "url" | "money" | "number" | "checkbox" | "select";
   placeholder?: string;
   /** For type "select". The empty option means "not set" and is sent as null. */
   options?: { value: string; label: string }[];
@@ -44,6 +56,9 @@ function serialize(fields: ReferenceField[], form: Record<string, string>): Reco
     const raw = form[field.key] ?? "";
     if (field.type === "checkbox") out[field.key] = raw === "true";
     else if (field.type === "select") out[field.key] = raw || null;
+    // Empty stays null rather than "" — the backend field is `Decimal | None`, and "" would
+    // fail validation instead of clearing it.
+    else if (field.type === "number") out[field.key] = raw.trim() === "" ? null : Number(raw);
     else out[field.key] = raw;
   }
   return out;
@@ -83,6 +98,7 @@ export function ReferenceDataTable<T extends ReferenceRow>({
   usageLabel,
   allowDelete = true,
   extraRowActions,
+  rowLeading,
 }: {
   title: string;
   description?: string;
@@ -95,6 +111,9 @@ export function ReferenceDataTable<T extends ReferenceRow>({
   usageLabel: (count: number) => string;
   allowDelete?: boolean;
   extraRowActions?: (row: T) => React.ReactNode;
+  /** Small visual rendered before the row's name in the collapsed header — e.g. a colour
+   *  swatch. Omit for tables with nothing to show there. */
+  rowLeading?: (row: T) => React.ReactNode;
 }) {
   const { data: rows } = useQuery({ queryKey, queryFn: api.list });
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -135,12 +154,7 @@ export function ReferenceDataTable<T extends ReferenceRow>({
 
   return (
     <DirtyPath segment={segment}>
-      <div className="flex flex-col gap-3 rounded border border-slate-300 p-3">
-        <div>
-          <h2 className="font-medium">{title}</h2>
-          {description && <p className="text-sm text-slate-500">{description}</p>}
-        </div>
-
+      <SettingsCard title={title} help={description}>
         <CreateForm title={title} api={api} queryKey={queryKey} />
 
         {rows && rows.length === 0 && <p className="text-sm text-slate-500">Nothing here yet.</p>}
@@ -159,7 +173,10 @@ export function ReferenceDataTable<T extends ReferenceRow>({
                     onClick={() => toggle(row.id)}
                     className="flex flex-1 items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-slate-50"
                   >
-                    <span className="font-medium">{row.name}</span>
+                    <span className="flex items-center gap-2 font-medium">
+                      {rowLeading?.(row)}
+                      {row.name}
+                    </span>
                     <span className="text-xs text-slate-400">
                       {row.usage_count > 0 ? usageLabel(row.usage_count) : "unused"}
                     </span>
@@ -207,7 +224,7 @@ export function ReferenceDataTable<T extends ReferenceRow>({
             ))}
           </ul>
         )}
-      </div>
+      </SettingsCard>
     </DirtyPath>
   );
 }
@@ -231,7 +248,7 @@ function CreateForm<T extends ReferenceRow>({
     markSaved,
   } = useEditableCopy<{ name: string }>({
     key: "new",
-    label: `New ${title.toLowerCase().replace(/s$/, "")}`,
+    label: `New ${singularise(title).toLowerCase()}`,
     initial: { name: "" },
     seed: { name: "" },
     seedKey: "const",
@@ -255,9 +272,9 @@ function CreateForm<T extends ReferenceRow>({
       }}
     >
       <label className="flex flex-col gap-1">
-        <span className="text-sm">Add {title.toLowerCase().replace(/s$/, "")}</span>
+        <span className="text-sm">Add {singularise(title).toLowerCase()}</span>
         <input
-          aria-label={`New ${title.toLowerCase().replace(/s$/, "")} name`}
+          aria-label={`New ${singularise(title).toLowerCase()} name`}
           className="rounded border border-slate-300 px-2 py-1 text-sm"
           value={draft.name}
           onChange={(e) => setDraft({ name: e.target.value })}
@@ -384,19 +401,19 @@ function ExpandedRow<T extends ReferenceRow>({
           if (field.type === "checkbox") {
             // Label after the control, not above it — the flex-col layout the text inputs use
             // puts a tick box under its own caption, which reads as a different question.
+            const fieldId = `reference-row-${row.id}-${field.key}`;
             return (
-              <label key={field.key} className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  aria-label={`${row.name} ${field.label}`}
-                  className="rounded border-slate-300"
+              <div key={field.key} className="flex items-center gap-2 text-sm">
+                <Switch
+                  id={fieldId}
+                  ariaLabel={`${row.name} ${field.label}`}
                   checked={form[field.key] === "true"}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, [field.key]: e.target.checked ? "true" : "false" }))
+                  onChange={(checked) =>
+                    setForm((prev) => ({ ...prev, [field.key]: checked ? "true" : "false" }))
                   }
                 />
-                {field.label}
-              </label>
+                <label htmlFor={fieldId}>{field.label}</label>
+              </div>
             );
           }
           if (field.type === "select") {
@@ -424,8 +441,8 @@ function ExpandedRow<T extends ReferenceRow>({
               {field.label}
               <input
                 aria-label={`${row.name} ${field.label}`}
-                type={field.type === "money" ? "number" : "text"}
-                step={field.type === "money" ? "0.01" : undefined}
+                type={field.type === "money" || field.type === "number" ? "number" : "text"}
+                step={field.type === "money" ? "0.01" : field.type === "number" ? "1" : undefined}
                 placeholder={field.placeholder}
                 className="rounded border border-slate-300 px-2 py-1"
                 value={form[field.key] ?? ""}

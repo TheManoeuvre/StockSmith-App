@@ -15,6 +15,18 @@ class OrderStatus(str, enum.Enum):
     cancelled = "cancelled"
 
 
+class ManualOrderChannel(str, enum.Enum):
+    """A hand-entered order's own channel label — "Manual · direct sale" vs. "Etsy · keyed
+    by hand" etc. Deliberately separate from `Order.platform`, which means "this order was
+    pulled in by marketplace sync" and several call sites (see `platform` below) key off
+    that to skip sync-owned recompute/reconciliation logic. Setting this column never
+    implies sync involvement."""
+
+    manual = "manual"
+    etsy = "etsy"
+    ebay = "ebay"
+
+
 class Order(Base):
     """A customer order, placed either manually or pulled from a marketplace (Etsy etc).
 
@@ -27,9 +39,10 @@ class Order(Base):
     __tablename__ = "orders"
     __table_args__ = (
         UniqueConstraint("platform", "external_order_id", name="uq_orders_platform_external_id"),
-        # Matches list_orders' `ORDER BY order_placed_at DESC, id DESC` exactly — without
-        # it, that query does a full table scan plus a temp B-tree sort on every Orders
-        # page load, which only gets worse as marketplace sync accumulates order history.
+        # list_orders now sorts awaiting orders ahead of terminal ones via CASE expressions,
+        # so it can't lean on this index for the full ordering — but the index still covers
+        # the order_placed_at/id tie-breakers and keeps the count/offset scan off a full
+        # table scan as marketplace sync accumulates order history.
         Index("ix_orders_order_placed_at_id", "order_placed_at", "id"),
     )
 
@@ -38,6 +51,11 @@ class Order(Base):
         portable_enum(ListingPlatform, name="listing_platform"), nullable=True
     )
     external_order_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # The manually-entered channel tag — see ManualOrderChannel. Independent of `platform`
+    # above; only ever set (or read) on orders created through the manual /orders/new flow.
+    manual_channel: Mapped[ManualOrderChannel | None] = mapped_column(
+        portable_enum(ManualOrderChannel, name="manual_order_channel"), nullable=True
+    )
     status: Mapped[OrderStatus] = mapped_column(
         portable_enum(OrderStatus, name="order_status"), nullable=False, default=OrderStatus.pending
     )
@@ -45,6 +63,11 @@ class Order(Base):
     buyer_note: Mapped[str | None] = mapped_column(String, nullable=True)
     order_placed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     shipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The marketplace's own fulfillment deadline (Etsy's expected_ship_date, eBay's
+    # shipByDate) — refreshed on every sync like the financial fields below, since it's
+    # marketplace-owned and never user-edited. NULL for manual orders and for any synced
+    # order the marketplace didn't report one for.
+    ship_by_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notes: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -97,6 +120,12 @@ class Order(Base):
     # snapshots on OrderLine) per an explicit product requirement.
     shipping_cost_snapshot: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
 
+    # Shipment tracking once the marketplace reports it (order_sync._apply_financials).
+    # A single pair covers the common single-package case; a rare multi-package shipment
+    # only surfaces its first tracking number here.
+    tracking_number: Mapped[str | None] = mapped_column(String, nullable=True)
+    carrier: Mapped[str | None] = mapped_column(String, nullable=True)
+
     lines: Mapped[list["OrderLine"]] = relationship(back_populates="order", cascade="all, delete-orphan")
     shipping_profile: Mapped["ShippingProfile | None"] = relationship()
 
@@ -137,6 +166,11 @@ class OrderLine(Base):
     external_line_id: Mapped[str | None] = mapped_column(String, nullable=True)
     sku: Mapped[str | None] = mapped_column(String, nullable=True)
     needs_mapping: Mapped[bool] = mapped_column(default=False, nullable=False)
+
+    # Buyer-supplied personalization/customization text for this line (Etsy transaction
+    # variations). Set once at import (see order_sync._upsert_lines) — never mutated,
+    # matching every other field on a marketplace-sourced line.
+    variation_text: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # Build-BOM cost per unit, snapshotted once at the line's first allocation (see
     # order_costs.compute_line_cost_snapshot, called from allocation._allocate_line) —

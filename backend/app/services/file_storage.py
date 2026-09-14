@@ -16,7 +16,20 @@ _SUBFOLDER_BY_ASSET_TYPE: dict[AssetType, str] = {
 }
 
 _THUMBNAIL_ASSET_TYPES = {AssetType.main_image, AssetType.listing_image}
-_THUMBNAIL_MAX_DIM = 320
+# The largest box any UI shows a thumbnail in is the ~192px detail-panel hero; 256 keeps that
+# crisp while the Materials list (80px) has plenty of headroom. Existing thumbnails predating
+# this value are brought down by scripts/regenerate_thumbnails.py.
+_THUMBNAIL_MAX_DIM = 256
+
+
+def image_dimensions(data: bytes) -> tuple[int, int] | None:
+    """(width, height) in pixels, or None if the bytes aren't a decodable image — so
+    callers can store dimensions for image assets and leave CAD/gcode uploads null."""
+    try:
+        with Image.open(io.BytesIO(data)) as image:
+            return image.width, image.height
+    except Exception:
+        return None
 
 
 def generate_thumbnail(data: bytes, max_dim: int = _THUMBNAIL_MAX_DIM) -> bytes:

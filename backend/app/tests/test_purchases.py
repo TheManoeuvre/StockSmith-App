@@ -19,8 +19,19 @@ from app.models.material import Material, MaterialAdjustmentMode, MaterialUnit
 from app.models.material_category import MaterialCategory
 from app.models.product import Product, ProductMaterial
 from app.models.purchase import MaterialPurchase, Purchase, PurchaseStatus
-from app.routers.purchases import delete_purchase, receive_purchase, replace_purchase_lines
-from app.schemas.purchase import PurchaseLineInput
+from app.routers.purchases import (
+    create_purchase,
+    delete_purchase,
+    receive_purchase,
+    replace_purchase_lines,
+    update_purchase,
+)
+from app.schemas.purchase import (
+    PurchaseCreate,
+    PurchaseLineInput,
+    PurchaseRead,
+    PurchaseUpdate,
+)
 from app.services import purchase_receipts
 from app.services.costing import create_adjustment, get_on_order_qty_by_material
 from app.services.material_categories import legacy_value_for
@@ -523,6 +534,72 @@ async def test_a_part_delivered_order_forecasts_only_the_remainder(session):
     assert forecasts[material.id].on_order_qty == Decimal(60)
 
 
+async def test_receipt_endpoints_serialise_with_a_supplier(session):
+    """The receipts endpoints return the ORM Purchase straight to FastAPI, which then reads
+    purchase.supplier_name for the response. That attribute walks the supplier relationship,
+    so it has to be eager-loaded — otherwise serialising the response lazy-loads on a
+    committed async session and blows up with MissingGreenlet (a 500 to the user)."""
+    from sqlalchemy import inspect as sa_inspect
+
+    from app.models.supplier import Supplier
+    from app.routers.purchases import create_receipts
+    from app.schemas.purchase import PurchaseRead, PurchaseReceiptLineInput, PurchaseReceiptsCreate
+
+    supplier = Supplier(name="AliExpress")
+    session.add(supplier)
+    await session.flush()
+
+    material = await _material(session)
+    purchase = Purchase(status=PurchaseStatus.ordered, supplier_id=supplier.id)
+    purchase.lines = [MaterialPurchase(material_id=material.id, qty=Decimal(10), total_cost=Decimal(100))]
+    session.add(purchase)
+    await session.commit()
+    purchase_id = purchase.id
+    line_id = await _line_id(session, purchase)
+
+    result = await create_receipts(
+        purchase_id,
+        PurchaseReceiptsCreate(lines=[PurchaseReceiptLineInput(line_id=line_id, qty=Decimal(4))]),
+        session,
+    )
+    # In a live request the supplier is not already in the session's identity map, so the
+    # relationship has to come back eager-loaded — a lazy load while FastAPI serialises the
+    # response would need a greenlet it does not have and 500s. Assert it is loaded rather
+    # than relying on the identity map to paper over it in the test.
+    assert "supplier" not in sa_inspect(result).unloaded
+    rendered = PurchaseRead.model_validate(result)
+    assert rendered.supplier_name == "AliExpress"
+    assert rendered.status == PurchaseStatus.partially_received
+
+
+async def test_supplier_order_number_round_trips_and_blanks_to_null(session):
+    """The supplier's own PO number is stored as given, and a blank/whitespace entry is
+    stored as NULL so the list's "is there a supplier number?" check stays a plain None
+    test rather than also having to treat "" as absent."""
+    from app.routers.purchases import create_purchase, update_purchase
+    from app.schemas.purchase import PurchaseCreate, PurchaseLineInput, PurchaseRead, PurchaseUpdate
+
+    material = await _material(session)
+
+    created = await create_purchase(
+        PurchaseCreate(
+            supplier_order_number="  PO-4521  ",
+            lines=[PurchaseLineInput(material_id=material.id, qty=Decimal(10), total_cost=Decimal(100))],
+        ),
+        session,
+    )
+    assert PurchaseRead.model_validate(created).supplier_order_number == "PO-4521"
+
+    cleared = await update_purchase(created.id, PurchaseUpdate(supplier_order_number="   "), session)
+    assert PurchaseRead.model_validate(cleared).supplier_order_number is None
+
+    # An update that doesn't mention the field leaves it alone.
+    reset = await update_purchase(created.id, PurchaseUpdate(supplier_order_number="INV-9"), session)
+    assert PurchaseRead.model_validate(reset).supplier_order_number == "INV-9"
+    untouched = await update_purchase(created.id, PurchaseUpdate(notes="hi"), session)
+    assert PurchaseRead.model_validate(untouched).supplier_order_number == "INV-9"
+
+
 async def test_stock_history_reconciles_with_current_qty(session):
     """What the timeline shows and what the material says must be the same number.
 
@@ -532,6 +609,7 @@ async def test_stock_history_reconciles_with_current_qty(session):
     account for the quantity exactly, and what is still on order says so separately.
     """
     from app.routers.materials import get_stock_history
+    from app.services.builds import create_build
 
     material = await _material(session)
     purchase = await _order(session, material.id, 10, "100")
@@ -539,14 +617,25 @@ async def test_stock_history_reconciles_with_current_qty(session):
     await purchase_receipts.record_receipts(session, purchase.id, [(line_id, Decimal(6), None)], received_at=JAN1)
     await create_adjustment(session, material.id, MaterialAdjustmentMode.adjust, Decimal(-2), "spillage")
 
+    # A build consumes material too — its adjustment row is its own 'build' kind, not the
+    # generic 'adjustment' bucket, but it still has to reconcile like any other movement.
+    product = Product(name="Widget", sku="SKU-BUILD-1")
+    session.add(product)
+    await session.flush()
+    session.add(ProductMaterial(product_id=product.id, material_id=material.id, qty_required=Decimal(1)))
+    await session.commit()
+    build = await create_build(session, product.id, None, qty_built=1, notes=None)
+
     rows = await get_stock_history(material.id, limit=100, session=session)
     by_kind = {}
     for row in rows:
         by_kind.setdefault(row["kind"], []).append(row)
 
-    moved = sum(Decimal(r["qty"]) for r in rows if r["kind"] in ("purchase", "adjustment"))
+    moved = sum(
+        Decimal(r["qty"]) for r in rows if r["kind"] in ("purchase", "adjustment", "build", "scrap")
+    )
     await session.refresh(material)
-    assert moved == Decimal(material.current_qty) == Decimal(4)
+    assert moved == Decimal(material.current_qty) == Decimal(3)
 
     # The four still to come are on the timeline, but as their own kind — they have not
     # moved anything, and counting them would put the page back where it started.
@@ -554,3 +643,49 @@ async def test_stock_history_reconciles_with_current_qty(session):
     assert Decimal(by_kind["purchase_outstanding"][0]["qty"]) == Decimal(4)
     assert by_kind["purchase_outstanding"][0]["status"] == "ordered"
     assert Decimal(by_kind["purchase"][0]["total_cost"]) == Decimal(60)
+    assert by_kind["purchase"][0]["purchase_id"] == purchase.id
+    assert by_kind["purchase_outstanding"][0]["purchase_id"] == purchase.id
+
+    # The build consumption is its own kind, not a generic "adjustment" — and still links
+    # back to the product it built.
+    assert len(by_kind["build"]) == 1
+    assert Decimal(by_kind["build"][0]["qty"]) == Decimal(-1)
+    assert by_kind["build"][0]["product_id"] == product.id
+    assert by_kind["build"][0]["reason"] == f"Build #{build.id}"
+    assert "adjustment" not in by_kind or all(
+        r["reason"] == "spillage" for r in by_kind["adjustment"]
+    )
+
+
+async def test_delivery_cost_round_trips(session):
+    """delivery_cost is accepted on create, editable on PATCH, and left alone when a PATCH
+    doesn't mention it (proves the schema default doesn't overwrite it via exclude_unset)."""
+    material = await _material(session)
+
+    created = await create_purchase(
+        PurchaseCreate(
+            delivery_cost=Decimal("12.50"),
+            lines=[PurchaseLineInput(material_id=material.id, qty=Decimal(10), total_cost=Decimal(100))],
+        ),
+        session,
+    )
+    assert PurchaseRead.model_validate(created).delivery_cost == Decimal("12.50")
+
+    zeroed = await update_purchase(created.id, PurchaseUpdate(delivery_cost=Decimal("0")), session)
+    assert PurchaseRead.model_validate(zeroed).delivery_cost == Decimal("0")
+
+    untouched = await update_purchase(created.id, PurchaseUpdate(notes="chasing it"), session)
+    body = PurchaseRead.model_validate(untouched)
+    assert body.delivery_cost == Decimal("0")
+    assert body.notes == "chasing it"
+
+
+async def test_delivery_cost_defaults_to_null(session):
+    material = await _material(session)
+    created = await create_purchase(
+        PurchaseCreate(
+            lines=[PurchaseLineInput(material_id=material.id, qty=Decimal(1), total_cost=Decimal(5))],
+        ),
+        session,
+    )
+    assert PurchaseRead.model_validate(created).delivery_cost is None

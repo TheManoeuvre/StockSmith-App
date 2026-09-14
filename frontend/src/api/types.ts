@@ -1,5 +1,8 @@
 export type MaterialUnit = "g" | "ml" | "each";
 export type AssetType = "main_image" | "listing_image" | "step" | "threemf" | "gcode";
+/** Time-to-stockout urgency from services/forecasting.py. "ok" only appears where the
+ *  caller asked for every material (the materials list/detail), not on the dashboard. */
+export type StockoutStatus = "critical" | "warning" | "insufficient_data" | "ok";
 
 export interface Material {
   id: number;
@@ -14,6 +17,9 @@ export interface Material {
   avg_unit_cost: string;
   is_active: boolean;
   colour: string | null;
+  /** Hex code of the reference colour when it has one — for the materials-list swatch. Null
+   *  for materials still on the legacy free-text colour path. */
+  colour_hex: string | null;
   material_type_id: number | null;
   material_type_name: string | null;
   barcode: string | null;
@@ -28,6 +34,24 @@ export interface Material {
   created_at: string;
   updated_at: string;
   on_order_qty: string | null;
+  /** Time-to-stockout forecast, populated on the list and single-get paths (null on a
+   *  mutation response). `weeks_of_supply` is null when there's too little sales history —
+   *  `stockout_status` is then "insufficient_data"; "ok" means healthy. See lib/forecast.ts. */
+  weeks_of_supply: string | null;
+  consumption_rate_per_week: string | null;
+  fg_buffer_weeks: string | null;
+  /** Lead time (business days) applied to this material's reorder point — its default
+   *  supplier's figure, or the shop-wide default. Shown under the supplier in the list. */
+  lead_time_days: number | null;
+  stockout_status: StockoutStatus | null;
+  /** Products whose build/kitting BOM names this material. Populated on the single-get only
+   *  (null in the list), for the detail panel's "Used in N products" footer. */
+  used_in_product_count: number | null;
+  /** The material's line on the currently-open stock take, if any. Populated on the
+   *  single-get only. `open_stock_take_line_status` is a StockTakeLineStatus value
+   *  ("pending" | "counted" | "applied" | "conflict" | "accepted_system" | "skipped"). */
+  open_stock_take_id: number | null;
+  open_stock_take_line_status: string | null;
   abc_class: ABCClass | null;
   stock_take_interval_days: number | null;
   last_stock_take_at: string | null;
@@ -50,6 +74,9 @@ export interface Supplier {
   /** How many records reference this. Computed per request — see the backend's list_with_usage. */
   usage_count: number;
   website_url: string | null;
+  /** Typical delivery time in business days (Mon-Fri). Null means "use the shop-wide default
+   *  lead time". Feeds the materials time-to-stockout forecast — see lib/forecast.ts. */
+  default_lead_time_days: number | null;
   created_at: string;
 }
 
@@ -78,6 +105,10 @@ export interface MaterialCategory {
   consumed_on_failed_build: boolean;
   /** Auto-added once per order rather than per unit. Was hardcoded to packaging. */
   auto_kitting_per_order: boolean;
+  /** Offer this category's materials in the kitting-BOM pickers (product/variant kitting BOM,
+   *  order kitting overrides). Off for everything but packaging by default, to keep those
+   *  pickers from listing filament and hardware nobody packs. */
+  show_in_kitting_bom_list: boolean;
   tracks_colour: boolean;
   tracks_material_type: boolean;
   /** Bought by the kilo, stocked by the gram, so average cost reads x1000. */
@@ -137,6 +168,13 @@ export interface DueForCountItem {
 }
 
 export type StockTakeStatus = "open" | "closed";
+/** Headline state for the list, derived server-side from the take's lines. `status` above
+ * is only ever open or closed; this splits a closed take by how much of it landed. */
+export type StockTakeProgressStatus =
+  | "open"
+  | "completed"
+  | "partially_completed"
+  | "closed";
 export type StockTakeLineStatus =
   | "pending"
   | "counted"
@@ -187,8 +225,13 @@ export interface StockTake {
   /** Visibility only — nothing expires a take. The longer one runs the more lines land in
    * manual review, which is what this is for noticing. */
   open_days: number;
+  progress_status: StockTakeProgressStatus;
   line_count: number;
   counted_count: number;
+  /** Rows that got a count and were carried through — counted, applied, or flagged.
+   * Unlike counted_count this survives approval, so a closed take's progress still reads
+   * "37 / 40" rather than snapping back to zero. */
+  completed_count: number;
   pending_count: number;
   conflict_count: number;
 }
@@ -297,25 +340,52 @@ export interface Purchase {
   id: number;
   supplier_id: number | null;
   supplier_name: string | null;
+  /** The supplier's own reference for this order (their PO/order/invoice number), free
+   *  text. Null when not recorded. Shown as the primary order number on the list. */
+  supplier_order_number: string | null;
   order_date: string;
   expected_arrival_date: string | null;
   status: PurchaseStatus;
   /** When the order was completed. null while anything is still outstanding. */
   received_at: string | null;
   notes: string | null;
+  /** Delivery / carriage charged on the whole order. null means none recorded — shown as
+   *  "no delivery charge", distinct from an entered "0.00". Added to the displayed order
+   *  total but never apportioned to unit costs. */
+  delivery_cost: string | null;
   created_at: string;
   updated_at: string;
   lines: PurchaseLine[];
 }
 
+/** What a material last cost, from GET/POST /purchases/price-reference — drives the
+ *  new-purchase panel's per-line "last paid" comparison. */
+export interface PriceReference {
+  material_id: number;
+  /** total_cost / qty of the chosen line. */
+  unit_cost: string;
+  qty: string;
+  total_cost: string;
+  supplier_id: number | null;
+  supplier_name: string | null;
+  purchase_id: number;
+  /** The purchase's supplier_order_number, if it had one. */
+  purchase_ref: string | null;
+  at: string;
+  /** The chosen line came from the supplier asked about (vs a fallback to any supplier). */
+  same_supplier: boolean;
+}
+
 export interface MaterialStockHistoryEntry {
   id: number;
   /**
-   * "purchase" is a delivery that happened; those plus "adjustment" account for the
-   * material's quantity exactly. "purchase_outstanding" is what is still on order — on the
-   * same timeline because that is where people look for it, but it has moved nothing.
+   * "purchase" is a delivery that happened; those plus "adjustment"/"build"/"scrap" account
+   * for the material's quantity exactly. "purchase_outstanding" is what is still on order —
+   * on the same timeline because that is where people look for it, but it has moved
+   * nothing. "build"/"scrap" are adjustments written by a build (successful consumption /
+   * failed-build scrap), split out of the generic "adjustment" bucket.
    */
-  kind: "purchase" | "purchase_outstanding" | "adjustment";
+  kind: "purchase" | "purchase_outstanding" | "adjustment" | "build" | "scrap";
   at: string;
   qty: string;
   total_cost: string | null;
@@ -328,6 +398,8 @@ export interface MaterialStockHistoryEntry {
   product_name: string | null;
   variant_id: number | null;
   order_id: number | null;
+  /** Set for "purchase"/"purchase_outstanding" rows only — links the row to its PO. */
+  purchase_id: number | null;
 }
 
 export interface Product {
@@ -356,6 +428,24 @@ export interface Product {
   made_to_order: boolean;
   cost_per_unit: string | null;
   kitting_cost_per_unit: string | null;
+  /**
+   * Lowest and highest of the two figures above across the product's ACTIVE variants, once
+   * their BOM overrides and substitutions are resolved. Both null when the product has no
+   * variants, in which case the base figures are the whole story. They exist because the
+   * base figures resolve the base BOM only, so for a variant product they can report a cost
+   * that matches no actual variant.
+   */
+  cost_per_unit_min: string | null;
+  cost_per_unit_max: string | null;
+  kitting_cost_per_unit_min: string | null;
+  kitting_cost_per_unit_max: string | null;
+  /** Resolved shipping profile and its cost on the shop-wide margin fee source. Null when
+   *  none is assigned — which is why such a product's orders ship with no postage cost. */
+  effective_shipping_profile_id: number | null;
+  effective_shipping_profile_name: string | null;
+  effective_shipping_cost: string | null;
+  /** Missing a shipping profile or a materials cost — see the backend's _cogs_incomplete. */
+  cogs_incomplete: boolean;
   main_image_asset_id: number | null;
   ready_to_ship: number | null;
   variant_attribute1_name: string | null;
@@ -379,6 +469,12 @@ export interface Product {
 export interface ProductPage {
   items: Product[];
   total: number;
+  /** Products with a COGS gap under the current category filter, counted whether or not the
+   *  gap filter itself is on — so the toggle can show what it would reveal. */
+  incomplete_total: number;
+  /** Inactive products under the current filters, counted whether or not they're being
+   *  shown — so the "Show inactive" toggle can show what it would reveal. */
+  inactive_total: number;
 }
 
 export type PricingMode = "product" | "variable" | "line";
@@ -514,6 +610,7 @@ export interface BulkBomAmendRequest {
   lines: BulkBomAmendLine[];
   apply?: boolean;
   include_inactive?: boolean;
+  is_kitting?: boolean;
 }
 
 export interface BulkBomAmendChange {
@@ -577,6 +674,10 @@ export interface Asset {
   asset_type: AssetType;
   file_path: string;
   original_filename: string;
+  /** Pixel size for image asset types; null for CAD/gcode and image rows predating the
+   *  columns (backfilled by scripts/backfill_asset_dimensions.py). */
+  width_px: number | null;
+  height_px: number | null;
   display_order: number;
   created_at: string;
 }
@@ -593,6 +694,9 @@ export interface LowStockMaterial {
   consumption_rate_per_week: string | null;
   weeks_of_supply: string | null;
   fg_buffer_weeks: string | null;
+  /** Lead time (business days) applied to this material's reorder point. Shown next to the
+   *  supplier. */
+  lead_time_days: number | null;
   status: "critical" | "warning" | "insufficient_data";
 }
 
@@ -612,6 +716,10 @@ export interface OrderAwaitingInventory {
   variant_name: string | null;
   short_by: number;
   order_placed_at: string;
+  platform: ListingPlatform | null;
+  /** False means there's no BOM (and it's not a bundle) to ever build more from — a genuine
+   * blocker, not just a wait for stock. See the dashboard's "Blocked orders" section. */
+  has_bom: boolean;
 }
 
 export interface OrderAwaitingPackaging {
@@ -619,6 +727,7 @@ export interface OrderAwaitingPackaging {
   material_id: number;
   material_name: string;
   short_by: string;
+  platform: ListingPlatform | null;
   order_placed_at: string;
 }
 
@@ -647,6 +756,10 @@ export interface DashboardSummary {
 }
 
 export type ListingPlatform = "etsy" | "ebay" | "shopify";
+
+/** A manually-entered order's own channel tag — see backend ManualOrderChannel. Distinct
+ *  from ListingPlatform, which means "pulled in by marketplace sync". */
+export type ManualOrderChannel = "manual" | "etsy" | "ebay";
 export type OrderStatus = "pending" | "allocated" | "shipped" | "cancelled";
 
 export interface OrderLine {
@@ -665,17 +778,23 @@ export interface OrderLine {
   external_line_id: string | null;
   needs_mapping: boolean;
   cost_per_unit_snapshot: string | null;
+  variation_text: string | null;
 }
 
 export interface Order {
   id: number;
   platform: ListingPlatform | null;
+  manual_channel: ManualOrderChannel | null;
   external_order_id: string | null;
   status: OrderStatus;
   buyer_name: string | null;
   buyer_note: string | null;
   order_placed_at: string;
   shipped_at: string | null;
+  // The marketplace's own fulfillment deadline (Etsy expected_ship_date / eBay
+  // shipByDate). Null for manual orders and for any synced order the marketplace
+  // didn't report one for.
+  ship_by_date: string | null;
   cancelled_at: string | null;
   notes: string | null;
   created_at: string;
@@ -702,8 +821,13 @@ export interface Order {
   kitting_cogs: string | null;
   net_profit: string | null;
   cogs_pending: boolean;
+  // Shipped without ever recording a postage cost, so net_profit is missing it. Distinct
+  // from cogs_pending: different cause, different fix (assign the product a shipping profile).
+  postage_cost_missing: boolean;
   sync_issue: string | null;
   pending_marketplace_cancellation: boolean;
+  tracking_number: string | null;
+  carrier: string | null;
   lines: OrderLine[];
 }
 

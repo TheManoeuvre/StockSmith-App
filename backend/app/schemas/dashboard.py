@@ -3,6 +3,7 @@ from decimal import Decimal
 
 from pydantic import BaseModel
 
+from app.models.listing import ListingPlatform
 from app.schemas.abc import DueForCountItemRead
 
 
@@ -24,6 +25,9 @@ class LowStockMaterial(BaseModel):
     # draw, rather than the material itself — see forecasting.py. Always 0 when
     # weeks_of_supply is None.
     fg_buffer_weeks: Decimal | None = None
+    # Lead time (business days) applied to this material's reorder point — the supplier's own
+    # figure or the shop-wide default. Shown next to the supplier name on the dashboard.
+    lead_time_days: int | None = None
     status: str = "insufficient_data"  # "critical" | "warning" | "insufficient_data"
 
 
@@ -50,6 +54,13 @@ class OrderAwaitingInventory(BaseModel):
     variant_name: str | None
     short_by: int
     order_placed_at: datetime
+    platform: ListingPlatform | None = None
+    # False means the product has no BOM at all (and isn't a bundle, which is fulfilled from
+    # its components' stock rather than a BOM) — so this shortfall can never close by
+    # building more. That's the genuinely blocked case, distinct from the common/expected
+    # "short on stock but buildable" one. Defaults True so an older client payload without
+    # this field still reads as the ordinary case rather than a false alarm.
+    has_bom: bool = True
 
 
 class OrderAwaitingPackaging(BaseModel):
@@ -58,6 +69,7 @@ class OrderAwaitingPackaging(BaseModel):
     material_name: str
     short_by: Decimal
     order_placed_at: datetime
+    platform: ListingPlatform | None = None
 
 
 class OpenStockTake(BaseModel):

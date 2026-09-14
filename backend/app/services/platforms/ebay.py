@@ -7,8 +7,10 @@ from xml.etree import ElementTree
 
 import httpx
 
+from app.models.listing import ListingPlatform
 from app.models.platform_connection import PlatformConnection
 from app.models.platform_credential import PlatformEnvironment
+from app.services import platform_api_usage
 from app.services.platforms.base import (
     ClassicListingCandidate,
     ExternalListingRef,
@@ -161,6 +163,7 @@ def _evaluate_eligibility(
     skus: list[str],
     variation_specifics: list[dict[str, str]] | None,
     detail_loaded: bool = True,
+    listing_sku: str | None = None,
 ) -> list[str]:
     """Best-effort local pre-filter for bulkMigrateListing eligibility — NOT
     authoritative. eBay's own migration call is the real gate (see
@@ -191,6 +194,15 @@ def _evaluate_eligibility(
             reasons.append(
                 f"{missing_variation_skus} of {len(skus)} variation(s) have no SKU — every variation needs one "
                 "before the whole listing can migrate."
+            )
+        if not listing_sku:
+            # eBay's migration rejects a multi-variation listing whose Item.SKU is unset,
+            # separately from the per-variation SKUs above. Adopting with "align SKUs"
+            # enabled sets it from the product's own SKU; this reason is what tells the
+            # user why an otherwise-ready listing still won't go.
+            reasons.append(
+                "The listing itself has no SKU (Custom Label) — eBay needs one to migrate a multi-variation "
+                "listing. Adopt with 'align SKUs' enabled, or set a Custom Label on the listing in Seller Hub."
             )
 
     return reasons
@@ -258,6 +270,14 @@ _PAGE_LIMIT = 200  # eBay's documented max page size for getOrders
 # inventory items had exercised this path until now).
 _INVENTORY_PAGE_LIMIT = 100
 _MAX_RATE_LIMIT_RETRIES = 3
+
+# Longest single back-off this adapter will ever actually sleep for on a 429. eBay sends
+# `Retry-After` on rate limits, and a daily-call-limit 429 carries the seconds until the
+# limit resets — obeying that literally can park a background loop for hours (see the
+# 2026-09-07 Etsy stall for the same failure mode). Past this cap we raise
+# PlatformRateLimitError immediately; the caller records a failed run and retries next
+# cycle. 5xx backoff is exponential and small, so it never approaches this.
+_RATE_LIMIT_MAX_SLEEP_SECONDS = 120.0
 
 # eBay answers a transient fault on its own side with a 5xx and errorId 25001
 # ("A system error has occurred. Dependent service failure") — confirmed live on
@@ -521,6 +541,14 @@ class EbayAdapter:
                 await self._do_refresh(session, connection)
                 response = await self._request_once(connection, method, url, **kwargs)
 
+            if response.status_code == 401:
+                # Survived a refresh — the connection is revoked/expired-past-refresh, not
+                # a transient fault. Raise as auth so the scheduler's consecutive-failure
+                # counter engages instead of retrying a dead connection every cycle.
+                raise PlatformAuthError(
+                    f"eBay rejected the access token on {method} {url} even after a refresh — reconnect required."
+                )
+
             # Separate budgets, so a call that hits a rate limit and then a server error
             # doesn't find one exhausted by the other — they're unrelated faults.
             rate_limit_attempts = 0
@@ -528,6 +556,11 @@ class EbayAdapter:
             while True:
                 if response.status_code == 429 and rate_limit_attempts < _MAX_RATE_LIMIT_RETRIES:
                     delay = self._retry_delay(response, rate_limit_attempts)
+                    if delay > _RATE_LIMIT_MAX_SLEEP_SECONDS:
+                        raise PlatformRateLimitError(
+                            f"eBay asked for a {delay:.0f}s back-off on {method} {url} (call limit) — "
+                            "not sleeping on it; will retry next cycle"
+                        )
                     logger.warning(
                         "eBay API rate limited on %s %s (retry %d/%d in %.1fs)",
                         method, url, rate_limit_attempts + 1, _MAX_RATE_LIMIT_RETRIES, delay,
@@ -573,15 +606,20 @@ class EbayAdapter:
         headers = {**headers, "Authorization": f"Bearer {connection.access_token}"}
         async with httpx.AsyncClient(timeout=timeout) as client:
             if not _needs_signature(url):
-                return await client.request(method, url, headers=headers, **kwargs)
-            # Signed calls take the two-step route so the Content-Digest can be computed
-            # over request.content — the exact bytes httpx will put on the wire.
-            # Re-serializing a `json=` dict a second time to hash it would be a standing
-            # risk of a digest that doesn't match the body, which eBay reports only as an
-            # opaque signature failure.
-            request = client.build_request(method, url, headers=headers, **kwargs)
-            request.headers.update(self._signature_headers(request))
-            return await client.send(request)
+                response = await client.request(method, url, headers=headers, **kwargs)
+            else:
+                # Signed calls take the two-step route so the Content-Digest can be computed
+                # over request.content — the exact bytes httpx will put on the wire.
+                # Re-serializing a `json=` dict a second time to hash it would be a standing
+                # risk of a digest that doesn't match the body, which eBay reports only as an
+                # opaque signature failure.
+                request = client.build_request(method, url, headers=headers, **kwargs)
+                request.headers.update(self._signature_headers(request))
+                response = await client.send(request)
+        # Every completed round-trip counts against eBay's daily budget, non-200s and
+        # retries included — see services/platform_api_usage.
+        platform_api_usage.record(ListingPlatform.ebay)
+        return response
 
     def _signature_headers(self, request: httpx.Request) -> dict[str, str]:
         if self.signing_key is None:
@@ -721,6 +759,17 @@ class EbayAdapter:
         line_items = order.get("lineItems", [])
         lines = [self._parse_line_item(li) for li in line_items]
 
+        # shipByDate lives per line item, not on the order — but a multi-line eBay order
+        # ships as one parcel, so the binding deadline for the whole order is the
+        # earliest of them. None when no line item reports one.
+        ship_by_dates = [
+            parsed
+            for li in line_items
+            if (parsed := self._parse_timestamp((li.get("lineItemFulfillmentInstructions") or {}).get("shipByDate")))
+            is not None
+        ]
+        ship_by_date = min(ship_by_dates) if ship_by_dates else None
+
         pricing = order.get("pricingSummary") or {}
         currency = (pricing.get("total") or {}).get("currency")
 
@@ -734,10 +783,13 @@ class EbayAdapter:
         enrich = payment_state is not PaymentState.unsettled and (cutoff is None or last_modified >= cutoff)
 
         payment_fees = payment_net = payment_status = None
+        tracking_number = carrier = None
         if enrich:
             payment_fees, payment_net, payment_status = await self._fetch_transactions(
                 session, connection, order.get("orderId")
             )
+            if is_shipped:
+                tracking_number, carrier = await self._fetch_tracking(session, connection, order.get("orderId"))
 
         # priceSubtotal is the items BEFORE any discount, exactly like deliveryCost below:
         # eBay's own formula is total = (priceSubtotal - priceDiscount) + deliveryCost +
@@ -761,6 +813,7 @@ class EbayAdapter:
             last_modified=last_modified,
             is_cancelled=is_cancelled,
             is_shipped=is_shipped,
+            ship_by_date=ship_by_date,
             lines=lines,
             raw=order,
             currency=currency,
@@ -781,6 +834,8 @@ class EbayAdapter:
             payment_status=payment_status,
             payment_state=payment_state,
             financials_enriched=enrich,
+            tracking_number=tracking_number,
+            carrier=carrier,
         )
         self._warn_if_unreconciled(external)
         return external
@@ -963,6 +1018,39 @@ class EbayAdapter:
             f"{float(net):.2f}" if net is not None else None,
             sale.get("transactionStatus"),
         )
+
+    async def _fetch_tracking(
+        self, session, connection: PlatformConnection, order_id
+    ) -> tuple[str | None, str | None]:
+        """Sell Fulfillment API's shipping_fulfillment sub-resource — a separate call
+        from the order itself, only worth making once an order is actually FULFILLED
+        (see the is_shipped gate at the call site). Mirrors _fetch_transactions: any
+        failure degrades to (None, None) rather than failing the whole sync, and gets
+        logged so a persistent failure doesn't look identical to "not shipped yet"."""
+        if order_id is None:
+            return None, None
+        response = await self._authed_request(
+            session,
+            connection,
+            "GET",
+            f"{self.api_base}/sell/fulfillment/v1/order/{order_id}/shipping_fulfillment",
+        )
+        if response.status_code != 200:
+            logger.warning(
+                "eBay tracking lookup failed for order %s: %d %s",
+                order_id,
+                response.status_code,
+                response.text[:500],
+            )
+            return None, None
+        fulfillments = response.json().get("fulfillments", [])
+        if not fulfillments:
+            return None, None
+        # An order shipped in multiple packages returns one fulfillment per shipment —
+        # StockSmith stores only a single tracking number per order (see
+        # models.order.Order.tracking_number), so the first one wins.
+        first = fulfillments[0]
+        return first.get("trackingNumber"), first.get("shippingCarrierCode")
 
     async def push_listing_quantity(
         self, session, connection: PlatformConnection, listing_ref: ExternalListingRef, sku: str | None, qty: int
@@ -1431,17 +1519,25 @@ class EbayAdapter:
             # an Authorization: Bearer header, which is the wrong auth scheme here (see
             # _trading_headers).
             async with httpx.AsyncClient(timeout=timeout) as client:
-                return await client.request(
+                sent = await client.request(
                     "POST",
                     self.trading_base,
                     headers=self._trading_headers(connection, call_name, site_id),
                     content=xml_body,
                 )
+            # Trading API round-trips count against eBay's daily budget too.
+            platform_api_usage.record(ListingPlatform.ebay)
+            return sent
 
         response = await _send()
         if response.status_code == 401:
             await self._do_refresh(session, connection)
             response = await _send()
+        if response.status_code == 401:
+            raise PlatformAuthError(
+                f"eBay rejected the access token on Trading call {call_name} even after a refresh — "
+                "reconnect required."
+            )
         return response
 
     async def _authed_trading_request(
@@ -1469,6 +1565,11 @@ class EbayAdapter:
             while True:
                 if response.status_code == 429 and rate_limit_attempts < _MAX_RATE_LIMIT_RETRIES:
                     delay = self._retry_delay(response, rate_limit_attempts)
+                    if delay > _RATE_LIMIT_MAX_SLEEP_SECONDS:
+                        raise PlatformRateLimitError(
+                            f"eBay Trading API asked for a {delay:.0f}s back-off on {call_name} (daily "
+                            "budget) — not sleeping on it; will retry next cycle"
+                        )
                     logger.warning(
                         "eBay Trading API rate limited on %s (retry %d/%d in %.1fs)",
                         call_name,
@@ -1516,6 +1617,11 @@ class EbayAdapter:
         )
         quantity = int(quantity_raw) if quantity_raw and quantity_raw.isdigit() else 0
 
+        # Item.SKU always, regardless of variations: for a multi-variation listing this is
+        # a separate field from the per-variation SKUs, and eBay's migration needs it set
+        # (see ClassicListingCandidate.listing_sku).
+        listing_sku = item.findtext("e:SKU", "", _TRADING_NS).strip() or None
+
         variations_el = item.find("e:Variations", _TRADING_NS)
         skus: list[str] = []
         variation_specifics: list[dict[str, str]] | None = None
@@ -1531,10 +1637,8 @@ class EbayAdapter:
                     if name:
                         specifics[name] = value
                 variation_specifics.append(specifics)
-        else:
-            sku = item.findtext("e:SKU", "", _TRADING_NS)
-            if sku:
-                skus.append(sku)
+        elif listing_sku:
+            skus.append(listing_sku)
 
         return ClassicListingCandidate(
             external_listing_id=item_id,
@@ -1548,7 +1652,10 @@ class EbayAdapter:
             variation_specifics=variation_specifics,
             quantity=quantity,
             is_migrated=False,  # filled in by the caller cross-referencing build_listing_sku_index
-            ineligibility_reasons=_evaluate_eligibility(listing_type, skus, variation_specifics, detail_loaded),
+            listing_sku=listing_sku,
+            ineligibility_reasons=_evaluate_eligibility(
+                listing_type, skus, variation_specifics, detail_loaded, listing_sku=listing_sku
+            ),
             detail_loaded=detail_loaded,
         )
 
@@ -1589,7 +1696,9 @@ class EbayAdapter:
         return self._parse_classic_listing(item, detail_loaded=True)
 
     @staticmethod
-    def _build_revise_skus_xml(candidate: ClassicListingCandidate, new_skus: list[str]) -> str:
+    def _build_revise_skus_xml(
+        candidate: ClassicListingCandidate, new_skus: list[str], listing_sku: str | None = None
+    ) -> str:
         """Builds the ReviseFixedPriceItem body that rewrites this listing's SKU(s).
 
         SAFETY: for a multi-variation listing, eBay treats an omitted variation as one to
@@ -1599,6 +1708,13 @@ class EbayAdapter:
         way). `new_skus` is therefore required to be positionally aligned with, and the
         same length as, candidate.variation_specifics; the caller is responsible for
         that and _align_new_skus enforces it.
+
+        `listing_sku` sets the listing-level Item.SKU. Ignored for a single-SKU listing
+        (there Item.SKU *is* new_skus[0]); for a multi-variation listing it is emitted
+        alongside the Variations block — omitting it leaves any existing Item.SKU
+        untouched, and eBay's migration requires one to be present (see
+        ClassicListingCandidate.listing_sku). Placed before <Variations> to match eBay's
+        ItemType element order.
 
         Pure and static so the generated XML — the part that could silently destroy
         variations if it were wrong — is unit-testable without a network call."""
@@ -1623,17 +1739,23 @@ class EbayAdapter:
                 f"<VariationSpecifics>{name_values}</VariationSpecifics></Variation>"
             )
 
+        item_sku_xml = f"<SKU>{_xml_escape(listing_sku)}</SKU>" if listing_sku else ""
         return (
             '<?xml version="1.0" encoding="utf-8"?>'
             '<ReviseFixedPriceItemRequest xmlns="urn:ebay:apis:eBLBaseComponents">'
-            f"<Item><ItemID>{item_id}</ItemID>"
+            f"<Item><ItemID>{item_id}</ItemID>{item_sku_xml}"
             f"<Variations>{''.join(variations_xml)}</Variations>"
             "</Item>"
             "</ReviseFixedPriceItemRequest>"
         )
 
     async def revise_listing_skus(
-        self, session, connection: PlatformConnection, candidate: ClassicListingCandidate, new_skus: list[str]
+        self,
+        session,
+        connection: PlatformConnection,
+        candidate: ClassicListingCandidate,
+        new_skus: list[str],
+        listing_sku: str | None = None,
     ) -> None:
         """Rewrites a CLASSIC (not-yet-migrated) listing's SKU(s) via Trading API
         ReviseFixedPriceItem, so StockSmith's own SKUs are what the listing carries into
@@ -1657,7 +1779,7 @@ class EbayAdapter:
                 "revised through this path (see this method's docstring)."
             )
         aligned = _align_new_skus(candidate, new_skus)
-        body = self._build_revise_skus_xml(candidate, aligned)
+        body = self._build_revise_skus_xml(candidate, aligned, listing_sku)
         try:
             response = await self._authed_trading_request(
                 session, connection, "ReviseFixedPriceItem", body, timeout=_REVISE_TIMEOUT

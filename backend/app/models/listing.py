@@ -17,9 +17,9 @@ class Listing(Base):
     """Per-product/variant marketplace listing state, one row per (product/variant,
     platform). external_title/external_state/external_quantity/last_checked_at are
     populated by the Stage 1 SKU sync-verification check (services/listing_sync.py) — a
-    read-only "does this SKU match a real listing" test. ceiling_qty/last_synced_qty/
-    last_synced_at remain reserved for the future quantity-push phase (Stage 3+), which
-    is not implemented yet."""
+    read-only "does this SKU match a real listing" test. last_pushed_qty/last_pushed_at
+    are the outbound quantity-push watermark (services/listing_push.py); last_synced_qty/
+    last_synced_at predate them and are now display/bookkeeping only."""
 
     __tablename__ = "listings"
     __table_args__ = (
@@ -54,6 +54,14 @@ class Listing(Base):
     ceiling_qty: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_synced_qty: Mapped[int | None] = mapped_column(Integer, nullable=True)
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The quantity StockSmith last successfully sent to this marketplace, and when.
+    # Distinct from last_synced_qty, which services/kitting.sync_listing_ceiling_qty also
+    # writes with a different meaning (expected-max-sellable bookkeeping) — these two are
+    # written ONLY by services/listing_push on a confirmed push and are the authority for
+    # "has the number we'd send actually changed since last time", which is what lets the
+    # push fan-out skip the no-op GET+PUT that dominated the 2026-09-07 API-budget blowout.
+    last_pushed_qty: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    last_pushed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     external_title: Mapped[str | None] = mapped_column(String, nullable=True)
     external_variation: Mapped[str | None] = mapped_column(String, nullable=True)
     external_state: Mapped[str | None] = mapped_column(String, nullable=True)

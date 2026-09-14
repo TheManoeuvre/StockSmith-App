@@ -5,7 +5,9 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
+from app.models.listing import ListingPlatform
 from app.models.platform_connection import PlatformConnection
+from app.services import platform_api_usage
 from app.services.platforms.base import (
     ExternalListingRef,
     ExternalOrder,
@@ -83,6 +85,15 @@ _MAX_LISTING_PAGES = 20
 # Etsy's QPS window is one second, so a couple of short backoffs is usually enough to
 # clear a transient limit hit without turning a single sync click into a long stall.
 _MAX_RATE_LIMIT_RETRIES = 3
+
+# Longest single back-off this adapter will ever actually sleep for. Etsy returns
+# `Retry-After` on a *daily*-quota 429 as the seconds until the quota window resets — up
+# to ~2h — and obeying that literally, up to _MAX_RATE_LIMIT_RETRIES times, is how one
+# exhausted budget parked the whole auto-sync loop for ~6h with no failed run recorded
+# and no periodic log line (2026-09-07). Past this cap we raise PlatformRateLimitError
+# immediately instead: the caller records a failed run and the next scheduled cycle
+# retries once the window has genuinely reset.
+_RATE_LIMIT_MAX_SLEEP_SECONDS = 120.0
 
 # Retries for push_listing_quantity's 409 ("being edited by another process") — see that
 # method's docstring. A flat short delay rather than exponential backoff since this is a
@@ -252,9 +263,24 @@ class EtsyAdapter:
             await self._do_refresh(session, connection)
             response = await self._request_once(connection, method, path, **kwargs)
 
+        if response.status_code == 401:
+            # A 401 that survives a token refresh is a revoked/expired-past-refresh
+            # connection, not a transient fault — surface it as auth so the scheduler's
+            # consecutive-failure counter engages and auto-sync disables itself rather
+            # than retrying a dead connection every cycle (it used to raise a generic
+            # PlatformSyncError here, which the counter ignores).
+            raise PlatformAuthError(
+                f"Etsy rejected the access token on {method} {path} even after a refresh — reconnect required."
+            )
+
         attempt = 0
         while response.status_code == 429 and attempt < _MAX_RATE_LIMIT_RETRIES:
             delay = self._rate_limit_delay(response, attempt)
+            if delay > _RATE_LIMIT_MAX_SLEEP_SECONDS:
+                raise PlatformRateLimitError(
+                    f"Etsy asked for a {delay:.0f}s back-off on {method} {path} (daily quota) — "
+                    "not sleeping on it; will retry next cycle"
+                )
             logger.warning(
                 "Etsy API rate limited on %s %s (retry %d/%d in %.1fs)",
                 method,
@@ -287,7 +313,12 @@ class EtsyAdapter:
         headers = kwargs.pop("headers", {})
         headers = {**headers, "Authorization": f"Bearer {connection.access_token}", "x-api-key": self._api_key}
         async with httpx.AsyncClient(timeout=15.0) as client:
-            return await client.request(method, f"{API_BASE}{path}", headers=headers, **kwargs)
+            response = await client.request(method, f"{API_BASE}{path}", headers=headers, **kwargs)
+        # Every completed round-trip counts against Etsy's daily budget, non-200s and
+        # retries included (this helper is re-entered per attempt) — see
+        # services/platform_api_usage.
+        platform_api_usage.record(ListingPlatform.etsy)
+        return response
 
     async def _ensure_fresh(self, session, connection: PlatformConnection) -> None:
         expires_at = ensure_utc(connection.access_token_expires_at)
@@ -342,7 +373,7 @@ class EtsyAdapter:
         if connection.external_account_id is None:
             raise PlatformSyncError("Etsy connection has no shop id — reconnect required")
 
-        params: dict[str, str | int] = {"limit": 100, "offset": 0, "includes": "Transactions"}
+        params: dict[str, str | int] = {"limit": 100, "offset": 0, "includes": "Transactions,Shipments"}
         if since is not None:
             params["min_last_modified"] = int(since.timestamp())
 
@@ -381,6 +412,12 @@ class EtsyAdapter:
             datetime.fromtimestamp(modified_ts, tz=timezone.utc) if modified_ts is not None else placed_at
         )
 
+        # Like create_timestamp/update_timestamp, Etsy reports this as a Unix timestamp,
+        # not an ISO date string. Absent on receipts placed before Etsy started returning
+        # it, so None here is a real "unknown", not "not due".
+        ship_by_ts = receipt.get("expected_ship_date")
+        ship_by_date = datetime.fromtimestamp(ship_by_ts, tz=timezone.utc) if ship_by_ts is not None else None
+
         transactions = receipt.get("transactions")
         if transactions is None:
             # The `includes=Transactions` embed didn't come through — fall back to a
@@ -395,6 +432,15 @@ class EtsyAdapter:
             transactions = tx_response.json().get("results", []) if tx_response.status_code == 200 else []
 
         lines = [self._parse_transaction(tx) for tx in transactions]
+
+        # An order shipped in multiple packages returns one entry per shipment —
+        # StockSmith stores only a single tracking number per order (see
+        # models.order.Order.tracking_number), so the first one wins, same as eBay's
+        # _fetch_tracking.
+        shipments = receipt.get("shipments") or []
+        first_shipment = shipments[0] if shipments else {}
+        tracking_number = first_shipment.get("tracking_code")
+        carrier = first_shipment.get("carrier_name")
 
         grand_total = self._parse_money(receipt.get("grandtotal"))
         currency = (receipt.get("grandtotal") or {}).get("currency_code")
@@ -475,6 +521,7 @@ class EtsyAdapter:
             last_modified=last_modified,
             is_cancelled=is_cancelled,
             is_shipped=is_shipped,
+            ship_by_date=ship_by_date,
             lines=lines,
             raw=receipt,
             currency=currency,
@@ -490,6 +537,8 @@ class EtsyAdapter:
             payment_status=payment_status,
             payment_state=payment_state,
             financials_enriched=enrich,
+            tracking_number=tracking_number,
+            carrier=carrier,
         )
 
     def _parse_transaction(self, tx: dict) -> ExternalOrderLine:
@@ -503,7 +552,24 @@ class EtsyAdapter:
             qty=int(tx.get("quantity", 1)),
             unit_price=unit_price,
             currency=price.get("currency_code"),
+            variation_text=self._format_variations(tx.get("variations")),
         )
+
+    @staticmethod
+    def _format_variations(variations: list[dict] | None) -> str | None:
+        """Etsy's transaction.variations mixes real product options (Colour, Size) with
+        buyer-entered personalization in the same array, distinguished only by
+        `formatted_name` (e.g. "Personalization") — there's no separate boolean flag.
+        Every entry is kept and shown as "Name: Value" since a mismapped SKU still
+        benefits from seeing the option text, not just the personalization."""
+        if not variations:
+            return None
+        parts = [
+            f"{v.get('formatted_name')}: {v.get('formatted_value')}"
+            for v in variations
+            if isinstance(v, dict) and v.get("formatted_value")
+        ]
+        return "; ".join(parts) if parts else None
 
     @staticmethod
     def _parse_money(money: dict | None) -> str | None:
@@ -725,7 +791,12 @@ class EtsyAdapter:
                 )
             inventory = response.json()
 
+            # What the target SKU's offering should read after this push.
+            desired_qty = 1 if qty <= 0 else qty
+            desired_enabled = qty > 0
+
             matched = False
+            needs_write = False
             products_payload = []
             for product in inventory.get("products", []):
                 is_target_sku = product.get("sku") == sku and not product.get("is_deleted")
@@ -748,12 +819,10 @@ class EtsyAdapter:
                         "readiness_state_id": offering.get("readiness_state_id"),
                     }
                     if is_target_sku:
-                        if qty <= 0:
-                            offering_payload["quantity"] = 1
-                            offering_payload["is_enabled"] = False
-                        else:
-                            offering_payload["quantity"] = qty
-                            offering_payload["is_enabled"] = True
+                        if offering.get("quantity") != desired_qty or offering.get("is_enabled", True) != desired_enabled:
+                            needs_write = True
+                        offering_payload["quantity"] = desired_qty
+                        offering_payload["is_enabled"] = desired_enabled
                         matched = True
                     offerings_payload.append(offering_payload)
                 products_payload.append(
@@ -768,6 +837,20 @@ class EtsyAdapter:
 
             if not matched:
                 raise PlatformSyncError(f"No matching SKU '{sku}' found in Etsy listing {listing_id}'s inventory")
+
+            if not needs_write:
+                # Etsy already holds this quantity for this SKU — skip the PUT (which
+                # replaces the listing's whole inventory record) rather than spend a
+                # write and a slice of the daily budget re-sending an identical value.
+                # The caller still advances its own last_pushed_* watermark on a clean
+                # return, so this reads as a successful push, just a free one.
+                logger.debug(
+                    "Etsy listing %s SKU %s already at quantity=%d — skipping no-op inventory PUT",
+                    listing_id,
+                    sku,
+                    desired_qty,
+                )
+                return
 
             put_body = {
                 "products": products_payload,
@@ -1037,6 +1120,7 @@ class EtsyAdapter:
             "when_made": draft.metadata.get("etsy.when_made"),
             "taxonomy_id": draft.metadata.get("etsy.taxonomy_id"),
             "shipping_profile_id": draft.metadata.get("etsy.shipping_profile_id"),
+            "readiness_state_id": draft.metadata.get("etsy.readiness_state_id"),
             "type": "physical",
         }
         for optional in ("etsy.is_supply", "etsy.return_policy_id", "etsy.shop_section_id"):
@@ -1304,6 +1388,40 @@ class EtsyAdapter:
             {"id": p.get("return_policy_id"), "label": EtsyAdapter._return_policy_label(p)}
             for p in response.json().get("results", [])
         ]
+
+    async def fetch_readiness_states(self, session, connection: PlatformConnection) -> list[dict]:
+        """The shop's processing profiles ("readiness states") as {id, label}.
+
+        Etsy's own createDraftListing docs list readiness_state_id as optional, but the
+        live endpoint refuses a physical draft without one — a documentation gap, not an
+        optional field in practice. Labelled from what it actually says (ready to ship /
+        made to order, and the processing time), since the object carries no name."""
+        if connection.external_account_id is None:
+            raise PlatformSyncError("Etsy connection has no shop id — reconnect required")
+
+        response = await self._authed_request(
+            session, connection, "GET", f"/shops/{connection.external_account_id}/readiness-state-definitions"
+        )
+        if response.status_code == 403:
+            raise PlatformSyncError(
+                "Etsy did not allow reading your processing profiles. Reconnect Etsy in "
+                "Settings to grant the newer permission."
+            )
+        if response.status_code != 200:
+            raise PlatformSyncError(
+                f"Failed to fetch Etsy processing profiles: {response.status_code} {response.text}"
+            )
+        return [
+            {"id": p.get("readiness_state_id"), "label": EtsyAdapter._readiness_state_label(p)}
+            for p in response.json().get("results", [])
+        ]
+
+    @staticmethod
+    def _readiness_state_label(profile: dict) -> str:
+        state = profile.get("readiness_state")
+        state_label = "Made to order" if state == "made_to_order" else "Ready to ship"
+        days = profile.get("processing_days_display_label")
+        return f"{state_label} ({days})" if days else state_label
 
     @staticmethod
     def _return_policy_label(policy: dict) -> str:

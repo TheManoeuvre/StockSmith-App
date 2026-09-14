@@ -18,10 +18,8 @@ export function Tabs({
         <button
           key={tab.id}
           onClick={() => onChange(tab.id)}
-          className={`border-b-2 px-3 py-2 text-sm ${
-            active === tab.id
-              ? "border-slate-900 font-medium text-slate-900"
-              : "border-transparent text-slate-500 hover:text-slate-700"
+          className={`h-8 border-b-2 px-[11px] text-[12.5px] font-medium ${
+            active === tab.id ? "border-blue-600 text-slate-900" : "border-transparent text-slate-500 hover:text-slate-700"
           }`}
         >
           {tab.label}

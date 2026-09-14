@@ -88,6 +88,9 @@ class MaterialRead(MaterialBase):
     # Material.colour_name. Aliased rather than renamed so every existing consumer of `colour`
     # (the CSV export, the materials list, materialDetail.test.tsx) is unaffected.
     colour: str | None = Field(default=None, validation_alias=AliasChoices("colour_name", "colour"))
+    # The reference colour's hex code when it has one, for the list swatch. Null for materials
+    # still on the legacy free-text colour path — see Material.colour_hex.
+    colour_hex: str | None = None
     manufacturer_name: str | None = None
     default_supplier_name: str | None = None
     material_type_name: str | None = None
@@ -96,16 +99,32 @@ class MaterialRead(MaterialBase):
     created_at: datetime
     updated_at: datetime
     on_order_qty: Decimal | None = None
+    # Time-to-stockout forecast, injected from services/forecasting.py on the list and
+    # single-get paths (null on a mutation response — the client refetches). `weeks_of_supply`
+    # is null when there's too little sales history; `stockout_status` is then
+    # "insufficient_data". "ok" means healthy.
+    weeks_of_supply: Decimal | None = None
+    consumption_rate_per_week: Decimal | None = None
+    fg_buffer_weeks: Decimal | None = None
+    # Lead time (business days) applied to this material's reorder point — its default
+    # supplier's own figure, or the shop-wide default. Shown under the supplier in the
+    # materials list. Null on a mutation response, same as the other forecast fields.
+    lead_time_days: int | None = None
+    stockout_status: str | None = None
+    # Products whose build/kitting BOM names this material — populated on the single-get only
+    # (the list leaves it null), for the detail panel's "Used in N products" footer.
+    used_in_product_count: int | None = None
+    # The material's line on the currently-open stock take, if any — populated on the
+    # single-get only. `open_stock_take_line_status` is a StockTakeLineStatus value
+    # (pending/counted/applied/conflict/accepted_system/skipped).
+    open_stock_take_id: int | None = None
+    open_stock_take_line_status: str | None = None
     last_stock_take_at: datetime | None = None
     # The effective tier/cadence with its provenance, so the UI can say "C, from the
     # Packaging category" rather than a bare "C" that gives no clue which level to edit.
     # Populated on the list and single-get paths; a mutation response leaves it null and
     # the client refetches, which is what every mutation here already does.
     classification: ResolvedClassificationRead | None = None
-
-
-class DraftPurchaseCreate(BaseModel):
-    qty: Decimal | None = None
 
 
 class MaterialAdjustmentCreate(BaseModel):

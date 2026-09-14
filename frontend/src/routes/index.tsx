@@ -1,12 +1,23 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { dashboardApi } from "../api/dashboard";
-import { materialsApi } from "../api/materials";
-import type { LowStockMaterial } from "../api/types";
-import { ErrorBanner } from "../components/common/ErrorBanner";
-import { roundQty } from "../lib/format";
+import type { DashboardSummary, ListingPlatform, LowStockMaterial } from "../api/types";
+import { Badge } from "../components/common/Badge";
+import { Th } from "../components/common/ListTable";
+import { formatDayMonth, roundQty } from "../lib/format";
+import { formatMoney } from "../lib/money";
+import {
+  formatLeadTime,
+  formatWeeksShort,
+  STOCKOUT_BADGE_CLASS,
+  STOCKOUT_LABEL,
+} from "../lib/forecast";
+import { PLATFORM_COLORS, PLATFORM_LABELS } from "../lib/platforms";
 
-function groupBySupplier(materials: LowStockMaterial[]): { supplierName: string; materials: LowStockMaterial[] }[] {
+function groupBySupplier(
+  materials: LowStockMaterial[],
+): { supplierName: string; materials: LowStockMaterial[] }[] {
   const groups: { supplierName: string; materials: LowStockMaterial[] }[] = [];
   for (const m of materials) {
     const supplierName = m.supplier_name ?? "No supplier";
@@ -20,26 +31,78 @@ function groupBySupplier(materials: LowStockMaterial[]): { supplierName: string;
   return groups;
 }
 
-const STATUS_STYLES: Record<LowStockMaterial["status"], string> = {
-  critical: "bg-red-100 text-red-800",
-  warning: "bg-amber-100 text-amber-800",
-  insufficient_data: "bg-slate-100 text-slate-600",
+/** One row in either the "Orders awaiting products" or "Blocked orders" table. */
+type FulfillmentRow = {
+  key: string;
+  orderId: number;
+  shortOn: "Stock" | "Packaging" | "No BOM defined";
+  item: string;
+  shortBy: string;
+  placedAt: string;
+  platform: ListingPlatform | null;
+  build: { productId: number; variantId: number | null } | null;
 };
 
-const STATUS_LABELS: Record<LowStockMaterial["status"], string> = {
-  critical: "Critical",
-  warning: "Warning",
-  insufficient_data: "Not enough history",
-};
-
-function formatWeeksOfSupply(m: LowStockMaterial): string {
-  if (m.weeks_of_supply == null) return "—";
-  const weeks = Number(m.weeks_of_supply);
-  const fgWeeks = m.fg_buffer_weeks != null ? Number(m.fg_buffer_weeks) : 0;
-  if (fgWeeks > 0.05) {
-    return `${weeks.toFixed(1)} wks (incl. ${fgWeeks.toFixed(1)} wk from finished-goods stock)`;
+/** Order lines short on stock or packaging they could still be built/assembled from — the
+ * common, expected case for a maker. Excludes lines with no BOM at all (see blockedRows). */
+function awaitingProductRows(data: DashboardSummary): FulfillmentRow[] {
+  const rows: FulfillmentRow[] = [];
+  for (const o of data.orders_awaiting_inventory) {
+    if (!o.has_bom) continue;
+    rows.push({
+      key: `inv-${o.line_id}`,
+      orderId: o.order_id,
+      shortOn: "Stock",
+      item:
+        (o.product_name ?? "—") + (o.variant_name ? ` — ${o.variant_name}` : ""),
+      shortBy: String(o.short_by),
+      placedAt: o.order_placed_at,
+      platform: o.platform,
+      build:
+        o.product_id != null
+          ? { productId: o.product_id, variantId: o.variant_id }
+          : null,
+    });
   }
-  return `${weeks.toFixed(1)} wks`;
+  for (const [i, o] of data.orders_awaiting_packaging.entries()) {
+    rows.push({
+      key: `pkg-${o.order_id}-${o.material_id}-${i}`,
+      orderId: o.order_id,
+      shortOn: "Packaging",
+      item: o.material_name,
+      shortBy: roundQty(o.short_by),
+      placedAt: o.order_placed_at,
+      platform: o.platform,
+      build: null,
+    });
+  }
+  rows.sort((a, b) => a.placedAt.localeCompare(b.placedAt));
+  return rows;
+}
+
+/** Order lines with no BOM at all to ever build more from — a genuine blocker, not just a
+ * wait for materials. Rare; kept separate from the routine "awaiting products" queue. */
+function blockedRows(data: DashboardSummary): FulfillmentRow[] {
+  const rows: FulfillmentRow[] = [];
+  for (const o of data.orders_awaiting_inventory) {
+    if (o.has_bom) continue;
+    rows.push({
+      key: `blocked-${o.line_id}`,
+      orderId: o.order_id,
+      shortOn: "No BOM defined",
+      item:
+        (o.product_name ?? "—") + (o.variant_name ? ` — ${o.variant_name}` : ""),
+      shortBy: String(o.short_by),
+      placedAt: o.order_placed_at,
+      platform: o.platform,
+      build:
+        o.product_id != null
+          ? { productId: o.product_id, variantId: o.variant_id }
+          : null,
+    });
+  }
+  rows.sort((a, b) => a.placedAt.localeCompare(b.placedAt));
+  return rows;
 }
 
 export const Route = createFileRoute("/")({
@@ -48,68 +111,272 @@ export const Route = createFileRoute("/")({
 
 function Dashboard() {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const { data, isLoading, error } = useQuery({
     queryKey: ["dashboard-summary"],
     queryFn: dashboardApi.summary,
   });
 
-  const draftPurchaseMutation = useMutation({
-    mutationFn: (materialId: number) => materialsApi.createDraftPurchase(materialId),
-    onSuccess: (purchase) => {
-      queryClient.invalidateQueries({ queryKey: ["purchases"] });
-      navigate({ to: "/purchases/$purchaseId", params: { purchaseId: String(purchase.id) } });
-    },
-  });
+  // Open the shared "New purchase" slideover pre-filled from a stockout alert: the supplier
+  // (taken from the group, all rows in it share one) plus every at-risk material as a line.
+  // new.tsx computes the quantities from each material's typical reorder qty.
+  const openDraftPurchase = (rows: LowStockMaterial[]) =>
+    navigate({
+      to: "/purchases/new",
+      search: {
+        ...(rows[0]?.supplier_id != null
+          ? { supplierId: rows[0].supplier_id }
+          : {}),
+        materialIds: rows.map((m) => m.id),
+      },
+    });
 
   if (isLoading) return <p>Loading dashboard…</p>;
   if (error) return <p className="text-red-600">{(error as Error).message}</p>;
   if (!data) return null;
 
+  const awaitingInventory = data.orders_awaiting_inventory.filter((o) => o.has_bom).length;
+  const awaitingPackaging = data.orders_awaiting_packaging.length;
+  const awaitingCount = awaitingInventory + awaitingPackaging;
+  const rows = awaitingProductRows(data);
+  const blocked = blockedRows(data);
+
+  const criticalCount = data.low_stock_materials.filter(
+    (m) => m.status === "critical",
+  ).length;
+  const warningCount = data.low_stock_materials.filter(
+    (m) => m.status === "warning",
+  ).length;
+
+  const dueByClass = { A: 0, B: 0, C: 0 };
+  for (const item of data.items_due_for_count) dueByClass[item.abc_class] += 1;
+
   return (
     <div className="flex flex-col gap-6">
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-        <SummaryCard label="Total inventory value" value={`£${Number(data.total_inventory_value).toFixed(2)}`} />
-        <SummaryCard label="Active products" value={String(data.active_product_count)} />
-        <SummaryCard label="Materials needing attention" value={String(data.low_stock_materials.length)} />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Link
+          to="/orders"
+          className="block rounded-lg transition hover:shadow-md"
+        >
+          <KpiCard
+            label="Orders awaiting products"
+            value={String(awaitingCount)}
+            unit="right now"
+            note={`${awaitingInventory} short on stock · ${awaitingPackaging} short on packaging`}
+            accent={
+              awaitingCount > 0 ? "border-l-amber-500" : "border-l-slate-400"
+            }
+          />
+        </Link>
+        <Link
+          to="/materials"
+          className="block rounded-lg transition hover:shadow-md"
+        >
+          <KpiCard
+            label="Materials at risk"
+            value={String(data.low_stock_materials.length)}
+            unit="of tracked"
+            note={
+              data.low_stock_materials.length > 0
+                ? `${criticalCount} critical · ${warningCount} warning`
+                : "all above threshold"
+            }
+            accent={
+              data.low_stock_materials.length > 0
+                ? "border-l-amber-500"
+                : "border-l-slate-400"
+            }
+          />
+        </Link>
+        <Link
+          to="/stock-takes"
+          search={{ overdue: true }}
+          className="block rounded-lg transition hover:shadow-md"
+        >
+          <KpiCard
+            label="Overdue counts"
+            value={String(data.items_due_for_count_total)}
+            unit="items"
+            note={
+              data.items_due_for_count_total > 0
+                ? `A ${dueByClass.A} · B ${dueByClass.B} · C ${dueByClass.C}`
+                : "nothing overdue"
+            }
+            accent={
+              data.items_due_for_count_total > 0
+                ? "border-l-slate-500"
+                : "border-l-slate-400"
+            }
+          />
+        </Link>
+        <Link
+          to="/materials"
+          className="block rounded-lg transition hover:shadow-md"
+        >
+          <KpiCard
+            label="Inventory value"
+            value={formatMoney(data.total_inventory_value, "GBP")}
+            unit="on hand"
+            note={`${data.active_product_count} active products`}
+            accent="border-l-blue-600"
+          />
+        </Link>
       </div>
 
-      {data.orders_awaiting_inventory.length > 0 && (
-        <section>
-          <h2 className="mb-2 text-lg font-semibold">Orders awaiting inventory</h2>
-          <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">
+      {blocked.length > 0 && (
+        <Card
+          title="Blocked orders"
+          hint="No BOM defined to build more from — this won't resolve on its own."
+          action={
+            <Link to="/orders" className="text-xs text-blue-700 hover:underline">
+              Open Orders →
+            </Link>
+          }
+        >
+          <table className="w-full border-collapse text-left text-[12.5px]">
             <thead>
               <tr className="border-b border-slate-200">
-                <th className="p-2">Product</th>
-                <th className="p-2">Short by</th>
-                <th className="p-2">Order placed</th>
-                <th className="p-2" />
+                <Th>Order</Th>
+                <Th>Channel</Th>
+                <Th>Item</Th>
+                <Th align="right">Short by</Th>
+                <Th>Placed</Th>
+                <Th>{""}</Th>
               </tr>
             </thead>
             <tbody>
-              {data.orders_awaiting_inventory.map((o) => (
-                <tr key={o.line_id} className="border-b border-slate-100">
+              {blocked.map((r) => (
+                <tr key={r.key} className="border-b border-slate-100">
                   <td className="p-2">
                     <Link
                       to="/orders/$orderId"
-                      params={{ orderId: String(o.order_id) }}
+                      params={{ orderId: String(r.orderId) }}
                       className="text-slate-900 underline"
                     >
-                      {o.product_name ?? "—"}
-                      {o.variant_name ? ` — ${o.variant_name}` : ""}
+                      #{r.orderId}
                     </Link>
                   </td>
-                  <td className="p-2 text-red-600">{o.short_by}</td>
-                  <td className="p-2">{new Date(o.order_placed_at).toLocaleDateString()}</td>
                   <td className="p-2">
-                    {o.product_id != null && (
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-[10.5px] font-semibold ${
+                        r.platform
+                          ? PLATFORM_COLORS[r.platform].muted
+                          : "border border-slate-200 bg-slate-50 text-slate-600"
+                      }`}
+                    >
+                      {r.platform ? PLATFORM_LABELS[r.platform] : "Manual"}
+                    </span>
+                  </td>
+                  <td className="p-2">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
+                      {r.item}
+                    </span>
+                  </td>
+                  <td className="p-2 text-right text-red-600 tabular-nums">
+                    {r.shortBy}
+                  </td>
+                  <td className="p-2">{formatDayMonth(r.placedAt)}</td>
+                  <td className="p-2">
+                    {r.build && (
                       <Link
                         to="/products/$productId"
-                        params={{ productId: String(o.product_id) }}
+                        params={{ productId: String(r.build.productId) }}
+                        search={{
+                          tab: "stock",
+                          ...(r.build.variantId != null
+                            ? { variantId: r.build.variantId }
+                            : {}),
+                        }}
+                        className="rounded border border-red-300 bg-red-50 px-2 py-1 text-xs text-red-800"
+                      >
+                        Define BOM
+                      </Link>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
+
+      <Card
+        title="Orders awaiting products"
+        action={
+          <Link to="/orders" className="text-xs text-blue-700 hover:underline">
+            Open Orders →
+          </Link>
+        }
+      >
+        {rows.length === 0 ? (
+          <p className="text-sm text-slate-500">
+            Nothing waiting — everything on order can be fulfilled from stock.
+          </p>
+        ) : (
+          <table className="w-full border-collapse text-left text-[12.5px]">
+            <thead>
+              <tr className="border-b border-slate-200">
+                <Th>Order</Th>
+                <Th>Channel</Th>
+                <Th>Short on</Th>
+                <Th>Item</Th>
+                <Th align="right">Short by</Th>
+                <Th>Placed</Th>
+                <Th>{""}</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((r) => (
+                <tr key={r.key} className="border-b border-slate-100">
+                  <td className="p-2">
+                    <Link
+                      to="/orders/$orderId"
+                      params={{ orderId: String(r.orderId) }}
+                      className="text-slate-900 underline"
+                    >
+                      #{r.orderId}
+                    </Link>
+                  </td>
+                  <td className="p-2">
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-[10.5px] font-semibold ${
+                        r.platform
+                          ? PLATFORM_COLORS[r.platform].muted
+                          : "border border-slate-200 bg-slate-50 text-slate-600"
+                      }`}
+                    >
+                      {r.platform ? PLATFORM_LABELS[r.platform] : "Manual"}
+                    </span>
+                  </td>
+                  <td className="p-2">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span
+                        className={`h-1.5 w-1.5 rounded-full ${
+                          r.shortOn === "Stock" ? "bg-amber-500" : "bg-blue-500"
+                        }`}
+                      />
+                      {r.shortOn}
+                    </span>
+                  </td>
+                  <td className="p-2">{r.item}</td>
+                  <td className="p-2 text-right text-amber-700 tabular-nums">
+                    {r.shortBy}
+                  </td>
+                  <td className="p-2">{formatDayMonth(r.placedAt)}</td>
+                  <td className="p-2">
+                    {r.build && (
+                      <Link
+                        to="/products/$productId"
+                        params={{ productId: String(r.build.productId) }}
                         // Straight to the build form with the variant already chosen, rather
                         // than dropping the user on Details to find the Stock tab and
                         // re-pick the variant they were just looking at here.
-                        search={{ tab: "stock", ...(o.variant_id != null ? { variantId: o.variant_id } : {}) }}
+                        search={{
+                          tab: "stock",
+                          ...(r.build.variantId != null
+                            ? { variantId: r.build.variantId }
+                            : {}),
+                        }}
                         className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800"
                       >
                         Build now
@@ -120,185 +387,86 @@ function Dashboard() {
               ))}
             </tbody>
           </table>
-        </section>
-      )}
+        )}
+      </Card>
 
-      {data.orders_awaiting_packaging.length > 0 && (
-        <section>
-          <h2 className="mb-2 text-lg font-semibold">Orders awaiting packaging</h2>
-          <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">
-            <thead>
-              <tr className="border-b border-slate-200">
-                <th className="p-2">Order</th>
-                <th className="p-2">Material</th>
-                <th className="p-2">Short by</th>
-                <th className="p-2">Order placed</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.orders_awaiting_packaging.map((o, i) => (
-                <tr key={`${o.order_id}-${o.material_id}-${i}`} className="border-b border-slate-100">
-                  <td className="p-2">
-                    <Link
-                      to="/orders/$orderId"
-                      params={{ orderId: String(o.order_id) }}
-                      className="text-slate-900 underline"
-                    >
-                      Order #{o.order_id}
-                    </Link>
-                  </td>
-                  <td className="p-2">{o.material_name}</td>
-                  <td className="p-2 text-red-600">{roundQty(o.short_by)}</td>
-                  <td className="p-2">{new Date(o.order_placed_at).toLocaleDateString()}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      )}
-
-      {(data.unresolved_variance_count > 0 || data.open_stock_take) && (
-        <section className="flex flex-wrap gap-3">
-          {data.open_stock_take && (
-            <Link
-              to="/stock-takes/$stockTakeId"
-              params={{ stockTakeId: String(data.open_stock_take.id) }}
-              className="rounded border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800"
-            >
-              <strong>Stock take in progress</strong> — {data.open_stock_take.counted_count} of{" "}
-              {data.open_stock_take.line_count} counted, open {data.open_stock_take.open_days} day
-              {data.open_stock_take.open_days === 1 ? "" : "s"}
-            </Link>
-          )}
-          {data.unresolved_variance_count > 0 && (
-            <Link
-              to="/stock-takes/unresolved"
-              className="rounded border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800"
-            >
-              <strong>
-                {data.unresolved_variance_count} unresolved variance
-                {data.unresolved_variance_count === 1 ? "" : "s"}
-              </strong>{" "}
-              — counted differences still waiting on a decision
-            </Link>
-          )}
-        </section>
-      )}
-
-      {data.items_due_for_count.length > 0 && (
-        <section>
-          <h2 className="mb-2 text-lg font-semibold">Due for counting</h2>
-          <p className="mb-2 text-sm text-slate-500">
-            Items whose count cadence has come round. Nothing here blocks any other work — it's a list of what
-            to check next time you do a stock take.
-          </p>
-          <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">
-            <thead>
-              <tr className="border-b border-slate-200">
-                <th className="p-2">Item</th>
-                <th className="p-2">Tier</th>
-                <th className="p-2">Every</th>
-                <th className="p-2">Last counted</th>
-                <th className="p-2">Overdue by</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.items_due_for_count.map((item) => (
-                <tr
-                  key={`${item.scope}-${item.material_id ?? item.product_id}-${item.variant_id ?? "base"}`}
-                  className="border-b border-slate-100"
-                >
-                  <td className="p-2">
-                    {item.scope === "material" ? (
-                      <Link
-                        to="/materials/$materialId"
-                        params={{ materialId: String(item.material_id) }}
-                        className="text-slate-900 underline"
-                      >
-                        {item.name}
-                      </Link>
-                    ) : (
-                      <Link
-                        to="/products/$productId"
-                        params={{ productId: String(item.product_id) }}
-                        className="text-slate-900 underline"
-                      >
-                        {item.name}
-                      </Link>
-                    )}
-                  </td>
-                  <td className="p-2">{item.abc_class}</td>
-                  <td className="p-2">{item.interval_days} days</td>
-                  <td className="p-2">
-                    {item.last_stock_take_at ? new Date(item.last_stock_take_at).toLocaleDateString() : "Never"}
-                  </td>
-                  {/* Never-counted has no overdue figure to show — there is no date to measure
-                      from, and a made-up number would rank it against genuinely overdue items
-                      on a scale it isn't on. */}
-                  <td className="p-2">
-                    {item.days_overdue === null ? (
-                      <span className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">Never counted</span>
-                    ) : item.days_overdue === 0 ? (
-                      "Due today"
-                    ) : (
-                      <span className="text-amber-800">{item.days_overdue} days</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {data.items_due_for_count_total > data.items_due_for_count.length && (
-            <p className="mt-1 text-sm text-slate-500">
-              Showing {data.items_due_for_count.length} of {data.items_due_for_count_total} items due.
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.4fr_1fr]">
+        <Card
+          title="Time to stockout"
+          hint="Weeks until you can't fulfil demand — grouped by supplier, finished-goods cover included."
+        >
+          {data.low_stock_materials.length === 0 ? (
+            <p className="text-sm text-slate-500">
+              Nothing below its warning threshold.
             </p>
-          )}
-        </section>
-      )}
-
-      <section>
-        <h2 className="mb-2 text-lg font-semibold">Materials — time to stockout</h2>
-        <p className="mb-2 text-sm text-slate-500">
-          Weeks until you can't fulfil demand for this material — includes finished-goods stock still covering
-          sales before any new builds draw on it.
-        </p>
-        {data.low_stock_materials.length === 0 ? (
-          <p className="text-slate-500">Nothing below its warning threshold.</p>
-        ) : (
-          groupBySupplier(data.low_stock_materials).map((group) => (
-            <div key={group.supplierName} className="mb-4">
-              <h3 className="mb-1 text-sm font-semibold text-slate-600">{group.supplierName}</h3>
-              <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">
-                <thead>
-                  <tr className="border-b border-slate-200">
-                    <th className="p-2">Material</th>
-                    <th className="p-2">Status</th>
-                    <th className="p-2">Time to stockout</th>
-                    <th className="p-2">Consumption rate</th>
-                    <th className="p-2">On hand</th>
-                    <th className="p-2">On order</th>
-                    <th className="p-2" />
+          ) : (
+            <table className="w-full border-collapse text-left text-[12.5px]">
+              <thead>
+                <tr className="border-b border-slate-200">
+                  <Th>Material</Th>
+                  <Th>Status</Th>
+                  <Th align="right">To stockout</Th>
+                  <Th align="right">Rate</Th>
+                  <Th align="right">On hand</Th>
+                  <Th align="right">On order</Th>
+                  <Th>{""}</Th>
+                </tr>
+              </thead>
+              {groupBySupplier(data.low_stock_materials).map((group) => {
+                const lead = formatLeadTime(group.materials[0]?.lead_time_days);
+                return (
+                <tbody key={group.supplierName}>
+                  <tr className="bg-slate-100">
+                    <th
+                      colSpan={6}
+                      className="p-2 text-left text-[11.5px] font-semibold text-slate-700"
+                    >
+                      {lead
+                        ? `${group.supplierName} · ${lead}`
+                        : group.supplierName}
+                      <span className="ml-2 text-[10.5px] font-normal text-slate-500">
+                        {group.materials.length}{" "}
+                        {group.materials.length === 1 ? "item" : "items"}
+                      </span>
+                    </th>
+                    <th className="p-2 text-right">
+                      <button
+                        onClick={() => openDraftPurchase(group.materials)}
+                        title="Draft one purchase covering every at-risk material from this supplier"
+                        className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-normal text-amber-800"
+                      >
+                        Create draft purchase
+                      </button>
+                    </th>
                   </tr>
-                </thead>
-                <tbody>
                   {group.materials.map((m) => (
                     <tr key={m.id} className="border-b border-slate-100">
                       <td className="p-2">{m.name}</td>
                       <td className="p-2">
-                        <span className={`rounded px-2 py-0.5 text-xs ${STATUS_STYLES[m.status]}`}>
-                          {STATUS_LABELS[m.status]}
-                        </span>
+                        <Badge className={STOCKOUT_BADGE_CLASS[m.status]}>
+                          {STOCKOUT_LABEL[m.status]}
+                        </Badge>
                       </td>
-                      <td className="p-2">{formatWeeksOfSupply(m)}</td>
-                      <td className="p-2">
-                        {m.consumption_rate_per_week != null ? `${roundQty(m.consumption_rate_per_week)}/wk` : "—"}
+                      <td className="p-2 text-right tabular-nums">
+                        {formatWeeksShort(m.weeks_of_supply)}
                       </td>
-                      <td className="p-2 text-red-600">{roundQty(m.current_qty)}</td>
-                      <td className="p-2">{Number(m.on_order_qty) > 0 ? roundQty(m.on_order_qty) : "—"}</td>
+                      <td className="p-2 text-right tabular-nums">
+                        {m.consumption_rate_per_week != null
+                          ? `${roundQty(m.consumption_rate_per_week)}/wk`
+                          : "—"}
+                      </td>
+                      <td className="p-2 text-right text-red-600 tabular-nums">
+                        {roundQty(m.current_qty)}
+                      </td>
+                      <td className="p-2 text-right tabular-nums">
+                        {Number(m.on_order_qty) > 0
+                          ? roundQty(m.on_order_qty)
+                          : "—"}
+                      </td>
                       <td className="p-2">
                         <button
-                          onClick={() => draftPurchaseMutation.mutate(m.id)}
-                          className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800"
+                          onClick={() => openDraftPurchase([m])}
+                          className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800"
                         >
                           Create draft purchase
                         </button>
@@ -306,73 +474,231 @@ function Dashboard() {
                     </tr>
                   ))}
                 </tbody>
-              </table>
-            </div>
-          ))
-        )}
-        <ErrorBanner error={draftPurchaseMutation.error} />
-      </section>
-
-      <section>
-        <h2 className="mb-2 text-lg font-semibold">Lowest buildable products</h2>
-        <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">
-          <thead>
-            <tr className="border-b border-slate-200">
-              <th className="p-2">Product</th>
-              <th className="p-2">Max buildable</th>
-              <th className="p-2">Expected max buildable</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data.lowest_buildable_products.map((p) => (
-              <tr key={p.product_id} className="border-b border-slate-100">
-                <td className="p-2">{p.name}</td>
-                <td className="p-2">{p.max_buildable ?? "No BOM set"}</td>
-                <td className="p-2">{p.expected_max_buildable ?? "No BOM set"}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </section>
-
-      {data.margin_alerts.length > 0 && (
-        <section>
-          <h2 className="mb-2 text-lg font-semibold">Products with significant margin changes</h2>
-          <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">
-            <thead>
-              <tr className="border-b border-slate-200">
-                <th className="p-2">Product</th>
-                <th className="p-2">Previous margin</th>
-                <th className="p-2">Current margin</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.margin_alerts.map((a) => {
-                const diff = Number(a.current_margin_percent) - Number(a.previous_margin_percent);
-                return (
-                  <tr key={a.product_id} className="border-b border-slate-100">
-                    <td className="p-2">{a.name}</td>
-                    <td className="p-2">{Number(a.previous_margin_percent).toFixed(1)}%</td>
-                    <td className={`p-2 ${diff < 0 ? "text-red-600" : "text-green-700"}`}>
-                      {Number(a.current_margin_percent).toFixed(1)}% ({diff > 0 ? "+" : ""}
-                      {diff.toFixed(1)} pts)
-                    </td>
-                  </tr>
                 );
               })}
-            </tbody>
-          </table>
-        </section>
-      )}
+            </table>
+          )}
+        </Card>
+
+        <div className="flex flex-col gap-6">
+          <StockTakeCard data={data} />
+          <MarginMovedCard data={data} />
+        </div>
+      </div>
     </div>
   );
 }
 
-function SummaryCard({ label, value }: { label: string; value: string }) {
+function StockTakeCard({ data }: { data: DashboardSummary }) {
+  const take = data.open_stock_take;
+  const due = data.items_due_for_count;
+  if (!take && data.unresolved_variance_count === 0 && due.length === 0) {
+    return null;
+  }
+
+  const pct =
+    take && take.line_count > 0
+      ? Math.round((take.counted_count / take.line_count) * 100)
+      : 0;
+
   return (
-    <div className="rounded-lg bg-white p-4 shadow-sm">
-      <p className="text-sm text-slate-500">{label}</p>
-      <p className="text-2xl font-semibold">{value}</p>
+    <Card title="Stock take">
+      {take ? (
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between text-sm">
+            <span className="font-medium text-slate-900">Count in progress</span>
+            <Link
+              to="/stock-takes/$stockTakeId"
+              params={{ stockTakeId: String(take.id) }}
+              className="text-xs text-blue-700 hover:underline"
+            >
+              Open →
+            </Link>
+          </div>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+            <div
+              className="h-full rounded-full bg-blue-600"
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          <p className="text-xs text-slate-500">
+            {take.counted_count} / {take.line_count} counted · open{" "}
+            {take.open_days} day{take.open_days === 1 ? "" : "s"}
+          </p>
+        </div>
+      ) : (
+        <p className="text-sm text-slate-500">No stock take in progress.</p>
+      )}
+
+      <p className="mt-3 text-xs">
+        {data.unresolved_variance_count > 0 ? (
+          <Link
+            to="/stock-takes/unresolved"
+            className="text-amber-800 hover:underline"
+          >
+            {data.unresolved_variance_count} unresolved variance
+            {data.unresolved_variance_count === 1 ? "" : "s"} waiting on a
+            decision
+          </Link>
+        ) : (
+          <span className="text-slate-400">Nothing escalated</span>
+        )}
+      </p>
+
+      {due.length > 0 && (
+        <div className="mt-3 border-t border-slate-100 pt-3">
+          <p className="mb-1.5 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Due for counting
+          </p>
+          <ul className="flex flex-col gap-1 text-[12.5px]">
+            {due.slice(0, 5).map((item) => (
+              <li
+                key={`${item.scope}-${item.material_id ?? item.product_id}-${item.variant_id ?? "base"}`}
+                className="flex items-center gap-2"
+              >
+                <Badge className="bg-slate-100 text-slate-600">
+                  {item.abc_class}
+                </Badge>
+                {item.scope === "material" ? (
+                  <Link
+                    to="/materials/$materialId"
+                    params={{ materialId: String(item.material_id) }}
+                    className="flex-1 truncate text-slate-900 hover:underline"
+                  >
+                    {item.name}
+                  </Link>
+                ) : (
+                  <Link
+                    to="/products/$productId"
+                    params={{ productId: String(item.product_id) }}
+                    className="flex-1 truncate text-slate-900 hover:underline"
+                  >
+                    {item.name}
+                  </Link>
+                )}
+                <span className="shrink-0 text-xs text-slate-500">
+                  {item.days_overdue === null
+                    ? "Never counted"
+                    : item.days_overdue === 0
+                      ? "Due today"
+                      : `${item.days_overdue} days over`}
+                </span>
+              </li>
+            ))}
+          </ul>
+          {data.items_due_for_count_total > due.slice(0, 5).length && (
+            <p className="mt-1 text-xs text-slate-400">
+              Showing {Math.min(5, due.length)} of{" "}
+              {data.items_due_for_count_total}
+            </p>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+function MarginMovedCard({ data }: { data: DashboardSummary }) {
+  if (data.margin_alerts.length === 0) return null;
+  const top = [...data.margin_alerts]
+    .sort(
+      (a, b) =>
+        Math.abs(
+          Number(b.current_margin_percent) - Number(b.previous_margin_percent),
+        ) -
+        Math.abs(
+          Number(a.current_margin_percent) - Number(a.previous_margin_percent),
+        ),
+    )
+    .slice(0, 3);
+
+  return (
+    <Card title="Margin moved" hint="Largest swings since the last snapshot.">
+      <ul className="flex flex-col gap-2 text-[12.5px]">
+        {top.map((a) => {
+          const prev = Number(a.previous_margin_percent);
+          const cur = Number(a.current_margin_percent);
+          const diff = cur - prev;
+          return (
+            <li key={a.product_id} className="flex items-center justify-between gap-2">
+              <Link
+                to="/products/$productId"
+                params={{ productId: String(a.product_id) }}
+                search={{ tab: "pricing" }}
+                className="flex-1 truncate text-slate-900 hover:underline"
+              >
+                {a.name}
+              </Link>
+              <span
+                className={
+                  diff < 0 ? "text-red-600 tabular-nums" : "text-green-700 tabular-nums"
+                }
+              >
+                {prev.toFixed(1)}% → {cur.toFixed(1)}% ({diff > 0 ? "+" : ""}
+                {diff.toFixed(1)} pts)
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    </Card>
+  );
+}
+
+function Card({
+  title,
+  hint,
+  action,
+  children,
+}: {
+  title: string;
+  hint?: string;
+  action?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mb-3 flex items-start justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold text-slate-900">{title}</h2>
+          {hint && <p className="text-xs text-slate-500">{hint}</p>}
+        </div>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function KpiCard({
+  label,
+  value,
+  unit,
+  note,
+  accent,
+}: {
+  label: string;
+  value: string;
+  unit?: string;
+  note?: string;
+  accent: string;
+}) {
+  return (
+    <div
+      className={`h-full rounded-lg border-l-[3px] bg-white p-4 shadow-sm ${accent}`}
+    >
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+        {label}
+      </p>
+      <p className="flex items-baseline gap-1.5">
+        <span className="text-[28px] font-semibold leading-tight tracking-tight">
+          {value}
+        </span>
+        {unit && <span className="text-xs text-slate-400">{unit}</span>}
+      </p>
+      {note && (
+        <p className="mt-1 text-xs leading-snug text-slate-500">{note}</p>
+      )}
     </div>
   );
 }

@@ -40,6 +40,7 @@ DEFAULT_CATEGORIES: tuple[dict, ...] = (
         "sort_order": 50,
         "default_unit": MaterialUnit.each,
         "auto_kitting_per_order": True,
+        "show_in_kitting_bom_list": True,
     },
     {"name": "blanks", "sort_order": 60, "default_unit": MaterialUnit.each},
     {"name": "other", "sort_order": 70, "default_unit": MaterialUnit.g},

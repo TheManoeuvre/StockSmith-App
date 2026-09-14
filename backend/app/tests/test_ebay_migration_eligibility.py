@@ -43,14 +43,35 @@ def test_fixed_price_listing_type_is_fine():
 
 
 def test_partial_variation_sku_coverage_flagged():
-    reasons = _evaluate_eligibility("FixedPriceItem", ["SKU-1", "", "SKU-3"], [{"Color": "Red"}, {"Color": "Blue"}, {"Color": "Green"}])
+    reasons = _evaluate_eligibility(
+        "FixedPriceItem",
+        ["SKU-1", "", "SKU-3"],
+        [{"Color": "Red"}, {"Color": "Blue"}, {"Color": "Green"}],
+        listing_sku="PARENT",
+    )
     assert any("variation(s) have no SKU" in r for r in reasons)
 
 
 def test_full_variation_sku_coverage_is_fine():
     reasons = _evaluate_eligibility(
-        "FixedPriceItem", ["SKU-1", "SKU-2"], [{"Color": "Red"}, {"Color": "Blue"}]
+        "FixedPriceItem", ["SKU-1", "SKU-2"], [{"Color": "Red"}, {"Color": "Blue"}], listing_sku="PARENT"
     )
+    assert reasons == []
+
+
+def test_multi_variation_missing_listing_level_sku_flagged():
+    """Every variation has a SKU but the listing itself doesn't — eBay's migration still
+    rejects it ("The listing SKU cannot be null or empty"), so the picker must say why."""
+    reasons = _evaluate_eligibility(
+        "FixedPriceItem", ["SKU-1", "SKU-2"], [{"Color": "Red"}, {"Color": "Blue"}], listing_sku=None
+    )
+    assert any("listing itself has no SKU" in r for r in reasons)
+
+
+def test_single_sku_listing_not_flagged_for_missing_listing_level_sku():
+    """The listing-level-SKU reason is multi-variation only — a single-SKU listing's
+    Item.SKU is already covered by the generic 'no SKU set' check."""
+    reasons = _evaluate_eligibility("FixedPriceItem", ["SKU-1"], None, listing_sku="SKU-1")
     assert reasons == []
 
 
@@ -64,6 +85,7 @@ _SAMPLE_ITEM_XML = """
   <ItemID>227269664481</ItemID>
   <Title>Aqara G400 mount</Title>
   <ListingType>FixedPriceItem</ListingType>
+  <SKU>SKU-0012</SKU>
   <SellingStatus><QuantityAvailable>7</QuantityAvailable></SellingStatus>
   <Variations>
     <Variation>
@@ -92,6 +114,7 @@ def test_parse_classic_listing_multi_variation():
     assert candidate.listing_type == "FixedPriceItem"
     assert candidate.quantity == 7
     assert candidate.skus == ["SKU-0012-A", "SKU-0012-B"]
+    assert candidate.listing_sku == "SKU-0012"
     assert candidate.variation_specifics == [{"Colour": "Black"}, {"Colour": "White"}]
     assert candidate.ineligibility_reasons == []
 
@@ -112,8 +135,21 @@ def test_parse_classic_listing_single_sku():
     candidate = EbayAdapter._parse_classic_listing(element)
 
     assert candidate.skus == ["WIDGET-1"]
+    assert candidate.listing_sku == "WIDGET-1"
     assert candidate.variation_specifics is None
     assert candidate.quantity == 3
+
+
+def test_parse_multi_variation_without_listing_level_sku_flags_it():
+    """The real-world case behind this: a 4-variation listing where every Variation.SKU is
+    set but the listing itself has no Custom Label. Parses fine, but is flagged ineligible
+    until an Item.SKU is added."""
+    xml = _SAMPLE_ITEM_XML.replace("<SKU>SKU-0012</SKU>", "")
+    candidate = EbayAdapter._parse_classic_listing(ElementTree.fromstring(xml), detail_loaded=True)
+
+    assert candidate.skus == ["SKU-0012-A", "SKU-0012-B"]
+    assert candidate.listing_sku is None
+    assert any("listing itself has no SKU" in r for r in candidate.ineligibility_reasons)
 
 
 _SAMPLE_NO_SKU_ITEM_XML = """

@@ -6,8 +6,10 @@ from sqlalchemy import select
 from app.db import async_session_factory
 from app.models.listing import ListingPlatform
 from app.models.platform_connection import PlatformConnection
+from app.models.platform_sync_run import SyncRunMode
 from app.services import order_sync
-from app.services.platforms.errors import PlatformAuthError
+from app.services.notification_alerts import raise_marketplace_sync_failure_alert
+from app.services.platforms.errors import PlatformAuthError, PlatformRateLimitError
 
 logger = logging.getLogger("stocksmith.sync_scheduler")
 
@@ -33,6 +35,15 @@ _locks: dict[ListingPlatform, asyncio.Lock] = {ListingPlatform.etsy: asyncio.Loc
 # auto_sync_enabled back off — a revoked/expired-past-refresh connection won't fix itself
 # by being retried, and hammering it every cycle is just log noise.
 _MAX_CONSECUTIVE_AUTH_FAILURES = 3
+
+# Hard ceiling on how long one background tick's commit_sync may run before the loop
+# abandons it and moves on. commit_sync is I/O to a marketplace with its own 15s
+# per-request timeouts and bounded retry loops, so a healthy run finishes in well under a
+# minute; anything past this is wedged (a dependency that never returns, a retry path that
+# outlives its own caps). Without this bound a single stuck tick freezes the whole
+# platform loop indefinitely with no failed run and no periodic log line — the exact
+# shape of the 2026-09-07 stall.
+_COMMIT_SYNC_TIMEOUT_SECONDS = 600
 
 _tasks: dict[ListingPlatform, asyncio.Task] = {}
 
@@ -73,6 +84,11 @@ async def _reset_auth_failures(platform: ListingPlatform) -> None:
             await session.commit()
 
 
+async def _raise_sync_failure_alert(platform: ListingPlatform, detail: str) -> None:
+    async with async_session_factory() as session:
+        await raise_marketplace_sync_failure_alert(session, platform, detail)
+
+
 async def _tick(platform: ListingPlatform) -> None:
     connection = await _load_connection(platform)
     if connection is None or not connection.is_connected or not connection.auto_sync_enabled:
@@ -98,12 +114,33 @@ async def _tick(platform: ListingPlatform) -> None:
             # docstring) rather than taking one from here — deliberately, so this loop
             # running for both platforms right at every app boot never holds a pooled
             # connection open across the slow marketplace fetch phase.
-            await order_sync.commit_sync(platform)
-        except PlatformAuthError:
+            await asyncio.wait_for(order_sync.commit_sync(platform), timeout=_COMMIT_SYNC_TIMEOUT_SECONDS)
+        except PlatformAuthError as exc:
             # commit_sync has already rolled back and logged this to PlatformSyncRun
             # (see order_sync._record_failure) — this is purely for the
             # auto-disable counter.
             await _record_auth_failure(platform)
+            await _raise_sync_failure_alert(platform, str(exc))
+            return
+        except PlatformRateLimitError as exc:
+            await _raise_sync_failure_alert(platform, str(exc))
+            return
+        except (asyncio.TimeoutError, TimeoutError):
+            # wait_for cancelled commit_sync mid-flight; the CancelledError it injected is
+            # a BaseException, so commit_sync's own `except Exception` never ran and no
+            # failed run was recorded. Record one here so the stall is visible in the sync
+            # panel and counts against get_sync_health, then let the loop carry on to its
+            # next cycle rather than staying wedged behind this tick forever.
+            logger.error(
+                "Background auto-sync for %s exceeded %ds and was abandoned — retrying next cycle",
+                platform.value,
+                _COMMIT_SYNC_TIMEOUT_SECONDS,
+            )
+            await order_sync.record_failed_run(
+                platform,
+                SyncRunMode.commit,
+                TimeoutError(f"Sync exceeded {_COMMIT_SYNC_TIMEOUT_SECONDS}s and was abandoned"),
+            )
             return
         except Exception:
             logger.exception("Background auto-sync failed for %s", platform.value)

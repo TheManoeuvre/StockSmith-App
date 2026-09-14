@@ -83,6 +83,21 @@ jobs:
         run: uv sync --group build
         working-directory: backend
 
+      # Bundled into the exe by stocksmith-backend.spec and read back out by
+      # app.bootstrap._load_packaged_pushover_token at startup — see that function for why
+      # this can't just be an env var on this job. Read through env rather than
+      # interpolated into the script body, same script-injection reasoning as the version
+      # step above. Skipped (rather than writing an empty file) when the secret is unset,
+      # e.g. on a fork, so the build still succeeds with Pushover simply unavailable.
+      - name: Write packaged Pushover token
+        shell: pwsh
+        env:
+          PUSHOVER_APP_API_TOKEN: ${{ secrets.PUSHOVER_APP_API_TOKEN }}
+        run: |
+          if ($env:PUSHOVER_APP_API_TOKEN) {
+            "PUSHOVER_APP_API_TOKEN=$env:PUSHOVER_APP_API_TOKEN" | Out-File -FilePath backend/.env.packaging -Encoding utf8 -NoNewline
+          }
+
       - name: Build backend sidecar
         run: powershell -File backend/build.ps1
 

@@ -1,9 +1,26 @@
+import enum
 from datetime import datetime
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.models.stock_take import StockTakeLineStatus, StockTakeStatus
+
+
+class StockTakeProgress(str, enum.Enum):
+    """The take's headline state, derived from its lines rather than stored.
+
+    `status` on the model is only ever open or closed. This splits a closed take by how
+    much of it actually landed: `completed` when every line was counted and applied,
+    `partially_completed` when some lines applied but others were left blank or flagged,
+    and `closed` when it was closed without a single line being applied. An open take is
+    always `open`.
+    """
+
+    open = "open"
+    completed = "completed"
+    partially_completed = "partially_completed"
+    closed = "closed"
 
 
 class StockTakeScope(BaseModel):
@@ -84,8 +101,16 @@ class StockTakeRead(BaseModel):
     # the longer one stays open the more lines land in manual review, and seeing that is
     # the point.
     open_days: int
+    # Headline state for the list: open / completed / partially_completed / closed. Derived
+    # from the lines — the stored `status` above is only ever open or closed.
+    progress_status: StockTakeProgress
     line_count: int
     counted_count: int
+    # Rows that got a count on the sheet and were carried through — counted, applied, or
+    # flagged. Unlike counted_count this survives approval, so a closed take's progress
+    # still reads "37 / 40" rather than snapping back to zero once the counted lines move
+    # on to their outcome.
+    completed_count: int
     pending_count: int
     conflict_count: int
 

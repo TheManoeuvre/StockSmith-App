@@ -52,6 +52,10 @@ class ExternalOrderLine:
     qty: int
     unit_price: str | None
     currency: str | None
+    # Buyer-supplied personalization/customization text for this specific line (Etsy's
+    # transaction.variations "Personalization" entry). None when the listing has no
+    # personalization option or the buyer left it blank. eBay has no equivalent concept.
+    variation_text: str | None = None
 
 
 @dataclass
@@ -67,6 +71,12 @@ class ExternalOrder:
     last_modified: datetime
     is_cancelled: bool
     is_shipped: bool
+    # The marketplace's own fulfillment deadline — Etsy's Receipt.expected_ship_date, or
+    # the earliest lineItemFulfillmentInstructions.shipByDate across an eBay order's line
+    # items (a single order-level cutoff, since the whole parcel ships together). None
+    # when the marketplace didn't report one, which order_sync leaves untouched rather
+    # than treating as "no longer due".
+    ship_by_date: datetime | None = None
     lines: list[ExternalOrderLine] = field(default_factory=list)
     # The untouched marketplace response this was parsed from — carried through so a
     # preview/debug view can show ground truth alongside our interpretation of it. Cheap
@@ -112,6 +122,13 @@ class ExternalOrder:
     # sync had already stored correctly.
     financials_enriched: bool = True
 
+    # Shipment tracking, once the marketplace has it — eBay's shipping_fulfillment
+    # trackingNumber/shippingCarrierCode, or the first entry of Etsy's receipt
+    # `shipments` array. None until the order actually ships; fetched under the same
+    # `enrich` gate as the payment trio above, since both need a per-order call.
+    tracking_number: str | None = None
+    carrier: str | None = None
+
 
 @dataclass
 class ExternalListingRef:
@@ -145,6 +162,13 @@ class ClassicListingCandidate:
     variation_specifics: list[dict[str, str]] | None
     quantity: int
     is_migrated: bool
+    # The listing-level Item.SKU, distinct from the per-variation SKUs in `skus`. For a
+    # single-SKU listing it is the same value as skus[0]; for a multi-variation listing
+    # it is a separate field that a seller often leaves unset. eBay's bulkMigrateListing
+    # rejects a multi-variation listing with no Item.SKU ("The listing SKU cannot be null
+    # or empty", errorId 25002) even though its own migration docs only mention the
+    # per-variation ones — confirmed live. None when the listing carries no Item.SKU.
+    listing_sku: str | None = None
     ineligibility_reasons: list[str] = field(default_factory=list)
     # False when this came from a bulk list call that doesn't return per-variation
     # detail (eBay's GetMyeBaySelling ActiveList), True when it came from a per-item

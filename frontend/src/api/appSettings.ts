@@ -13,7 +13,7 @@ export interface ForecastSettings {
   forecast_warning_weeks: string;
   forecast_critical_weeks: string;
   forecast_lookback_weeks: number;
-  default_lead_time_weeks: string;
+  default_lead_time_days: number;
 }
 
 export const appSettingsApi = {

@@ -64,16 +64,15 @@ export function PurchaseLineEditor({
         />
       )}
       <div className="overflow-x-auto">
-        <table className="w-full border-collapse bg-white text-left text-sm shadow-sm">
+        <table className="w-full table-fixed border-collapse bg-white text-left text-sm shadow-sm">
           <thead>
             <tr className="border-b border-slate-200">
               <th className="p-2">Material</th>
-              <th className="p-2">Ordered</th>
-              {showReceiving && <th className="p-2">Received</th>}
-              {showReceiving && <th className="p-2">Outstanding</th>}
-              <th className="p-2">Total cost (£)</th>
-              <th className="p-2">Notes</th>
-              <th className="p-2" />
+              <th className="w-20 p-2">Ordered</th>
+              {showReceiving && <th className="w-16 p-2">Received</th>}
+              {showReceiving && <th className="w-28 p-2">Outstanding</th>}
+              <th className="w-24 p-2">Total cost (£)</th>
+              <th className="w-20 p-2" />
             </tr>
           </thead>
           <tbody>
@@ -87,6 +86,7 @@ export function PurchaseLineEditor({
                 <tr key={line.id ?? `new-${i}`} className="border-b border-slate-100">
                   <td className="p-2">
                     <MaterialSelect
+                      className="w-full rounded border border-slate-300 px-2 py-1 disabled:bg-slate-100"
                       materials={materials}
                       value={line.material_id}
                       onChange={(material_id) => updateLine(i, { material_id })}
@@ -96,7 +96,7 @@ export function PurchaseLineEditor({
                   </td>
                   <td className="p-2">
                     <input
-                      className="w-24 rounded border border-slate-300 px-2 py-1"
+                      className="w-16 rounded border border-slate-300 px-2 py-1"
                       step={wholeNumberStepFor(material?.unit)}
                       min={locked ? persisted?.received_qty : undefined}
                       title={locked ? `${roundQty(persisted!.received_qty)} has already arrived on this line` : undefined}
@@ -120,19 +120,12 @@ export function PurchaseLineEditor({
                   )}
                   <td className="p-2">
                     <input
-                      className="w-24 rounded border border-slate-300 px-2 py-1"
+                      className="w-20 rounded border border-slate-300 px-2 py-1"
                       value={line.total_cost}
                       onChange={(e) => updateLine(i, { total_cost: e.target.value })}
                     />
                   </td>
                   <td className="p-2">
-                    <input
-                      className="rounded border border-slate-300 px-2 py-1"
-                      value={line.notes ?? ""}
-                      onChange={(e) => updateLine(i, { notes: e.target.value })}
-                    />
-                  </td>
-                  <td className="p-2 whitespace-nowrap">
                     {locked ? (
                       closed ? (
                         onReopenLine && (
@@ -154,8 +147,13 @@ export function PurchaseLineEditor({
                         )
                       )
                     ) : (
-                      <button onClick={() => removeLine(i)} className="text-red-600">
-                        Remove
+                      <button
+                        onClick={() => removeLine(i)}
+                        aria-label="Remove line"
+                        title="Remove line"
+                        className="text-base leading-none text-red-600 hover:text-red-700"
+                      >
+                        ✕
                       </button>
                     )}
                   </td>

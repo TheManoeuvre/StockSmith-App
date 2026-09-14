@@ -12,6 +12,298 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-09-12
+
+### Changed
+- **The dashboard's "Blocked orders" is now "Orders awaiting products".** Waiting on stock
+  or packaging you can still build/assemble more of is the normal, expected state for a
+  maker — it no longer shows in red or pages you outside quiet hours. **"Blocked orders"**
+  is now reserved for the rarer, genuinely stuck case: an order for a product with no BOM
+  (or kitting BOM) at all, so the shortfall can never close on its own. That case gets its
+  own dashboard table, nav badge colour, and notification type ("Order blocked — no BOM
+  defined"), separate from the routine "Order awaiting product" alert.
+
+### Fixed
+- **Alerts now clear themselves once the condition they warned about is resolved.** An
+  order-awaiting-inventory, material-forecast, or pending-order-backlog alert used to sit
+  unread until someone dismissed it by hand, even after the order was fully allocated, the
+  forecast recovered, or the backlog dropped back under threshold. Those alerts now mark
+  themselves read automatically the moment the underlying condition clears.
+
+## [0.13.0] - 2026-09-11
+
+### Added
+- **In-app, Windows-toast and Pushover notifications.** A bell-style **Alerts** item in
+  the sidebar shows a live unread count and a dropdown of recent notifications, with
+  mark-read and mark-all-read. A new **Notifications** settings page controls delivery
+  channels (Windows toast; Pushover mobile push, with test/replace/remove), quiet hours,
+  the daily/weekly shipped-order summary schedule, and per-alert-type delivery mode
+  (right away, digest, or off). Alerts hook into existing conditions rather than
+  duplicating their logic — platform auth/rate-limit errors, backup failures, low-stock
+  and stockout forecasts, orders awaiting inventory, and a platform nearing its daily API
+  call budget — plus a daily/weekly summary of shipped orders' profit and COGS.
+
+## [0.12.1] - 2026-09-07
+
+### Fixed
+- **Auto-sync no longer stalls for hours when a marketplace hits its daily API limit.**
+  A burst of listing-quantity pushes could spend the whole day's Etsy API budget by
+  midday; the next order-sync tick then hit a "try again in ~2 hours" response and slept
+  on it, freezing that platform's sync — no error, no log line — until the app was
+  restarted. Sync now refuses to sleep on a multi-hour back-off, abandons any tick that
+  runs too long, and treats a stuck connection as needing re-authorisation.
+
+### Changed
+- **Listing quantity pushes are deduplicated and rate-limited.** A stock change that
+  touches a shared material (a box, a common filament) used to re-push every listing that
+  uses it, even when the number was unchanged — thousands of needless marketplace calls.
+  Now a push is sent only when the quantity StockSmith would send actually differs from
+  what the marketplace already holds, and automatic pushes pause automatically as the
+  day's API usage nears the platform's budget (order sync is never paused). Each platform's
+  Sync panel shows calls-used-today against that budget.
+- **A background sweep re-checks listing quantities and retries failed pushes.** Runs
+  hourly, re-asserting any listing whose quantity hasn't been confirmed in a while and
+  retrying pushes that previously errored — the periodic reconciliation the push path
+  never had.
+- **"Create draft purchase" on the dashboard now opens the full New purchase panel.**
+  The dashboard's "Time to stockout" section gains a per-supplier **Create draft purchase**
+  button that drafts every at-risk material from that supplier in one order; the existing
+  per-material buttons (dashboard and material detail) use the same flow. Instead of the
+  old stripped-down draft editor, they open the standard New purchase slideover with the
+  supplier and lines pre-filled — each line's quantity set to the smallest whole multiple
+  of the material's typical reorder qty that clears its warning threshold, priced at the
+  last known unit cost.
+
+## [0.12.0] - 2026-09-04
+
+Composing a purchase order is now a forecasting check rather than a data-entry form, and
+the materials panel matches the rest of the app. Plus supplier order numbers, CSV export
+for the orders and purchases lists, and a batch of reliability fixes.
+
+### Added
+- **The New purchase panel is rebuilt around "will this order cover me?"** A header with
+  three stat tiles — Lines, Order total, Cover on arrival — sits above a line editor that
+  shows each material's last paid price (`last paid £4.20 · #PO-4521 · 12 Aug`) with an
+  up/down percentage badge, and flags an input amber when the price has risen. The order
+  total tints amber and reads "N lines above last price" when any line is over what the
+  supplier last charged. A **Stock alerts** card lists every material below its reorder
+  point — chosen supplier first — with a suggested quantity and one-click **Add**. The
+  footer's **Raise purchase order** button explains, in three places, why it's disabled
+  when it is.
+- **Purchases carry a delivery & carriage charge.** A single figure per order, added to
+  the displayed order total and shown on both purchase panels and the CSV export. It is
+  informational — it is never apportioned into unit costs.
+- **Purchases record the supplier's own order number.** Free text — their PO, order or
+  invoice number — entered in the purchase slide-over. It leads the list's **Order**
+  column as `PO-4521 (#12)`, falling back to `#12` when unset, because that's the number
+  you quote when chasing a delivery. Included in the purchases CSV export.
+- **CSV export for the Orders and Purchases lists**, matching the export already on
+  Materials and Products.
+- **The dashboard's Blocked orders table has a Channel column** — an Etsy / eBay / Manual
+  pill beside the placed date.
+- **Manual orders can be tagged with a source** — `Manual · direct sale`,
+  `Etsy · keyed by hand`, `eBay · keyed by hand` — kept separate from the channel tag that
+  marketplace sync applies automatically.
+
+### Changed
+- **The materials slide-over now works like the product slide-over.** One **Save / Revert**
+  bar in the footer with a context summary, in place of the old per-form Save button. Tabs
+  are reordered to **Details, Supplier, Stock** and open on Details; the former Counting
+  tab is folded into the foot of Details under a "Stock counting" heading (old
+  `?tab=counting` links still work). The Stock tab's adjustment form is unchanged.
+- **Supplier lead times are set in business days, not weeks.** A supplier's default lead
+  time and the shop-wide fallback (Settings → Forecast) now take a whole number of
+  Mon–Fri business days. Existing values are converted on upgrade at 5 business
+  days/week. A fresh install now defaults to 5 business days (one week) rather than the 20
+  that a mechanical conversion of the old four-week default produced.
+- **The stock takes list says how a closed take actually turned out.** The status column
+  now reads **Completed** when every line was counted and applied, **Partially completed**
+  when some lines applied but others were left blank or held for review, and **Closed**
+  when the take was closed without a single line applied. Open takes still show
+  **Open N days**. The progress column no longer snaps back to `0 / N` the moment a take
+  closes — it keeps showing how many rows were counted (`37 / 40`), on the list and on the
+  take's own summary.
+- **Purchase line quantities read as whole numbers** — `30 g`, not `30.0000` — on the
+  list and seeded into the line editor. The line editor drops the per-line Notes column
+  (existing notes are still saved), narrows the Ordered box, and no longer scrolls
+  sideways on a long material name.
+- **Settings toggles render as switches** instead of bare checkboxes, across background
+  sync, backups and the reference-data tables.
+- **A material with no image falls back to its colour chip** in the slide-over hero, the
+  way the list already does, and the **Colours** settings table shows a swatch next to
+  each colour name.
+
+### Fixed
+- **"Create draft purchase" from the dashboard** returned "Internal server error" every
+  time. Fixed.
+- **Recording a delivery on a purchase that has a supplier** saved the delivery but then
+  returned "Internal server error". Fixed.
+- **New kitting-BOM lines listed filament by default**, and could show materials from
+  categories not marked **Show in Kitting BOM list**. New lines now default to a material
+  from a listed category. The "Material categories" reference table also no longer labels
+  its add button "New material categorie".
+
+## [0.11.0] - 2026-09-03
+
+Reorder timing that knows how long each supplier takes, shorter kitting-BOM material
+lists, and a round of speed and reliability fixes.
+
+### Added
+- **A supplier can carry its own lead time, and time-to-stockout uses it.** Set a
+  **Default lead time (weeks)** on any supplier in Settings → Suppliers. A material bought
+  from that supplier is then flagged for reorder that many weeks earlier — eight weeks of
+  cover from a supplier that takes two weeks to deliver now reads the same urgency as six
+  weeks from one that ships next day. The lead time shows next to the supplier on the
+  dashboard's time-to-stockout list and under the supplier in the materials list. Leave it
+  blank and the material falls back to the shop-wide default in Settings → Forecast, which
+  now applies to the reorder point as well as to estimating when an on-order purchase lands.
+
+### Changed
+- **Kitting-BOM material pickers only list packaging by default.** Each material category
+  now has a **Show in Kitting BOM list** switch (Settings → Material categories), on for
+  Packaging and off for everything else. The kitting BOM on a product, the kitting
+  overrides on a variant or an order, and the default kitting BOM in Settings now only
+  offer materials from ticked categories — no more scrolling past filament and screws to
+  find a box. Anything already on a kitting line stays selectable regardless.
+- **Assigning a product to an unrecognised order line** now groups the product dropdown by
+  category, sorted A–Z, instead of one long flat list.
+- **Choosing a replacement material** for a variant no longer offers retired (inactive)
+  materials.
+
+### Fixed
+- **Every screen loads faster.** Authenticating each API request was running a full
+  password hash on the backend, one at a time, so a screen that fires a dozen requests as
+  it opens spent several seconds waiting before any data arrived. Verified requests are now
+  remembered for the life of the backend, cutting a typical navigation from around four
+  seconds to a fraction of that.
+- **Starting a stock take that covered a product with a category set** failed with
+  "Internal server error". Fixed.
+- **Migrating a multi-variation eBay listing** that had SKUs on its variations but none on
+  the listing itself failed with "The listing SKU cannot be null or empty". StockSmith now
+  sets the listing-level SKU as part of the migration, and the listing picker explains up
+  front when a listing can't be migrated yet because it has no SKU to align.
+
+## [0.10.0] - 2026-09-02
+
+The second half of the redesign. 0.9.0 moved the furniture — sidebar, slide-over panels;
+this pass restyles what's inside every screen so they read as one app, and rebuilds the
+dashboard around what actually needs your attention.
+
+### Changed
+- **The dashboard is rebuilt around blocked work.** Four figures across the top —
+  blocked orders, materials at risk, overdue counts, inventory value — each a link to the
+  list it summarises. Below them, one **Blocked orders** table that merges "short on stock"
+  and "short on packaging" into a single queue, oldest first, so nothing waiting on you is
+  split across two panels. Then time-to-stockout grouped by supplier, a stock-take card
+  with a progress bar and the items due for counting, and the products whose margin has
+  moved most. The standalone "Lowest buildable products" and "Due for counting" tables are
+  gone — the first was rarely acted on, the second now lives on the stock-take card.
+- **The orders list splits into two groups instead of status tabs.** Everything still to
+  fulfil sits in **Awaiting shipment**, oldest first, pinned above **Shipped & cancelled**.
+  An order moves down only once it ships or is cancelled. The Fulfilment column already
+  tells you *why* an order is waiting (short stock, needs a build, ready to ship), which is
+  more useful than a Pending/Allocated tab.
+- **Every list and detail panel picked up the same visual grammar** — stat tiles at the
+  top of a detail view, denser tables, a single Save / Revert in the panel footer instead
+  of a Save button on every section, and clicking anywhere on a row opens it.
+- **The product panel's Bill of Materials, pricing and variant screens were reworked** for
+  the new density: tighter BOM rows, right-aligned figures, and variant material
+  substitutions shown as an inline swap rather than a second table.
+- **Recording a build as failed now asks which materials to scrap.**
+- **The stock-take approve step says what it will actually do.** Instead of implying
+  nothing changes, it now reads "Of N counted lines, X adjust the recorded quantity and Y
+  confirm it unchanged" and names how many blank lines are left alone. The separate Review
+  tab is gone — lines held back for a decision are settled on the Unresolved variances
+  page, linked from the stock-take when there are any.
+- **Settings is one consistent surface.** Every section is the same card, every form the
+  same label-left rows, and the Connection tab is a card like the rest. Editing a listing
+  profile and navigating away now warns about unsaved changes, the same as everywhere else.
+
+### Added
+- **The materials list and each material's panel show time to stockout** — weeks of cover
+  left at the current consumption rate, with finished-goods stock counted in, and a
+  warning / critical badge. Grouped by supplier so one purchase order clears a set.
+- **A material's panel lists what it's used in** — every product and variant whose recipe
+  includes it, with the quantity per build.
+- **Product images now record their pixel dimensions**, shown on the Assets tab, so you can
+  see at a glance whether an image meets a marketplace's size minimum. Non-image files
+  (design source, print files) list with a download link.
+
+### Fixed
+- **Starting a stock take that included a filament — any material with a material type set
+  — failed with "Internal server error".** The count sheet needs each material's type to
+  group it, and two of the code paths that build the sheet weren't loading it. Fixed; a
+  filament stock take works.
+
+## [0.9.0] - 2026-09-01
+
+A new look for the whole app: navigation moves to a sidebar, and opening a product,
+material, order, purchase or stock take no longer leaves the list behind for a new page —
+it slides a panel over it instead.
+
+### Changed
+- **Navigation moved from a top bar to a sidebar**, and every screen picked up a denser,
+  more consistent visual style — tabs, dialogs, buttons and status pills all restyled to
+  match.
+- **Clicking into a product, material, order, purchase or stock take now opens it in a
+  panel over the list, instead of navigating to a full page.** The list stays put behind
+  it, so closing the panel or stepping to the next/previous item never re-fetches or loses
+  your place. Each one is still its own URL — a direct link or a bookmark opens straight to
+  the right item — and leaving a panel with unsaved changes still asks first, the same as
+  before.
+- **Materials, orders and purchases now split their detail view into tabs**, matching
+  products and stock takes: Materials into Details / Purchasing / Counting / Stock, Orders
+  into Lines / Financials / Shipping, and Purchases into Lines / Receiving history.
+
+## [0.8.0] - 2026-08-22
+
+Two orders currently stuck out of sync — dispatched on the marketplace before StockSmith could allocate them — will now record a real postage cost once mapped and shipped, instead of silently reading as free. The products list can now show you this kind of gap before it reaches an order: sale price, materials, packaging and postage cost, together, with a filter for what's still missing.
+
+### Fixed
+- **Orders dispatched on the marketplace before they were allocated here shipped with no
+  postage cost, making them look more profitable than they were.** When a marketplace SKU
+  isn't recognised, the order line has no product attached — so there is nothing to allocate
+  (which is the "shows as shipped, but no units are allocated" warning) and, less visibly,
+  no shipping profile to take a postage cost from. Mapping the line by hand fixed the first
+  problem but never the second, so the order shipped with postage counted as £0. It now
+  resolves the shipping profile whenever a line is mapped, created or re-allocated. 26 of
+  this shop's shipped orders are affected, overstating profit by about £95 between them.
+- **A shipping profile assigned after an order had already shipped never took effect.** The
+  order would show the profile's name against a blank postage cost, and because shipping
+  can't be changed on a shipped order there was no way to correct it. The cost is now
+  recorded at the point the profile is resolved. Four orders were in this state.
+- **Multi-unit orders that got their stock from a build were charged for a box per unit.**
+  Packaging is meant to be counted once per parcel. That default was applied when an order
+  was allocated, but not when a build handed it stock — so an order whose packaging was set
+  up after it arrived, then filled from a build, consumed three boxes and three labels for a
+  single parcel. Two orders were affected.
+
+  **Orders already shipped are not corrected automatically.** They keep the figures they
+  shipped with; ask for them to be repaired if you want the history restated.
+- **Creating an Etsy draft could fail with "A readiness_state_id is required for physical
+  listings."** Etsy's own API documentation lists that field as optional, but the live
+  endpoint refuses a physical draft without one. A listing profile now needs a processing
+  profile picked, same as it already needs a shipping profile, and the draft panel says so
+  up front instead of letting the create call fail.
+
+### Added
+- **Orders missing a postage cost now say so.** A shipped order that never recorded what
+  postage cost is marked "No postage cost" on the orders list and explains itself on the
+  order, instead of quietly reporting a profit that leaves it out. Separate from the
+  existing "COGS pending" mark, which means something else and is fixed a different way.
+- **The products list now shows what each product costs to sell.** Sale price, then
+  materials, packaging and postage stacked in one column, with the shipping profile named
+  underneath. For a product with variations each figure shows the range across them — the
+  list previously showed the base recipe's cost, which for some products matched no
+  variation actually sold.
+- **Products with missing cost information can be found in one place.** A count beside the
+  products list says how many are missing a shipping profile or a materials recipe, and
+  filters down to exactly those. This shop has 9. Products genuinely sent without packaging
+  are not counted — no packaging is a real answer, not a gap.
+- **The product margin estimate no longer treats missing postage as free.** Where no
+  shipping profile is set, the margin is marked as excluding postage rather than quietly
+  reading £0.
+
 ## [0.7.2] - 2026-08-19
 
 Deliveries can now be recorded as they actually turn up, line by line, instead of a

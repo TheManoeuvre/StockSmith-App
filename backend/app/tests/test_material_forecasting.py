@@ -16,6 +16,7 @@ from app.models.material import Material, LegacyMaterialCategory, MaterialUnit
 from app.models.order import Order, OrderLine, OrderStatus
 from app.models.product import Product, ProductMaterial
 from app.models.purchase import MaterialPurchase, Purchase, PurchaseStatus
+from app.models.supplier import Supplier
 from app.services.forecasting import compute_material_forecasts
 
 NOW = datetime.now(timezone.utc)
@@ -216,3 +217,75 @@ async def test_material_above_threshold_with_no_history_is_not_surfaced(session)
 
     forecasts = await compute_material_forecasts(session)
     assert forecasts == []
+
+
+async def test_include_all_returns_every_material_with_a_status(session):
+    """The materials list/detail want a row per material, not just the alerting ones."""
+    await _settings(session)
+    healthy = await _material(session, name="Healthy", current_qty=Decimal(1000))
+    no_history = await _material(session, name="No history", current_qty=Decimal(10), reorder_threshold=Decimal(5))
+    product = await _product(session, "Blue Bottle Opener", "SKU-1", current_stock=0)
+    session.add(ProductMaterial(product_id=product.id, material_id=healthy.id, qty_required=Decimal(1)))
+    await session.commit()
+
+    for w in range(8):
+        await _place_order(session, product.id, qty=2, weeks_ago=w)
+    await session.commit()
+
+    # Default: the healthy material with plenty of cover is not surfaced at all.
+    assert await compute_material_forecasts(session) == []
+
+    by_id = {f.material_id: f for f in await compute_material_forecasts(session, include_all=True)}
+    assert set(by_id) == {healthy.id, no_history.id}
+    assert by_id[healthy.id].status == "ok"
+    assert by_id[healthy.id].weeks_of_supply is not None
+    assert by_id[no_history.id].status == "insufficient_data"
+    assert by_id[no_history.id].weeks_of_supply is None
+
+
+async def _eight_weeks_of_cover(session, **material_kwargs):
+    """A material with exactly 8 weeks of undelayed cover: 8 on hand, drawn at 1/week."""
+    material = await _material(session, current_qty=Decimal(8), **material_kwargs)
+    product = await _product(session, "Widget", f"SKU-{material.id}", current_stock=0)
+    session.add(ProductMaterial(product_id=product.id, material_id=material.id, qty_required=Decimal(1)))
+    await session.commit()
+    for w in range(8):
+        await _place_order(session, product.id, qty=1, weeks_ago=w)
+    await session.commit()
+    return material
+
+
+async def test_lead_time_pushes_the_reorder_point_out(session):
+    """8 weeks of cover clears a 6-week warning threshold with no lead time — but a
+    supplier that takes 15 business days (3 weeks) to deliver makes those same 8 weeks a
+    warning, because the reorder point is judged lead-time-ahead of stockout."""
+    await _settings(session, forecast_warning_weeks=Decimal(6), default_lead_time_days=0)
+    supplier = Supplier(name="Slow Co", default_lead_time_days=15)
+    session.add(supplier)
+    await session.flush()
+    material = await _eight_weeks_of_cover(session, default_supplier_id=supplier.id)
+
+    forecasts = {f.material_id: f for f in await compute_material_forecasts(session)}
+    f = forecasts[material.id]
+    assert f.weeks_of_supply == Decimal(8)
+    assert f.status == "warning"
+    assert f.lead_time_days == 15
+
+
+async def test_shop_wide_default_lead_time_applies_without_a_supplier(session):
+    """No supplier on the material — the shop-wide default lead time still widens the net."""
+    await _settings(session, forecast_warning_weeks=Decimal(6), default_lead_time_days=15)
+    material = await _eight_weeks_of_cover(session)
+
+    forecasts = {f.material_id: f for f in await compute_material_forecasts(session)}
+    assert forecasts[material.id].status == "warning"
+    assert forecasts[material.id].lead_time_days == 15
+
+
+async def test_no_lead_time_leaves_healthy_cover_unflagged(session):
+    """The widening is strictly opt-in: with the shop default at 0 and no supplier figure,
+    8 weeks of cover against a 6-week threshold is still healthy and not surfaced."""
+    await _settings(session, forecast_warning_weeks=Decimal(6), default_lead_time_days=0)
+    await _eight_weeks_of_cover(session)
+
+    assert await compute_material_forecasts(session) == []

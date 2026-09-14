@@ -20,17 +20,44 @@ class PurchaseLineInput(BaseModel):
 
 class PurchaseCreate(BaseModel):
     supplier_id: int | None = None
+    supplier_order_number: str | None = None
     order_date: date | None = None
     expected_arrival_date: date | None = None
     notes: str | None = None
+    delivery_cost: Decimal | None = None
     lines: list[PurchaseLineInput]
 
 
 class PurchaseUpdate(BaseModel):
     supplier_id: int | None = None
+    supplier_order_number: str | None = None
     order_date: date | None = None
     expected_arrival_date: date | None = None
     notes: str | None = None
+    delivery_cost: Decimal | None = None
+
+
+class PriceReferenceRequest(BaseModel):
+    """"What did we last pay for these materials?" — asked once per open new-purchase panel,
+    re-asked when the supplier or the set of materials on the draft changes."""
+
+    supplier_id: int | None = None
+    material_ids: list[int]
+
+
+class PriceReferenceEntry(BaseModel):
+    material_id: int
+    # total_cost / qty of the chosen line — the frontend does the 4dp/2dp display rounding.
+    unit_cost: Decimal
+    qty: Decimal
+    total_cost: Decimal
+    supplier_id: int | None
+    supplier_name: str | None
+    purchase_id: int
+    purchase_ref: str | None
+    at: date
+    # The chosen line's supplier matches the one asked about (vs a fallback to any supplier).
+    same_supplier: bool
 
 
 class PurchaseReceiptRead(BaseModel):
@@ -86,13 +113,16 @@ class MaterialStockHistoryRead(BaseModel):
     """A single row in a material's unified stock timeline, merged and ordered
     chronologically. Used by GET /materials/{id}/stock-history.
 
-    Three kinds. 'purchase' is a delivery that happened, dated when it arrived, and those
-    plus the 'adjustment' rows account for current_qty exactly. 'purchase_outstanding' is
-    what is still on order — shown on the same timeline because that is where someone looks
-    for it, but deliberately a different kind, because it has not moved any stock."""
+    Five kinds. 'purchase' is a delivery that happened, dated when it arrived, and those
+    plus 'adjustment'/'build'/'scrap' rows account for current_qty exactly.
+    'purchase_outstanding' is what is still on order — shown on the same timeline because
+    that is where someone looks for it, but deliberately a different kind, because it has
+    not moved any stock. 'build' and 'scrap' are adjustments written by services/builds.py
+    (successful build consumption / failed-build scrap), split out of the generic
+    'adjustment' bucket so the timeline says what actually happened."""
 
     id: int
-    kind: Literal["purchase", "purchase_outstanding", "adjustment"]
+    kind: Literal["purchase", "purchase_outstanding", "adjustment", "build", "scrap"]
     at: datetime
     qty: Decimal
     total_cost: Decimal | None
@@ -105,6 +135,8 @@ class MaterialStockHistoryRead(BaseModel):
     product_name: str | None
     variant_id: int | None
     order_id: int | None
+    # Set for 'purchase'/'purchase_outstanding' rows only — links the row to its PO.
+    purchase_id: int | None
 
 
 class PurchaseRead(BaseModel):
@@ -113,11 +145,13 @@ class PurchaseRead(BaseModel):
     id: int
     supplier_id: int | None
     supplier_name: str | None = None
+    supplier_order_number: str | None = None
     order_date: date
     expected_arrival_date: date | None = None
     status: PurchaseStatus
     received_at: datetime | None
     notes: str | None
+    delivery_cost: Decimal | None = None
     created_at: datetime
     updated_at: datetime
     lines: list[PurchaseLineRead] = []

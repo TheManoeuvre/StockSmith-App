@@ -249,6 +249,31 @@ async def create_stock_take(session: AsyncSession, scope: StockTakeScope) -> tup
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Nothing to count — no items match that scope",
         )
+
+    description = await describe_scope(session, scope)
+    # A *partial* overlap with another open take is legitimate and only warns (below). An
+    # open take whose scope renders identically is almost always a double-fire of the
+    # start flow — on 2026-09-02 two takes with the same scope were created six seconds
+    # apart, and the duplicate could only be cleared by hand. Refuse it and point at the
+    # take already open; a deliberate re-count means closing or narrowing that one first.
+    duplicate = (
+        await session.execute(
+            select(StockTake)
+            .where(StockTake.status == StockTakeStatus.open)
+            .where(StockTake.scope_description == description)
+            .order_by(StockTake.id)
+        )
+    ).scalars().first()
+    if duplicate is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Stock take #{duplicate.id} is already open on exactly this scope "
+                f"({description}). Approve or abandon it before starting another, or "
+                "change the scope."
+            ),
+        )
+
     warnings = await _open_take_warnings(session, candidates)
 
     take = StockTake(
@@ -256,7 +281,7 @@ async def create_stock_take(session: AsyncSession, scope: StockTakeScope) -> tup
         includes_materials=scope.include_materials,
         includes_products=scope.include_products,
         overdue_only=scope.overdue_only,
-        scope_description=await describe_scope(session, scope),
+        scope_description=description,
     )
     session.add(take)
     await session.flush()

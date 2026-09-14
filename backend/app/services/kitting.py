@@ -105,6 +105,50 @@ _RESOLVED_PRODUCT_VARIANTS_KITTING_BOM_SQL = text(
 )
 
 
+# Catalogue-wide analog of _RESOLVED_PRODUCT_VARIANTS_KITTING_BOM_SQL aggregated to a per-
+# product cost range — the packaging twin of buildability._VARIANT_COST_RANGE_BY_PRODUCT_SQL,
+# built the same way and for the same reason. See that constant for the full rationale.
+_VARIANT_KITTING_COST_RANGE_BY_PRODUCT_SQL = text(
+    """
+    WITH resolved AS (
+        SELECT v.product_id, v.id AS variant_id, pkm.material_id,
+               COALESCE(qo.qty_required, pkm.qty_required) AS effective_qty_required
+        FROM product_variants v
+        JOIN product_kitting_materials pkm ON pkm.product_id = v.product_id
+        LEFT JOIN product_variant_kitting_materials qo
+            ON qo.variant_id = v.id AND qo.material_id = pkm.material_id AND qo.replaces_material_id IS NULL
+        LEFT JOIN product_variant_kitting_materials sub
+            ON sub.variant_id = v.id AND sub.replaces_material_id = pkm.material_id
+        WHERE v.is_active = true AND sub.id IS NULL
+
+        UNION ALL
+
+        SELECT v.product_id, pvkm.variant_id, pvkm.material_id, pvkm.qty_required
+        FROM product_variant_kitting_materials pvkm
+        JOIN product_variants v ON v.id = pvkm.variant_id
+        WHERE v.is_active = true
+          AND (
+              pvkm.replaces_material_id IS NOT NULL
+              OR pvkm.material_id NOT IN (
+                  SELECT material_id FROM product_kitting_materials WHERE product_id = v.product_id
+              )
+          )
+    ),
+    variant_cost AS (
+        SELECT r.product_id, r.variant_id,
+               SUM(r.effective_qty_required * m.avg_unit_cost) AS kitting_cost_per_unit
+        FROM resolved r
+        JOIN materials m ON m.id = r.material_id
+        WHERE r.effective_qty_required > 0
+        GROUP BY r.product_id, r.variant_id
+    )
+    SELECT product_id, MIN(kitting_cost_per_unit) AS cost_min, MAX(kitting_cost_per_unit) AS cost_max
+    FROM variant_cost
+    GROUP BY product_id
+    """
+)
+
+
 async def get_default_kitting_bom(session: AsyncSession) -> list[DefaultKittingMaterial]:
     result = await session.execute(select(DefaultKittingMaterial))
     return list(result.scalars())
@@ -322,6 +366,18 @@ async def get_kitting_cost_per_unit_by_product(session: AsyncSession) -> dict[in
     per variant by the capacity paths, which carry their own unit costs."""
     rows = await session.execute(_KITTING_COST_PER_UNIT_BY_PRODUCT_SQL)
     return {row.product_id: Decimal(row.kitting_cost_per_unit) for row in rows if row.kitting_cost_per_unit is not None}
+
+
+async def get_kitting_cost_per_unit_range_by_product(session: AsyncSession) -> dict[int, tuple[Decimal, Decimal]]:
+    """(lowest, highest) packaging cost across a product's ACTIVE variants, catalogue-wide in
+    one query — the packaging analog of buildability.get_cost_per_unit_range_by_product, and
+    the variant-aware companion to get_kitting_cost_per_unit_by_product above."""
+    rows = await session.execute(_VARIANT_KITTING_COST_RANGE_BY_PRODUCT_SQL)
+    return {
+        row.product_id: (Decimal(str(row.cost_min)), Decimal(str(row.cost_max)))
+        for row in rows
+        if row.cost_min is not None
+    }
 
 
 def _clamp_value_to_ceiling(
@@ -847,8 +903,15 @@ async def get_order_kitting_summary(session: AsyncSession, order_id: int) -> Ord
             unit_cost = Decimal(material.avg_unit_cost)
         else:
             unit_cost = Decimal(0)
-        effective_qty = effective.get(material_id, Decimal(0))
         consumed_qty = Decimal(ledger.consumed_qty) if ledger is not None else Decimal(0)
+        # Floor the forward-looking requirement at what's already been consumed. Consumption
+        # is monotonic (see get_kitting_cogs_by_order), so lowering or removing an override
+        # after the order shipped — or an additive override that now sits at 0 — leaves the
+        # recomputed effective total below what physically left the building for this order.
+        # Without this, such a line reports effective_qty 0 while consumed_qty stays 1, and
+        # effective_cost_total silently drops it, breaking the "effective and consumed
+        # converge once fully shipped" invariant the editor promises.
+        effective_qty = max(effective.get(material_id, Decimal(0)), consumed_qty)
         result_lines.append(
             OrderKittingRequirementLine(
                 material_id=material_id,
@@ -963,6 +1026,7 @@ async def get_orders_awaiting_packaging(session: AsyncSession) -> list[OrderAwai
             material_name=material_names.get(material_id, "Unknown material"),
             short_by=short_by,
             order_placed_at=order.order_placed_at,
+            platform=order.platform,
         )
         for order, material_id, short_by in shortfalls
     ]

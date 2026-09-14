@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -8,6 +9,8 @@ from sqlalchemy.orm import selectinload
 from app.deps import get_db, require_auth
 from app.models.purchase import MaterialPurchase, Purchase, PurchaseStatus
 from app.schemas.purchase import (
+    PriceReferenceEntry,
+    PriceReferenceRequest,
     PurchaseCreate,
     PurchaseLineCloseInput,
     PurchaseLineInput,
@@ -17,9 +20,21 @@ from app.schemas.purchase import (
 )
 from app.services import purchase_receipts
 from app.services.costing import recompute_materials
+from app.services.csv_io import export_purchases_csv
 from app.services.validation import validate_lines_against_units
 
 router = APIRouter(prefix="/purchases", tags=["purchases"], dependencies=[Depends(require_auth)])
+
+
+def _clean_supplier_order_number(value: str | None) -> str | None:
+    """Blank or whitespace-only means "no supplier reference" — store NULL, not "".
+
+    Keeps the list view's "show the supplier number if there is one" check a plain None test.
+    """
+    if value is None:
+        return None
+    trimmed = value.strip()
+    return trimmed or None
 
 
 async def _get_purchase_with_lines(session: AsyncSession, purchase_id: int) -> Purchase:
@@ -60,6 +75,16 @@ async def list_purchases(
     return list(result.scalars())
 
 
+@router.get("/export")
+async def export_purchases(session: AsyncSession = Depends(get_db)) -> Response:
+    csv_text = await export_purchases_csv(session)
+    return Response(
+        content=csv_text,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=purchases.csv"},
+    )
+
+
 @router.post("", response_model=PurchaseRead, status_code=status.HTTP_201_CREATED)
 async def create_purchase(payload: PurchaseCreate, session: AsyncSession = Depends(get_db)) -> Purchase:
     if not payload.lines:
@@ -69,7 +94,9 @@ async def create_purchase(payload: PurchaseCreate, session: AsyncSession = Depen
 
     purchase = Purchase(
         supplier_id=payload.supplier_id,
+        supplier_order_number=_clean_supplier_order_number(payload.supplier_order_number),
         notes=payload.notes,
+        delivery_cost=payload.delivery_cost,
         expected_arrival_date=payload.expected_arrival_date,
         **({"order_date": payload.order_date} if payload.order_date else {}),
     )
@@ -82,6 +109,67 @@ async def create_purchase(payload: PurchaseCreate, session: AsyncSession = Depen
     return await _get_purchase_with_lines(session, purchase.id)
 
 
+@router.post("/price-reference", response_model=list[PriceReferenceEntry])
+async def price_reference(
+    payload: PriceReferenceRequest, session: AsyncSession = Depends(get_db)
+) -> list[PriceReferenceEntry]:
+    """What each material last cost, so the new-purchase panel can flag a line priced above it.
+
+    Considers any ordered line with a positive invoiced total — not only lines that have been
+    delivered — because the invoiced line total is recorded at PO time. Prefers the most
+    recent line from `supplier_id` when one is given, falling back to the most recent from any
+    supplier. Materials with no such line are simply absent from the result.
+    """
+    if not payload.material_ids:
+        return []
+
+    result = await session.execute(
+        select(MaterialPurchase, Purchase)
+        .join(Purchase, MaterialPurchase.purchase_id == Purchase.id)
+        .where(
+            MaterialPurchase.material_id.in_(payload.material_ids),
+            MaterialPurchase.qty > 0,
+            MaterialPurchase.total_cost > 0,
+        )
+        .options(selectinload(Purchase.supplier))
+        .order_by(Purchase.order_date.desc(), Purchase.id.desc())
+    )
+
+    # Rows arrive newest-first, so the first row seen for a material is the fallback pick; it
+    # is only replaced when a later row is from the supplier asked about and the current pick
+    # is not (which then also stops any older same-supplier row from displacing it).
+    chosen: dict[int, tuple[MaterialPurchase, Purchase]] = {}
+    for line, purchase in result.all():
+        current = chosen.get(line.material_id)
+        if current is None:
+            chosen[line.material_id] = (line, purchase)
+        elif (
+            payload.supplier_id is not None
+            and current[1].supplier_id != payload.supplier_id
+            and purchase.supplier_id == payload.supplier_id
+        ):
+            chosen[line.material_id] = (line, purchase)
+
+    return [
+        PriceReferenceEntry(
+            material_id=material_id,
+            unit_cost=line.total_cost / line.qty,
+            qty=line.qty,
+            total_cost=line.total_cost,
+            supplier_id=purchase.supplier_id,
+            supplier_name=purchase.supplier_name,
+            purchase_id=purchase.id,
+            purchase_ref=purchase.supplier_order_number,
+            at=purchase.order_date,
+            same_supplier=(
+                payload.supplier_id is not None
+                and purchase.supplier_id == payload.supplier_id
+            ),
+        )
+        for material_id, (line, purchase) in chosen.items()
+    ]
+
+
 @router.get("/{purchase_id}", response_model=PurchaseRead)
 async def get_purchase(purchase_id: int, session: AsyncSession = Depends(get_db)) -> Purchase:
     return await _get_purchase_with_lines(session, purchase_id)
@@ -91,6 +179,8 @@ async def get_purchase(purchase_id: int, session: AsyncSession = Depends(get_db)
 async def update_purchase(purchase_id: int, payload: PurchaseUpdate, session: AsyncSession = Depends(get_db)) -> Purchase:
     purchase = await _get_purchase_with_lines(session, purchase_id)
     for field, value in payload.model_dump(exclude_unset=True).items():
+        if field == "supplier_order_number":
+            value = _clean_supplier_order_number(value)
         setattr(purchase, field, value)
     await session.commit()
     return await _get_purchase_with_lines(session, purchase_id)

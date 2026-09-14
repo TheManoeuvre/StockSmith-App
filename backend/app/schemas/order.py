@@ -4,7 +4,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from app.models.listing import ListingPlatform
-from app.models.order import OrderStatus
+from app.models.order import ManualOrderChannel, OrderStatus
 
 
 class OrderLineInput(BaseModel):
@@ -28,6 +28,9 @@ class OrderCreate(BaseModel):
     currency: str | None = None
     shipping_profile_id: int | None = None
     shipping_charged: Decimal | None = None
+    # The order's own channel tag — see ManualOrderChannel. Distinct from the automatic
+    # platform-sync `platform` field, which this never touches.
+    manual_channel: ManualOrderChannel | None = None
     lines: list[OrderLineInput]
 
 
@@ -81,6 +84,7 @@ class OrderLineRead(BaseModel):
     external_line_id: str | None
     needs_mapping: bool
     cost_per_unit_snapshot: Decimal | None = None
+    variation_text: str | None = None
 
 
 class OrderRead(BaseModel):
@@ -88,12 +92,14 @@ class OrderRead(BaseModel):
 
     id: int
     platform: ListingPlatform | None
+    manual_channel: ManualOrderChannel | None = None
     external_order_id: str | None
     status: OrderStatus
     buyer_name: str | None
     buyer_note: str | None
     order_placed_at: datetime
     shipped_at: datetime | None
+    ship_by_date: datetime | None = None
     cancelled_at: datetime | None
     notes: str | None
     created_at: datetime
@@ -122,8 +128,14 @@ class OrderRead(BaseModel):
     kitting_cogs: Decimal | None = None
     net_profit: Decimal | None = None
     cogs_pending: bool = False
+    # A shipped order that never recorded its postage cost — see routers/orders.py
+    # _postage_cost_missing. Kept separate from cogs_pending because the two have
+    # different causes and different fixes.
+    postage_cost_missing: bool = False
     sync_issue: str | None = None
     pending_marketplace_cancellation: bool = False
+    tracking_number: str | None = None
+    carrier: str | None = None
     lines: list[OrderLineRead] = []
 
 

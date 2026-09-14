@@ -49,6 +49,29 @@ def _backend_root() -> Path:
     return Path(__file__).resolve().parent.parent
 
 
+def _load_packaged_pushover_token() -> None:
+    """PUSHOVER_APP_API_TOKEN is StockSmith's own app-wide token, not a per-install secret
+    like the config.json values above, so it isn't generated here — it's baked into the
+    exe at build time by release.yml (see stocksmith-backend.spec) as a bundled
+    .env.packaging file. Absent entirely for an exe built by a plain local `build.ps1`
+    run, where Pushover delivery is then simply unavailable, same as an unconfigured dev
+    .env.
+
+    Reads the file directly rather than letting Settings' `env_file=".env"` pick it up:
+    that path resolves relative to CWD, which for the frozen sidecar is wherever Tauri
+    launched it from, not `_backend_root()`'s extracted bundle dir.
+    """
+    packaged_env = _backend_root() / ".env.packaging"
+    if not packaged_env.exists():
+        return
+    for line in packaged_env.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip())
+
+
 def _generate_config() -> dict:
     from app.security import hash_password
 
@@ -348,6 +371,8 @@ def run() -> Path:
 
     _configure_logging(root / "backend.log")
     logging.getLogger("stocksmith.bootstrap").info("Starting bootstrap (data dir: %s)", root)
+
+    _load_packaged_pushover_token()
 
     config = _load_or_create_config(config_path())
 

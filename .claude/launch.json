@@ -12,6 +12,54 @@
       "runtimeExecutable": "cmd.exe",
       "runtimeArgs": ["/c", "cd /d D:\\Projects\\StockSmith\\backend && C:\\Users\\Benja\\AppData\\Local\\Microsoft\\WinGet\\Packages\\astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe\\uv.exe run uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload"],
       "port": 8000
+    },
+    {
+      "name": "frontend-worktree",
+      "runtimeExecutable": "cmd.exe",
+      "runtimeArgs": ["/c", "set PATH=C:\\PROGRA~1\\nodejs;%PATH% && cd /d D:\\Projects\\StockSmith\\.claude\\worktrees\\purchases-slideover-revamp-9c15e1\\frontend && C:\\PROGRA~1\\nodejs\\npm.cmd run dev -- --port 1430 --strictPort"],
+      "port": 1430
+    },
+    {
+      "name": "backend-worktree",
+      "runtimeExecutable": "cmd.exe",
+      "runtimeArgs": ["/c", "cd /d D:\\Projects\\StockSmith\\.claude\\worktrees\\purchases-slideover-revamp-9c15e1\\backend && C:\\Users\\Benja\\AppData\\Local\\Microsoft\\WinGet\\Packages\\astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe\\uv.exe run uvicorn app.main:app --host 127.0.0.1 --port 8010 --reload"],
+      "port": 8010
+    },
+    {
+      "name": "frontend-settings-redesign",
+      "runtimeExecutable": "cmd.exe",
+      "runtimeArgs": ["/c", "set PATH=C:\\PROGRA~1\\nodejs;%PATH% && cd /d D:\\Projects\\StockSmith\\.claude\\worktrees\\compassionate-proskuriakova-cc5829\\frontend && C:\\PROGRA~1\\nodejs\\npm.cmd run dev -- --port 1440 --strictPort"],
+      "port": 1440
+    },
+    {
+      "name": "backend-settings-redesign",
+      "runtimeExecutable": "cmd.exe",
+      "runtimeArgs": ["/c", "cd /d D:\\Projects\\StockSmith\\.claude\\worktrees\\compassionate-proskuriakova-cc5829\\backend && C:\\Users\\Benja\\AppData\\Local\\Microsoft\\WinGet\\Packages\\astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe\\uv.exe run uvicorn app.main:app --host 127.0.0.1 --port 8020 --reload"],
+      "port": 8020
+    },
+    {
+      "name": "frontend-hide-disabled-bom-materials",
+      "runtimeExecutable": "cmd.exe",
+      "runtimeArgs": ["/c", "set PATH=C:\\PROGRA~1\\nodejs;%PATH% && cd /d D:\\Projects\\StockSmith\\.claude\\worktrees\\hide-disabled-bom-materials-aad163\\frontend && C:\\PROGRA~1\\nodejs\\npm.cmd run dev -- --port 1460 --strictPort"],
+      "port": 1460
+    },
+    {
+      "name": "backend-hide-disabled-bom-materials",
+      "runtimeExecutable": "cmd.exe",
+      "runtimeArgs": ["/c", "cd /d D:\\Projects\\StockSmith\\.claude\\worktrees\\hide-disabled-bom-materials-aad163\\backend && C:\\Users\\Benja\\AppData\\Local\\Microsoft\\WinGet\\Packages\\astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe\\uv.exe run uvicorn app.main:app --host 127.0.0.1 --port 8040 --reload"],
+      "port": 8040
+    },
+    {
+      "name": "frontend-notifications-ui",
+      "runtimeExecutable": "cmd.exe",
+      "runtimeArgs": ["/c", "set PATH=C:\\PROGRA~1\\nodejs;%PATH% && cd /d D:\\Projects\\StockSmith\\.claude\\worktrees\\create-draft-purchase-error-5a6088\\frontend && C:\\PROGRA~1\\nodejs\\npm.cmd run dev -- --port 1450 --strictPort"],
+      "port": 1450
+    },
+    {
+      "name": "backend-notifications-ui",
+      "runtimeExecutable": "cmd.exe",
+      "runtimeArgs": ["/c", "cd /d D:\\Projects\\StockSmith\\.claude\\worktrees\\create-draft-purchase-error-5a6088\\backend && C:\\Users\\Benja\\AppData\\Local\\Microsoft\\WinGet\\Packages\\astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe\\uv.exe run uvicorn app.main:app --host 127.0.0.1 --port 8030 --reload"],
+      "port": 8030
     }
   ]
 }

@@ -107,6 +107,37 @@ async def test_disabled_auto_sync_tick_does_nothing(monkeypatch):
     await sync_scheduler._tick(ListingPlatform.etsy)
 
 
+async def test_a_wedged_commit_sync_is_abandoned_not_awaited_forever(monkeypatch):
+    """The 2026-09-07 stall: commit_sync got stuck (a retry path sleeping on an
+    hours-long Retry-After) and _loop, which awaits _tick to completion before it sleeps
+    or iterates, froze for the whole platform with no failed run and no log line. _tick
+    now bounds commit_sync with asyncio.wait_for; on timeout it records a failed run and
+    returns so the loop lives on.
+    """
+    monkeypatch.setattr(sync_scheduler, "_load_connection", _returning(_SimpleConnection()))
+    monkeypatch.setattr(sync_scheduler, "_COMMIT_SYNC_TIMEOUT_SECONDS", 0.05)
+
+    async def _hang(_platform):
+        # asyncio.sleep is monkeypatched to raise by the autouse fixture, so block on an
+        # event that never fires instead — the point is a coroutine that never returns.
+        await asyncio.Event().wait()
+
+    recorded: list[tuple] = []
+
+    async def _record(platform, mode, error):
+        recorded.append((platform, mode, type(error).__name__))
+
+    monkeypatch.setattr(sync_scheduler.order_sync, "commit_sync", _hang)
+    monkeypatch.setattr(sync_scheduler.order_sync, "record_failed_run", _record)
+
+    # Returns (rather than hangs or raises) — the loop would go on to its sleep.
+    await sync_scheduler._tick(ListingPlatform.etsy)
+
+    assert recorded == [(ListingPlatform.etsy, sync_scheduler.SyncRunMode.commit, "TimeoutError")]
+    # Lock released, so the next tick (or a manual sync) isn't blocked behind the abandoned one.
+    assert not sync_scheduler.get_lock(ListingPlatform.etsy).locked()
+
+
 class _SimpleConnection:
     def __init__(self, auto_sync_enabled: bool = True):
         self.auto_sync_enabled = auto_sync_enabled

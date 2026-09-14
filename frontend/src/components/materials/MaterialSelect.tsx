@@ -1,5 +1,6 @@
 import { useMaterialCategories } from "../../hooks/useMaterialCategories";
 import type { Material } from "../../api/types";
+import { formatUnitCost } from "../../lib/money";
 
 function matchesFilter(material: Material, filterText: string): boolean {
   if (!filterText.trim()) return true;
@@ -18,6 +19,8 @@ export function MaterialSelect({
   filterText = "",
   className,
   disabled = false,
+  showUnitCost = false,
+  kittingOnly = false,
 }: {
   materials: Material[];
   value: number;
@@ -25,12 +28,44 @@ export function MaterialSelect({
   filterText?: string;
   className?: string;
   disabled?: boolean;
+  /** Append "· £X/unit" to each option — used in the BOM pickers so a line's cost driver is
+   *  visible before it's chosen. */
+  showUnitCost?: boolean;
+  /** Restrict the list to materials whose category is flagged "Show in Kitting BOM list"
+   *  (Settings > Material categories). Used by the kitting-BOM pickers so the user isn't
+   *  scrolling past filament and hardware that never gets packed. The row's own current
+   *  selection is always kept, flagged or not, so an existing line never silently changes. */
+  kittingOnly?: boolean;
 }) {
-  const { categories } = useMaterialCategories();
+  const { categories, byName: categoriesByName } = useMaterialCategories();
 
-  // Never hide the row's own current selection, even if it doesn't match the filter —
-  // otherwise typing into the filter box can silently un-select an already-chosen material.
-  const visible = materials.filter((m) => matchesFilter(m, filterText) || m.id === value);
+  const unitCostLabel = (m: Material): string => {
+    if (!showUnitCost) return "";
+    const perKg = categoriesByName.get(m.category)?.cost_per_kg_display;
+    return perKg
+      ? ` · ${formatUnitCost(Number(m.avg_unit_cost) * 1000)}/kg`
+      : ` · ${formatUnitCost(m.avg_unit_cost)}/${m.unit}`;
+  };
+
+  // Never hide the row's own current selection, even if it doesn't match the filter or the
+  // kitting-category restriction — otherwise typing into the filter box, or a line that
+  // predates the restriction, can silently un-select an already-chosen material.
+  const inKittingScope = (m: Material): boolean => {
+    if (!kittingOnly || m.id === value) return true;
+    // Unknown category (list mid-refetch) — can't tell, so keep it rather than flash the row
+    // empty. Self-corrects once categories load.
+    const cat = categoriesByName.get(m.category);
+    return cat ? cat.show_in_kitting_bom_list : true;
+  };
+  // Disabled materials aren't offered as new choices, but a row's own current selection is
+  // always kept — same rationale as inKittingScope: a material getting disabled later shouldn't
+  // silently blank out a BOM line that already references it.
+  const visible = materials.filter(
+    (m) =>
+      (matchesFilter(m, filterText) || m.id === value) &&
+      inKittingScope(m) &&
+      (m.is_active || m.id === value)
+  );
 
   const byCategory = new Map<string, Material[]>();
   for (const m of visible) {
@@ -58,7 +93,7 @@ export function MaterialSelect({
         <optgroup key={category} label={category} className="capitalize">
           {(byCategory.get(category) ?? []).map((m) => (
             <option key={m.id} value={m.id}>
-              {m.name} ({m.unit})
+              {m.name} ({m.unit}){unitCostLabel(m)}
             </option>
           ))}
         </optgroup>

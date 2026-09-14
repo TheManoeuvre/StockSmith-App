@@ -45,6 +45,7 @@ const CATEGORIES = [
     default_unit: "g",
     consumed_on_failed_build: true,
     auto_kitting_per_order: false,
+    show_in_kitting_bom_list: false,
     tracks_colour: true,
     tracks_material_type: true,
     cost_per_kg_display: true,
@@ -58,6 +59,7 @@ const CATEGORIES = [
     default_unit: "each",
     consumed_on_failed_build: false,
     auto_kitting_per_order: true,
+    show_in_kitting_bom_list: true,
     tracks_colour: false,
     tracks_material_type: false,
     cost_per_kg_display: false,
@@ -92,32 +94,59 @@ async function renderMaterialPage(path = "/materials/7") {
 describe("material detail", () => {
   beforeEach(() => setRoutes(materialRoutes()));
 
-  it("disables Save until a detail changes, then re-disables after saving", async () => {
+  it("disables the footer Save until a detail changes, then re-disables after saving", async () => {
     const user = userEvent.setup();
     await renderMaterialPage();
 
+    // The panel opens on Details, where the editable identity fields live.
+    await user.click(await screen.findByRole("button", { name: "Details" }, { timeout: 5000 }));
     const nameInput = await screen.findByDisplayValue("PLA+ Filament", {}, { timeout: 5000 });
-    const save = within(nameInput.closest("form")!).getByRole("button", { name: "Save" });
+    // The shared edit form no longer carries its own Save — the slide-over has one footer
+    // Save/Revert bar, like the product slide-over.
+    expect(within(nameInput.closest("form")!).queryByRole("button", { name: "Save" })).toBeNull();
+    const save = screen.getByRole("button", { name: "Save" });
     expect(save).toBeDisabled();
+    expect(screen.getByText("No changes")).toBeInTheDocument();
 
     await user.type(nameInput, " v2");
     await waitFor(() => expect(save).toBeEnabled());
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
 
     await user.click(save);
     await waitFor(() => expect(calls.some((c) => c.method === "PATCH" && c.path === "/materials/7")).toBe(true));
     await waitFor(() => expect(save).toBeDisabled());
   });
 
+  it("the footer Revert discards a buffered detail edit without a PATCH", async () => {
+    const user = userEvent.setup();
+    await renderMaterialPage();
+
+    await user.click(await screen.findByRole("button", { name: "Details" }, { timeout: 5000 }));
+    const nameInput = await screen.findByDisplayValue("PLA+ Filament", {}, { timeout: 5000 });
+
+    await user.type(nameInput, " v2");
+    await waitFor(() => expect(screen.getByText("Unsaved changes")).toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "Revert" }));
+    await waitFor(() => expect(screen.getByDisplayValue("PLA+ Filament")).toBeInTheDocument());
+    expect(screen.getByText("No changes")).toBeInTheDocument();
+    expect(calls.some((c) => c.method === "PATCH" && c.path === "/materials/7")).toBe(false);
+  });
+
   it("warns before navigating away from unsaved detail edits", async () => {
     const user = userEvent.setup();
     const router = await renderMaterialPage();
 
+    await user.click(await screen.findByRole("button", { name: "Details" }, { timeout: 5000 }));
     const nameInput = await screen.findByDisplayValue("PLA+ Filament", {}, { timeout: 5000 });
     await user.type(nameInput, " v2");
 
     await user.click(screen.getByRole("link", { name: "Products" }));
 
-    const dialog = await screen.findByRole("dialog");
+    // Named lookup, not a bare role query: the detail panel itself is also role="dialog"
+    // (see DetailPanel.tsx) and stays mounted underneath, so an unqualified query would be
+    // ambiguous between it and this confirmation.
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
     expect(within(dialog).getByText("Material details")).toBeInTheDocument();
 
     await user.click(within(dialog).getByRole("button", { name: /keep editing/i }));
@@ -128,7 +157,9 @@ describe("material detail", () => {
     const user = userEvent.setup();
     await renderMaterialPage();
 
-    const reason = await screen.findByPlaceholderText("Breakage, recount, …", {}, { timeout: 5000 });
+    // The panel opens on Details now — the adjust form lives on the Stock tab.
+    await user.click(await screen.findByRole("button", { name: "Stock" }, { timeout: 5000 }));
+    const reason = await screen.findByLabelText("Reason", {}, { timeout: 5000 });
     const adjustForm = reason.closest("form")!;
     const record = within(adjustForm).getByRole("button", { name: "Save" });
     expect(record).toBeDisabled();
@@ -136,7 +167,7 @@ describe("material detail", () => {
     await user.type(within(adjustForm).getByLabelText("Adjust by"), "-5");
     expect(record).toBeDisabled(); // a value alone isn't enough
 
-    await user.type(reason, "Recount");
+    await user.selectOptions(reason, "Correction");
     await waitFor(() => expect(record).toBeEnabled());
   });
 
@@ -144,12 +175,13 @@ describe("material detail", () => {
     const user = userEvent.setup();
     const router = await renderMaterialPage();
 
-    const reason = await screen.findByPlaceholderText("Breakage, recount, …", {}, { timeout: 5000 });
-    await user.type(reason, "Spillage");
+    await user.click(await screen.findByRole("button", { name: "Stock" }, { timeout: 5000 }));
+    const reason = await screen.findByLabelText("Reason", {}, { timeout: 5000 });
+    await user.selectOptions(reason, "Spool ran short");
 
     await user.click(screen.getByRole("link", { name: "Products" }));
 
-    const dialog = await screen.findByRole("dialog");
+    const dialog = await screen.findByRole("dialog", { name: "Unsaved changes" });
     expect(within(dialog).getByText("Stock adjustment")).toBeInTheDocument();
 
     await user.click(within(dialog).getByRole("button", { name: /discard changes/i }));
@@ -159,12 +191,12 @@ describe("material detail", () => {
   it("does not warn when nothing has been touched", async () => {
     const user = userEvent.setup();
     const router = await renderMaterialPage();
-    await screen.findByDisplayValue("PLA+ Filament", {}, { timeout: 5000 });
+    await screen.findByRole("dialog", { name: "PLA+ Filament" }, { timeout: 5000 });
 
     await user.click(screen.getByRole("link", { name: "Products" }));
 
     await waitFor(() => expect(router.state.location.pathname).toBe("/products"));
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Unsaved changes" })).not.toBeInTheDocument();
   });
 });
 
@@ -198,32 +230,41 @@ describe("materials list", () => {
 
 describe("category-driven fields", () => {
   it("offers Colour and Material type when the category tracks them", async () => {
+    const user = userEvent.setup();
     setRoutes(materialRoutes());
     await renderMaterialPage();
 
+    await user.click(await screen.findByRole("button", { name: "Details" }, { timeout: 5000 }));
     await screen.findByDisplayValue("PLA+ Filament", {}, { timeout: 5000 });
-    expect(screen.getByText("Colour / hex")).toBeInTheDocument();
+    expect(screen.getByText("Colour")).toBeInTheDocument();
     expect(screen.getByText("Material type")).toBeInTheDocument();
   });
 
   it("hides them for a category that doesn't, and shows cost per unit", async () => {
     // Same page, same material, different category row — nothing here names filament, which is
     // the point: the fields follow the flags, not a hardcoded category.
+    const user = userEvent.setup();
     setRoutes(materialRoutes({ ...MATERIAL, category: "packaging", category_id: 2, unit: "each" }));
     await renderMaterialPage();
 
+    const panel = await screen.findByRole("dialog", { name: "PLA+ Filament" }, { timeout: 5000 });
+    await user.click(within(panel).getByRole("button", { name: "Details" }));
     await screen.findByDisplayValue("PLA+ Filament", {}, { timeout: 5000 });
-    expect(screen.queryByText("Colour / hex")).toBeNull();
-    expect(screen.queryByText("Material type")).toBeNull();
-    expect(screen.getByText("Avg unit cost")).toBeInTheDocument();
-    expect(screen.queryByText("Avg cost/kg")).toBeNull();
+    expect(within(panel).queryByText("Colour")).toBeNull();
+    expect(within(panel).queryByText("Material type")).toBeNull();
+
+    // The read-only cost figure lives on the Supplier tab now.
+    await user.click(within(panel).getByRole("button", { name: "Supplier" }));
+    expect(within(panel).getByText("Avg unit cost")).toBeInTheDocument();
+    expect(within(panel).queryByText("Avg cost/kg")).toBeNull();
   });
 
   it("shows cost per kg for a category that asks for it", async () => {
+    const user = userEvent.setup();
     setRoutes(materialRoutes());
     await renderMaterialPage();
 
-    await screen.findByDisplayValue("PLA+ Filament", {}, { timeout: 5000 });
-    expect(screen.getByText("Avg cost/kg")).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Supplier" }, { timeout: 5000 }));
+    expect(await screen.findByText("Avg cost/kg")).toBeInTheDocument();
   });
 });

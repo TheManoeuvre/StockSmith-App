@@ -9,6 +9,6 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
  */
 export const Route = createFileRoute("/suppliers/")({
   beforeLoad: () => {
-    throw redirect({ to: "/settings", search: { tab: "reference" } });
+    throw redirect({ to: "/settings", search: { page: "lists" } });
   },
 });

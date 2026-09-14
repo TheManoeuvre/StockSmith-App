@@ -63,6 +63,10 @@ class ListingProfile(Base):
     # is a local price/cost concept referenced by historical orders and carries no
     # marketplace id.
     etsy_shipping_profile_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Etsy's processing profile. createDraftListing's own docs list this as optional, but
+    # the live API refuses a physical draft without it ("A readiness_state_id is required
+    # for physical listings"), so it is required-in-practice here too.
+    etsy_readiness_state_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     etsy_return_policy_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     etsy_shop_section_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     etsy_processing_min: Mapped[int | None] = mapped_column(Integer, nullable=True)

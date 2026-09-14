@@ -12,6 +12,7 @@ class ListingProfileBase(BaseModel):
     etsy_when_made: str | None = None
     etsy_is_supply: bool | None = None
     etsy_shipping_profile_id: int | None = None
+    etsy_readiness_state_id: int | None = None
     etsy_return_policy_id: int | None = None
     etsy_shop_section_id: int | None = None
     etsy_processing_min: int | None = None
@@ -49,6 +50,7 @@ class ListingProfileUpdate(BaseModel):
     etsy_when_made: str | None = None
     etsy_is_supply: bool | None = None
     etsy_shipping_profile_id: int | None = None
+    etsy_readiness_state_id: int | None = None
     etsy_return_policy_id: int | None = None
     etsy_shop_section_id: int | None = None
     etsy_processing_min: int | None = None

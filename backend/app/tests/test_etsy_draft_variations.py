@@ -79,7 +79,7 @@ async def _setup(session, *, variants, attributes=("Studs", "Colour"), stock=5):
         ListingProfile(
             platform=ETSY, name="Handmade", is_default=True, etsy_taxonomy_id=1234,
             etsy_who_made="i_did", etsy_when_made="made_to_order", etsy_is_supply=False,
-            etsy_shipping_profile_id=99,
+            etsy_shipping_profile_id=99, etsy_readiness_state_id=7,
         )
     )
     names = list(attributes) + [None] * (3 - len(attributes))

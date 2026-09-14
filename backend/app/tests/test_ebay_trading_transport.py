@@ -207,6 +207,7 @@ _GET_ITEM = """
     <ItemID>227269664481</ItemID>
     <Title>Aqara G400 mount</Title>
     <ListingType>FixedPriceItem</ListingType>
+    <SKU>SKU-0012</SKU>
     <SellingStatus><QuantityAvailable>9</QuantityAvailable></SellingStatus>
     <Variations>
       <Variation>
@@ -236,6 +237,7 @@ async def test_get_item_returns_variation_detail(fake_http):
 
     assert candidate.detail_loaded is True
     assert candidate.skus == ["SKU-0012-A", "SKU-0012-B"]
+    assert candidate.listing_sku == "SKU-0012"
     assert candidate.variation_specifics == [{"Colour": "Black"}, {"Colour": "White"}]
     assert candidate.ineligibility_reasons == []
 

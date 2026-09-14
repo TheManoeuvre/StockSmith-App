@@ -7,6 +7,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.kitting import ProductKittingMaterial, ProductVariantKittingMaterial
 from app.models.listing import ListingPlatform
 from app.models.material import Material
 from app.models.product import Product, ProductMaterial
@@ -158,8 +159,10 @@ class ResolvedOverride:
     material_source: tuple[str, str] | None = None  # (attribute name, value) that set the material
     qty_source: tuple[str, str] | None = None  # (attribute name, value) that set the quantity
 
-    def to_row(self, variant_id: int) -> ProductVariantMaterial:
-        return ProductVariantMaterial(
+    def to_row(
+        self, variant_id: int, row_cls: type[ProductVariantMaterial] | type[ProductVariantKittingMaterial] = ProductVariantMaterial
+    ) -> ProductVariantMaterial | ProductVariantKittingMaterial:
+        return row_cls(
             variant_id=variant_id,
             material_id=self.material_id,
             replaces_material_id=self.replaces_material_id,
@@ -521,6 +524,7 @@ async def amend_attribute_bom_overrides(
     *,
     apply: bool = False,
     include_inactive: bool = False,
+    is_kitting: bool = False,
 ) -> tuple[list, int, int]:
     """Rewrites one base BOM line per amend line, across every variant sharing an
     attribute value — "set the Ivory White quantity to 3 for all Large variants".
@@ -545,17 +549,21 @@ async def amend_attribute_bom_overrides(
 
     value_attr = _resolve_attribute_slot(product, attribute_name)
 
+    base_material_cls = ProductKittingMaterial if is_kitting else ProductMaterial
+    variant_material_cls = ProductVariantKittingMaterial if is_kitting else ProductVariantMaterial
+    bom_label = "kitting BOM" if is_kitting else "build BOM"
+
     base_lines = {
         pm.material_id: pm
         for pm in (
-            await session.execute(select(ProductMaterial).where(ProductMaterial.product_id == product_id))
+            await session.execute(select(base_material_cls).where(base_material_cls.product_id == product_id))
         ).scalars()
     }
     missing = {line.base_material_id for line in lines} - set(base_lines)
     if missing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Material(s) {sorted(missing)} are not on this product's build BOM",
+            detail=f"Material(s) {sorted(missing)} are not on this product's {bom_label}",
         )
 
     referenced = {line.base_material_id for line in lines} | {
@@ -593,12 +601,12 @@ async def amend_attribute_bom_overrides(
     targets = matched if include_inactive else [v for v in matched if v.is_active]
     skipped_inactive = len(matched) - len(targets)
 
-    existing_by_variant: dict[int, list[ProductVariantMaterial]] = {}
+    existing_by_variant: dict[int, list] = {}
     if targets:
         rows = (
             await session.execute(
-                select(ProductVariantMaterial).where(
-                    ProductVariantMaterial.variant_id.in_([v.id for v in targets])
+                select(variant_material_cls).where(
+                    variant_material_cls.variant_id.in_([v.id for v in targets])
                 )
             )
         ).scalars()
@@ -643,7 +651,7 @@ async def amend_attribute_bom_overrides(
         await session.flush()
         for variant, _changes, _replaced_rows, new_rows in units:
             for row in new_rows:
-                session.add(row.to_row(variant.id))
+                session.add(row.to_row(variant.id, variant_material_cls))
         await session.commit()
 
     return units, len(matched), skipped_inactive

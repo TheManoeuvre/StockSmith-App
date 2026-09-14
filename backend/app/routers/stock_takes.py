@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.deps import get_db, require_auth
 from app.models.material import Material
@@ -26,6 +27,7 @@ from app.schemas.stock_take import (
     LineCountUpdate,
     LineResolution,
     ScopePreview,
+    StockTakeProgress,
     StockTakeCreated,
     StockTakeDetail,
     StockTakeImportResult,
@@ -46,12 +48,37 @@ async def _name_lookups(session: AsyncSession, lines: list[StockTakeLine]) -> tu
     product_ids = {line.product_id for line in lines if line.product_id}
     variant_ids = {line.variant_id for line in lines if line.variant_id}
     materials = (
-        {m.id: m for m in (await session.execute(select(Material).where(Material.id.in_(material_ids)))).scalars()}
+        {
+            m.id: m
+            # group_lines reads material_type_name for the sub-group heading; without eager
+            # loading that's a lazy load mid-iteration, which async SQLAlchemy can't do
+            # (MissingGreenlet). category_ref is already lazy="selectin" on the model.
+            for m in (
+                await session.execute(
+                    select(Material)
+                    .options(selectinload(Material.material_type))
+                    .where(Material.id.in_(material_ids))
+                )
+            ).scalars()
+        }
         if material_ids
         else {}
     )
     products = (
-        {p.id: p for p in (await session.execute(select(Product).where(Product.id.in_(product_ids)))).scalars()}
+        {
+            p.id: p
+            # group_lines reads product_category_name for the group heading; Product's
+            # product_category relationship has no lazy="selectin", so without this it's a
+            # lazy load mid-iteration that async SQLAlchemy can't do (MissingGreenlet) —
+            # the same hazard the materials query above guards against.
+            for p in (
+                await session.execute(
+                    select(Product)
+                    .options(selectinload(Product.product_category))
+                    .where(Product.id.in_(product_ids))
+                )
+            ).scalars()
+        }
         if product_ids
         else {}
     )
@@ -112,6 +139,25 @@ def _open_days(take: StockTake) -> int:
     return max((end - started).days, 0)
 
 
+# A line "had a count completed" if a number was entered on the sheet and the line was
+# carried forward with it — whether it applied cleanly or got flagged for review. `skipped`
+# (left blank) and `pending`/`counted`-but-nothing means it did not.
+_COUNT_COMPLETED = frozenset(
+    {StockTakeLineStatus.counted, StockTakeLineStatus.applied, StockTakeLineStatus.conflict}
+)
+
+
+def _progress_status(take: StockTake, lines: list[StockTakeLine]) -> StockTakeProgress:
+    if take.status is not StockTakeStatus.closed:
+        return StockTakeProgress.open
+    applied = sum(1 for line in lines if line.status is StockTakeLineStatus.applied)
+    if lines and applied == len(lines):
+        return StockTakeProgress.completed
+    if applied > 0:
+        return StockTakeProgress.partially_completed
+    return StockTakeProgress.closed
+
+
 def _take_fields(take: StockTake, lines: list[StockTakeLine]) -> dict:
     """The stored columns plus the counts derived from this take's lines.
 
@@ -131,8 +177,10 @@ def _take_fields(take: StockTake, lines: list[StockTakeLine]) -> dict:
         "closed_at": take.closed_at,
         "notes": take.notes,
         "open_days": _open_days(take),
+        "progress_status": _progress_status(take, lines),
         "line_count": len(lines),
         "counted_count": sum(1 for line in lines if line.status is StockTakeLineStatus.counted),
+        "completed_count": sum(1 for line in lines if line.status in _COUNT_COMPLETED),
         "pending_count": sum(1 for line in lines if line.status is StockTakeLineStatus.pending),
         "conflict_count": sum(1 for line in lines if line.status is StockTakeLineStatus.conflict),
     }

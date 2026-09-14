@@ -99,3 +99,48 @@ async def test_effective_and_consumed_costs_converge_when_fully_shipped(session)
 
     read = await _serialize_one(session, await _get_order_with_lines(session, order.id))
     assert Decimal(read.kitting_cogs) == summary.consumed_cost_total
+
+
+async def test_effective_never_drops_below_what_was_consumed(session):
+    """An additive override that's been consumed and then lowered to 0 (or removed) must
+    still count towards the effective total — otherwise the editor's headline "Kitting
+    cost" understates and disagrees with COGS on a fully-shipped order, even though its
+    own copy promises the two converge."""
+    order, box = await _order_with_kitting(session, qty=2)
+
+    label = Material(name="Label", category=LegacyMaterialCategory.packaging, unit=MaterialUnit.each)
+    session.add(label)
+    await session.flush()
+    await received_purchase(session, label.id, Decimal(100), Decimal("55.00"), received_at=_STOCKED_AT)
+    await session.commit()
+    await recompute_material(session, label.id)
+
+    # Add the label as an extra kitting line for this order (additive: not in any BOM).
+    await replace_kitting_overrides(
+        order.id,
+        [
+            OrderKittingOverrideLine(material_id=box.id, qty_required=Decimal(1), replaces_material_id=None),
+            OrderKittingOverrideLine(material_id=label.id, qty_required=Decimal(1), replaces_material_id=None),
+        ],
+        session=session,
+    )
+
+    await allocation.ship_order(session, await session.get(Order, order.id))
+    await session.commit()
+
+    summary = await get_order_kitting_summary(session, order.id)
+    assert summary.effective_cost_total == summary.consumed_cost_total
+
+    # Now zero the label override, as if the user cleared the extra line after shipping.
+    await replace_kitting_overrides(
+        order.id,
+        [OrderKittingOverrideLine(material_id=box.id, qty_required=Decimal(1), replaces_material_id=None)],
+        session=session,
+    )
+
+    summary = await get_order_kitting_summary(session, order.id)
+    label_line = next(l for l in summary.lines if l.material_id == label.id)
+    assert label_line.consumed_qty == Decimal(1)
+    assert label_line.effective_qty == Decimal(1)  # floored at consumed, not 0
+    assert label_line.effective_cost == label_line.consumed_cost
+    assert summary.effective_cost_total == summary.consumed_cost_total

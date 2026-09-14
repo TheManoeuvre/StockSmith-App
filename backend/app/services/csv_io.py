@@ -5,13 +5,16 @@ from decimal import Decimal, InvalidOperation
 from fastapi import HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.models.manufacturer import Manufacturer
 from app.models.material import Material, MaterialAdjustment, MaterialAdjustmentMode, MaterialUnit
 from app.models.material_category import MaterialCategory
 from app.models.colour import Colour
 from app.models.material_type import MaterialType
+from app.models.order import Order
 from app.models.product import Product
+from app.models.purchase import Purchase
 from app.models.supplier import Supplier
 from app.services.colours import find_or_create as find_or_create_colour
 from app.services import material_categories
@@ -35,7 +38,36 @@ MATERIALS_CSV_FIELDS = [
     "product_url",
 ]
 
-PRODUCTS_CSV_FIELDS = ["name", "sku", "description"]
+PRODUCTS_CSV_FIELDS = ["name", "sku", "description", "is_active"]
+
+ORDERS_CSV_FIELDS = [
+    "id",
+    "channel",
+    "external_order_id",
+    "status",
+    "buyer_name",
+    "order_placed_at",
+    "shipped_at",
+    "grand_total",
+    "subtotal",
+    "shipping_charged",
+    "tax_charged",
+    "currency",
+    "payment_status",
+]
+
+PURCHASES_CSV_FIELDS = [
+    "id",
+    "supplier_order_number",
+    "supplier_name",
+    "order_date",
+    "expected_arrival_date",
+    "status",
+    "received_at",
+    "total_cost",
+    "delivery_cost",
+    "notes",
+]
 
 # Keyed on line_id, deviating from the names-not-ids rule the two exports above follow.
 # That rule exists because those files are meant to move between machines; this one is
@@ -280,7 +312,66 @@ async def export_products_csv(session: AsyncSession) -> str:
     writer = csv.DictWriter(buf, fieldnames=PRODUCTS_CSV_FIELDS)
     writer.writeheader()
     for p in result.scalars():
-        writer.writerow({"name": p.name, "sku": p.sku or "", "description": p.description or ""})
+        writer.writerow(
+            {
+                "name": p.name,
+                "sku": p.sku or "",
+                "description": p.description or "",
+                "is_active": "true" if p.is_active else "false",
+            }
+        )
+    return buf.getvalue()
+
+
+async def export_orders_csv(session: AsyncSession) -> str:
+    result = await session.execute(select(Order).order_by(Order.order_placed_at.desc(), Order.id.desc()))
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=ORDERS_CSV_FIELDS)
+    writer.writeheader()
+    for o in result.scalars():
+        writer.writerow(
+            {
+                "id": o.id,
+                "channel": o.platform.value if o.platform is not None else "manual",
+                "external_order_id": o.external_order_id or "",
+                "status": o.status.value,
+                "buyer_name": o.buyer_name or "",
+                "order_placed_at": o.order_placed_at.isoformat(),
+                "shipped_at": o.shipped_at.isoformat() if o.shipped_at is not None else "",
+                "grand_total": str(o.grand_total) if o.grand_total is not None else "",
+                "subtotal": str(o.subtotal) if o.subtotal is not None else "",
+                "shipping_charged": str(o.shipping_charged) if o.shipping_charged is not None else "",
+                "tax_charged": str(o.tax_charged) if o.tax_charged is not None else "",
+                "currency": o.currency or "",
+                "payment_status": o.payment_status or "",
+            }
+        )
+    return buf.getvalue()
+
+
+async def export_purchases_csv(session: AsyncSession) -> str:
+    result = await session.execute(
+        select(Purchase).options(selectinload(Purchase.supplier), selectinload(Purchase.lines)).order_by(Purchase.order_date.desc(), Purchase.id.desc())
+    )
+    buf = io.StringIO()
+    writer = csv.DictWriter(buf, fieldnames=PURCHASES_CSV_FIELDS)
+    writer.writeheader()
+    for p in result.scalars():
+        total_cost = sum((Decimal(line.total_cost) for line in p.lines), Decimal(0))
+        writer.writerow(
+            {
+                "id": p.id,
+                "supplier_order_number": p.supplier_order_number or "",
+                "supplier_name": p.supplier_name or "",
+                "order_date": p.order_date.isoformat(),
+                "expected_arrival_date": p.expected_arrival_date.isoformat() if p.expected_arrival_date else "",
+                "status": p.status.value,
+                "received_at": p.received_at.isoformat() if p.received_at is not None else "",
+                "total_cost": str(total_cost),
+                "delivery_cost": str(p.delivery_cost) if p.delivery_cost is not None else "",
+                "notes": p.notes or "",
+            }
+        )
     return buf.getvalue()
 
 
@@ -297,13 +388,14 @@ async def import_products_csv(session: AsyncSession, content: bytes) -> dict:
                 raise ValueError("name is required")
             sku = (row.get("sku") or "").strip() or None
             description = row.get("description") or None
+            is_active = _parse_bool(row.get("is_active"), default=True)
 
             existing = None
             if sku:
                 existing = (await session.execute(select(Product).where(Product.sku == sku))).scalar_one_or_none()
 
             if existing is None:
-                product = Product(name=name, sku=sku, description=description)
+                product = Product(name=name, sku=sku, description=description, is_active=is_active)
                 session.add(product)
                 await session.flush()
                 if not sku:
@@ -313,6 +405,7 @@ async def import_products_csv(session: AsyncSession, content: bytes) -> dict:
             else:
                 existing.name = name
                 existing.description = description
+                existing.is_active = is_active
                 updated += 1
 
             await session.commit()
@@ -332,7 +425,18 @@ async def _stock_take_lookups(session: AsyncSession, lines) -> tuple[dict, dict,
     product_ids = {line.product_id for line in lines if line.product_id}
     variant_ids = {line.variant_id for line in lines if line.variant_id}
     materials = (
-        {m.id: m for m in (await session.execute(select(Material).where(Material.id.in_(material_ids)))).scalars()}
+        {
+            m.id: m
+            for m in (
+                await session.execute(
+                    # group_lines reads material_type_name through a relationship — a lazy
+                    # load in async raises MissingGreenlet rather than fetching.
+                    select(Material)
+                    .where(Material.id.in_(material_ids))
+                    .options(selectinload(Material.material_type))
+                )
+            ).scalars()
+        }
         if material_ids
         else {}
     )

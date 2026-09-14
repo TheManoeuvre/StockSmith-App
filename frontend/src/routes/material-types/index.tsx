@@ -9,6 +9,6 @@ import { createFileRoute, redirect } from "@tanstack/react-router";
  */
 export const Route = createFileRoute("/material-types/")({
   beforeLoad: () => {
-    throw redirect({ to: "/settings", search: { tab: "reference" } });
+    throw redirect({ to: "/settings", search: { page: "lists" } });
   },
 });

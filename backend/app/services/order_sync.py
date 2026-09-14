@@ -16,7 +16,7 @@ from app.models.product import Product
 from app.models.variant import ProductVariant
 from app.schemas.platform import SyncCommitResult, SyncPreviewLine, SyncPreviewOrder, SyncPreviewResult
 from app.services import allocation
-from app.services.order_costs import resolve_order_shipping_profile
+from app.services.order_costs import default_order_shipping_profile
 from app.services.platforms import get_adapter
 from app.services.platforms.base import ExternalOrder, PaymentState, ensure_utc
 from app.services.variants import find_by_sku
@@ -420,8 +420,11 @@ def _apply_financials(order: Order, ext_order: ExternalOrder) -> None:
     ext_order — called both for brand-new orders and, critically, for already-imported
     ones on every later sync, since that's what lets a late change (payment settling, a
     refund) show up without waiting for the order to be re-created. Deliberately touches
-    ONLY these financial fields — buyer_name/buyer_note/notes/order_placed_at are
-    user-editable via PATCH /orders/{id} and must not be silently overwritten by a sync."""
+    ONLY these financial fields (and ship_by_date, below — not financial, but the same
+    kind of marketplace-owned, never-user-edited field) — buyer_name/buyer_note/notes/
+    order_placed_at are user-editable via PATCH /orders/{id} and must not be silently
+    overwritten by a sync."""
+    order.ship_by_date = ext_order.ship_by_date
     order.currency = ext_order.currency
     order.grand_total = _parse_price(ext_order.grand_total)
     order.subtotal = _parse_price(ext_order.subtotal)
@@ -440,6 +443,13 @@ def _apply_financials(order: Order, ext_order: ExternalOrder) -> None:
         order.payment_fees = _parse_price(ext_order.payment_fees)
         order.payment_net = _parse_price(ext_order.payment_net)
         order.payment_status = ext_order.payment_status
+
+    # Only written once the adapter actually has it (fetched under the same enrich gate
+    # as the payment trio above) — never blanked out on a sync pass that skipped
+    # enrichment, the same reasoning as the guard above.
+    if ext_order.tracking_number:
+        order.tracking_number = ext_order.tracking_number
+        order.carrier = ext_order.carrier
 
     order.financials_synced_at = datetime.now(timezone.utc)
 
@@ -480,18 +490,6 @@ def _parse_price(raw: str | None) -> Decimal | None:
         return None
 
 
-async def _default_shipping_profile_if_unset(session: AsyncSession, order: Order) -> None:
-    """Auto-defaults a synced order's shipping profile from its lines' resolved product/
-    variant default, the first time it has any resolvable lines — never overwrites an
-    already-set value, so a user's manual reassignment survives future re-syncs."""
-    if order.shipping_profile_id is not None:
-        return
-    await session.flush()
-    result = await session.execute(select(OrderLine.product_id, OrderLine.variant_id).where(OrderLine.order_id == order.id))
-    pairs = [(product_id, variant_id) for product_id, variant_id in result]
-    order.shipping_profile_id = await resolve_order_shipping_profile(session, pairs)
-
-
 async def _upsert_lines(session: AsyncSession, order: Order, ext_order: ExternalOrder) -> int:
     """Returns how many lines on this order needed mapping. Lines are matched by
     external_line_id and only ever created, never mutated — Etsy line items don't
@@ -527,9 +525,10 @@ async def _upsert_lines(session: AsyncSession, order: Order, ext_order: External
                 external_line_id=ext_line.external_line_id,
                 sku=ext_line.sku,
                 needs_mapping=needs_mapping,
+                variation_text=ext_line.variation_text,
             )
         )
-    await _default_shipping_profile_if_unset(session, order)
+    await default_order_shipping_profile(session, order)
     return needs_mapping_count
 
 
@@ -665,3 +664,13 @@ async def _record_failure(session: AsyncSession, platform: ListingPlatform, mode
     )
     session.add(run)
     await session.commit()
+
+
+async def record_failed_run(platform: ListingPlatform, mode: SyncRunMode, error: Exception) -> None:
+    """Log a failed sync run from outside commit_sync/preview_sync — e.g. sync_scheduler
+    abandoning a tick that blew past its timeout, where the cancelled commit_sync coroutine
+    never reaches its own except-clause (asyncio.CancelledError is a BaseException, not an
+    Exception). Self-contained: opens its own short-lived session, like _record_failure's
+    callers already do."""
+    async with async_session_factory() as session:
+        await _record_failure(session, platform, mode, error)

@@ -69,8 +69,8 @@ class FakeEbayAdapter:
     async def fetch_classic_listings(self, session, connection):
         return [self.candidate]
 
-    async def revise_listing_skus(self, session, connection, candidate, new_skus):
-        self.calls.append(("revise", list(new_skus)))
+    async def revise_listing_skus(self, session, connection, candidate, new_skus, listing_sku=None):
+        self.calls.append(("revise", list(new_skus), listing_sku))
 
     async def migrate_listing(self, session, connection, external_listing_id):
         self.calls.append(("migrate", external_listing_id))
@@ -140,7 +140,12 @@ async def _make_product(session, sku: str, suffixes: list[str]) -> tuple[Product
     return product, variants
 
 
-def _candidate(skus: list[str], specifics: list[dict[str, str]] | None, is_migrated: bool = False):
+def _candidate(
+    skus: list[str],
+    specifics: list[dict[str, str]] | None,
+    is_migrated: bool = False,
+    listing_sku: str | None = None,
+):
     return ClassicListingCandidate(
         external_listing_id="227269664481",
         title="Aqara G400 mount",
@@ -149,6 +154,7 @@ def _candidate(skus: list[str], specifics: list[dict[str, str]] | None, is_migra
         variation_specifics=specifics,
         quantity=4,
         is_migrated=is_migrated,
+        listing_sku=listing_sku,
         detail_loaded=True,
     )
 
@@ -189,6 +195,9 @@ async def test_align_skus_revises_before_migrating(session, monkeypatch):
     assert ordered.index("revise") < ordered.index("migrate")
     revise_call = next(c for c in adapter.calls if c[0] == "revise")
     assert revise_call[1] == ["SKU-0012-A", "SKU-0012-B"]
+    # The listing had no Item.SKU; alignment sets it from the product's own SKU so eBay's
+    # migration doesn't reject the multi-variation listing.
+    assert revise_call[2] == "SKU-0012"
 
     # Alignment resolved the divergence, so nothing should be reported as conflicting.
     assert result.skus_aligned is True
@@ -201,7 +210,11 @@ async def test_align_skus_is_a_noop_when_skus_already_match(session, monkeypatch
     await _connect(session, ListingPlatform.ebay)
     product, variants = await _make_product(session, "SKU-0012", ["A", "B"])
     adapter = FakeEbayAdapter(
-        _candidate(["SKU-0012-A", "SKU-0012-B"], [{"Colour": "Black"}, {"Colour": "White"}])
+        _candidate(
+            ["SKU-0012-A", "SKU-0012-B"],
+            [{"Colour": "Black"}, {"Colour": "White"}],
+            listing_sku="SKU-0012",
+        )
     )
     _use_adapter(monkeypatch, adapter, "EbayAdapter")
 
@@ -220,6 +233,67 @@ async def test_align_skus_is_a_noop_when_skus_already_match(session, monkeypatch
 
     assert not any(c[0] == "revise" for c in adapter.calls)
     assert result.skus_aligned is False
+
+
+async def test_multi_variation_without_listing_sku_is_blocked_with_a_useful_message(session, monkeypatch):
+    """eBay rejects a multi-variation migration when the listing itself has no Item.SKU
+    ("The listing SKU cannot be null or empty"). Without align_skus there's nothing to set
+    it, so this must fail early with guidance rather than surfacing eBay's bare 400."""
+    await _connect(session, ListingPlatform.ebay)
+    product, variants = await _make_product(session, "SKU-0012", ["A", "B"])
+    adapter = FakeEbayAdapter(
+        _candidate(["SKU-0012-A", "SKU-0012-B"], [{"Colour": "Black"}, {"Colour": "White"}], listing_sku=None)
+    )
+    _use_adapter(monkeypatch, adapter, "EbayAdapter")
+
+    with pytest.raises(HTTPException) as exc:
+        await platforms_router.adopt_ebay_listing(
+            product.id,
+            AdoptListingRequest(
+                external_listing_id="227269664481",
+                variation_mapping=[
+                    VariationMappingChoice(variant_id=variants[0].id, sku="SKU-0012-A"),
+                    VariationMappingChoice(variant_id=variants[1].id, sku="SKU-0012-B"),
+                ],
+                align_skus=False,
+            ),
+            session,
+        )
+
+    assert exc.value.status_code == 400
+    assert "listing-level SKU" in exc.value.detail
+    assert not any(c[0] == "migrate" for c in adapter.calls)
+    assert await _listings_for(session, product.id, ListingPlatform.ebay) == []
+
+
+async def test_multi_variation_missing_listing_sku_is_fixed_by_align_skus(session, monkeypatch):
+    """With align_skus on, the same listing migrates: alignment sets Item.SKU from the
+    product's own SKU first, so eBay's migration accepts it. This is the reported bug."""
+    await _connect(session, ListingPlatform.ebay)
+    product, variants = await _make_product(session, "SKU-0012", ["A", "B"])
+    adapter = FakeEbayAdapter(
+        _candidate(["SKU-0012-A", "SKU-0012-B"], [{"Colour": "Black"}, {"Colour": "White"}], listing_sku=None)
+    )
+    _use_adapter(monkeypatch, adapter, "EbayAdapter")
+
+    result = await platforms_router.adopt_ebay_listing(
+        product.id,
+        AdoptListingRequest(
+            external_listing_id="227269664481",
+            variation_mapping=[
+                VariationMappingChoice(variant_id=variants[0].id, sku="SKU-0012-A"),
+                VariationMappingChoice(variant_id=variants[1].id, sku="SKU-0012-B"),
+            ],
+            align_skus=True,
+        ),
+        session,
+    )
+
+    revise_call = next(c for c in adapter.calls if c[0] == "revise")
+    assert revise_call[1] == ["SKU-0012-A", "SKU-0012-B"]  # variations unchanged, all echoed
+    assert revise_call[2] == "SKU-0012"  # Item.SKU set from the product SKU
+    assert [c[0] for c in adapter.calls].index("revise") < [c[0] for c in adapter.calls].index("migrate")
+    assert len(result.units) == 2
 
 
 async def test_without_align_skus_conflict_is_reported_and_stockssmith_sku_wins(session, monkeypatch):
@@ -460,7 +534,9 @@ async def test_four_variation_listing_writes_one_row_per_variant(session, monkey
     await _connect(session, ListingPlatform.ebay)
     product, variants = await _make_product(session, "SKU-0012", ["A", "B", "C", "D"])
     specifics = [{"Colour": c} for c in ("Black", "White", "Red", "Blue")]
-    adapter = FakeEbayAdapter(_candidate([f"SKU-0012-{s}" for s in "ABCD"], specifics))
+    adapter = FakeEbayAdapter(
+        _candidate([f"SKU-0012-{s}" for s in "ABCD"], specifics, listing_sku="SKU-0012")
+    )
     _use_adapter(monkeypatch, adapter, "EbayAdapter")
 
     result = await platforms_router.adopt_ebay_listing(

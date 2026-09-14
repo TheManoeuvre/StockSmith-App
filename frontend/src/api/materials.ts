@@ -1,6 +1,6 @@
 import { api, downloadCsv, materialImageUploadUrl, uploadCsv, type CsvImportResult } from "./client";
 import { getSettings, uploadFile } from "../lib/tauri";
-import type { ABCClass, Material, MaterialStockHistoryEntry, MaterialUnit, Purchase } from "./types";
+import type { ABCClass, Material, MaterialStockHistoryEntry, MaterialUnit } from "./types";
 
 export interface MaterialInput {
   name: string;
@@ -55,8 +55,6 @@ export const materialsApi = {
   removeImage: (materialId: number) => api.delete<void>(`/materials/${materialId}/image`),
   importImageUrl: (materialId: number, url: string) =>
     api.post<Material>(`/materials/${materialId}/image/import-url`, { url }),
-  createDraftPurchase: (materialId: number, qty?: string | null) =>
-    api.post<Purchase>(`/materials/${materialId}/draft-purchase`, { qty: qty || null }),
   exportCsv: () => downloadCsv("/materials/export", "materials.csv"),
   importCsv: (fileBytes: Uint8Array, filename: string): Promise<CsvImportResult> =>
     uploadCsv("/materials/import", fileBytes, filename),

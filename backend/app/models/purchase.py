@@ -27,6 +27,11 @@ class Purchase(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     supplier_id: Mapped[int | None] = mapped_column(ForeignKey("suppliers.id", ondelete="SET NULL"), nullable=True)
+    # The supplier's own reference for this order (their PO/order/invoice number), as printed
+    # on their paperwork. Free text — every supplier formats it differently — and optional.
+    # The UI leads with it on the list because it is the number a human quotes when chasing a
+    # delivery; our own `id` stays the stable key everything else joins on.
+    supplier_order_number: Mapped[str | None] = mapped_column(String, nullable=True)
     order_date: Mapped[date] = mapped_column(Date, server_default=func.current_date())
     # Derived, never set directly: refresh_purchase_status() in services/purchase_receipts.py
     # is the only writer, and it works the value out from the lines. Kept as a stored column
@@ -43,10 +48,15 @@ class Purchase(Base):
     received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # Optional ETA, entered by the user at PO time. When absent, the materials forecast
     # (services/forecasting.py) estimates arrival as order_date + GeneralSettings.
-    # default_lead_time_weeks instead — this column is never back-filled with that
+    # default_lead_time_days instead — this column is never back-filled with that
     # estimate, so "unknown ETA" stays distinguishable from "known ETA."
     expected_arrival_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     notes: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Delivery / carriage charged on the order as a whole. NULL means "no delivery charge
+    # recorded" — a distinct state from 0.00 (the UI says "no delivery charge" for NULL and
+    # "incl £X delivery" once a figure is entered). Shown on the order total only; it is not
+    # apportioned to unit costs, so services/costing.py never reads it.
+    delivery_cost: Mapped[Decimal | None] = mapped_column(Numeric(14, 2), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

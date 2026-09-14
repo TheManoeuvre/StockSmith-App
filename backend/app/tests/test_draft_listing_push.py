@@ -56,6 +56,7 @@ async def _profile(session, **overrides) -> ListingProfile:
         etsy_when_made="made_to_order",
         etsy_is_supply=False,
         etsy_shipping_profile_id=99,
+        etsy_readiness_state_id=7,
     )
     fields.update(overrides)
     profile = ListingProfile(**fields)

@@ -32,6 +32,7 @@ async def _complete_etsy_profile(session, **overrides) -> ListingProfile:
         etsy_when_made="made_to_order",
         etsy_is_supply=False,
         etsy_shipping_profile_id=99,
+        etsy_readiness_state_id=7,
     )
     fields.update(overrides)
     profile = ListingProfile(**fields)
@@ -97,7 +98,11 @@ async def test_each_missing_required_etsy_field_is_named_individually(session):
     """One message per missing field, each naming where to set it — a single "profile
     incomplete" would make the user hunt for which of seven fields it meant."""
     await _complete_etsy_profile(
-        session, etsy_taxonomy_id=None, etsy_who_made=None, etsy_shipping_profile_id=None
+        session,
+        etsy_taxonomy_id=None,
+        etsy_who_made=None,
+        etsy_shipping_profile_id=None,
+        etsy_readiness_state_id=None,
     )
     product = await _ready_product(session)
 
@@ -106,6 +111,7 @@ async def test_each_missing_required_etsy_field_is_named_individually(session):
     assert "etsy_taxonomy_id" in blockers
     assert "etsy_who_made" in blockers
     assert "etsy_shipping_profile_id" in blockers
+    assert "etsy_readiness_state_id" in blockers
     assert "etsy_when_made" not in blockers
     assert all(i.fix_hint for i in report.issues if i.severity == BLOCKER and i.field.startswith("etsy_"))
 
