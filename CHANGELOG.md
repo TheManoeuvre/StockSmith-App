@@ -12,6 +12,39 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Routine phone alerts now clear themselves off your lock screen.** Settings →
+  Notifications → Mobile push has a new "Clear routine alerts after" period in hours
+  (default 24, 0 to keep everything). A shortfall waiting on a restock or a build, a material
+  warning or a growing backlog deletes itself from your phone once that period is up, so
+  alerts for orders you dealt with this morning stop piling up. Blockers and failures — an
+  order with no BOM, a failed sync or backup, a critically low material — never expire, since
+  those don't stop being true just because time passed. Pushover offers no way to clear an
+  alert at the moment it's resolved, so this timer is the closest thing available.
+- **Batched notifications now go out on a schedule you choose** (Settings → Notifications →
+  Digest schedule, defaulting to 9am and 5pm). Previously a digest was sent as soon as the
+  backend next checked in, so anything set to "Digest" arrived as a trickle of separate
+  messages rather than one batch.
+
+### Changed
+- **Several items short on the same order now arrive as one notification**, listing the
+  items, instead of one push per line. An order with five short variants used to mean five
+  near-identical alerts.
+- **Notification titles now say which order and how much is short** — "Order #242 — 3 items
+  short" rather than a repeated "Order awaiting product", so a notification is readable
+  without opening it. This also makes the digest roll-up useful, since it is built from
+  those titles.
+
+### Fixed
+- **Alerts set to arrive right away are no longer sent a second time in the next digest.**
+  Delivery was being decided partly by an alert's built-in importance rather than purely by
+  the delivery setting chosen for it, which double-sent some alert types and — in the
+  reverse case — meant an alert switched to "Digest" could reach the in-app list and never
+  the phone at all. Affected "Order awaiting product", "Material running low (warning)",
+  "Pending orders over threshold", "Marketplace API usage — approaching limit" and
+  "Secondary backup location unreachable" on the double-send side, and the five
+  right-away-by-default alert types on the never-sent side.
+
 ## [0.14.1] - 2026-09-14
 
 ### Added
