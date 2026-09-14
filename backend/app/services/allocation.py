@@ -283,12 +283,18 @@ async def ship_order(session: AsyncSession, order: Order) -> None:
             order.shipping_cost_snapshot = resolve_shipping_cost_for_platform(profile, order.platform)
 
 
-async def apply_ordered_qty_change(session: AsyncSession, line: OrderLine, new_ordered_qty: int) -> None:
+async def apply_ordered_qty_change(
+    session: AsyncSession, line: OrderLine, new_ordered_qty: int, *, allow_zero: bool = False
+) -> None:
     """Mirrors Purchase's rule that mutating a line while the order is in an effectful
     state re-fires that effect: lowering ordered_qty below what's already allocated
     deallocates the difference first; raising it just leaves the extra as unallocated
-    demand for the next allocate/auto-allocate pass to pick up."""
-    if new_ordered_qty <= 0:
+    demand for the next allocate/auto-allocate pass to pick up.
+
+    allow_zero exists for services/order_substitution.py's whole-line case, which shrinks
+    a line to 0 rather than deleting it (see OrderLine's own docstring for why) — every
+    other caller keeps the "a line is either removed or has positive demand" rule."""
+    if new_ordered_qty < 0 or (new_ordered_qty == 0 and not allow_zero):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ordered_qty must be positive")
     if new_ordered_qty < line.shipped_qty:
         raise HTTPException(

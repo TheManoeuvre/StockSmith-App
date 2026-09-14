@@ -24,6 +24,7 @@ from app.models.listing import Listing, ListingPlatform
 from app.models.listing_profile import ListingProfile, ProductPlatformSettings
 from app.models.order import Order, OrderLine, OrderStatus
 from app.models.order_return import OrderLineReturn, ReturnDisposition, ReturnScope, ReturnSource
+from app.models.order_substitution import OrderLineSubstitution
 from app.models.manufacturer import Manufacturer
 from app.models.material import (
     LegacyMaterialCategory,
@@ -118,6 +119,7 @@ __all__ = [
     "ReturnDisposition",
     "ReturnScope",
     "ReturnSource",
+    "OrderLineSubstitution",
     "AllocationEvent",
     "AllocationEventType",
     "PlatformConnection",

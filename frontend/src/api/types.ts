@@ -762,6 +762,14 @@ export type ListingPlatform = "etsy" | "ebay" | "shopify";
 export type ManualOrderChannel = "manual" | "etsy" | "ebay";
 export type OrderStatus = "pending" | "allocated" | "shipped" | "cancelled";
 
+export interface SubstitutionRef {
+  substitution_id: number;
+  line_id: number;
+  variant_name: string | null;
+  qty: number;
+  created_at: string;
+}
+
 export interface OrderLine {
   id: number;
   order_id: number;
@@ -779,6 +787,9 @@ export interface OrderLine {
   needs_mapping: boolean;
   cost_per_unit_snapshot: string | null;
   variation_text: string | null;
+  // Substitution provenance — see backend app.models.order_substitution.
+  substituted_from: SubstitutionRef | null;
+  substituted_to: SubstitutionRef[];
 }
 
 export interface Order {
