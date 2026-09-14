@@ -607,6 +607,7 @@ export interface BulkBomAmendRequest {
   lines: BulkBomAmendLine[];
   apply?: boolean;
   include_inactive?: boolean;
+  is_kitting?: boolean;
 }
 
 export interface BulkBomAmendChange {

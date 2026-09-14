@@ -753,6 +753,7 @@ async def amend_variant_bom_overrides(
         payload.lines,
         apply=payload.apply,
         include_inactive=payload.include_inactive,
+        is_kitting=payload.is_kitting,
     )
 
     if payload.apply:

@@ -10,6 +10,13 @@ import type {
 import { ErrorBanner } from "../common/ErrorBanner";
 import { Modal } from "../common/Modal";
 
+type BomSource = "build" | "kitting";
+
+interface SelectedLine {
+  qty: string; // "" means inherit the base BOM quantity
+  substituteId: number | null; // null means keep the base material
+}
+
 /**
  * Bulk-corrects BOM overrides for every variant sharing an attribute value — "set the
  * filament quantity to 14 for all Large variants".
@@ -30,6 +37,10 @@ export function BulkBomAmendModal({
     queryKey: ["products", product.id, "bom"],
     queryFn: () => productsApi.getBom(product.id),
   });
+  const { data: kittingBom } = useQuery({
+    queryKey: ["products", product.id, "kitting-bom"],
+    queryFn: () => productsApi.getKittingBom(product.id),
+  });
   const { data: materials } = useQuery({
     queryKey: ["materials"],
     queryFn: materialsApi.list,
@@ -47,6 +58,7 @@ export function BulkBomAmendModal({
 
   const [attributeName, setAttributeName] = useState(attributeNames[0] ?? "");
   const [attributeValue, setAttributeValue] = useState("");
+  const [bomSource, setBomSource] = useState<BomSource>("build");
 
   // The values actually present on this product's variants for the chosen attribute.
   // The backend matches attribute_value literally, so free text meant a typo, a case
@@ -67,33 +79,97 @@ export function BulkBomAmendModal({
         .filter((value): value is string => !!value && value.trim() !== ""),
     ),
   );
-  const [baseMaterialId, setBaseMaterialId] = useState<number | null>(null);
-  const [qty, setQty] = useState("");
-  const [substituteId, setSubstituteId] = useState<number | null>(null);
+
+  const baseLines = bomSource === "kitting" ? (kittingBom ?? []) : (bom ?? []);
+  const effectiveKey =
+    bomSource === "kitting" ? "effective_kitting_bom" : "effective_bom";
+
+  // For the chosen attribute value, find an existing override (substitution or quantity
+  // change) already sitting on one of the matching variants — so ticking a line that's
+  // already been corrected for some variants shows what it's already set to, rather than
+  // making the user go check a variant row to find out. Different matching variants can in
+  // principle disagree (a hand edit on just one of them); the first one found wins, which
+  // is the same "pick something reasonable, let the preview reveal the rest" tradeoff the
+  // preview step already exists to cover.
+  const findExistingOverride = (baseMaterialId: number, baseQty: string): SelectedLine | null => {
+    for (const v of variants ?? []) {
+      if (!v.is_active) continue;
+      const val = [v.attribute1_value, v.attribute2_value, v.attribute3_value][
+        attributeSlot
+      ];
+      if (val !== attributeValue) continue;
+      const lines = v[effectiveKey];
+      const sub = lines.find((l) => l.replaces_material_id === baseMaterialId);
+      if (sub) return { substituteId: sub.material_id, qty: sub.qty_required };
+      const qtyLine = lines.find(
+        (l) => l.material_id === baseMaterialId && l.replaces_material_id == null,
+      );
+      if (qtyLine && qtyLine.qty_required !== baseQty) {
+        return { substituteId: null, qty: qtyLine.qty_required };
+      }
+    }
+    return null;
+  };
+
+  const [selectedLines, setSelectedLines] = useState<Record<number, SelectedLine>>({});
   const [preview, setPreview] = useState<BulkBomAmendResult | null>(null);
 
-  const baseLine = bom?.find((l) => l.material_id === baseMaterialId);
+  const resetSelection = () => {
+    setSelectedLines({});
+    setPreview(null);
+  };
+
+  const toggleLine = (baseMaterialId: number, baseQty: string) => {
+    setPreview(null);
+    setSelectedLines((prev) => {
+      if (baseMaterialId in prev) {
+        const { [baseMaterialId]: _removed, ...rest } = prev;
+        return rest;
+      }
+      const existing = findExistingOverride(baseMaterialId, baseQty);
+      return {
+        ...prev,
+        [baseMaterialId]: existing ?? { qty: "", substituteId: null },
+      };
+    });
+  };
+
+  const updateQty = (baseMaterialId: number, qty: string) => {
+    setPreview(null);
+    setSelectedLines((prev) => ({
+      ...prev,
+      [baseMaterialId]: { ...prev[baseMaterialId], qty },
+    }));
+  };
+
+  const updateSubstitute = (baseMaterialId: number, substituteId: number | null) => {
+    setPreview(null);
+    setSelectedLines((prev) => ({
+      ...prev,
+      [baseMaterialId]: { ...prev[baseMaterialId], substituteId },
+    }));
+  };
+
   // Substituting only ever swaps within the same material type — the backend enforces it
   // strictly here (this fans out across many variants without review), so offering
   // anything else in the picker would only produce a 400.
-  const baseMaterial = materials?.find((m) => m.id === baseMaterialId);
-  const substituteOptions = (materials ?? []).filter(
-    (m) =>
-      m.id !== baseMaterialId &&
-      baseMaterial != null &&
-      m.material_type_id === baseMaterial.material_type_id,
-  );
+  const substituteOptionsFor = (baseMaterialId: number) => {
+    const baseMaterial = materials?.find((m) => m.id === baseMaterialId);
+    return (materials ?? []).filter(
+      (m) =>
+        m.id !== baseMaterialId &&
+        baseMaterial != null &&
+        m.material_type_id === baseMaterial.material_type_id,
+    );
+  };
 
-  const lines: BulkBomAmendLine[] =
-    baseMaterialId === null
-      ? []
-      : [
-          {
-            base_material_id: baseMaterialId,
-            material_id: substituteId,
-            qty_required: qty.trim() === "" ? null : qty.trim(),
-          },
-        ];
+  const lines: BulkBomAmendLine[] = Object.entries(selectedLines).map(
+    ([baseMaterialId, sel]) => ({
+      base_material_id: Number(baseMaterialId),
+      material_id: sel.substituteId,
+      qty_required: sel.qty.trim() === "" ? null : sel.qty.trim(),
+    }),
+  );
 
   const amendMutation = useMutation({
     mutationFn: (apply: boolean) =>
@@ -102,6 +178,7 @@ export function BulkBomAmendModal({
         attribute_value: attributeValue.trim(),
         lines,
         apply,
+        is_kitting: bomSource === "kitting",
       }),
     onSuccess: (result) => {
       setPreview(result);
@@ -115,9 +192,7 @@ export function BulkBomAmendModal({
   });
 
   const canPreview =
-    attributeName !== "" &&
-    attributeValue.trim() !== "" &&
-    baseMaterialId !== null;
+    attributeName !== "" && attributeValue.trim() !== "" && lines.length > 0;
   const applied = preview?.applied ?? false;
 
   return (
@@ -174,7 +249,7 @@ export function BulkBomAmendModal({
                 setAttributeName(e.target.value);
                 // A value from the previous attribute would match no variants at all.
                 setAttributeValue("");
-                setPreview(null);
+                resetSelection();
               }}
             >
               {attributeNames.map((name) => (
@@ -192,7 +267,7 @@ export function BulkBomAmendModal({
               value={attributeValue}
               onChange={(e) => {
                 setAttributeValue(e.target.value);
-                setPreview(null);
+                resetSelection();
               }}
             >
               <option value="">
@@ -208,61 +283,95 @@ export function BulkBomAmendModal({
             </select>
           </label>
           <label className="flex flex-col gap-1 text-sm">
-            <span>BOM line</span>
-            <select
-              className="rounded-md border border-slate-300 px-2 py-1"
-              value={baseMaterialId ?? ""}
-              onChange={(e) => {
-                setBaseMaterialId(
-                  e.target.value === "" ? null : Number(e.target.value),
-                );
-                setSubstituteId(null);
-                setPreview(null);
-              }}
-            >
-              <option value="">Select a line…</option>
-              {(bom ?? []).map((line) => (
-                <option key={line.material_id} value={line.material_id}>
-                  {materials?.find((m) => m.id === line.material_id)?.name ??
-                    `#${line.material_id}`}
-                </option>
+            <span>BOM</span>
+            <div className="flex gap-px rounded bg-slate-100 p-0.5">
+              {(
+                [
+                  { value: "build", label: "Build" },
+                  { value: "kitting", label: "Kitting" },
+                ] as const
+              ).map(({ value, label }) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => {
+                    setBomSource(value);
+                    resetSelection();
+                  }}
+                  className={`rounded px-2 py-1 text-sm font-semibold ${
+                    bomSource === value
+                      ? "bg-white text-slate-900 shadow-sm"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  {label}
+                </button>
               ))}
-            </select>
+            </div>
           </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span>Quantity</span>
-            <input
-              className="w-28 rounded-md border border-slate-300 px-2 py-1"
-              placeholder={
-                baseLine ? `base ${baseLine.qty_required}` : "inherit"
-              }
-              value={qty}
-              onChange={(e) => {
-                setQty(e.target.value);
-                setPreview(null);
-              }}
-            />
-          </label>
-          <label className="flex flex-col gap-1 text-sm">
-            <span>Substitute with</span>
-            <select
-              className="rounded-md border border-slate-300 px-2 py-1"
-              value={substituteId ?? ""}
-              onChange={(e) => {
-                setSubstituteId(
-                  e.target.value === "" ? null : Number(e.target.value),
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <span className="text-sm">BOM lines</span>
+          {baseLines.length === 0 ? (
+            <p className="text-sm text-slate-400">
+              No lines on this product's{" "}
+              {bomSource === "kitting" ? "kitting BOM" : "build BOM"}.
+            </p>
+          ) : (
+            <div className="overflow-hidden rounded border border-slate-200">
+              {baseLines.map((base) => {
+                const material = materials?.find((m) => m.id === base.material_id);
+                const selected = selectedLines[base.material_id];
+                const checked = selected !== undefined;
+                return (
+                  <div
+                    key={base.material_id}
+                    className="flex items-center gap-2 border-b border-slate-100 px-2.5 py-1.5 last:border-0"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleLine(base.material_id, base.qty_required)}
+                    />
+                    <span
+                      className="w-36 shrink-0 truncate text-sm"
+                      title={material?.name}
+                    >
+                      {material?.name ?? base.material_id}
+                    </span>
+                    {checked && (
+                      <>
+                        <input
+                          className="w-24 shrink-0 rounded-md border border-slate-300 px-2 py-1 text-sm"
+                          placeholder={`base ${base.qty_required}`}
+                          value={selected.qty}
+                          onChange={(e) => updateQty(base.material_id, e.target.value)}
+                        />
+                        <select
+                          className="h-[30px] min-w-0 flex-1 rounded-md border border-slate-300 px-2 text-sm"
+                          value={selected.substituteId ?? ""}
+                          onChange={(e) =>
+                            updateSubstitute(
+                              base.material_id,
+                              e.target.value === "" ? null : Number(e.target.value),
+                            )
+                          }
+                        >
+                          <option value="">Keep the base material</option>
+                          {substituteOptionsFor(base.material_id).map((m) => (
+                            <option key={m.id} value={m.id}>
+                              {m.name}
+                            </option>
+                          ))}
+                        </select>
+                      </>
+                    )}
+                  </div>
                 );
-                setPreview(null);
-              }}
-            >
-              <option value="">Keep the base material</option>
-              {substituteOptions.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.name}
-                </option>
-              ))}
-            </select>
-          </label>
+              })}
+            </div>
+          )}
         </div>
 
         <ErrorBanner error={amendMutation.error} />
