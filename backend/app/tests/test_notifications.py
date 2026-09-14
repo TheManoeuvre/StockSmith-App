@@ -445,7 +445,7 @@ class TestDigestRouting:
     async def _flush_recording(self, session, monkeypatch) -> list[tuple[str, str]]:
         sent: list[tuple[str, str]] = []
 
-        async def _record(_session, _settings, title, body):
+        async def _record(_session, _settings, title, body, _ttl=None):
             sent.append((title, body))
 
         monkeypatch.setattr(notifications, "_deliver_external", _record)
@@ -558,7 +558,7 @@ class TestDigestSchedule:
     async def test_a_pending_notification_waits_for_its_slot(self, session, monkeypatch):
         sent: list[tuple[str, str]] = []
 
-        async def _record(_session, _settings, title, body):
+        async def _record(_session, _settings, title, body, _ttl=None):
             sent.append((title, body))
 
         monkeypatch.setattr(notifications, "_deliver_external", _record)
@@ -596,8 +596,144 @@ class TestDigestSchedule:
         assert settings.digest_last_fired_at is not None
 
 
-async def _noop_deliver(_session, _settings, _title, _body):
+async def _noop_deliver(_session, _settings, _title, _body, _ttl=None):
     return None
+
+
+class TestPushoverExpiry:
+    """Pushover's `ttl` is the only handle on a delivered notification — there is no
+    resolve-driven clear, so routine alerts age off on a timer and blockers never do."""
+
+    def _settings(self, **overrides) -> NotificationSettings:
+        base = dict(pushover_expiry_hours=24)
+        base.update(overrides)
+        return NotificationSettings(id=1, **base)
+
+    def test_routine_alerts_expire_after_the_configured_hours(self):
+        assert notifications._expiry_seconds(self._settings(), NotificationUrgency.digest) == 24 * 3600
+
+    def test_the_period_is_configurable(self):
+        settings = self._settings(pushover_expiry_hours=4)
+        assert notifications._expiry_seconds(settings, NotificationUrgency.digest) == 4 * 3600
+
+    def test_zero_hours_disables_expiry(self):
+        settings = self._settings(pushover_expiry_hours=0)
+        assert notifications._expiry_seconds(settings, NotificationUrgency.digest) is None
+
+    def test_blockers_and_failures_never_expire(self):
+        # An order that can never be built, or a backup that failed, doesn't stop being true
+        # after a day — deleting it off the lock screen would lose the only prompt there was.
+        assert notifications._expiry_seconds(self._settings(), NotificationUrgency.immediate) is None
+
+    async def test_dispatch_passes_the_ttl_for_a_routine_alert(self, session, monkeypatch):
+        ttls: list[int | None] = []
+
+        async def _record(_session, _settings, _title, _body, ttl=None):
+            ttls.append(ttl)
+
+        monkeypatch.setattr(notifications, "_deliver_external", _record)
+        settings = await notifications.get_notification_settings(session)
+        settings.pushover_expiry_hours = 6
+        await session.commit()
+
+        await notifications.dispatch_notification(
+            session,
+            category=NotificationCategory.order_unfulfillable,
+            urgency=NotificationUrgency.digest,
+            title="Order #242 — 1 item short",
+            body="body",
+            delivery_mode=NotificationDeliveryMode.immediate,
+        )
+        await notifications.dispatch_notification(
+            session,
+            category=NotificationCategory.order_blocked,
+            urgency=NotificationUrgency.immediate,
+            title="Order #300 blocked — 1 item with no BOM",
+            body="body",
+            delivery_mode=NotificationDeliveryMode.immediate,
+        )
+
+        assert ttls == [6 * 3600, None]
+
+    async def test_a_digest_batch_containing_a_blocker_does_not_expire(self, session, monkeypatch):
+        ttls: list[int | None] = []
+
+        async def _record(_session, _settings, _title, _body, ttl=None):
+            ttls.append(ttl)
+
+        monkeypatch.setattr(notifications, "_deliver_external", _record)
+        settings = await notifications.get_notification_settings(session)
+        settings.digest_hours_local = ""
+        await session.commit()
+
+        for urgency in (NotificationUrgency.digest, NotificationUrgency.immediate):
+            await notifications.dispatch_notification(
+                session,
+                category=NotificationCategory.order_unfulfillable,
+                urgency=urgency,
+                title=f"{urgency.value} item",
+                body="body",
+                delivery_mode=NotificationDeliveryMode.digest,
+            )
+
+        await notifications.flush_digest(session)
+        assert ttls == [None]
+
+    async def test_an_all_routine_digest_batch_expires(self, session, monkeypatch):
+        ttls: list[int | None] = []
+
+        async def _record(_session, _settings, _title, _body, ttl=None):
+            ttls.append(ttl)
+
+        monkeypatch.setattr(notifications, "_deliver_external", _record)
+        settings = await notifications.get_notification_settings(session)
+        settings.digest_hours_local = ""
+        settings.pushover_expiry_hours = 12
+        await session.commit()
+
+        await notifications.dispatch_notification(
+            session,
+            category=NotificationCategory.order_unfulfillable,
+            urgency=NotificationUrgency.digest,
+            title="Order #242 — 1 item short",
+            body="body",
+            delivery_mode=NotificationDeliveryMode.digest,
+        )
+
+        await notifications.flush_digest(session)
+        assert ttls == [12 * 3600]
+
+    async def test_send_pushover_omits_ttl_when_unset(self, session, monkeypatch):
+        captured: dict = {}
+
+        class _Response:
+            status_code = 200
+
+            def json(self):
+                return {"status": 1}
+
+        class _Client:
+            def __init__(self, **_kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_exc):
+                return False
+
+            async def post(self, _url, data=None):
+                captured.update(data or {})
+                return _Response()
+
+        monkeypatch.setattr(notifications.httpx, "AsyncClient", _Client)
+        monkeypatch.setattr(notifications.app_settings, "pushover_app_api_token", "token")
+
+        await notifications.send_pushover("userkey", "title", "body")
+        assert "ttl" not in captured
+
+        await notifications.send_pushover("userkey", "title", "body", ttl_seconds=3600)
+        assert captured["ttl"] == "3600"
 
 
 class TestSummaryDueCalculation:

@@ -29,6 +29,7 @@ def _settings_read(settings_row, type_rows: list[NotificationTypeSettings]) -> N
         windows_notifications_enabled=settings_row.windows_notifications_enabled,
         pushover_enabled=settings_row.pushover_enabled,
         pushover_user_key_masked=notifications.mask_pushover_key(settings_row.pushover_user_key),
+        pushover_expiry_hours=settings_row.pushover_expiry_hours,
         quiet_hours_enabled=settings_row.quiet_hours_enabled,
         quiet_hours_start=settings_row.quiet_hours_start,
         quiet_hours_end=settings_row.quiet_hours_end,
@@ -80,6 +81,7 @@ async def update_notification_settings(
     settings_row.windows_notifications_enabled = payload.windows_notifications_enabled
     settings_row.pushover_enabled = payload.pushover_enabled
     settings_row.pushover_user_key = _resolve_pushover_key(payload.pushover_user_key, settings_row.pushover_user_key)
+    settings_row.pushover_expiry_hours = payload.pushover_expiry_hours
     settings_row.quiet_hours_enabled = payload.quiet_hours_enabled
     settings_row.quiet_hours_start = payload.quiet_hours_start
     settings_row.quiet_hours_end = payload.quiet_hours_end

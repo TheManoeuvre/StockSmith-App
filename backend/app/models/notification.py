@@ -131,6 +131,7 @@ class NotificationSettings(Base):
             name="ck_notif_summary_dow_range",
         ),
         CheckConstraint("pending_order_threshold >= 1", name="ck_notif_pending_order_threshold_positive"),
+        CheckConstraint("pushover_expiry_hours >= 0", name="ck_notif_pushover_expiry_non_negative"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -155,6 +156,19 @@ class NotificationSettings(Base):
     # flush" — a blank field must not silently strand notifications on the phone side.
     digest_hours_local: Mapped[str] = mapped_column(String, nullable=False, default="9,17")
     digest_last_fired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Hours before a *routine* Pushover message deletes itself from the phone — Pushover's
+    # `ttl`, the only lever it offers for clearing a delivered notification. 0 disables it.
+    #
+    # There is deliberately no "clear this alert now that it's resolved" here, because
+    # Pushover cannot do it: tags/cancel_by_tag only stops emergency-priority *retries* (and
+    # emergency priority re-alerts with sound until acknowledged, which no order shortfall
+    # warrants), and iOS only clears a delivered notification via a throttled silent push or
+    # a timer set when it was sent. A timer is what's actually available, so a shortfall
+    # alert for an order that shipped hours ago ages off the lock screen instead of sitting
+    # there. Only urgency=digest alerts expire; see services/notifications._expiry_seconds
+    # for why a blocker never does.
+    pushover_expiry_hours: Mapped[int] = mapped_column(Integer, nullable=False, default=24)
 
     daily_summary_enabled: Mapped[bool] = mapped_column(nullable=False, default=False)
     daily_summary_frequency: Mapped[SummaryFrequency] = mapped_column(

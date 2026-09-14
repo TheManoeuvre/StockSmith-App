@@ -51,6 +51,9 @@ export interface NotificationSettings {
   pushover_enabled: boolean;
   /** Last 4 characters only, or null if no key is stored — never the real key. */
   pushover_user_key_masked: string | null;
+  /** Hours before a routine push deletes itself from the phone; 0 never expires. Blockers
+   *  and failures ignore it. */
+  pushover_expiry_hours: number;
   quiet_hours_enabled: boolean;
   quiet_hours_start: number;
   quiet_hours_end: number;
@@ -71,6 +74,7 @@ export interface NotificationSettingsUpdate {
   /** Omit (undefined) to keep the stored key unchanged, "" to clear it, or a new value to
    *  replace it — see the backend's _resolve_pushover_key. */
   pushover_user_key?: string | null;
+  pushover_expiry_hours: number;
   quiet_hours_enabled: boolean;
   quiet_hours_start: number;
   quiet_hours_end: number;

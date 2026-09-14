@@ -64,6 +64,7 @@ interface FormAlertType {
 interface Form {
   windowsNotificationsEnabled: boolean;
   pushoverEnabled: boolean;
+  pushoverExpiryHours: string;
   quietHoursEnabled: boolean;
   quietHoursStart: number;
   quietHoursEnd: number;
@@ -80,6 +81,7 @@ function toForm(settings: NotificationSettingsValue): Form {
   return {
     windowsNotificationsEnabled: settings.windows_notifications_enabled,
     pushoverEnabled: settings.pushover_enabled,
+    pushoverExpiryHours: String(settings.pushover_expiry_hours),
     quietHoursEnabled: settings.quiet_hours_enabled,
     quietHoursStart: settings.quiet_hours_start,
     quietHoursEnd: settings.quiet_hours_end,
@@ -129,6 +131,7 @@ export function NotificationSettings() {
         windows_notifications_enabled: value.windowsNotificationsEnabled,
         pushover_enabled: value.pushoverEnabled,
         pushover_user_key: pushoverKeyInput.trim() || undefined,
+        pushover_expiry_hours: Math.min(Math.max(Number(value.pushoverExpiryHours) || 0, 0), 336),
         quiet_hours_enabled: value.quietHoursEnabled,
         quiet_hours_start: value.quietHoursStart,
         quiet_hours_end: value.quietHoursEnd,
@@ -262,6 +265,27 @@ export function NotificationSettings() {
               />
             </FieldRow>
           )}
+          <FieldRow label="Clear routine alerts after">
+            <div className="flex flex-col gap-1">
+              <div className="flex items-center gap-2 text-sm">
+                <input
+                  type="number"
+                  min="0"
+                  max="336"
+                  className="w-16 rounded border border-slate-300 px-1.5 py-1 text-right tabular-nums"
+                  value={form.pushoverExpiryHours}
+                  disabled={!form.pushoverEnabled}
+                  onChange={(e) => setField("pushoverExpiryHours", e.target.value)}
+                />
+                hours
+              </div>
+              <p className="text-xs text-slate-500">
+                {Number(form.pushoverExpiryHours) > 0
+                  ? `Routine alerts — a shortfall waiting on a restock or a build, a material warning, a growing backlog — delete themselves from your phone after ${form.pushoverExpiryHours} hours, so alerts for orders you've already dealt with don't pile up. Blockers and failures stay until you clear them.`
+                  : "Nothing expires — every push stays on your phone until you clear it."}
+              </p>
+            </div>
+          </FieldRow>
           <div className="flex items-center gap-2">
             <button
               type="button"

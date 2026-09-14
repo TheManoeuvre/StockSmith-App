@@ -105,21 +105,29 @@ def _in_quiet_hours(settings: NotificationSettings, *, now: datetime | None = No
     return hour >= start or hour < end  # wraps past midnight
 
 
-async def send_pushover(user_key: str, title: str, body: str) -> tuple[bool, str | None]:
+async def send_pushover(
+    user_key: str, title: str, body: str, *, ttl_seconds: int | None = None
+) -> tuple[bool, str | None]:
     """POSTs one message to Pushover. Returns (success, reason) — reason is a human-readable
     failure explanation (bad key vs. network error) on failure, None on success. Never
     raises: a bad key or a flaky network must not crash the caller (an alert-detection loop,
-    or the settings router's test-send endpoint)."""
+    or the settings router's test-send endpoint).
+
+    `ttl_seconds` maps to Pushover's `ttl`: the message deletes itself from every device it
+    reached once that many seconds have passed. Omitted when None, which is what a
+    notification that should persist until a person deals with it wants."""
     token = app_settings.pushover_app_api_token
     if not token:
         logger.warning("Pushover is enabled but PUSHOVER_APP_API_TOKEN is not configured — skipping send")
         return False, "Pushover is not configured on this install (missing application token)."
 
+    payload_data = {"token": token, "user": user_key, "title": title, "message": body}
+    if ttl_seconds is not None and ttl_seconds > 0:
+        payload_data["ttl"] = str(ttl_seconds)
+
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(
-                _PUSHOVER_URL, data={"token": token, "user": user_key, "title": title, "message": body}
-            )
+            response = await client.post(_PUSHOVER_URL, data=payload_data)
     except httpx.HTTPError as exc:
         logger.warning("Pushover send failed (network error): %s", exc)
         return False, f"Network error contacting Pushover: {exc}"
@@ -138,9 +146,33 @@ async def send_pushover(user_key: str, title: str, body: str) -> tuple[bool, str
     return False, reason
 
 
-async def _deliver_external(session: AsyncSession, settings: NotificationSettings, title: str, body: str) -> None:
+def _expiry_seconds(settings: NotificationSettings, urgency: NotificationUrgency) -> int | None:
+    """How long a Pushover message should live on the phone, or None to leave it there.
+
+    Only routine alerts (urgency=digest — a shortfall that a restock or a build will close, a
+    material warning, a backlog over threshold) expire. Anything urgency=immediate is a
+    blocker or a failure: an order that can never be built, a sync or backup that broke. Those
+    do not become less true with time, so quietly deleting one off the lock screen would lose
+    the only prompt the person had. The in-app log keeps every notification either way — this
+    only governs the copy on the phone.
+    """
+    if urgency != NotificationUrgency.digest:
+        return None
+    hours = settings.pushover_expiry_hours
+    if hours <= 0:
+        return None
+    return hours * 3600
+
+
+async def _deliver_external(
+    session: AsyncSession,
+    settings: NotificationSettings,
+    title: str,
+    body: str,
+    ttl_seconds: int | None = None,
+) -> None:
     if settings.pushover_enabled and settings.pushover_user_key:
-        await send_pushover(settings.pushover_user_key, title, body)
+        await send_pushover(settings.pushover_user_key, title, body, ttl_seconds=ttl_seconds)
     # Windows toast delivery is Tauri/Rust-side, not backend — the Rust shell polls
     # GET /api/v1/notifications/unread-count and raises its own OS toast when that count
     # increases. Nothing further to do here; see routers/notifications.py for the contract.
@@ -195,7 +227,7 @@ async def dispatch_notification(
         if _in_quiet_hours(settings) and urgency != NotificationUrgency.immediate:
             pass  # suppressed; the in-app record above still stands
         else:
-            await _deliver_external(session, settings, title, body)
+            await _deliver_external(session, settings, title, body, _expiry_seconds(settings, urgency))
 
     return notification
 
@@ -282,7 +314,15 @@ async def flush_digest(session: AsyncSession) -> None:
         lines.append(f"...and {len(pending) - _DIGEST_BODY_LINE_CAP} more")
     body = "\n".join(lines)
 
-    await _deliver_external(session, settings, title, body)
+    # The batch expires only if everything in it is routine. One blocker or failure batched
+    # in (a type whose urgency is immediate but which the user routed to the digest) keeps
+    # the whole message on the phone — see _expiry_seconds.
+    batch_urgency = (
+        NotificationUrgency.digest
+        if all(n.urgency == NotificationUrgency.digest for n in pending)
+        else NotificationUrgency.immediate
+    )
+    await _deliver_external(session, settings, title, body, _expiry_seconds(settings, batch_urgency))
 
     for notification in pending:
         notification.digest_sent_at = now
