@@ -331,6 +331,12 @@ async def list_products(
     # for the same reason as the category filter above: the list is paginated, so filtering
     # in the client would only ever narrow the current page and leave `total` wrong.
     cogs_incomplete: bool = False,
+    # Off by default, so a deactivated product falls out of the list the way a deleted one
+    # would — see DELETE /products/{id} below, which sets is_active=False rather than
+    # removing the row. Server-side for the same pagination reason as the filters above;
+    # mirrors materials' is_active handling, which can afford to do this client-side only
+    # because its list isn't paginated.
+    include_inactive: bool = False,
     # Free-text search over name and SKU. Server-side, same reasoning as the filters above.
     q: str | None = None,
     session: AsyncSession = Depends(get_db),
@@ -343,6 +349,7 @@ async def list_products(
     ctx = await _ProductReadContext.build(session)
     count_query = select(func.count()).select_from(Product)
     incomplete_count_query = select(func.count()).select_from(Product).where(Product.id.in_(ctx.cogs_incomplete_ids))
+    inactive_count_query = select(func.count()).select_from(Product).where(Product.is_active.is_(False))
     # outerjoin so the ORDER BY below can read the category's name; products without one
     # keep their row rather than dropping out.
     query = (
@@ -353,13 +360,23 @@ async def list_products(
     if product_category_id is not None:
         count_query = count_query.where(Product.product_category_id == product_category_id)
         incomplete_count_query = incomplete_count_query.where(Product.product_category_id == product_category_id)
+        inactive_count_query = inactive_count_query.where(Product.product_category_id == product_category_id)
         query = query.where(Product.product_category_id == product_category_id)
     if q and q.strip():
         needle = f"%{q.strip()}%"
         search = or_(Product.name.ilike(needle), Product.sku.ilike(needle))
         count_query = count_query.where(search)
         incomplete_count_query = incomplete_count_query.where(search)
+        inactive_count_query = inactive_count_query.where(search)
         query = query.where(search)
+    # Counted before the inactive filter narrows anything, so the toggle can show how many
+    # products it would reveal while it's still switched off — same reasoning as
+    # incomplete_total below.
+    inactive_total = await session.scalar(inactive_count_query)
+    if not include_inactive:
+        count_query = count_query.where(Product.is_active.is_(True))
+        incomplete_count_query = incomplete_count_query.where(Product.is_active.is_(True))
+        query = query.where(Product.is_active.is_(True))
     # Counted before the gap filter narrows anything, so the toggle can show how many
     # products it would reveal while it's still switched off.
     incomplete_total = await session.scalar(incomplete_count_query)
@@ -384,7 +401,12 @@ async def list_products(
     )
     products = list(result.scalars())
     items = [_read_product(p, ctx) for p in products]
-    return ProductPage(items=items, total=total or 0, incomplete_total=incomplete_total or 0)
+    return ProductPage(
+        items=items,
+        total=total or 0,
+        incomplete_total=incomplete_total or 0,
+        inactive_total=inactive_total or 0,
+    )
 
 
 @router.get("/export")

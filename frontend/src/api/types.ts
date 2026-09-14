@@ -472,6 +472,9 @@ export interface ProductPage {
   /** Products with a COGS gap under the current category filter, counted whether or not the
    *  gap filter itself is on — so the toggle can show what it would reveal. */
   incomplete_total: number;
+  /** Inactive products under the current filters, counted whether or not they're being
+   *  shown — so the "Show inactive" toggle can show what it would reveal. */
+  inactive_total: number;
 }
 
 export type PricingMode = "product" | "variable" | "line";

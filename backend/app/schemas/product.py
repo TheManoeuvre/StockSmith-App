@@ -115,6 +115,10 @@ class ProductPage(BaseModel):
     # page is being shown — what the "Incomplete COGS only" toggle displays beside itself so
     # the count is visible without first switching the filter on.
     incomplete_total: int = 0
+    # How many products matching the other filters are inactive and hidden by default —
+    # what the "Show inactive" checkbox displays beside itself, mirroring materials'
+    # inactiveCount (computed client-side there since that list isn't paginated).
+    inactive_total: int = 0
 
 
 class BomLine(BaseModel):

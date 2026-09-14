@@ -52,13 +52,14 @@ export const productsApi = {
   listPaged: (
     limit: number,
     offset: number,
-    opts: { cogsIncomplete?: boolean; q?: string } = {},
+    opts: { cogsIncomplete?: boolean; includeInactive?: boolean; q?: string } = {},
   ) =>
     api.get<ProductPage>(
       // Filtered server-side: the list is paginated, so narrowing it client-side would
       // filter only the current page and leave the total wrong.
       `/products?limit=${limit}&offset=${offset}` +
         `${opts.cogsIncomplete ? "&cogs_incomplete=true" : ""}` +
+        `${opts.includeInactive ? "&include_inactive=true" : ""}` +
         `${opts.q?.trim() ? `&q=${encodeURIComponent(opts.q.trim())}` : ""}`,
     ),
   get: (id: number) => api.get<Product>(`/products/${id}`),

@@ -38,7 +38,7 @@ MATERIALS_CSV_FIELDS = [
     "product_url",
 ]
 
-PRODUCTS_CSV_FIELDS = ["name", "sku", "description"]
+PRODUCTS_CSV_FIELDS = ["name", "sku", "description", "is_active"]
 
 ORDERS_CSV_FIELDS = [
     "id",
@@ -312,7 +312,14 @@ async def export_products_csv(session: AsyncSession) -> str:
     writer = csv.DictWriter(buf, fieldnames=PRODUCTS_CSV_FIELDS)
     writer.writeheader()
     for p in result.scalars():
-        writer.writerow({"name": p.name, "sku": p.sku or "", "description": p.description or ""})
+        writer.writerow(
+            {
+                "name": p.name,
+                "sku": p.sku or "",
+                "description": p.description or "",
+                "is_active": "true" if p.is_active else "false",
+            }
+        )
     return buf.getvalue()
 
 
@@ -381,13 +388,14 @@ async def import_products_csv(session: AsyncSession, content: bytes) -> dict:
                 raise ValueError("name is required")
             sku = (row.get("sku") or "").strip() or None
             description = row.get("description") or None
+            is_active = _parse_bool(row.get("is_active"), default=True)
 
             existing = None
             if sku:
                 existing = (await session.execute(select(Product).where(Product.sku == sku))).scalar_one_or_none()
 
             if existing is None:
-                product = Product(name=name, sku=sku, description=description)
+                product = Product(name=name, sku=sku, description=description, is_active=is_active)
                 session.add(product)
                 await session.flush()
                 if not sku:
@@ -397,6 +405,7 @@ async def import_products_csv(session: AsyncSession, content: bytes) -> dict:
             else:
                 existing.name = name
                 existing.description = description
+                existing.is_active = is_active
                 updated += 1
 
             await session.commit()
