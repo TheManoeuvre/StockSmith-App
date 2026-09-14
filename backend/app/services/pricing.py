@@ -28,9 +28,21 @@ def compute_profit_margin(
     shipping_cost: Decimal | None,
     platform_fee_percent: Decimal | None,
     kitting_cost_per_unit: Decimal | None = None,
+    shipping_price: Decimal | None = None,
 ) -> tuple[Decimal | None, Decimal | None]:
     """Returns (profit, margin_percent). Both None if sale_price isn't set — there's
     nothing meaningful to compute margin against.
+
+    Revenue is sale_price + shipping_price — what the buyer actually pays, the same
+    "Order Value Paid + Postage Paid" that orders._compute_net_profit starts from. Postage
+    charged to the customer is income exactly as much as the item price is; leaving it out
+    while still deducting shipping_cost (what the carrier charges the seller) made every
+    product look worse than its orders, by the full postage price.
+
+    platform_fee_percent is a percentage of that revenue, not of sale_price alone: a
+    marketplace's fee is levied on the whole amount the buyer pays (see
+    platform_fees.compute_effective_fee_amount), so a manual figure like "13%" is applied
+    to the same base. margin_percent is profit over the same revenue.
 
     kitting_cost_per_unit is the packaging cost of fulfilling one unit. It's defaulted
     rather than required because it was added after the fact, but it should be supplied:
@@ -38,18 +50,20 @@ def compute_profit_margin(
     cost, and only the order is right. It's an estimate at this level — an order that ships
     several units together pays for one box, not one per unit (see
     kitting.auto_apply_multiunit_kitting_override), so a per-unit figure is the pessimistic
-    single-unit case."""
+    single-unit case. shipping_price is defaulted for the same reason, and should be
+    supplied for the same reason."""
     if sale_price is None:
         return None, None
-    fee = sale_price * (platform_fee_percent or Decimal(0)) / Decimal(100)
+    revenue = sale_price + (shipping_price or Decimal(0))
+    fee = revenue * (platform_fee_percent or Decimal(0)) / Decimal(100)
     profit = (
-        sale_price
+        revenue
         - (cost_per_unit or Decimal(0))
         - (kitting_cost_per_unit or Decimal(0))
         - (shipping_cost or Decimal(0))
         - fee
     )
-    margin_percent = (profit / sale_price * Decimal(100)) if sale_price != 0 else None
+    margin_percent = (profit / revenue * Decimal(100)) if revenue != 0 else None
     return profit, margin_percent
 
 
@@ -58,7 +72,7 @@ async def snapshot_product_pricing(session: AsyncSession, product: Product, cost
     the BUILD cost only, unchanged: it's what check_and_snapshot_for_materials' drift
     comparison is keyed on and what the price-history table renders, so folding packaging in
     would silently reinterpret every historical row. Only margin_percent accounts for
-    kitting, and only from here forward."""
+    kitting and for postage charged as revenue, and only from here forward."""
     from app.services.kitting import compute_variant_kitting_cost_per_unit
 
     kitting_cost_per_unit = await compute_variant_kitting_cost_per_unit(session, product.id, None)
@@ -71,7 +85,7 @@ async def snapshot_product_pricing(session: AsyncSession, product: Product, cost
         fee_source, fee_components, product.platform_fee_percent, product.sale_price, shipping_price
     )
     _, margin_percent = compute_profit_margin(
-        product.sale_price, cost_per_unit, shipping_cost, effective_fee_percent, kitting_cost_per_unit
+        product.sale_price, cost_per_unit, shipping_cost, effective_fee_percent, kitting_cost_per_unit, shipping_price
     )
     session.add(
         ProductPriceSnapshot(

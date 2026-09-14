@@ -439,10 +439,12 @@ export interface Product {
   cost_per_unit_max: string | null;
   kitting_cost_per_unit_min: string | null;
   kitting_cost_per_unit_max: string | null;
-  /** Resolved shipping profile and its cost on the shop-wide margin fee source. Null when
-   *  none is assigned — which is why such a product's orders ship with no postage cost. */
+  /** Resolved shipping profile, what it charges the buyer, and its cost on the shop-wide
+   *  margin fee source. Null when none is assigned — which is why such a product's orders
+   *  ship with no postage cost. */
   effective_shipping_profile_id: number | null;
   effective_shipping_profile_name: string | null;
+  effective_shipping_price: string | null;
   effective_shipping_cost: string | null;
   /** Missing a shipping profile or a materials cost — see the backend's _cogs_incomplete. */
   cogs_incomplete: boolean;
