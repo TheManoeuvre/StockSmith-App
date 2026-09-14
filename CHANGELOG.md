@@ -12,6 +12,34 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-09-14
+
+### Added
+- **Ship-by dates and shipment tracking are now pulled in from Etsy and eBay.** Order sync
+  now captures the marketplace's fulfillment deadline (Etsy's expected ship date, or the
+  earliest eBay ship-by date across an order's line items) and, once the marketplace
+  reports it, the shipment tracking number and carrier — shown with a copy-to-clipboard
+  button in the orders table's Fulfilment column and the order slideover's Shipping tab.
+  Etsy buyer personalization/customization text is also now captured per order line and
+  shown under the relevant line item.
+- **Product images can now be imported by pasting a URL**, matching the existing material
+  image field — previously only drag-and-drop or local file upload were available.
+- **Bulk BOM edit now covers the Kitting BOM**, supports selecting multiple BOM lines at
+  once, and pre-fills "Substitute with" from each line's actual existing override instead
+  of always defaulting to "Keep the base material".
+- **The products list can now show or hide inactive products** (a "Show inactive (N)"
+  checkbox, matching the materials list), and the products CSV now round-trips the
+  active/inactive flag on import and export.
+
+### Fixed
+- **CSV downloads no longer occasionally fail to start.** The blob URL backing the
+  download could be revoked before the browser had a chance to begin the download in some
+  browsers; revocation is now deferred until after the download starts.
+- **Disabled materials no longer appear as pickable options in BOM and Kitting BOM
+  pickers** (Build BOM, Kitting BOM, the Default Kitting BOM, order kitting extras, and the
+  override "extra material" picker). A BOM line already pointing at a since-disabled
+  material still displays and keeps working.
+
 ## [0.13.1] - 2026-09-12
 
 ### Changed

@@ -11,7 +11,7 @@ Two independent additions surfaced by the eBay/Etsy "unused API data" review:
   every eBay-sourced line.
 
 Revision ID: a2f6c918e4b7
-Revises: fdc3ea941e39
+Revises: a1c7e4f92b56
 Create Date: 2026-09-13 00:00:00.000000
 
 """
@@ -23,7 +23,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'a2f6c918e4b7'
-down_revision: Union[str, Sequence[str], None] = 'fdc3ea941e39'
+down_revision: Union[str, Sequence[str], None] = 'a1c7e4f92b56'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
