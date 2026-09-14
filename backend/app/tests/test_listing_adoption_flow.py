@@ -80,13 +80,21 @@ class FakeEbayAdapter:
 
 
 class FakeEtsyAdapter:
-    def __init__(self, listings: list[dict] | None = None):
+    def __init__(self, listings: list[dict] | None = None, products: list[ListingProductRef] | None = None):
         self.listings = listings or []
+        self.products = products or []
         self.calls: list[tuple] = []
         self.write_error: Exception | None = None
+        self.fetch_error: Exception | None = None
 
     async def fetch_all_listings(self, session, connection):
         return self.listings
+
+    async def fetch_listing_products(self, session, connection, listing_id):
+        self.calls.append(("fetch_products", listing_id))
+        if self.fetch_error is not None:
+            raise self.fetch_error
+        return self.products
 
     async def update_listing_skus(self, session, connection, listing_id, sku_by_index):
         self.calls.append(("write_skus", listing_id, dict(sku_by_index)))
@@ -624,3 +632,101 @@ async def test_etsy_write_failure_writes_nothing_locally(session, monkeypatch):
         )
 
     assert await _listings_for(session, product.id, ListingPlatform.etsy) == []
+
+
+# --- Variation-mapping proposals ---------------------------------------------------
+
+
+def _etsy_products(colours: list[str]) -> list[ListingProductRef]:
+    return [
+        ListingProductRef(index=i, sku=None, variation=f"Colour: {c}", quantity=1, attributes={"Colour": c})
+        for i, c in enumerate(colours)
+    ]
+
+
+async def test_etsy_variation_mapping_prefills_by_attribute_value(session, monkeypatch):
+    await _connect(session, ListingPlatform.etsy, scopes=None)
+    product, variants = await _make_product(session, "WIDGET", ["A", "B"])  # Black, White
+    adapter = FakeEtsyAdapter(products=_etsy_products(["white", "BLACK"]))
+    _use_adapter(monkeypatch, adapter, "EtsyAdapter")
+
+    proposal = await platforms_router.get_etsy_variation_mapping(product.id, "1234", None, session)
+
+    assert adapter.calls == [("fetch_products", "1234")]
+    by_variant = {e.variant_id: e for e in proposal.entries}
+    assert (by_variant[variants[0].id].matched_index, by_variant[variants[0].id].match_confidence) == (1, "exact")
+    assert (by_variant[variants[1].id].matched_index, by_variant[variants[1].id].match_confidence) == (0, "exact")
+    assert [(p.stocksmith_name, p.platform_name, p.source) for p in proposal.attribute_pairs] == [
+        ("Colour", "Colour", "exact")
+    ]
+
+
+async def test_etsy_variation_mapping_honours_manual_attribute_map(session, monkeypatch):
+    await _connect(session, ListingPlatform.etsy, scopes=None)
+    product, variants = await _make_product(session, "WIDGET", ["A", "B"])
+    products = [
+        ListingProductRef(index=0, sku=None, variation="Shade: White", quantity=1, attributes={"Shade": "White"}),
+        ListingProductRef(index=1, sku=None, variation="Shade: Black", quantity=1, attributes={"Shade": "Black"}),
+    ]
+    _use_adapter(monkeypatch, FakeEtsyAdapter(products=products), "EtsyAdapter")
+
+    proposal = await platforms_router.get_etsy_variation_mapping(product.id, "1234", '{"Colour": "Shade"}', session)
+
+    assert proposal.attribute_pairs[0].source == "manual"
+    by_variant = {e.variant_id: e for e in proposal.entries}
+    assert by_variant[variants[0].id].matched_index == 1
+    assert by_variant[variants[1].id].matched_index == 0
+
+
+async def test_etsy_variation_mapping_maps_platform_errors(session, monkeypatch):
+    await _connect(session, ListingPlatform.etsy, scopes=None)
+    product, _ = await _make_product(session, "WIDGET", ["A"])
+    adapter = FakeEtsyAdapter()
+    adapter.fetch_error = PlatformSyncError("Failed to fetch Etsy listing inventory: 404")
+    _use_adapter(monkeypatch, adapter, "EtsyAdapter")
+
+    with pytest.raises(HTTPException) as exc:
+        await platforms_router.get_etsy_variation_mapping(product.id, "1234", None, session)
+
+    assert exc.value.status_code == 502
+
+
+@pytest.mark.parametrize("raw", ["not json", "[1, 2]", '{"Colour": 3}'])
+async def test_variation_mapping_rejects_malformed_attribute_map(session, monkeypatch, raw):
+    await _connect(session, ListingPlatform.ebay)
+    product, _ = await _make_product(session, "SKU-0012", ["A"])
+    adapter = FakeEbayAdapter(_candidate(["OLD-1"], [{"Colour": "Black"}]))
+    _use_adapter(monkeypatch, adapter, "EbayAdapter")
+
+    with pytest.raises(HTTPException) as exc:
+        await platforms_router.get_variation_mapping(product.id, "227269664481", raw, session)
+
+    assert exc.value.status_code == 400
+    # Rejected before spending a Trading API call.
+    assert adapter.calls == []
+
+
+async def test_variation_mapping_rejects_unknown_platform_attribute(session, monkeypatch):
+    await _connect(session, ListingPlatform.ebay)
+    product, _ = await _make_product(session, "SKU-0012", ["A"])
+    _use_adapter(monkeypatch, FakeEbayAdapter(_candidate(["OLD-1"], [{"Colour": "Black"}])), "EbayAdapter")
+
+    with pytest.raises(HTTPException) as exc:
+        await platforms_router.get_variation_mapping(product.id, "227269664481", '{"Colour": "Shade"}', session)
+
+    assert exc.value.status_code == 400
+    assert "Shade" in exc.value.detail
+
+
+async def test_ebay_variation_mapping_accepts_manual_attribute_map(session, monkeypatch):
+    await _connect(session, ListingPlatform.ebay)
+    product, variants = await _make_product(session, "SKU-0012", ["A", "B"])  # Black, White
+    candidate = _candidate(["OLD-1", "OLD-2"], [{"Shade": "White"}, {"Shade": "Black"}])
+    _use_adapter(monkeypatch, FakeEbayAdapter(candidate), "EbayAdapter")
+
+    proposal = await platforms_router.get_variation_mapping(product.id, "227269664481", '{"Colour": "Shade"}', session)
+
+    assert proposal.platform_attribute_names == ["Shade"]
+    by_variant = {e.variant_id: e for e in proposal.entries}
+    assert by_variant[variants[0].id].matched_sku == "OLD-2"
+    assert by_variant[variants[1].id].matched_sku == "OLD-1"

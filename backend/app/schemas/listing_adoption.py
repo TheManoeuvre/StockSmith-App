@@ -25,16 +25,36 @@ class UnmigratedListingsReport(BaseModel):
     listings: list[EligibilityAnnotatedCandidate]
 
 
+MatchConfidence = Literal["exact", "count_only", "unmatched"]
+
+
+class AttributePair(BaseModel):
+    """How one StockSmith attribute name (product.variant_attributeN_name) was paired
+    with a platform variation attribute name for value matching. `source` says how the
+    pairing was arrived at so the picker can flag the guessed ones: "exact" by
+    normalised name, "inferred" by overlapping values only (the names differ, e.g.
+    "Colour" vs "Primary colour"), "manual" from the caller's attribute_map, or
+    "unmatched" when nothing fit — the user picks one from platform_attribute_names."""
+
+    stocksmith_name: str
+    platform_name: str | None
+    source: Literal["exact", "inferred", "manual", "unmatched"]
+
+
 class VariationMappingEntry(BaseModel):
     variant_id: int | None  # None only for a no-variant product's single unit
     variant_name: str | None
     stockssmith_attributes: dict[str, str]
     matched_sku: str | None
     matched_variation_specifics: dict[str, str] | None
-    match_confidence: Literal["exact", "count_only", "unmatched"]
+    match_confidence: MatchConfidence
 
 
 class VariationMappingProposal(BaseModel):
+    attribute_pairs: list[AttributePair] = []
+    # Union of attribute names across the listing's variations, for the pairing
+    # dropdown. Empty when the listing has no per-variation specifics.
+    platform_attribute_names: list[str] = []
     entries: list[VariationMappingEntry]
 
 
@@ -89,6 +109,8 @@ class UnadoptedListingProduct(BaseModel):
     sku: str | None
     variation: str | None
     quantity: int
+    # The same property values as `variation`, structured: {property_name: value}.
+    attributes: dict[str, str] = {}
 
 
 class UnadoptedListing(BaseModel):
@@ -101,6 +123,26 @@ class UnadoptedListing(BaseModel):
 class UnadoptedListingsReport(BaseModel):
     total_count: int
     listings: list[UnadoptedListing]
+
+
+class EtsyVariationMappingEntry(BaseModel):
+    """Etsy's counterpart to VariationMappingEntry, keyed by the listing product's
+    position (the only stable handle for a product with no SKU) rather than by SKU.
+    `stockssmith_attributes` keeps eBay's spelling so the two share one frontend type."""
+
+    variant_id: int | None
+    variant_name: str | None
+    stockssmith_attributes: dict[str, str]
+    matched_index: int | None
+    matched_variation: str | None
+    matched_attributes: dict[str, str] | None
+    match_confidence: MatchConfidence
+
+
+class EtsyVariationMappingProposal(BaseModel):
+    attribute_pairs: list[AttributePair]
+    platform_attribute_names: list[str]
+    entries: list[EtsyVariationMappingEntry]
 
 
 class EtsyLinkChoice(BaseModel):
