@@ -332,7 +332,7 @@ async def _serialize_one(session: AsyncSession, order: Order) -> OrderRead:
 
 @router.get("", response_model=OrderPage)
 async def list_orders(
-    status_filter: OrderStatus | None = None,
+    status_filter: str | None = None,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_db),
@@ -367,8 +367,17 @@ async def list_orders(
         .offset(offset)
     )
     if status_filter is not None:
-        count_query = count_query.where(Order.status == status_filter)
-        query = query.where(Order.status == status_filter)
+        # "awaiting" is a synthetic status the frontend's tab strip filters on — it has no
+        # single OrderStatus of its own, standing in for "not yet shipped or cancelled".
+        if status_filter == "awaiting":
+            status_clause = Order.status.in_((OrderStatus.pending, OrderStatus.allocated))
+        else:
+            try:
+                status_clause = Order.status == OrderStatus(status_filter)
+            except ValueError:
+                raise HTTPException(status_code=422, detail="Invalid status_filter") from None
+        count_query = count_query.where(status_clause)
+        query = query.where(status_clause)
     total = await session.scalar(count_query)
     result = await session.execute(query)
     orders = list(result.scalars())

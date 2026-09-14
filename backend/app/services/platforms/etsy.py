@@ -446,12 +446,6 @@ class EtsyAdapter:
             datetime.fromtimestamp(modified_ts, tz=timezone.utc) if modified_ts is not None else placed_at
         )
 
-        # Like create_timestamp/update_timestamp, Etsy reports this as a Unix timestamp,
-        # not an ISO date string. Absent on receipts placed before Etsy started returning
-        # it, so None here is a real "unknown", not "not due".
-        ship_by_ts = receipt.get("expected_ship_date")
-        ship_by_date = datetime.fromtimestamp(ship_by_ts, tz=timezone.utc) if ship_by_ts is not None else None
-
         transactions = receipt.get("transactions")
         if transactions is None:
             # The `includes=Transactions` embed didn't come through — fall back to a
@@ -464,6 +458,8 @@ class EtsyAdapter:
                 f"/shops/{connection.external_account_id}/receipts/{receipt.get('receipt_id')}/transactions",
             )
             transactions = tx_response.json().get("results", []) if tx_response.status_code == 200 else []
+
+        ship_by_date = self._ship_by_date_from_transactions(transactions)
 
         lines = [self._parse_transaction(tx) for tx in transactions]
 
@@ -604,18 +600,44 @@ class EtsyAdapter:
         )
 
     @staticmethod
+    def _ship_by_date_from_transactions(transactions: list[dict]) -> datetime | None:
+        """expected_ship_date lives on each transaction (line item), not on the receipt
+        itself — Etsy's ShopReceipt schema has no such field at all, only
+        ShopReceiptTransaction does. Reading it off the receipt (as this used to) silently
+        returned None for every single order. A multi-line receipt ships as one parcel, so
+        the binding deadline for the whole order is the earliest one across its
+        transactions, same reasoning as eBay's per-line-item shipByDate in
+        EbayAdapter._parse_order. Like create_timestamp/update_timestamp, Etsy reports this
+        as a Unix timestamp, not an ISO date string. Still absent on transactions placed
+        before Etsy started returning it, so None here is a real "unknown", not "not due".
+
+        Extracted as its own static method (rather than left inline in _parse_receipt) so
+        scripts/backfill_order_tracking_and_variations.py can compute the exact same value
+        for an already-imported order without going through the rest of receipt parsing.
+        """
+        ship_by_dates = [
+            datetime.fromtimestamp(ts, tz=timezone.utc)
+            for tx in transactions
+            if (ts := tx.get("expected_ship_date")) is not None
+        ]
+        return min(ship_by_dates) if ship_by_dates else None
+
+    @staticmethod
     def _format_variations(variations: list[dict] | None) -> str | None:
         """Etsy's transaction.variations mixes real product options (Colour, Size) with
-        buyer-entered personalization in the same array, distinguished only by
-        `formatted_name` (e.g. "Personalization") — there's no separate boolean flag.
-        Every entry is kept and shown as "Name: Value" since a mismapped SKU still
-        benefits from seeing the option text, not just the personalization."""
+        buyer-entered personalization in the same array. They ARE distinguishable:
+        Etsy's schema documents `question_id` as present "[Personalization only]" — a
+        real product option carries `property_id`/`value_id` instead and has no
+        question_id. This field (order_lines.variation_text) is documented as
+        buyer-supplied personalization only, and is already handled by the SKU for real
+        options, so including those here duplicated information already shown as the
+        line's product/variant name and mislabeled it as personalization in the UI."""
         if not variations:
             return None
         parts = [
             f"{v.get('formatted_name')}: {v.get('formatted_value')}"
             for v in variations
-            if isinstance(v, dict) and v.get("formatted_value")
+            if isinstance(v, dict) and v.get("formatted_value") and v.get("question_id") is not None
         ]
         return "; ".join(parts) if parts else None
 

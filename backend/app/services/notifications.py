@@ -25,6 +25,7 @@ from app.models.notification import (
     NotificationSettings,
     NotificationTypeSettings,
     NotificationUrgency,
+    parse_digest_hours,
 )
 
 logger = logging.getLogger("stocksmith.notifications")
@@ -104,21 +105,29 @@ def _in_quiet_hours(settings: NotificationSettings, *, now: datetime | None = No
     return hour >= start or hour < end  # wraps past midnight
 
 
-async def send_pushover(user_key: str, title: str, body: str) -> tuple[bool, str | None]:
+async def send_pushover(
+    user_key: str, title: str, body: str, *, ttl_seconds: int | None = None
+) -> tuple[bool, str | None]:
     """POSTs one message to Pushover. Returns (success, reason) — reason is a human-readable
     failure explanation (bad key vs. network error) on failure, None on success. Never
     raises: a bad key or a flaky network must not crash the caller (an alert-detection loop,
-    or the settings router's test-send endpoint)."""
+    or the settings router's test-send endpoint).
+
+    `ttl_seconds` maps to Pushover's `ttl`: the message deletes itself from every device it
+    reached once that many seconds have passed. Omitted when None, which is what a
+    notification that should persist until a person deals with it wants."""
     token = app_settings.pushover_app_api_token
     if not token:
         logger.warning("Pushover is enabled but PUSHOVER_APP_API_TOKEN is not configured — skipping send")
         return False, "Pushover is not configured on this install (missing application token)."
 
+    payload_data = {"token": token, "user": user_key, "title": title, "message": body}
+    if ttl_seconds is not None and ttl_seconds > 0:
+        payload_data["ttl"] = str(ttl_seconds)
+
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(
-                _PUSHOVER_URL, data={"token": token, "user": user_key, "title": title, "message": body}
-            )
+            response = await client.post(_PUSHOVER_URL, data=payload_data)
     except httpx.HTTPError as exc:
         logger.warning("Pushover send failed (network error): %s", exc)
         return False, f"Network error contacting Pushover: {exc}"
@@ -137,9 +146,33 @@ async def send_pushover(user_key: str, title: str, body: str) -> tuple[bool, str
     return False, reason
 
 
-async def _deliver_external(session: AsyncSession, settings: NotificationSettings, title: str, body: str) -> None:
+def _expiry_seconds(settings: NotificationSettings, urgency: NotificationUrgency) -> int | None:
+    """How long a Pushover message should live on the phone, or None to leave it there.
+
+    Only routine alerts (urgency=digest — a shortfall that a restock or a build will close, a
+    material warning, a backlog over threshold) expire. Anything urgency=immediate is a
+    blocker or a failure: an order that can never be built, a sync or backup that broke. Those
+    do not become less true with time, so quietly deleting one off the lock screen would lose
+    the only prompt the person had. The in-app log keeps every notification either way — this
+    only governs the copy on the phone.
+    """
+    if urgency != NotificationUrgency.digest:
+        return None
+    hours = settings.pushover_expiry_hours
+    if hours <= 0:
+        return None
+    return hours * 3600
+
+
+async def _deliver_external(
+    session: AsyncSession,
+    settings: NotificationSettings,
+    title: str,
+    body: str,
+    ttl_seconds: int | None = None,
+) -> None:
     if settings.pushover_enabled and settings.pushover_user_key:
-        await send_pushover(settings.pushover_user_key, title, body)
+        await send_pushover(settings.pushover_user_key, title, body, ttl_seconds=ttl_seconds)
     # Windows toast delivery is Tauri/Rust-side, not backend — the Rust shell polls
     # GET /api/v1/notifications/unread-count and raises its own OS toast when that count
     # increases. Nothing further to do here; see routers/notifications.py for the contract.
@@ -159,8 +192,13 @@ async def dispatch_notification(
     """The single entry point every alert (and the daily/weekly order summary) goes
     through. `off` skips everything, including the in-app log. Otherwise the in-app record
     is unconditional; external delivery only happens immediately for `delivery_mode ==
-    immediate` — `digest` items sit as unread rows until the next digest flush (see
-    flush_digest) batches them into one external send.
+    immediate` — `digest` items sit as rows with digest_sent_at NULL until the next
+    scheduled digest flush (see flush_digest) batches them into one external send.
+
+    `delivery_mode` is persisted on the row precisely so flush_digest can find the digest
+    ones without falling back to `urgency`, which describes importance rather than routing —
+    see the Notification model docstring for the double-send and silent-drop that conflating
+    the two produced.
 
     Quiet hours only suppress *external* delivery, and only for non-immediate-urgency
     notifications — the in-app record always stands, and an immediate-urgency notification
@@ -174,6 +212,7 @@ async def dispatch_notification(
     notification = Notification(
         category=category,
         urgency=urgency,
+        delivery_mode=delivery_mode,
         title=title,
         body=body,
         related_entity_type=related_entity_type,
@@ -188,34 +227,85 @@ async def dispatch_notification(
         if _in_quiet_hours(settings) and urgency != NotificationUrgency.immediate:
             pass  # suppressed; the in-app record above still stands
         else:
-            await _deliver_external(session, settings, title, body)
+            await _deliver_external(session, settings, title, body, _expiry_seconds(settings, urgency))
 
     return notification
 
 
+def _digest_due(settings: NotificationSettings, *, now: datetime | None = None) -> bool:
+    """Whether a scheduled digest slot has come round that we haven't already flushed for.
+
+    Same "reached the hour, haven't already run since it came round" shape as
+    notification_summary._is_due and backup_scheduler._is_due, generalised to several slots
+    a day: find the latest configured hour that has already passed today, and fire if the
+    last flush predates it. A machine asleep at 5pm flushes shortly after waking rather than
+    skipping the slot entirely.
+
+    No configured hours means "flush on every tick" — see NotificationSettings
+    .digest_hours_local for why a blank field must not mean "never".
+    """
+    now = now or datetime.now()
+    hours = parse_digest_hours(settings.digest_hours_local)
+    if not hours:
+        return True
+
+    passed = [hour for hour in hours if hour <= now.hour]
+    if not passed:
+        return False  # today's first slot is still ahead
+    slot_hour = max(passed)
+
+    last = settings.digest_last_fired_at
+    if last is None:
+        return True
+    if last.tzinfo is None:
+        # SQLite hands back naive datetimes even for DateTime(timezone=True) columns, and
+        # everything written here is UTC — without this, .astimezone() would read the stored
+        # value as local time and shift the slot comparison by the UTC offset.
+        last = last.replace(tzinfo=timezone.utc)
+    last_local = last.astimezone()
+    return last_local.date() < now.date() or last_local.hour < slot_hour
+
+
 async def flush_digest(session: AsyncSession) -> None:
     """Batches every not-yet-sent digest-mode notification into one Pushover message (and
-    the same unread-count bump the Windows toast side reads) — "all unread digest-mode
-    notifications since last digest send", per the feature spec. Called from
-    notification_scheduler's periodic tick.
+    the same unread-count bump the Windows toast side reads). Called from
+    notification_scheduler's periodic tick, but only actually sends on the configured digest
+    hours — the tick cadence is an implementation detail of the poller, not a delivery
+    schedule a person asked for.
+
+    Keyed on `delivery_mode`, not `urgency`: urgency says how important a notification is,
+    delivery_mode says how the user asked to receive it, and only the latter may decide what
+    gets batched (see the Notification model docstring).
 
     Deliberately keyed on `digest_sent_at IS NULL` rather than `read_at IS NULL`: read_at
     means a person opened it in the app, which can happen before or after this flush and
     must not affect whether it gets batched.
     """
     settings = await get_notification_settings(session)
+    if not _digest_due(settings):
+        return
     if _in_quiet_hours(settings):
-        # Wait out the quiet window rather than dropping them — the next tick after it ends
-        # will pick these back up since digest_sent_at is still NULL.
+        # Wait out the quiet window rather than dropping them — the watermark is deliberately
+        # not advanced, so the first tick after the window ends still sees the slot as due.
         return
 
     result = await session.execute(
         select(Notification)
-        .where(Notification.urgency == NotificationUrgency.digest, Notification.digest_sent_at.is_(None))
+        .where(
+            Notification.delivery_mode == NotificationDeliveryMode.digest,
+            Notification.digest_sent_at.is_(None),
+        )
         .order_by(Notification.created_at)
     )
     pending = list(result.scalars())
+    now = datetime.now(timezone.utc)
+
     if not pending:
+        # Still mark the slot as served. Otherwise it stays due, and the very next item to
+        # arrive would go out within 15 minutes of being raised — which is the un-batched
+        # behaviour the schedule exists to stop.
+        settings.digest_last_fired_at = now
+        await session.commit()
         return
 
     title = f"StockSmith: {len(pending)} update{'s' if len(pending) != 1 else ''}"
@@ -224,11 +314,19 @@ async def flush_digest(session: AsyncSession) -> None:
         lines.append(f"...and {len(pending) - _DIGEST_BODY_LINE_CAP} more")
     body = "\n".join(lines)
 
-    await _deliver_external(session, settings, title, body)
+    # The batch expires only if everything in it is routine. One blocker or failure batched
+    # in (a type whose urgency is immediate but which the user routed to the digest) keeps
+    # the whole message on the phone — see _expiry_seconds.
+    batch_urgency = (
+        NotificationUrgency.digest
+        if all(n.urgency == NotificationUrgency.digest for n in pending)
+        else NotificationUrgency.immediate
+    )
+    await _deliver_external(session, settings, title, body, _expiry_seconds(settings, batch_urgency))
 
-    now = datetime.now(timezone.utc)
     for notification in pending:
         notification.digest_sent_at = now
+    settings.digest_last_fired_at = now
     await session.commit()
 
 

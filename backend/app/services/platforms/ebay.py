@@ -759,16 +759,7 @@ class EbayAdapter:
         line_items = order.get("lineItems", [])
         lines = [self._parse_line_item(li) for li in line_items]
 
-        # shipByDate lives per line item, not on the order — but a multi-line eBay order
-        # ships as one parcel, so the binding deadline for the whole order is the
-        # earliest of them. None when no line item reports one.
-        ship_by_dates = [
-            parsed
-            for li in line_items
-            if (parsed := self._parse_timestamp((li.get("lineItemFulfillmentInstructions") or {}).get("shipByDate")))
-            is not None
-        ]
-        ship_by_date = min(ship_by_dates) if ship_by_dates else None
+        ship_by_date = self._ship_by_date_from_line_items(line_items)
 
         pricing = order.get("pricingSummary") or {}
         currency = (pricing.get("total") or {}).get("currency")
@@ -855,6 +846,25 @@ class EbayAdapter:
             unit_price=unit_price,
             currency=cost.get("currency"),
         )
+
+    @classmethod
+    def _ship_by_date_from_line_items(cls, line_items: list[dict]) -> datetime | None:
+        """shipByDate lives per line item, not on the order — but a multi-line eBay order
+        ships as one parcel, so the binding deadline for the whole order is the earliest
+        of them. None when no line item reports one.
+
+        Extracted as its own method (rather than left inline in _parse_order) so
+        scripts/backfill_order_tracking_and_variations.py can compute the exact same
+        value for an already-imported order without going through the rest of order
+        parsing — mirrors EtsyAdapter._ship_by_date_from_transactions.
+        """
+        ship_by_dates = [
+            parsed
+            for li in line_items
+            if (parsed := cls._parse_timestamp((li.get("lineItemFulfillmentInstructions") or {}).get("shipByDate")))
+            is not None
+        ]
+        return min(ship_by_dates) if ship_by_dates else None
 
     @staticmethod
     def _parse_timestamp(raw: str | None) -> datetime | None:
@@ -1018,6 +1028,26 @@ class EbayAdapter:
             f"{float(net):.2f}" if net is not None else None,
             sale.get("transactionStatus"),
         )
+
+    async def fetch_order(self, session, connection: PlatformConnection, order_id) -> dict | None:
+        """Sell Fulfillment API getOrder — the single-order counterpart to the bulk
+        getOrders call fetch_orders_since already makes, same response shape (including
+        lineItems[].lineItemFulfillmentInstructions.shipByDate). Used by
+        scripts/backfill_order_tracking_and_variations.py to recompute an already-imported
+        order's ship_by_date without waiting for a bulk sync to re-fetch it. Returns None
+        on any non-200 rather than raising, matching this adapter's other best-effort
+        per-order lookups (_fetch_tracking, _fetch_transactions)."""
+        if order_id is None:
+            return None
+        response = await self._authed_request(
+            session, connection, "GET", f"{self.api_base}/sell/fulfillment/v1/order/{order_id}"
+        )
+        if response.status_code != 200:
+            logger.warning(
+                "eBay order lookup failed for order %s: %d %s", order_id, response.status_code, response.text[:500]
+            )
+            return None
+        return response.json()
 
     async def _fetch_tracking(
         self, session, connection: PlatformConnection, order_id

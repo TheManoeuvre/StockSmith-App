@@ -153,7 +153,7 @@ class TestOrderUnfulfillableDedup:
         result = await session.execute(select(Notification))
         [notification] = result.scalars().all()
         assert notification.category == NotificationCategory.order_unfulfillable
-        assert notification.title == "Order awaiting product"
+        assert notification.title == "Order #103 — 1 item short"
 
 
 class TestOrderBlockedDedup:
@@ -183,7 +183,7 @@ class TestOrderBlockedDedup:
         result = await session.execute(select(Notification))
         [notification] = result.scalars().all()
         assert notification.category == NotificationCategory.order_blocked
-        assert notification.title == "Order blocked — no BOM defined"
+        assert notification.title == "Order #201 blocked — 1 item with no BOM"
 
     async def test_fires_once_then_stays_quiet_while_still_blocked(self, session, monkeypatch):
         await _set_type(session, NotificationCategory.order_blocked)
@@ -209,6 +209,101 @@ class TestOrderBlockedDedup:
 
 async def _awaiting_stub(items):
     return list(items)
+
+
+class TestOrderShortfallGrouping:
+    """Several lines of one order going short in the same sweep is one event to a person, so
+    it must be one notification — the shape that produced five near-identical "Order awaiting
+    product" pushes for a single five-variant order."""
+
+    def _line(self, line_id: int, order_id: int, variant: str | None, *, has_bom: bool = True) -> OrderAwaitingInventory:
+        return OrderAwaitingInventory(
+            line_id=line_id,
+            order_id=order_id,
+            product_id=1,
+            variant_id=None,
+            product_name="Brick Pencil Pot",
+            variant_name=variant,
+            short_by=1,
+            order_placed_at=datetime.now(timezone.utc),
+            platform=None,
+            has_bom=has_bom,
+        )
+
+    async def test_lines_of_one_order_collapse_into_a_single_notification(self, session, monkeypatch):
+        await _set_type(session, NotificationCategory.order_unfulfillable)
+        lines = [
+            self._line(1, 242, "4 Stud / Dark Blue"),
+            self._line(2, 242, "6 Stud / Gold"),
+            self._line(3, 242, "6 Stud / Silver"),
+        ]
+        monkeypatch.setattr(notification_alerts, "get_orders_awaiting_inventory", lambda s: _awaiting_stub(lines))
+
+        await notification_alerts.check_order_unfulfillable_alerts(session)
+
+        result = await session.execute(select(Notification))
+        [notification] = result.scalars().all()
+        assert notification.title == "Order #242 — 3 items short"
+        # The title identifies the order; the body is what says which items.
+        assert "4 Stud / Dark Blue" in notification.body
+        assert "6 Stud / Silver" in notification.body
+        assert notification.related_entity_id == 242
+
+    async def test_separate_orders_stay_separate(self, session, monkeypatch):
+        await _set_type(session, NotificationCategory.order_unfulfillable)
+        lines = [self._line(1, 242, "Gold"), self._line(2, 243, "Silver")]
+        monkeypatch.setattr(notification_alerts, "get_orders_awaiting_inventory", lambda s: _awaiting_stub(lines))
+
+        await notification_alerts.check_order_unfulfillable_alerts(session)
+
+        assert sorted(await _notification_titles(session)) == [
+            "Order #242 — 1 item short",
+            "Order #243 — 1 item short",
+        ]
+
+    async def test_a_later_line_on_an_alerted_order_notifies_again_with_context(self, session, monkeypatch):
+        await _set_type(session, NotificationCategory.order_unfulfillable)
+        first = [self._line(1, 242, "Gold"), self._line(2, 242, "Silver")]
+        monkeypatch.setattr(notification_alerts, "get_orders_awaiting_inventory", lambda s: _awaiting_stub(first))
+        await notification_alerts.check_order_unfulfillable_alerts(session)
+
+        later = first + [self._line(3, 242, "Bronze")]
+        monkeypatch.setattr(notification_alerts, "get_orders_awaiting_inventory", lambda s: _awaiting_stub(later))
+        await notification_alerts.check_order_unfulfillable_alerts(session)
+
+        result = await session.execute(select(Notification).order_by(Notification.id))
+        notifications_rows = result.scalars().all()
+        assert [n.title for n in notifications_rows] == [
+            "Order #242 — 2 items short",
+            "Order #242 — 1 item short",
+        ]
+        # The newly-short line is the news; the two already flagged are context, not a re-alert.
+        assert "Bronze" in notifications_rows[1].body
+        assert "2 other items on this order were already flagged." in notifications_rows[1].body
+
+    async def test_blocked_lines_group_by_order_too(self, session, monkeypatch):
+        await _set_type(session, NotificationCategory.order_blocked)
+        lines = [self._line(1, 300, "Gold", has_bom=False), self._line(2, 300, "Silver", has_bom=False)]
+        monkeypatch.setattr(notification_alerts, "get_orders_awaiting_inventory", lambda s: _awaiting_stub(lines))
+
+        await notification_alerts.check_order_unfulfillable_alerts(session)
+
+        result = await session.execute(select(Notification))
+        [notification] = result.scalars().all()
+        assert notification.title == "Order #300 blocked — 2 items with no BOM"
+
+    async def test_awaiting_and_blocked_lines_on_one_order_stay_separate_notifications(self, session, monkeypatch):
+        await _set_type(session, NotificationCategory.order_unfulfillable)
+        await _set_type(session, NotificationCategory.order_blocked)
+        lines = [self._line(1, 400, "Gold"), self._line(2, 400, "Silver", has_bom=False)]
+        monkeypatch.setattr(notification_alerts, "get_orders_awaiting_inventory", lambda s: _awaiting_stub(lines))
+
+        await notification_alerts.check_order_unfulfillable_alerts(session)
+
+        assert sorted(await _notification_titles(session)) == [
+            "Order #400 blocked — 1 item with no BOM",
+            "Order #400 — 1 item short",
+        ]
 
 
 class TestAutoResolve:
@@ -339,6 +434,306 @@ class TestQuietHours:
         )
         assert notification is None
         assert await _notification_titles(session) == []
+
+
+class TestDigestRouting:
+    """flush_digest batches on delivery_mode (how the user asked to receive it), never on
+    urgency (how important it is). Batching on urgency double-sent anything immediate whose
+    urgency happened to be digest, and never sent anything digest whose urgency happened to
+    be immediate."""
+
+    async def _flush_recording(self, session, monkeypatch) -> list[tuple[str, str]]:
+        sent: list[tuple[str, str]] = []
+
+        async def _record(_session, _settings, title, body, _ttl=None):
+            sent.append((title, body))
+
+        monkeypatch.setattr(notifications, "_deliver_external", _record)
+        settings = await notifications.get_notification_settings(session)
+        settings.digest_hours_local = ""  # no schedule: flush on this call
+        await session.commit()
+        await notifications.flush_digest(session)
+        return sent
+
+    async def test_an_immediately_delivered_alert_is_not_also_swept_into_the_digest(
+        self, session, monkeypatch
+    ):
+        # order_unfulfillable carries urgency=digest in code but the user set it to deliver
+        # right away — it must go out exactly once, at dispatch.
+        await notifications.dispatch_notification(
+            session,
+            category=NotificationCategory.order_unfulfillable,
+            urgency=NotificationUrgency.digest,
+            title="Order #242 — 3 items short",
+            body="body",
+            delivery_mode=NotificationDeliveryMode.immediate,
+        )
+
+        assert await self._flush_recording(session, monkeypatch) == []
+
+    async def test_a_digest_delivered_alert_with_immediate_urgency_still_gets_swept(
+        self, session, monkeypatch
+    ):
+        # The mirror case: order_blocked carries urgency=immediate in code, but the user set
+        # it to Digest. It has to reach the digest, or it reaches nothing at all.
+        await notifications.dispatch_notification(
+            session,
+            category=NotificationCategory.order_blocked,
+            urgency=NotificationUrgency.immediate,
+            title="Order #300 blocked — 2 items with no BOM",
+            body="body",
+            delivery_mode=NotificationDeliveryMode.digest,
+        )
+
+        sent = await self._flush_recording(session, monkeypatch)
+        assert len(sent) == 1
+        assert "Order #300 blocked" in sent[0][1]
+
+    async def test_a_flushed_notification_is_never_flushed_twice(self, session, monkeypatch):
+        await notifications.dispatch_notification(
+            session,
+            category=NotificationCategory.material_forecast_warning,
+            urgency=NotificationUrgency.digest,
+            title="Filament is running low",
+            body="body",
+            delivery_mode=NotificationDeliveryMode.digest,
+        )
+
+        assert len(await self._flush_recording(session, monkeypatch)) == 1
+        assert await self._flush_recording(session, monkeypatch) == []
+
+    async def test_digest_body_lines_carry_each_notification_title(self, session, monkeypatch):
+        for title in ("Order #242 — 3 items short", "Order #243 — 1 item short"):
+            await notifications.dispatch_notification(
+                session,
+                category=NotificationCategory.order_unfulfillable,
+                urgency=NotificationUrgency.digest,
+                title=title,
+                body="body",
+                delivery_mode=NotificationDeliveryMode.digest,
+            )
+
+        [(title, body)] = await self._flush_recording(session, monkeypatch)
+        assert title == "StockSmith: 2 updates"
+        # Distinguishable lines — the whole point of the roll-up. Generic per-alert titles
+        # used to render this as the same string repeated.
+        assert body == "- Order #242 — 3 items short\n- Order #243 — 1 item short"
+
+
+class TestDigestSchedule:
+    def _settings(self, **overrides) -> NotificationSettings:
+        base = dict(digest_hours_local="9,17", digest_last_fired_at=None)
+        base.update(overrides)
+        return NotificationSettings(id=1, **base)
+
+    def test_not_due_before_the_first_slot_of_the_day(self):
+        settings = self._settings(digest_last_fired_at=datetime(2026, 1, 1, 17, 0, tzinfo=timezone.utc))
+        assert notifications._digest_due(settings, now=datetime(2026, 1, 2, 8, 0)) is False
+
+    def test_due_once_a_slot_has_passed(self):
+        settings = self._settings(digest_last_fired_at=datetime(2026, 1, 1, 17, 0, tzinfo=timezone.utc))
+        assert notifications._digest_due(settings, now=datetime(2026, 1, 2, 9, 30)) is True
+
+    def test_not_due_again_within_the_same_slot(self):
+        settings = self._settings(digest_last_fired_at=datetime(2026, 1, 2, 9, 5, tzinfo=timezone.utc))
+        assert notifications._digest_due(settings, now=datetime(2026, 1, 2, 9, 50)) is False
+        assert notifications._digest_due(settings, now=datetime(2026, 1, 2, 16, 0)) is False
+
+    def test_due_again_at_the_next_slot(self):
+        settings = self._settings(digest_last_fired_at=datetime(2026, 1, 2, 9, 5, tzinfo=timezone.utc))
+        assert notifications._digest_due(settings, now=datetime(2026, 1, 2, 17, 10)) is True
+
+    def test_a_missed_slot_fires_late_rather_than_being_skipped(self):
+        # Machine asleep at 17:00, woken at 21:00 — the 17:00 digest still goes out.
+        settings = self._settings(digest_last_fired_at=datetime(2026, 1, 2, 9, 0, tzinfo=timezone.utc))
+        assert notifications._digest_due(settings, now=datetime(2026, 1, 2, 21, 0)) is True
+
+    def test_no_configured_hours_means_flush_every_tick(self):
+        settings = self._settings(digest_hours_local="")
+        assert notifications._digest_due(settings, now=datetime(2026, 1, 2, 3, 0)) is True
+
+    def test_never_fired_is_always_due_once_a_slot_has_passed(self):
+        assert notifications._digest_due(self._settings(), now=datetime(2026, 1, 2, 12, 0)) is True
+
+    async def test_a_pending_notification_waits_for_its_slot(self, session, monkeypatch):
+        sent: list[tuple[str, str]] = []
+
+        async def _record(_session, _settings, title, body, _ttl=None):
+            sent.append((title, body))
+
+        monkeypatch.setattr(notifications, "_deliver_external", _record)
+        settings = await notifications.get_notification_settings(session)
+        settings.digest_hours_local = "9,17"
+        settings.digest_last_fired_at = datetime.now(timezone.utc)  # this slot already served
+        await session.commit()
+
+        await notifications.dispatch_notification(
+            session,
+            category=NotificationCategory.order_unfulfillable,
+            urgency=NotificationUrgency.digest,
+            title="Order #242 — 1 item short",
+            body="body",
+            delivery_mode=NotificationDeliveryMode.digest,
+        )
+        await notifications.flush_digest(session)
+
+        assert sent == []
+        result = await session.execute(select(Notification))
+        assert all(n.digest_sent_at is None for n in result.scalars())
+
+    async def test_an_empty_due_slot_is_still_marked_served(self, session, monkeypatch):
+        """Otherwise the slot stays due, and the next notification to arrive goes out within
+        one scheduler tick — exactly the un-batched trickle the schedule exists to stop."""
+        monkeypatch.setattr(notifications, "_deliver_external", _noop_deliver)
+        settings = await notifications.get_notification_settings(session)
+        settings.digest_hours_local = ""
+        settings.digest_last_fired_at = None
+        await session.commit()
+
+        await notifications.flush_digest(session)
+
+        settings = await notifications.get_notification_settings(session)
+        assert settings.digest_last_fired_at is not None
+
+
+async def _noop_deliver(_session, _settings, _title, _body, _ttl=None):
+    return None
+
+
+class TestPushoverExpiry:
+    """Pushover's `ttl` is the only handle on a delivered notification — there is no
+    resolve-driven clear, so routine alerts age off on a timer and blockers never do."""
+
+    def _settings(self, **overrides) -> NotificationSettings:
+        base = dict(pushover_expiry_hours=24)
+        base.update(overrides)
+        return NotificationSettings(id=1, **base)
+
+    def test_routine_alerts_expire_after_the_configured_hours(self):
+        assert notifications._expiry_seconds(self._settings(), NotificationUrgency.digest) == 24 * 3600
+
+    def test_the_period_is_configurable(self):
+        settings = self._settings(pushover_expiry_hours=4)
+        assert notifications._expiry_seconds(settings, NotificationUrgency.digest) == 4 * 3600
+
+    def test_zero_hours_disables_expiry(self):
+        settings = self._settings(pushover_expiry_hours=0)
+        assert notifications._expiry_seconds(settings, NotificationUrgency.digest) is None
+
+    def test_blockers_and_failures_never_expire(self):
+        # An order that can never be built, or a backup that failed, doesn't stop being true
+        # after a day — deleting it off the lock screen would lose the only prompt there was.
+        assert notifications._expiry_seconds(self._settings(), NotificationUrgency.immediate) is None
+
+    async def test_dispatch_passes_the_ttl_for_a_routine_alert(self, session, monkeypatch):
+        ttls: list[int | None] = []
+
+        async def _record(_session, _settings, _title, _body, ttl=None):
+            ttls.append(ttl)
+
+        monkeypatch.setattr(notifications, "_deliver_external", _record)
+        settings = await notifications.get_notification_settings(session)
+        settings.pushover_expiry_hours = 6
+        await session.commit()
+
+        await notifications.dispatch_notification(
+            session,
+            category=NotificationCategory.order_unfulfillable,
+            urgency=NotificationUrgency.digest,
+            title="Order #242 — 1 item short",
+            body="body",
+            delivery_mode=NotificationDeliveryMode.immediate,
+        )
+        await notifications.dispatch_notification(
+            session,
+            category=NotificationCategory.order_blocked,
+            urgency=NotificationUrgency.immediate,
+            title="Order #300 blocked — 1 item with no BOM",
+            body="body",
+            delivery_mode=NotificationDeliveryMode.immediate,
+        )
+
+        assert ttls == [6 * 3600, None]
+
+    async def test_a_digest_batch_containing_a_blocker_does_not_expire(self, session, monkeypatch):
+        ttls: list[int | None] = []
+
+        async def _record(_session, _settings, _title, _body, ttl=None):
+            ttls.append(ttl)
+
+        monkeypatch.setattr(notifications, "_deliver_external", _record)
+        settings = await notifications.get_notification_settings(session)
+        settings.digest_hours_local = ""
+        await session.commit()
+
+        for urgency in (NotificationUrgency.digest, NotificationUrgency.immediate):
+            await notifications.dispatch_notification(
+                session,
+                category=NotificationCategory.order_unfulfillable,
+                urgency=urgency,
+                title=f"{urgency.value} item",
+                body="body",
+                delivery_mode=NotificationDeliveryMode.digest,
+            )
+
+        await notifications.flush_digest(session)
+        assert ttls == [None]
+
+    async def test_an_all_routine_digest_batch_expires(self, session, monkeypatch):
+        ttls: list[int | None] = []
+
+        async def _record(_session, _settings, _title, _body, ttl=None):
+            ttls.append(ttl)
+
+        monkeypatch.setattr(notifications, "_deliver_external", _record)
+        settings = await notifications.get_notification_settings(session)
+        settings.digest_hours_local = ""
+        settings.pushover_expiry_hours = 12
+        await session.commit()
+
+        await notifications.dispatch_notification(
+            session,
+            category=NotificationCategory.order_unfulfillable,
+            urgency=NotificationUrgency.digest,
+            title="Order #242 — 1 item short",
+            body="body",
+            delivery_mode=NotificationDeliveryMode.digest,
+        )
+
+        await notifications.flush_digest(session)
+        assert ttls == [12 * 3600]
+
+    async def test_send_pushover_omits_ttl_when_unset(self, session, monkeypatch):
+        captured: dict = {}
+
+        class _Response:
+            status_code = 200
+
+            def json(self):
+                return {"status": 1}
+
+        class _Client:
+            def __init__(self, **_kwargs):
+                pass
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_exc):
+                return False
+
+            async def post(self, _url, data=None):
+                captured.update(data or {})
+                return _Response()
+
+        monkeypatch.setattr(notifications.httpx, "AsyncClient", _Client)
+        monkeypatch.setattr(notifications.app_settings, "pushover_app_api_token", "token")
+
+        await notifications.send_pushover("userkey", "title", "body")
+        assert "ttl" not in captured
+
+        await notifications.send_pushover("userkey", "title", "body", ttl_seconds=3600)
+        assert captured["ttl"] == "3600"
 
 
 class TestSummaryDueCalculation:

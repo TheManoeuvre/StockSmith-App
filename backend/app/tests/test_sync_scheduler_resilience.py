@@ -10,8 +10,10 @@ first sign is missing orders, days later.
 import asyncio
 
 import pytest
+from sqlalchemy import select
 
 from app.models.listing import ListingPlatform
+from app.models.notification import Notification, NotificationCategory
 from app.services import sync_scheduler
 
 
@@ -136,6 +138,71 @@ async def test_a_wedged_commit_sync_is_abandoned_not_awaited_forever(monkeypatch
     assert recorded == [(ListingPlatform.etsy, sync_scheduler.SyncRunMode.commit, "TimeoutError")]
     # Lock released, so the next tick (or a manual sync) isn't blocked behind the abandoned one.
     assert not sync_scheduler.get_lock(ListingPlatform.etsy).locked()
+
+
+class TestReconnectRequiredAlert:
+    """auto_sync_enabled flipping off after repeated auth failures is meant to be a
+    one-time event from the outside, not something that re-alerts every cycle — see
+    notification_alerts.raise_platform_reconnect_required_alert."""
+
+    async def test_fires_once_when_auto_sync_disables_after_repeated_auth_failures(
+        self, session, session_factory, monkeypatch, connection
+    ):
+        # _record_auth_failure/_tick build their own sessions from the module-level
+        # factory rather than taking one from the caller — redirect it at the same
+        # in-memory DB the `session`/`connection` fixtures use, same as conftest does for
+        # order_sync/stock_takes.
+        monkeypatch.setattr(sync_scheduler, "async_session_factory", session_factory)
+
+        async def _boom(_platform):
+            raise sync_scheduler.PlatformAuthError("token revoked")
+
+        monkeypatch.setattr(sync_scheduler.order_sync, "commit_sync", _boom)
+
+        async def _reconnect_notifications():
+            result = await session.execute(
+                select(Notification).where(Notification.category == NotificationCategory.platform_reconnect_required)
+            )
+            return list(result.scalars())
+
+        # Three consecutive auth failures is _MAX_CONSECUTIVE_AUTH_FAILURES — the third
+        # is what crosses the threshold and disables auto-sync.
+        for _ in range(sync_scheduler._MAX_CONSECUTIVE_AUTH_FAILURES):
+            await sync_scheduler._tick(ListingPlatform.etsy)
+
+        notifications = await _reconnect_notifications()
+        assert len(notifications) == 1
+        assert "Etsy" in notifications[0].title
+
+        await session.refresh(connection)
+        assert connection.auto_sync_enabled is False
+
+        # Further ticks must no-op entirely (and so raise no second alert): _tick bails
+        # out on auto_sync_enabled before ever reaching commit_sync or _record_auth_failure.
+        await sync_scheduler._tick(ListingPlatform.etsy)
+        await sync_scheduler._tick(ListingPlatform.etsy)
+
+        notifications = await _reconnect_notifications()
+        assert len(notifications) == 1
+
+    async def test_does_not_fire_before_the_threshold_is_crossed(self, session, session_factory, monkeypatch, connection):
+        monkeypatch.setattr(sync_scheduler, "async_session_factory", session_factory)
+
+        async def _boom(_platform):
+            raise sync_scheduler.PlatformAuthError("token revoked")
+
+        monkeypatch.setattr(sync_scheduler.order_sync, "commit_sync", _boom)
+
+        for _ in range(sync_scheduler._MAX_CONSECUTIVE_AUTH_FAILURES - 1):
+            await sync_scheduler._tick(ListingPlatform.etsy)
+
+        result = await session.execute(
+            select(Notification).where(Notification.category == NotificationCategory.platform_reconnect_required)
+        )
+        assert list(result.scalars()) == []
+
+        await session.refresh(connection)
+        assert connection.auto_sync_enabled is True
 
 
 class _SimpleConnection:

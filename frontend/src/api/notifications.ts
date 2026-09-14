@@ -6,6 +6,7 @@ export type NotificationCategory =
   | "material_forecast_warning"
   | "order_unfulfillable"
   | "order_blocked"
+  | "platform_reconnect_required"
   | "pending_order_threshold"
   | "backup_failed"
   | "secondary_backup_unreachable"
@@ -21,6 +22,8 @@ export interface Notification {
   id: number;
   category: NotificationCategory;
   urgency: NotificationUrgency;
+  /** How this one was routed externally when it was raised — not how important it is. */
+  delivery_mode: NotificationDeliveryMode;
   title: string;
   body: string;
   related_entity_type: string | null;
@@ -49,9 +52,15 @@ export interface NotificationSettings {
   pushover_enabled: boolean;
   /** Last 4 characters only, or null if no key is stored — never the real key. */
   pushover_user_key_masked: string | null;
+  /** Hours before a routine push deletes itself from the phone; 0 never expires. Blockers
+   *  and failures ignore it. */
+  pushover_expiry_hours: number;
   quiet_hours_enabled: boolean;
   quiet_hours_start: number;
   quiet_hours_end: number;
+  /** Local hours the digest is delivered at. Empty means "as soon as the backend next
+   *  ticks", which is what it did before the schedule existed. */
+  digest_hours: number[];
   daily_summary_enabled: boolean;
   daily_summary_frequency: SummaryFrequency;
   daily_summary_hour_local: number;
@@ -66,9 +75,11 @@ export interface NotificationSettingsUpdate {
   /** Omit (undefined) to keep the stored key unchanged, "" to clear it, or a new value to
    *  replace it — see the backend's _resolve_pushover_key. */
   pushover_user_key?: string | null;
+  pushover_expiry_hours: number;
   quiet_hours_enabled: boolean;
   quiet_hours_start: number;
   quiet_hours_end: number;
+  digest_hours: number[];
   daily_summary_enabled: boolean;
   daily_summary_frequency: SummaryFrequency;
   daily_summary_hour_local: number;

@@ -25,10 +25,19 @@ class NotificationSettingsRead(BaseModel):
     # Last 4 characters only — see services/notifications.mask_pushover_key. None when no
     # key is stored.
     pushover_user_key_masked: str | None
+    # Hours before a routine Pushover message deletes itself from the phone; 0 never expires.
+    # Blockers and failures ignore it — see services/notifications._expiry_seconds.
+    pushover_expiry_hours: int
 
     quiet_hours_enabled: bool
     quiet_hours_start: int
     quiet_hours_end: int
+
+    # Local hours at which batched notifications actually go out. Exposed as a list rather
+    # than the comma-separated string the column stores — see models/notification
+    # .parse_digest_hours / format_digest_hours. Empty means "send as soon as the scheduler
+    # next ticks", the pre-schedule behaviour.
+    digest_hours: list[int]
 
     daily_summary_enabled: bool
     daily_summary_frequency: SummaryFrequency
@@ -48,10 +57,15 @@ class NotificationSettingsUpdate(BaseModel):
     # string to clear it, or send a new value to replace it. See routers/notifications.py's
     # _resolve_pushover_key for the masked-echo detection.
     pushover_user_key: str | None = None
+    # Capped at a fortnight: past that the message has outlived any decision it could prompt,
+    # and Pushover keeps nothing forever either.
+    pushover_expiry_hours: int = Field(default=24, ge=0, le=336)
 
     quiet_hours_enabled: bool
     quiet_hours_start: int = Field(ge=0, le=23)
     quiet_hours_end: int = Field(ge=0, le=23)
+
+    digest_hours: list[int] = Field(default_factory=list)
 
     daily_summary_enabled: bool
     daily_summary_frequency: SummaryFrequency
@@ -74,6 +88,7 @@ class NotificationRead(BaseModel):
     id: int
     category: NotificationCategory
     urgency: NotificationUrgency
+    delivery_mode: NotificationDeliveryMode
     title: str
     body: str
     related_entity_type: str | None
