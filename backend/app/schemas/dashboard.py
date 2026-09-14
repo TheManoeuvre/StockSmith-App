@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from app.models.listing import ListingPlatform
 from app.schemas.abc import DueForCountItemRead
+from app.schemas.material_substitute import SubstituteSuggestion
 
 
 class LowStockMaterial(BaseModel):
@@ -70,6 +71,9 @@ class OrderAwaitingPackaging(BaseModel):
     short_by: Decimal
     order_placed_at: datetime
     platform: ListingPlatform | None = None
+    # Ranked, human-curated fallbacks for material_id — suggested only, never
+    # auto-applied. See app.models.material_substitute.
+    suggested_substitutes: list[SubstituteSuggestion] = []
 
 
 class OpenStockTake(BaseModel):

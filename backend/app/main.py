@@ -18,6 +18,7 @@ from app.routers import (
     fee_config,
     manufacturers,
     material_categories,
+    material_substitutes,
     material_types,
     materials,
     notifications,
@@ -128,6 +129,8 @@ app.add_middleware(
 
 app.include_router(materials.router, prefix="/api/v1")
 app.include_router(material_categories.router, prefix="/api/v1")
+app.include_router(material_substitutes.router, prefix="/api/v1")
+app.include_router(material_substitutes.usage_router, prefix="/api/v1")
 app.include_router(material_types.router, prefix="/api/v1")
 app.include_router(colours.router, prefix="/api/v1")
 app.include_router(products.router, prefix="/api/v1")

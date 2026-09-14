@@ -33,6 +33,7 @@ from app.models.material import (
     MaterialUnit,
 )
 from app.models.material_category import MaterialCategory
+from app.models.material_substitute import MaterialSubstitute, MaterialSubstituteUsage
 from app.models.material_type import MaterialType
 from app.models.notification import (
     ALERT_TYPES,
@@ -79,6 +80,8 @@ __all__ = [
     "MaterialUnit",
     "MaterialAdjustment",
     "MaterialAdjustmentMode",
+    "MaterialSubstitute",
+    "MaterialSubstituteUsage",
     "MaterialType",
     "MaterialCategoryABC",
     "ProductCategory",
