@@ -80,6 +80,32 @@ class SummaryFrequency(str, enum.Enum):
     weekly = "weekly"
 
 
+def parse_digest_hours(raw: str | None) -> list[int]:
+    """NotificationSettings.digest_hours_local -> a sorted, de-duplicated list of local
+    hours. Silently drops anything unparseable or out of range rather than raising: this is
+    read on every scheduler tick, and a hand-edited settings row must not be able to take
+    the whole notification loop down."""
+    if not raw:
+        return []
+    hours: set[int] = set()
+    for part in raw.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        try:
+            hour = int(part)
+        except ValueError:
+            continue
+        if 0 <= hour <= 23:
+            hours.add(hour)
+    return sorted(hours)
+
+
+def format_digest_hours(hours: list[int]) -> str:
+    """Inverse of parse_digest_hours, for writing the column from an API payload."""
+    return ",".join(str(hour) for hour in sorted({h for h in hours if 0 <= h <= 23}))
+
+
 class NotificationSettings(Base):
     """Single-row (id=1) notification configuration — channels, quiet hours, and the
     daily/weekly order-summary schedule. Per-alert-type enable/delivery-mode lives on
@@ -116,6 +142,19 @@ class NotificationSettings(Base):
     quiet_hours_enabled: Mapped[bool] = mapped_column(nullable=False, default=False)
     quiet_hours_start: Mapped[int] = mapped_column(Integer, nullable=False, default=22)
     quiet_hours_end: Mapped[int] = mapped_column(Integer, nullable=False, default=7)
+
+    # When the digest actually goes out: a comma-separated list of local hours (see
+    # parse_digest_hours). Stored as text rather than a child table because it is a handful
+    # of small ints on an already-single-row settings object, and the whole thing is written
+    # as one PUT — the same reason quiet hours are two plain int columns here.
+    #
+    # Without a schedule the digest flush ran on every 15-minute scheduler tick, which made
+    # "digest" mean nothing more than "immediate, up to 15 minutes late", and trickled out a
+    # fresh push every quarter of an hour while events kept arriving. An empty string means
+    # exactly that old behaviour (flush on every tick) and is deliberately NOT read as "never
+    # flush" — a blank field must not silently strand notifications on the phone side.
+    digest_hours_local: Mapped[str] = mapped_column(String, nullable=False, default="9,17")
+    digest_last_fired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     daily_summary_enabled: Mapped[bool] = mapped_column(nullable=False, default=False)
     daily_summary_frequency: Mapped[SummaryFrequency] = mapped_column(
@@ -163,6 +202,18 @@ class Notification(Base):
     """The in-app notification log — source of truth for every delivery StockSmith has ever
     raised, whether or not it also went out over Pushover or a Windows toast.
 
+    `urgency` and `delivery_mode` are two different axes and must not be conflated.
+    `urgency` is fixed in code per alert condition and means *how important this is* — it is
+    read only to decide whether quiet hours may hold a message back. `delivery_mode` is the
+    user's per-type setting and means *how this reaches them* — right away, batched into the
+    next digest, or not at all — and it is the only thing flush_digest may batch on.
+
+    Batching on `urgency` instead (the original shape) double-delivered every row whose type
+    was set to immediate but whose hard-coded urgency was digest: it pushed once at dispatch
+    and was then swept into the next digest as well. It also silently dropped the mirror
+    case — a type set to digest whose hard-coded urgency was immediate was never picked up
+    by any flush, so it reached the in-app log and nothing else.
+
     digest_sent_at is separate from read_at: read_at means a person opened it in the app;
     digest_sent_at means the periodic digest flush (services/notifications.flush_digest)
     already folded this row into a batched external send, so it must not be sent again on
@@ -178,6 +229,14 @@ class Notification(Base):
     )
     urgency: Mapped[NotificationUrgency] = mapped_column(
         portable_enum(NotificationUrgency, name="notification_urgency"), nullable=False
+    )
+    # How this row was routed externally, captured at dispatch time from the alert type's
+    # NotificationTypeSettings. This is what flush_digest batches on — see the class
+    # docstring for why it can't just use `urgency`.
+    delivery_mode: Mapped[NotificationDeliveryMode] = mapped_column(
+        portable_enum(NotificationDeliveryMode, name="notification_delivery_mode"),
+        nullable=False,
+        default=NotificationDeliveryMode.immediate,
     )
     title: Mapped[str] = mapped_column(String, nullable=False)
     body: Mapped[str] = mapped_column(String, nullable=False)

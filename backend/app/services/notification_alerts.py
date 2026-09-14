@@ -43,6 +43,9 @@ _PENDING_ORDER_THRESHOLD_KEY = "pending_order_threshold"
 _API_SOFT_LIMIT_KEY = "marketplace_api_soft_limit"
 _API_HARD_LIMIT_KEY = "marketplace_api_hard_limit"
 
+# Items listed in a grouped order-shortfall body before it collapses into "...and N more".
+_ORDER_BODY_LINE_CAP = 6
+
 
 async def _get_alert_state(session: AsyncSession, alert_key: str, entity_key: str) -> NotificationAlertState | None:
     result = await session.execute(
@@ -215,13 +218,45 @@ async def check_material_forecast_alerts(session: AsyncSession) -> None:
         await _clear_alert_state(session, _MATERIAL_FORECAST_KEY, stale_key)
 
 
+def _product_label(line) -> str:
+    """"Brick Pencil Pot (6 Stud / Gold)", or just the product name for an unvarianted
+    product."""
+    if line.variant_name:
+        return f"{line.product_name} ({line.variant_name})"
+    return line.product_name or "Unnamed product"
+
+
+def _shortfall_body(new_lines: list, already_flagged: int) -> str:
+    """One line per newly-short item, capped, with a tail noting anything already alerted on
+    for the same order so the reader isn't left thinking this is the whole picture."""
+    body_lines = [f"{_product_label(line)} — short by {line.short_by}" for line in new_lines[:_ORDER_BODY_LINE_CAP]]
+    overflow = len(new_lines) - _ORDER_BODY_LINE_CAP
+    if overflow > 0:
+        body_lines.append(f"...and {overflow} more")
+    if already_flagged:
+        body_lines.append(
+            f"({already_flagged} other item{'s' if already_flagged != 1 else ''} on this order "
+            f"{'were' if already_flagged != 1 else 'was'} already flagged.)"
+        )
+    return "\n".join(body_lines)
+
+
 async def check_order_unfulfillable_alerts(session: AsyncSession) -> None:
     """Fires once per order line the moment it starts awaiting product (has_bom=True, the
     common/expected case for a maker) or becomes genuinely blocked (has_bom=False — no BOM
     or kitting BOM exists to ever build more), then stays quiet for that line until it's
     resolved (allocated or cancelled) and, if it happens again, goes short a second time.
     The two cases dispatch under separate categories/keys so a routine restock wait never
-    shares a dedup slot — or urgency — with a real blocker."""
+    shares a dedup slot — or urgency — with a real blocker.
+
+    Dedup stays per *line*, but delivery is grouped per *order*: every line that newly went
+    short in this sweep becomes one notification for its order, listing the items. A single
+    import of one order with five short variants is one event to a person — they open the
+    order, or they go and make the product — so five near-identical pushes, each titled with
+    the same category name, was five times the interruption for no extra information. A line
+    that goes short later still raises its own (grouped) notification, because that genuinely
+    is new information.
+    """
     type_settings = await get_type_settings_map(session)
     awaiting_config = type_settings.get(NotificationCategory.order_unfulfillable)
     blocked_config = type_settings.get(NotificationCategory.order_blocked)
@@ -236,41 +271,63 @@ async def check_order_unfulfillable_alerts(session: AsyncSession) -> None:
     current_awaiting_keys: set[str] = set()
     current_blocked_keys: set[str] = set()
 
+    # order_id -> lines that newly went short in this sweep, and a count of the ones on the
+    # same order we've already alerted on (context for the body, not a reason to re-alert).
+    new_awaiting: dict[int, list] = {}
+    new_blocked: dict[int, list] = {}
+    known_awaiting: dict[int, int] = {}
+    known_blocked: dict[int, int] = {}
+
     for line in awaiting:
         key = str(line.line_id)
-        product_label = line.variant_name and f"{line.product_name} ({line.variant_name})" or line.product_name
-
         if line.has_bom:
             current_awaiting_keys.add(key)
-            if awaiting_on and key not in previous_awaiting_keys:
-                await dispatch_notification(
-                    session,
-                    category=NotificationCategory.order_unfulfillable,
-                    urgency=NotificationUrgency.digest,
-                    title="Order awaiting product",
-                    body=f"Order #{line.order_id} — {product_label or 'a line'} is short by {line.short_by}.",
-                    delivery_mode=awaiting_config.delivery_mode,
-                    related_entity_type="order",
-                    related_entity_id=line.order_id,
-                )
-                await _set_alert_state(session, _ORDER_UNFULFILLABLE_KEY, key, "alerted")
+            if key in previous_awaiting_keys:
+                known_awaiting[line.order_id] = known_awaiting.get(line.order_id, 0) + 1
+            else:
+                new_awaiting.setdefault(line.order_id, []).append(line)
         else:
             current_blocked_keys.add(key)
-            if blocked_on and key not in previous_blocked_keys:
-                await dispatch_notification(
-                    session,
-                    category=NotificationCategory.order_blocked,
-                    urgency=NotificationUrgency.immediate,
-                    title="Order blocked — no BOM defined",
-                    body=(
-                        f"Order #{line.order_id} — {product_label or 'a line'} is short by "
-                        f"{line.short_by} and has no BOM to build more from."
-                    ),
-                    delivery_mode=blocked_config.delivery_mode,
-                    related_entity_type="order",
-                    related_entity_id=line.order_id,
-                )
-                await _set_alert_state(session, _ORDER_BLOCKED_KEY, key, "alerted")
+            if key in previous_blocked_keys:
+                known_blocked[line.order_id] = known_blocked.get(line.order_id, 0) + 1
+            else:
+                new_blocked.setdefault(line.order_id, []).append(line)
+
+    if awaiting_on:
+        for order_id, lines in sorted(new_awaiting.items()):
+            count = len(lines)
+            await dispatch_notification(
+                session,
+                category=NotificationCategory.order_unfulfillable,
+                urgency=NotificationUrgency.digest,
+                # The title is the only line read at a glance on a lock screen, so it
+                # identifies the order and the size of the problem rather than restating the
+                # alert category the reader already subscribed to.
+                title=f"Order #{order_id} — {count} item{'s' if count != 1 else ''} short",
+                body=_shortfall_body(lines, known_awaiting.get(order_id, 0)),
+                delivery_mode=awaiting_config.delivery_mode,
+                related_entity_type="order",
+                related_entity_id=order_id,
+            )
+            for line in lines:
+                await _set_alert_state(session, _ORDER_UNFULFILLABLE_KEY, str(line.line_id), "alerted")
+
+    if blocked_on:
+        for order_id, lines in sorted(new_blocked.items()):
+            count = len(lines)
+            body = _shortfall_body(lines, known_blocked.get(order_id, 0))
+            await dispatch_notification(
+                session,
+                category=NotificationCategory.order_blocked,
+                urgency=NotificationUrgency.immediate,
+                title=f"Order #{order_id} blocked — {count} item{'s' if count != 1 else ''} with no BOM",
+                body=f"{body}\n\nNothing can be built to cover this — these items need a BOM.",
+                delivery_mode=blocked_config.delivery_mode,
+                related_entity_type="order",
+                related_entity_id=order_id,
+            )
+            for line in lines:
+                await _set_alert_state(session, _ORDER_BLOCKED_KEY, str(line.line_id), "alerted")
 
     for resolved_key in previous_awaiting_keys - current_awaiting_keys:
         await _clear_alert_state(session, _ORDER_UNFULFILLABLE_KEY, resolved_key)

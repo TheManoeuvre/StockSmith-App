@@ -2,7 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db, require_auth
-from app.models.notification import ALERT_TYPES, NotificationCategory, NotificationTypeSettings
+from app.models.notification import (
+    ALERT_TYPES,
+    NotificationCategory,
+    NotificationTypeSettings,
+    format_digest_hours,
+    parse_digest_hours,
+)
 from app.schemas.notification import (
     NotificationPage,
     NotificationRead,
@@ -26,6 +32,7 @@ def _settings_read(settings_row, type_rows: list[NotificationTypeSettings]) -> N
         quiet_hours_enabled=settings_row.quiet_hours_enabled,
         quiet_hours_start=settings_row.quiet_hours_start,
         quiet_hours_end=settings_row.quiet_hours_end,
+        digest_hours=parse_digest_hours(settings_row.digest_hours_local),
         daily_summary_enabled=settings_row.daily_summary_enabled,
         daily_summary_frequency=settings_row.daily_summary_frequency,
         daily_summary_hour_local=settings_row.daily_summary_hour_local,
@@ -76,6 +83,7 @@ async def update_notification_settings(
     settings_row.quiet_hours_enabled = payload.quiet_hours_enabled
     settings_row.quiet_hours_start = payload.quiet_hours_start
     settings_row.quiet_hours_end = payload.quiet_hours_end
+    settings_row.digest_hours_local = format_digest_hours(payload.digest_hours)
     settings_row.daily_summary_enabled = payload.daily_summary_enabled
     settings_row.daily_summary_frequency = payload.daily_summary_frequency
     settings_row.daily_summary_hour_local = payload.daily_summary_hour_local

@@ -67,6 +67,7 @@ interface Form {
   quietHoursEnabled: boolean;
   quietHoursStart: number;
   quietHoursEnd: number;
+  digestHours: number[];
   dailySummaryEnabled: boolean;
   dailySummaryFrequency: SummaryFrequency;
   dailySummaryHourLocal: number;
@@ -82,6 +83,7 @@ function toForm(settings: NotificationSettingsValue): Form {
     quietHoursEnabled: settings.quiet_hours_enabled,
     quietHoursStart: settings.quiet_hours_start,
     quietHoursEnd: settings.quiet_hours_end,
+    digestHours: settings.digest_hours,
     dailySummaryEnabled: settings.daily_summary_enabled,
     dailySummaryFrequency: settings.daily_summary_frequency,
     dailySummaryHourLocal: settings.daily_summary_hour_local,
@@ -130,6 +132,7 @@ export function NotificationSettings() {
         quiet_hours_enabled: value.quietHoursEnabled,
         quiet_hours_start: value.quietHoursStart,
         quiet_hours_end: value.quietHoursEnd,
+        digest_hours: value.digestHours,
         daily_summary_enabled: value.dailySummaryEnabled,
         daily_summary_frequency: value.dailySummaryFrequency,
         daily_summary_hour_local: value.dailySummaryHourLocal,
@@ -315,6 +318,40 @@ export function NotificationSettings() {
             </select>
           </FieldRow>
         </div>
+      </SettingsCard>
+
+      <SettingsCard
+        title="Digest schedule"
+        help="When batched alerts actually go out. Anything set to Digest below is held and delivered as one message at these times — pick none and it goes out as soon as the backend notices it, which is what makes a digest feel like a trickle of separate alerts."
+      >
+        <div className="flex flex-wrap gap-1">
+          {HOURS.map((hour) => {
+            const selected = form.digestHours.includes(hour);
+            return (
+              <button
+                key={hour}
+                type="button"
+                aria-pressed={selected}
+                onClick={() =>
+                  setField(
+                    "digestHours",
+                    selected ? form.digestHours.filter((h) => h !== hour) : [...form.digestHours, hour].sort((a, b) => a - b),
+                  )
+                }
+                className={`w-12 rounded border px-1 py-1 text-xs tabular-nums ${
+                  selected ? "border-slate-700 bg-slate-700 text-white" : "border-slate-300 text-slate-600"
+                }`}
+              >
+                {hourLabel(hour)}
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-xs text-slate-500">
+          {form.digestHours.length === 0
+            ? "No schedule — batched alerts are sent as soon as they're picked up."
+            : `Digest sent at ${form.digestHours.map(hourLabel).join(", ")}.`}
+        </p>
       </SettingsCard>
 
       <SettingsCard title="Order summary" help="A recap of revenue, profit, and items shipped, sent on a schedule.">

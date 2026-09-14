@@ -30,6 +30,12 @@ class NotificationSettingsRead(BaseModel):
     quiet_hours_start: int
     quiet_hours_end: int
 
+    # Local hours at which batched notifications actually go out. Exposed as a list rather
+    # than the comma-separated string the column stores — see models/notification
+    # .parse_digest_hours / format_digest_hours. Empty means "send as soon as the scheduler
+    # next ticks", the pre-schedule behaviour.
+    digest_hours: list[int]
+
     daily_summary_enabled: bool
     daily_summary_frequency: SummaryFrequency
     daily_summary_hour_local: int
@@ -53,6 +59,8 @@ class NotificationSettingsUpdate(BaseModel):
     quiet_hours_start: int = Field(ge=0, le=23)
     quiet_hours_end: int = Field(ge=0, le=23)
 
+    digest_hours: list[int] = Field(default_factory=list)
+
     daily_summary_enabled: bool
     daily_summary_frequency: SummaryFrequency
     daily_summary_hour_local: int = Field(ge=0, le=23)
@@ -74,6 +82,7 @@ class NotificationRead(BaseModel):
     id: int
     category: NotificationCategory
     urgency: NotificationUrgency
+    delivery_mode: NotificationDeliveryMode
     title: str
     body: str
     related_entity_type: str | None

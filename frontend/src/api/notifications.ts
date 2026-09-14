@@ -21,6 +21,8 @@ export interface Notification {
   id: number;
   category: NotificationCategory;
   urgency: NotificationUrgency;
+  /** How this one was routed externally when it was raised — not how important it is. */
+  delivery_mode: NotificationDeliveryMode;
   title: string;
   body: string;
   related_entity_type: string | null;
@@ -52,6 +54,9 @@ export interface NotificationSettings {
   quiet_hours_enabled: boolean;
   quiet_hours_start: number;
   quiet_hours_end: number;
+  /** Local hours the digest is delivered at. Empty means "as soon as the backend next
+   *  ticks", which is what it did before the schedule existed. */
+  digest_hours: number[];
   daily_summary_enabled: boolean;
   daily_summary_frequency: SummaryFrequency;
   daily_summary_hour_local: number;
@@ -69,6 +74,7 @@ export interface NotificationSettingsUpdate {
   quiet_hours_enabled: boolean;
   quiet_hours_start: number;
   quiet_hours_end: number;
+  digest_hours: number[];
   daily_summary_enabled: boolean;
   daily_summary_frequency: SummaryFrequency;
   daily_summary_hour_local: number;
