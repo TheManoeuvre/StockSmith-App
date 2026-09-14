@@ -373,7 +373,7 @@ class EtsyAdapter:
         if connection.external_account_id is None:
             raise PlatformSyncError("Etsy connection has no shop id — reconnect required")
 
-        params: dict[str, str | int] = {"limit": 100, "offset": 0, "includes": "Transactions"}
+        params: dict[str, str | int] = {"limit": 100, "offset": 0, "includes": "Transactions,Shipments"}
         if since is not None:
             params["min_last_modified"] = int(since.timestamp())
 
@@ -432,6 +432,15 @@ class EtsyAdapter:
             transactions = tx_response.json().get("results", []) if tx_response.status_code == 200 else []
 
         lines = [self._parse_transaction(tx) for tx in transactions]
+
+        # An order shipped in multiple packages returns one entry per shipment —
+        # StockSmith stores only a single tracking number per order (see
+        # models.order.Order.tracking_number), so the first one wins, same as eBay's
+        # _fetch_tracking.
+        shipments = receipt.get("shipments") or []
+        first_shipment = shipments[0] if shipments else {}
+        tracking_number = first_shipment.get("tracking_code")
+        carrier = first_shipment.get("carrier_name")
 
         grand_total = self._parse_money(receipt.get("grandtotal"))
         currency = (receipt.get("grandtotal") or {}).get("currency_code")
@@ -528,6 +537,8 @@ class EtsyAdapter:
             payment_status=payment_status,
             payment_state=payment_state,
             financials_enriched=enrich,
+            tracking_number=tracking_number,
+            carrier=carrier,
         )
 
     def _parse_transaction(self, tx: dict) -> ExternalOrderLine:
@@ -541,7 +552,24 @@ class EtsyAdapter:
             qty=int(tx.get("quantity", 1)),
             unit_price=unit_price,
             currency=price.get("currency_code"),
+            variation_text=self._format_variations(tx.get("variations")),
         )
+
+    @staticmethod
+    def _format_variations(variations: list[dict] | None) -> str | None:
+        """Etsy's transaction.variations mixes real product options (Colour, Size) with
+        buyer-entered personalization in the same array, distinguished only by
+        `formatted_name` (e.g. "Personalization") — there's no separate boolean flag.
+        Every entry is kept and shown as "Name: Value" since a mismapped SKU still
+        benefits from seeing the option text, not just the personalization."""
+        if not variations:
+            return None
+        parts = [
+            f"{v.get('formatted_name')}: {v.get('formatted_value')}"
+            for v in variations
+            if isinstance(v, dict) and v.get("formatted_value")
+        ]
+        return "; ".join(parts) if parts else None
 
     @staticmethod
     def _parse_money(money: dict | None) -> str | None:

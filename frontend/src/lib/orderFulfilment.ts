@@ -9,6 +9,9 @@ export interface OrderFulfilment {
   detail: string;
   /** The inline action the row offers, if any. "open" just opens the slide-over. */
   action?: { label: string; kind: "allocate" | "ship" | "open" };
+  /** Set only when shipped and the marketplace reported a tracking number — lets the
+   * Fulfilment column render a copy-to-clipboard button next to it. */
+  trackingNumber?: string;
 }
 
 /**
@@ -22,7 +25,10 @@ export function orderFulfilment(order: Order): OrderFulfilment {
     return {
       label: "Shipped",
       toneClass: "text-slate-500",
-      detail: order.shipping_profile_name ?? "no shipping profile",
+      detail: order.tracking_number
+        ? `${order.carrier ? `${order.carrier} · ` : ""}${order.tracking_number}`
+        : (order.shipping_profile_name ?? "no shipping profile"),
+      trackingNumber: order.tracking_number ?? undefined,
     };
   }
   if (order.status === "cancelled") {

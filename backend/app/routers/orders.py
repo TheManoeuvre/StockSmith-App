@@ -226,6 +226,7 @@ def _serialize_order(order: Order, kitting_cogs: Decimal | None) -> OrderRead:
             external_line_id=line.external_line_id,
             needs_mapping=line.needs_mapping,
             cost_per_unit_snapshot=line.cost_per_unit_snapshot,
+            variation_text=line.variation_text,
         )
         for line in order.lines
     ]
@@ -267,6 +268,8 @@ def _serialize_order(order: Order, kitting_cogs: Decimal | None) -> OrderRead:
         postage_cost_missing=_postage_cost_missing(order),
         sync_issue=order.sync_issue,
         pending_marketplace_cancellation=order.pending_marketplace_cancellation,
+        tracking_number=order.tracking_number,
+        carrier=order.carrier,
         lines=lines,
     )
 

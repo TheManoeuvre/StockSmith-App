@@ -84,6 +84,7 @@ class OrderLineRead(BaseModel):
     external_line_id: str | None
     needs_mapping: bool
     cost_per_unit_snapshot: Decimal | None = None
+    variation_text: str | None = None
 
 
 class OrderRead(BaseModel):
@@ -133,6 +134,8 @@ class OrderRead(BaseModel):
     postage_cost_missing: bool = False
     sync_issue: str | None = None
     pending_marketplace_cancellation: bool = False
+    tracking_number: str | None = None
+    carrier: str | None = None
     lines: list[OrderLineRead] = []
 
 

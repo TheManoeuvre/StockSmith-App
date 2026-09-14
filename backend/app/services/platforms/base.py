@@ -52,6 +52,10 @@ class ExternalOrderLine:
     qty: int
     unit_price: str | None
     currency: str | None
+    # Buyer-supplied personalization/customization text for this specific line (Etsy's
+    # transaction.variations "Personalization" entry). None when the listing has no
+    # personalization option or the buyer left it blank. eBay has no equivalent concept.
+    variation_text: str | None = None
 
 
 @dataclass
@@ -117,6 +121,13 @@ class ExternalOrder:
     # Without that, a held-open re-fetch would null out a payment breakdown an earlier
     # sync had already stored correctly.
     financials_enriched: bool = True
+
+    # Shipment tracking, once the marketplace has it — eBay's shipping_fulfillment
+    # trackingNumber/shippingCarrierCode, or the first entry of Etsy's receipt
+    # `shipments` array. None until the order actually ships; fetched under the same
+    # `enrich` gate as the payment trio above, since both need a per-order call.
+    tracking_number: str | None = None
+    carrier: str | None = None
 
 
 @dataclass

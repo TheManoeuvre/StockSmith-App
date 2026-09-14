@@ -37,6 +37,7 @@ function line(over: Record<string, unknown> = {}) {
     external_line_id: null,
     needs_mapping: false,
     cost_per_unit_snapshot: "3.00",
+    variation_text: null,
     ...over,
   };
 }
@@ -78,6 +79,8 @@ function order(over: Record<string, unknown> = {}) {
     postage_cost_missing: false,
     sync_issue: null,
     pending_marketplace_cancellation: false,
+    tracking_number: null,
+    carrier: null,
     lines: [line()],
     ...over,
   };

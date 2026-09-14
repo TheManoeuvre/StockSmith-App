@@ -14,6 +14,7 @@ import {
 import { useState, type MouseEvent } from "react";
 import { ordersApi } from "../../api/orders";
 import type { Order, OrderStatus } from "../../api/types";
+import { CopyButton } from "../../components/common/CopyButton";
 import { CsvImportExport } from "../../components/common/CsvImportExport";
 import { Th } from "../../components/common/ListTable";
 import { formatMoney } from "../../lib/money";
@@ -345,7 +346,14 @@ function OrderRow({
           {fulfilment.label}
         </span>
         {fulfilment.detail && (
-          <div className="text-[11px] text-slate-500">{fulfilment.detail}</div>
+          <div className="flex items-center gap-1 text-[11px] text-slate-500">
+            <span>{fulfilment.detail}</span>
+            {fulfilment.trackingNumber && (
+              <span onClick={(e) => e.stopPropagation()}>
+                <CopyButton value={fulfilment.trackingNumber} label="Copy tracking number" />
+              </span>
+            )}
+          </div>
         )}
       </td>
       <td className="p-2 text-right align-top tabular-nums">
