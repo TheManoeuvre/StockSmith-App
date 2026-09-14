@@ -57,8 +57,14 @@ export function MaterialSelect({
     const cat = categoriesByName.get(m.category);
     return cat ? cat.show_in_kitting_bom_list : true;
   };
+  // Disabled materials aren't offered as new choices, but a row's own current selection is
+  // always kept — same rationale as inKittingScope: a material getting disabled later shouldn't
+  // silently blank out a BOM line that already references it.
   const visible = materials.filter(
-    (m) => (matchesFilter(m, filterText) || m.id === value) && inKittingScope(m)
+    (m) =>
+      (matchesFilter(m, filterText) || m.id === value) &&
+      inKittingScope(m) &&
+      (m.is_active || m.id === value)
   );
 
   const byCategory = new Map<string, Material[]>();
