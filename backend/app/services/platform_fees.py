@@ -65,17 +65,29 @@ def compute_effective_fee_amount(
     return subtotal
 
 
+def _fee_percent_of_revenue(fee_amount: Decimal, sale_price: Decimal, shipping_price: Decimal | None) -> Decimal | None:
+    """Expresses a fee amount as a percentage of what the buyer pays (sale price + postage
+    charged). That's the base a manual Product.platform_fee_percent is applied to in
+    pricing.compute_profit_margin, so a calculated fee has to be reported on the same base
+    or the two modes would mean different things by "13%"."""
+    revenue = sale_price + (shipping_price or Decimal(0))
+    if revenue == 0:
+        return None
+    return fee_amount / revenue * Decimal(100)
+
+
 async def compute_effective_fee_percent(
     session: AsyncSession, platform: ListingPlatform, sale_price: Decimal | None, shipping_price: Decimal | None
 ) -> Decimal | None:
     """Resolves a calculated platform's fee components down to a single effective
-    percent-of-sale-price, so callers that already work in terms of a flat fee % (the
-    existing margin-calculation code) don't need to change shape."""
-    if sale_price is None or sale_price == 0:
+    percent-of-revenue (sale price + postage charged), so callers that already work in
+    terms of a flat fee % (the existing margin-calculation code) don't need to change
+    shape."""
+    if sale_price is None:
         return None
     components = await get_fee_components(session, platform)
     fee_amount = compute_effective_fee_amount(components, sale_price, shipping_price)
-    return fee_amount / sale_price * Decimal(100)
+    return _fee_percent_of_revenue(fee_amount, sale_price, shipping_price)
 
 
 async def get_resolver_context(session: AsyncSession) -> tuple[MarginFeeSource, list[PlatformFeeComponent]]:
@@ -100,10 +112,10 @@ def resolve_fee_percent(
     safe to call in a per-row loop without additional DB round trips."""
     if fee_source == MarginFeeSource.manual:
         return manual_fee_percent
-    if sale_price is None or sale_price == 0:
+    if sale_price is None:
         return None
     fee_amount = compute_effective_fee_amount(components, sale_price, shipping_price)
-    return fee_amount / sale_price * Decimal(100)
+    return _fee_percent_of_revenue(fee_amount, sale_price, shipping_price)
 
 
 def resolve_variant_fee_percent(

@@ -76,9 +76,10 @@ const TAB_IDS = [
 ] as const;
 type TabId = (typeof TAB_IDS)[number];
 
-/** COGS = the three per-unit deductions an order carries; margin nets platform fees off the
- *  sale price too. Mirrors what PricingSection computes. Null where the inputs aren't there
- *  yet (no BOM → no cost; no sale price → no margin). */
+/** COGS = the three per-unit deductions an order carries; margin nets platform fees off
+ *  revenue, which is the sale price plus postage charged to the buyer. Mirrors what
+ *  PricingSection computes. Null where the inputs aren't there yet (no BOM → no cost; no
+ *  sale price → no margin). */
 function productEconomics(p: Product): {
   cogs: number | null;
   marginPct: number | null;
@@ -90,13 +91,16 @@ function productEconomics(p: Product): {
     p.effective_shipping_cost != null ? Number(p.effective_shipping_cost) : null;
   const cogs = mat == null ? null : mat + kit + (post ?? 0);
   const salePrice = p.sale_price != null ? Number(p.sale_price) : null;
+  const shippingPrice =
+    p.effective_shipping_price != null ? Number(p.effective_shipping_price) : 0;
+  const revenue = salePrice == null ? null : salePrice + shippingPrice;
   const feePct =
     p.effective_platform_fee_percent != null
       ? Number(p.effective_platform_fee_percent)
       : 0;
   const marginPct =
-    cogs != null && salePrice != null && salePrice > 0
-      ? ((salePrice - cogs - (salePrice * feePct) / 100) / salePrice) * 100
+    cogs != null && revenue != null && revenue > 0
+      ? ((revenue - cogs - (revenue * feePct) / 100) / revenue) * 100
       : null;
   return { cogs, marginPct, missingPostage: post == null };
 }

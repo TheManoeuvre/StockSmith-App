@@ -299,6 +299,7 @@ def _read_product(product: Product, ctx: "_ProductReadContext") -> ProductRead:
             "effective_platform_fee_percent": effective_platform_fee_percent,
             "effective_shipping_profile_id": shipping_profile.id if shipping_profile else None,
             "effective_shipping_profile_name": shipping_profile.name if shipping_profile else None,
+            "effective_shipping_price": shipping_profile.price if shipping_profile else None,
             "effective_shipping_cost": (
                 resolve_shipping_cost_for_fee_source(shipping_profile, ctx.fee_source) if shipping_profile else None
             ),

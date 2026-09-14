@@ -307,20 +307,22 @@ otherwise this ships half-working. Note the "Symbol position" (Before/After) fie
 same mockup card was **not** added for the identical reason, and should be picked up
 together with this one.
 
-### Pricing & fees: target margin threshold and "include postage in COGS"
+### Pricing & fees: target margin threshold and extra fee-source modes
 
 **Problem:** The mockup's Margin card adds a "Target margin %" (to flag below-margin
-products amber in the product list) and an "Include postage in COGS" toggle (off treats
-postage as buyer-recovered). Neither exists: there's no margin-threshold concept feeding
-the product list's colour-coding, and postage/COGS treatment isn't currently split this way.
-Also proposed: extending the margin fee-source enum (`MarginFeeSource`, currently
-`manual | etsy | ebay`) with "whichever is cheapest" and "no channel" options, which need
-new comparison logic in fee estimation, not just new enum values.
+products amber in the product list). It doesn't exist: there's no margin-threshold concept
+feeding the product list's colour-coding. Also proposed: extending the margin fee-source
+enum (`MarginFeeSource`, currently `manual | etsy | ebay`) with "whichever is cheapest" and
+"no channel" options, which need new comparison logic in fee estimation, not just new enum
+values.
 
-**Ask:** Three separable pieces — (1) a target-margin setting plus product-list amber-flag
-wiring, (2) a postage/COGS-split calculation change (note: relates to the existing
-[COGS backfill deferred] follow-up — 38 shipped orders already carry wrong postage/kitting
-figures), and (3) the two new fee-source comparison modes. Each is real backend logic, not
+The mockup's "Include postage in COGS" toggle (off treats postage as buyer-recovered) is
+no longer needed: product margin now counts postage charged as revenue and postage cost as
+a cost (`pricing.compute_profit_margin`), the same shape as order net profit, so the
+buyer-recovered case falls out of the arithmetic rather than needing a switch.
+
+**Ask:** Two separable pieces — (1) a target-margin setting plus product-list amber-flag
+wiring, and (2) the two new fee-source comparison modes. Each is real backend logic, not
 a settings relocation.
 
 ### Forecasting: count usage from sales, builds, or both

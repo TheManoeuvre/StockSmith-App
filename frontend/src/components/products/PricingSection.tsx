@@ -20,6 +20,10 @@ import { formatUnitCost } from "../../lib/money";
 
 const INITIAL_LINE_LIMIT = 5;
 
+// The manual fee is a share of the whole amount the buyer pays, because that is what a
+// marketplace's percentage fee is levied on — see backend pricing.compute_profit_margin.
+const MANUAL_FEE_TITLE = "Applied to the sale price plus postage charged (the full amount the buyer pays).";
+
 const MODE_LABELS: Record<PricingMode, string> = {
   product: "Product (one price for all variations)",
   variable: "Variable (by attribute, e.g. colour or size)",
@@ -43,11 +47,23 @@ function shippingCostForFeeSource(profile: ShippingProfile, feeSource: MarginFee
   return Number(profile.cost_manual);
 }
 
+interface MarginResult {
+  revenue: number;
+  shippingPrice: number;
+  profit: number;
+  marginPercent: number;
+  postageMissing: boolean;
+}
+
+/** Mirrors backend services/pricing.py::compute_profit_margin. Revenue is the sale price
+ *  plus what the profile charges the buyer for postage — the same "Order Value Paid +
+ *  Postage Paid" an order's net profit starts from — and the platform fee percent is a
+ *  share of that whole amount, because that is what a marketplace levies it on. */
 function computeMargin(
   inputs: MarginInputs,
   profiles: ShippingProfile[],
   feeSource: MarginFeeSource | undefined
-): { profit: number; marginPercent: number; postageMissing: boolean } | null {
+): MarginResult | null {
   if (!inputs.sale_price) return null;
   const salePrice = Number(inputs.sale_price);
   const cost = inputs.cost_per_unit ? Number(inputs.cost_per_unit) : 0;
@@ -62,18 +78,25 @@ function computeMargin(
   // order page's "No postage cost", and for the same reason: silently treating an unknown
   // as zero is exactly what let £95 of real postage sit outside reported profit.
   const postageMissing = profile === undefined;
+  const shippingPrice = profile ? Number(profile.price) : 0;
   const shipping = profile ? shippingCostForFeeSource(profile, feeSource) : 0;
-  const fee = (salePrice * (inputs.effective_platform_fee_percent ? Number(inputs.effective_platform_fee_percent) : 0)) / 100;
-  const profit = salePrice - cost - kitting - shipping - fee;
-  const marginPercent = salePrice !== 0 ? (profit / salePrice) * 100 : 0;
-  return { profit, marginPercent, postageMissing };
+  const revenue = salePrice + shippingPrice;
+  const fee = (revenue * (inputs.effective_platform_fee_percent ? Number(inputs.effective_platform_fee_percent) : 0)) / 100;
+  const profit = revenue - cost - kitting - shipping - fee;
+  const marginPercent = revenue !== 0 ? (profit / revenue) * 100 : 0;
+  return { revenue, shippingPrice, profit, marginPercent, postageMissing };
 }
 
 /** The margin figure plus, when postage is unknown, a note saying the figure excludes it. */
-function MarginSummary({ margin }: { margin: { profit: number; marginPercent: number; postageMissing: boolean } }) {
+function MarginSummary({ margin }: { margin: MarginResult }) {
   return (
     <span className="text-sm">
       Profit: <strong>£{margin.profit.toFixed(2)}</strong> · Margin: <strong>{margin.marginPercent.toFixed(1)}%</strong>
+      {margin.shippingPrice > 0 && (
+        <span className="ml-2 text-xs text-slate-400" title="Margin is on the full amount the buyer pays — sale price plus postage charged — the same base an order's net profit uses.">
+          on £{margin.revenue.toFixed(2)} incl. £{margin.shippingPrice.toFixed(2)} postage
+        </span>
+      )}
       {margin.postageMissing && (
         <span className="ml-2 rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800" title="No shipping profile is assigned, so postage is not deducted here — and an order for this product will ship with no postage cost recorded at all.">
           excludes postage
@@ -139,15 +162,26 @@ function CogsBreakdown({ product }: { product: Product }) {
       : null;
   const totalCogs = materials == null ? null : materials + packaging + (postage ?? 0);
   const salePrice = product.sale_price != null ? Number(product.sale_price) : null;
+  // Postage charged is income, so it belongs in the base margin is measured against —
+  // otherwise a product that charges £4 postage and pays £3 for it reads as losing £3.
+  const shippingPrice =
+    product.effective_shipping_price != null ? Number(product.effective_shipping_price) : 0;
+  const revenue = salePrice == null ? null : salePrice + shippingPrice;
   const marginBeforeFees =
-    totalCogs != null && salePrice != null && salePrice > 0
-      ? ((salePrice - totalCogs) / salePrice) * 100
+    totalCogs != null && revenue != null && revenue > 0
+      ? ((revenue - totalCogs) / revenue) * 100
       : null;
 
   const money = (n: number | null) => (n == null ? "—" : `£${n.toFixed(2)}`);
 
   return (
     <div className="flex flex-col gap-1 rounded bg-white p-4 text-sm shadow-sm">
+      <h4 className="mb-1 text-sm font-medium text-slate-600">Revenue</h4>
+      <Row label="Sale price" value={money(salePrice)} />
+      <Row label="Postage charged" value={money(salePrice == null ? null : shippingPrice)} />
+      <div className="mb-2 border-t border-slate-100 pt-1">
+        <Row label="Total revenue" value={<strong>{money(revenue)}</strong>} />
+      </div>
       <h4 className="mb-1 text-sm font-medium text-slate-600">Cost of goods</h4>
       <Row label="Materials" value={money(materials)} />
       <Row label="Packaging" value={money(packaging)} />
@@ -241,6 +275,8 @@ function ChannelFeeComparison({
       ? Number(product.effective_shipping_cost)
       : 0;
   const totalCogs = materials == null ? null : materials + packaging + postage;
+  // Fee % and margin are both shares of what the buyer pays — see computeMargin.
+  const revenue = salePrice + shippingPrice;
 
   const rows: { platform: string; components: PlatformFeeComponent[] | undefined }[] = [
     { platform: "Etsy", components: etsyComponents },
@@ -251,6 +287,7 @@ function ChannelFeeComparison({
     <div className="flex flex-col gap-1 rounded bg-white p-4 text-sm shadow-sm">
       <h4 className="mb-1 text-sm font-medium text-slate-600">
         Channel fees at £{salePrice.toFixed(2)}
+        {shippingPrice > 0 && ` + £${shippingPrice.toFixed(2)} postage`}
       </h4>
       <table className="w-full text-left">
         <thead>
@@ -274,11 +311,11 @@ function ChannelFeeComparison({
               );
             }
             const feeAmount = effectiveFeeAmount(components, salePrice, shippingPrice);
-            const feePct = (feeAmount / salePrice) * 100;
+            const feePct = (feeAmount / revenue) * 100;
             const margin =
               totalCogs == null
                 ? null
-                : ((salePrice - totalCogs - feeAmount) / salePrice) * 100;
+                : ((revenue - totalCogs - feeAmount) / revenue) * 100;
             return (
               <tr key={platform} className="border-t border-slate-100">
                 <td className="py-1">{platform}</td>
@@ -662,6 +699,7 @@ function ProductPriceForm({
           ) : (
             <input
               className="w-24 rounded border border-slate-300 px-2 py-1 text-right tabular-nums"
+              title={MANUAL_FEE_TITLE}
               value={platformFeePercent}
               onChange={(e) => setPlatformFeePercent(e.target.value)}
             />
@@ -828,6 +866,7 @@ function VariableGroupRow({
         ) : (
           <input
             className="w-24 rounded border border-slate-300 px-2 py-1"
+            title={MANUAL_FEE_TITLE}
             placeholder={product.platform_fee_percent ?? ""}
             value={platformFeePercent}
             onChange={(e) => setPlatformFeePercent(e.target.value)}
@@ -1000,6 +1039,7 @@ function LineRow({
         ) : (
           <input
             className="w-24 rounded border border-slate-300 px-2 py-1"
+            title={MANUAL_FEE_TITLE}
             placeholder={product.platform_fee_percent ?? ""}
             value={platformFeePercent}
             onChange={(e) => setPlatformFeePercent(e.target.value)}

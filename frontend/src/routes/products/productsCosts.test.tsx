@@ -31,6 +31,7 @@ function product(overrides: Record<string, unknown> = {}) {
     kitting_cost_per_unit_max: null,
     effective_shipping_profile_id: 1,
     effective_shipping_profile_name: "Small Parcel 48",
+    effective_shipping_price: "3.99",
     effective_shipping_cost: "3.65",
     cogs_incomplete: false,
     pricing_mode: "product",
@@ -115,6 +116,7 @@ it("names what is missing instead of showing a bare dash", async () => {
       product({
         effective_shipping_profile_id: null,
         effective_shipping_profile_name: null,
+        effective_shipping_price: null,
         effective_shipping_cost: null,
         cogs_incomplete: true,
       }),

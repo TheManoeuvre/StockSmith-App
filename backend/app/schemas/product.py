@@ -92,12 +92,14 @@ class ProductRead(ProductBase):
     main_image_asset_id: int | None = None
     ready_to_ship: int | None = None
     effective_platform_fee_percent: Decimal | None = None
-    # The product's resolved shipping profile and what it costs on the shop-wide margin fee
-    # source (Settings -> Pricing) — the same basis the product page's margin estimate uses,
-    # so the two agree. All None when no profile is assigned, which is itself the signal:
-    # an order for such a product ships with no postage cost recorded at all.
+    # The product's resolved shipping profile, what it charges the buyer, and what it costs
+    # on the shop-wide margin fee source (Settings -> Pricing) — the same basis the product
+    # page's margin estimate uses, so the two agree. All None when no profile is assigned,
+    # which is itself the signal: an order for such a product ships with no postage cost
+    # recorded at all.
     effective_shipping_profile_id: int | None = None
     effective_shipping_profile_name: str | None = None
+    effective_shipping_price: Decimal | None = None
     effective_shipping_cost: Decimal | None = None
     # Something this product needs before its orders can report a truthful profit — see
     # routers/products.py _cogs_incomplete for exactly what counts.

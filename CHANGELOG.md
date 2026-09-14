@@ -12,6 +12,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **Product margin now counts the postage you charge as income.** A product's profit and
+  margin (Pricing tab, product header, and the Etsy vs eBay comparison) were computed on the
+  sale price alone, while still deducting what postage costs you — so a £20 item posted for
+  £3.60 read as £3.60 worse off than its orders did. Revenue is now sale price + postage
+  charged, the same base an order's net profit uses, and the platform fee is taken as a
+  share of that whole amount (which is what the marketplaces charge it on). In calculated
+  fee mode the fee £ is unchanged; the displayed fee % is now a share of the full amount
+  rather than of the item price, so it reads lower. Manual fee %s are likewise applied to
+  sale price + postage from now on. Margin history recorded before this change keeps its old
+  figures.
+
 ## [0.15.0] - 2026-09-14
 
 ### Added
