@@ -4,8 +4,10 @@ import random
 from datetime import datetime, timedelta, timezone
 
 import httpx
+from sqlalchemy import or_, select
 
 from app.models.listing import ListingPlatform
+from app.models.order import Order
 from app.models.platform_connection import PlatformConnection
 from app.services import platform_api_usage
 from app.services.platforms.base import (
@@ -377,6 +379,13 @@ class EtsyAdapter:
         if since is not None:
             params["min_last_modified"] = int(since.timestamp())
 
+        # Only consulted on a cold watermark (first connect, or a reconnect as a different
+        # shop). With a live watermark the enrich gate in _parse_receipt is already as
+        # narrow as it can be — see the comment there.
+        already_enriched: dict[str, bool] = (
+            await self._already_enriched_receipts(session) if connection.last_orders_synced_at is None else {}
+        )
+
         orders: list[ExternalOrder] = []
         for _ in range(_MAX_PAGES):
             response = await self._authed_request(
@@ -388,7 +397,9 @@ class EtsyAdapter:
             body = response.json()
             results = body.get("results", [])
             for receipt in results:
-                orders.append(await self._parse_receipt(session, connection, receipt))
+                orders.append(
+                    await self._parse_receipt(session, connection, receipt, already_enriched=already_enriched)
+                )
 
             total = body.get("count", len(results))
             params["offset"] = int(params["offset"]) + len(results)
@@ -397,7 +408,30 @@ class EtsyAdapter:
 
         return orders
 
-    async def _parse_receipt(self, session, connection: PlatformConnection, receipt: dict) -> ExternalOrder:
+    @staticmethod
+    async def _already_enriched_receipts(session) -> dict[str, bool]:
+        """receipt_id -> already shipped locally, for every imported Etsy order that
+        already carries a payment breakdown. Feeds _parse_receipt's cold-watermark gate:
+        these are the receipts a from-scratch fetch would otherwise re-enrich for no gain.
+        Returns {} without a session (unit tests drive _parse_receipt directly)."""
+        if session is None:
+            return {}
+        result = await session.execute(
+            select(Order.external_order_id, Order.shipped_at).where(
+                Order.platform == ListingPlatform.etsy,
+                Order.external_order_id.is_not(None),
+                or_(Order.payment_fees.is_not(None), Order.payment_net.is_not(None)),
+            )
+        )
+        return {external_id: shipped_at is not None for external_id, shipped_at in result.all()}
+
+    async def _parse_receipt(
+        self,
+        session,
+        connection: PlatformConnection,
+        receipt: dict,
+        already_enriched: dict[str, bool] | None = None,
+    ) -> ExternalOrder:
         buyer_name = receipt.get("name") or receipt.get("first_line") or None
         placed_ts = receipt.get("create_timestamp") or receipt.get("created_timestamp")
         placed_at = (
@@ -458,11 +492,25 @@ class EtsyAdapter:
         #    receipt caught in that widened window on every poll would burn the daily
         #    quota (~4 calls per receipt) for information that hasn't changed.
         #
+        #  - Cold watermark, receipt already enriched locally: with no watermark at all
+        #    (first connect, or a reconnect as a different shop) the window reaches back
+        #    to sync_start_date and the cutoff test above is open for *everything*. A
+        #    same-shop reconnect no longer clears the watermark (see routers/platforms.
+        #    disconnect_platform), but for the cases that legitimately start cold, an
+        #    order whose payment breakdown is already stored has nothing to gain from
+        #    the ~10–20 calls (payment + a 30-day ledger crawl) it would cost — the one
+        #    exception being a receipt that has shipped since we stored it, whose ledger
+        #    total (fees only post on shipment) is still worth fetching.
+        #
         # Note the second condition is a no-op whenever no hold is active: `since` then
         # equals last_orders_synced_at, so everything returned is at or past the cutoff
         # and behaviour is identical to before.
         cutoff = ensure_utc(connection.last_orders_synced_at)
         enrich = payment_state is not PaymentState.unsettled and (cutoff is None or last_modified >= cutoff)
+        if enrich and cutoff is None and already_enriched:
+            shipped_locally = already_enriched.get(str(receipt.get("receipt_id")))
+            if shipped_locally is not None and (shipped_locally or not is_shipped):
+                enrich = False
 
         payment_fees = payment_net = payment_status = None
         if enrich:

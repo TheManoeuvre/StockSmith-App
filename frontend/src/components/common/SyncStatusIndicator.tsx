@@ -27,6 +27,7 @@ function formatRelative(iso: string): string {
 function summarise(summaries: PlatformSyncSummary[]) {
   const connected = summaries.filter((s) => s.connected);
   const errored = connected.filter((s) => s.last_sync_status === "error");
+  const syncing = connected.some((s) => s.last_sync_status === "running");
   const failingPushes = connected.reduce((total, s) => total + s.failing_push_count, 0);
   // The most recent successful-or-not sync across platforms — the question the label
   // answers is "how stale is my data", which is governed by whichever synced last.
@@ -37,7 +38,7 @@ function summarise(summaries: PlatformSyncSummary[]) {
     if (newest === null) return s.last_sync_at;
     return new Date(s.last_sync_at) > new Date(newest) ? s.last_sync_at : newest;
   }, null);
-  return { connected, errored, failingPushes, latest };
+  return { connected, errored, failingPushes, latest, syncing };
 }
 
 export function SyncStatusIndicator() {
@@ -52,7 +53,7 @@ export function SyncStatusIndicator() {
   // "never synced" while the first request is still in flight would be actively wrong.
   if (!data) return null;
 
-  const { connected, errored, failingPushes, latest } = summarise(data);
+  const { connected, errored, failingPushes, latest, syncing } = summarise(data);
   if (connected.length === 0) return null;
 
   const hasProblem = errored.length > 0 || failingPushes > 0;
@@ -91,7 +92,7 @@ export function SyncStatusIndicator() {
         {hasProblem ? "!" : "✓"}
       </span>
       <span className={`flex-1 ${hasProblem ? "text-red-700" : "text-slate-600"}`}>
-        {latest ? `Synced ${formatRelative(latest)}` : "Never synced"}
+        {syncing ? "Syncing…" : latest ? `Synced ${formatRelative(latest)}` : "Never synced"}
       </span>
     </Link>
   );

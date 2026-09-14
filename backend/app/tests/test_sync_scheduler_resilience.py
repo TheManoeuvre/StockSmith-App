@@ -154,3 +154,34 @@ def _returning(value):
 
 async def _never_called(_platform):
     raise AssertionError("should not be reached in this test")
+
+
+async def test_manual_sync_is_under_the_same_stall_guard(monkeypatch):
+    """"Sync now" used to call commit_sync bare. A wedged manual sync therefore held the
+    platform lock indefinitely — every later tick logged "already in flight" and no-op'd,
+    and nothing was ever recorded — which is exactly the state the 2026-09-14 reconnect
+    left the app in. The endpoint now shares run_commit_sync_guarded with the tick."""
+    from fastapi import HTTPException
+
+    from app.routers import platforms as platforms_router
+
+    monkeypatch.setattr(sync_scheduler, "_COMMIT_SYNC_TIMEOUT_SECONDS", 0.05)
+
+    async def _hang(_platform):
+        await asyncio.Event().wait()
+
+    recorded: list[tuple] = []
+
+    async def _record(platform, mode, error):
+        recorded.append((platform, mode, type(error).__name__))
+
+    monkeypatch.setattr(sync_scheduler.order_sync, "commit_sync", _hang)
+    monkeypatch.setattr(sync_scheduler.order_sync, "record_failed_run", _record)
+
+    with pytest.raises(HTTPException) as excinfo:
+        await platforms_router.sync_orders(ListingPlatform.etsy)
+
+    assert excinfo.value.status_code == 504
+    assert "abandoned" in excinfo.value.detail
+    assert recorded == [(ListingPlatform.etsy, sync_scheduler.SyncRunMode.commit, "TimeoutError")]
+    assert not sync_scheduler.get_lock(ListingPlatform.etsy).locked()

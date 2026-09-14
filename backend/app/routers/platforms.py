@@ -306,6 +306,7 @@ async def _status_from_connection(
             auto_sync_enabled=False,
             sync_interval_minutes=connection.sync_interval_minutes if connection is not None else 15,
             last_sync_attempt_at=None,
+            last_sync_status=None,
             last_sync_success_at=None,
             last_sync_error=None,
             unpaid_hold_since=None,
@@ -315,6 +316,7 @@ async def _status_from_connection(
     last_sync_success_at = (
         latest_run.started_at if latest_run is not None and latest_run.status == SyncRunStatus.success else None
     )
+    last_sync_status = latest_run.status if latest_run is not None else None
     last_sync_error = (
         latest_run.error_message if latest_run is not None and latest_run.status == SyncRunStatus.error else None
     )
@@ -336,6 +338,7 @@ async def _status_from_connection(
         auto_sync_enabled=connection.auto_sync_enabled,
         sync_interval_minutes=connection.sync_interval_minutes,
         last_sync_attempt_at=latest_run.started_at if latest_run is not None else None,
+        last_sync_status=last_sync_status,
         last_sync_success_at=last_sync_success_at,
         last_sync_error=last_sync_error,
         unpaid_hold_since=connection.unpaid_hold_since,
@@ -470,6 +473,18 @@ async def platform_callback(
     # screen, so the requested set is what was granted. Etsy does return it, and its
     # value wins where present since a user can in principle approve a subset.
     connection.scopes = tokens.scopes or " ".join(_SCOPES.get(platform, [])) or None
+    if connection.external_account_id is not None and connection.external_account_id != account_id:
+        # A different shop than the one the retained watermark belongs to (see
+        # disconnect_platform for why it is retained at all). Its orders are a different
+        # shop's orders, so the watermark and unpaid hold must not carry over.
+        logger.info(
+            "%s reconnected as account %s (was %s) — resetting the order-sync watermark",
+            platform.value,
+            account_id,
+            connection.external_account_id,
+        )
+        connection.last_orders_synced_at = None
+        connection.unpaid_hold_since = None
     connection.external_account_id = account_id
     connection.connected_at = datetime.now(timezone.utc)
     if platform == ListingPlatform.etsy:
@@ -628,9 +643,20 @@ async def disconnect_platform(platform: ListingPlatform, session: AsyncSession =
     # Neither Etsy's nor eBay's public APIs expose a server-side token-revocation call
     # StockSmith can make — the access token expires naturally and the refresh token
     # becomes useless once dropped here, but a user wanting a full revoke must do so
-    # from the marketplace's own connected-apps account settings. Clear every
-    # connection-specific field, not just the tokens, so a future reconnect never
-    # inherits a stale account id or sync watermark from a prior connection.
+    # from the marketplace's own connected-apps account settings.
+    #
+    # The account id and the sync watermark (last_orders_synced_at / unpaid_hold_since)
+    # deliberately survive a disconnect. They used to be cleared here so a different shop
+    # could never inherit them — but the overwhelmingly common reconnect is the *same*
+    # shop (re-consenting after a scope change, or just troubleshooting), and a wiped
+    # watermark made that shop's next sync start over from sync_start_date with the
+    # Etsy adapter's per-receipt enrichment gate open for every receipt: two months of
+    # already-imported orders re-fetched at 10–20 API calls each, a sync that ran for
+    # the better part of an hour, and restarts that threw the progress away. The
+    # different-shop case is handled where it can actually be detected — the OAuth
+    # callback compares the freshly fetched account id against the stored one and
+    # resets the watermark only if it changed. is_connected keys on refresh_token, so
+    # a retained account id doesn't make the row look connected.
     result = await session.execute(select(PlatformConnection).where(PlatformConnection.platform == platform))
     connection = result.scalar_one_or_none()
     if connection is None:
@@ -639,9 +665,7 @@ async def disconnect_platform(platform: ListingPlatform, session: AsyncSession =
     connection.refresh_token = None
     connection.access_token_expires_at = None
     connection.scopes = None
-    connection.external_account_id = None
     connection.connected_at = None
-    connection.last_orders_synced_at = None
     connection.last_refreshed_at = None
     connection.auto_sync_enabled = False
     connection.consecutive_auth_failures = 0
@@ -671,9 +695,15 @@ async def sync_orders(platform: ListingPlatform) -> SyncCommitResult:
     # waits for it, since the user explicitly asked for this to run now. No session
     # dependency here — commit_sync manages its own short-lived sessions internally (see
     # its docstring), so this endpoint doesn't need one of its own to hand it.
+    #
+    # Runs under the same stall guard as the background tick. A manual sync that wedges
+    # would otherwise hold this lock forever — every later tick logs "already in flight"
+    # and no-ops — and the user's only symptom is a button that never stops importing.
     async with sync_scheduler.get_lock(platform):
         try:
-            return await order_sync.commit_sync(platform)
+            return await sync_scheduler.run_commit_sync_guarded(platform)
+        except sync_scheduler.SyncAbandonedError as e:
+            raise HTTPException(status_code=status.HTTP_504_GATEWAY_TIMEOUT, detail=str(e)) from e
         except PlatformError as e:
             raise _map_platform_error(e)
 

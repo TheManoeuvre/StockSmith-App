@@ -322,8 +322,21 @@ async def commit_sync(platform: ListingPlatform) -> SyncCommitResult:
     app boot (sync_scheduler) instead of by a stock-change fan-out. The fetch-phase
     session is closed (and its pooled connection released) before the write phase opens
     its own — the write phase never needs anything beyond the plain rows/IDs fetch_orders_
-    since already returned, so nothing is lost by not sharing a session across the two."""
+    since already returned, so nothing is lost by not sharing a session across the two.
+
+    A `running` PlatformSyncRun row is committed before the fetch begins and finalised to
+    success/error at the end, rather than one row being inserted on completion. The
+    fetch phase can legitimately take many minutes (a reconnected shop with no watermark
+    re-fetches everything back to sync_start_date), and with completion-only logging that
+    whole stretch was indistinguishable from "nothing is happening": the sync panel kept
+    showing the previous run as the latest, and the scheduler's "already in flight" skip
+    warning pointed at nothing a user could see. The row is also what lets a run the
+    process died under (see fail_orphaned_runs) be told apart from one that simply never
+    started."""
+    run_id: int | None = None
     try:
+        run_id = await _open_run(platform, SyncRunMode.commit)
+
         async with async_session_factory() as fetch_session:
             connection = await _get_connection(fetch_session, platform)
             adapter = await get_adapter(fetch_session, platform)
@@ -381,18 +394,17 @@ async def commit_sync(platform: ListingPlatform) -> SyncCommitResult:
             # `skipped_unpaid`, and the hold releases itself with no cleanup pass.
             connection.unpaid_hold_since = _compute_unpaid_hold(skipped_unpaid)
 
-            run = PlatformSyncRun(
-                platform=platform,
-                mode=SyncRunMode.commit,
-                status=SyncRunStatus.success,
-                fetched_count=len(external_orders),
-                new_count=created_count,
-                needs_mapping_count=needs_mapping_count,
-                shipped_count=shipped_count,
-                skipped_unpaid_count=len(skipped_unpaid),
-                finished_at=datetime.now(timezone.utc),
-            )
-            session.add(run)
+            run = await session.get(PlatformSyncRun, run_id)
+            if run is None:  # pragma: no cover — only if something deleted the row mid-run
+                run = PlatformSyncRun(platform=platform, mode=SyncRunMode.commit)
+                session.add(run)
+            run.status = SyncRunStatus.success
+            run.fetched_count = len(external_orders)
+            run.new_count = created_count
+            run.needs_mapping_count = needs_mapping_count
+            run.shipped_count = shipped_count
+            run.skipped_unpaid_count = len(skipped_unpaid)
+            run.finished_at = datetime.now(timezone.utc)
             await session.commit()
 
             return SyncCommitResult(
@@ -411,7 +423,7 @@ async def commit_sync(platform: ListingPlatform) -> SyncCommitResult:
         # doesn't need to share a session with whatever failed. Matches the pattern
         # sync_scheduler's own failure-recording helpers already use.
         async with async_session_factory() as failure_session:
-            await _record_failure(failure_session, platform, SyncRunMode.commit, e)
+            await _record_failure(failure_session, platform, SyncRunMode.commit, e, run_id=run_id)
         raise
 
 
@@ -654,15 +666,51 @@ def _describe_error(error: Exception) -> str:
     return type(error).__name__
 
 
-async def _record_failure(session: AsyncSession, platform: ListingPlatform, mode: SyncRunMode, error: Exception) -> None:
-    run = PlatformSyncRun(
-        platform=platform,
-        mode=mode,
-        status=SyncRunStatus.error,
-        error_message=_describe_error(error),
-        finished_at=datetime.now(timezone.utc),
+async def _open_run(platform: ListingPlatform, mode: SyncRunMode) -> int:
+    """Commit a `running` sync-run row in its own short-lived session and return its id,
+    so the run is visible to the status endpoints from the moment the fetch begins."""
+    async with async_session_factory() as session:
+        run = PlatformSyncRun(
+            platform=platform, mode=mode, status=SyncRunStatus.running, started_at=datetime.now(timezone.utc)
+        )
+        session.add(run)
+        await session.commit()
+        return run.id
+
+
+async def _latest_running_run(
+    session: AsyncSession, platform: ListingPlatform, mode: SyncRunMode
+) -> PlatformSyncRun | None:
+    result = await session.execute(
+        select(PlatformSyncRun)
+        .where(
+            PlatformSyncRun.platform == platform,
+            PlatformSyncRun.mode == mode,
+            PlatformSyncRun.status == SyncRunStatus.running,
+        )
+        .order_by(PlatformSyncRun.started_at.desc())
+        .limit(1)
     )
-    session.add(run)
+    return result.scalar_one_or_none()
+
+
+async def _record_failure(
+    session: AsyncSession, platform: ListingPlatform, mode: SyncRunMode, error: Exception, run_id: int | None = None
+) -> None:
+    """Mark the run that failed. Prefers finalising the `running` row commit_sync opened
+    (by id when the caller has it; otherwise the newest running row for this platform and
+    mode — the shape sync_scheduler's timeout path is in, where the cancelled commit_sync
+    never got to report its own id) and only inserts a fresh row when there is none to
+    finalise, e.g. preview_sync, which never opens one."""
+    run = await session.get(PlatformSyncRun, run_id) if run_id is not None else None
+    if run is None:
+        run = await _latest_running_run(session, platform, mode)
+    if run is None:
+        run = PlatformSyncRun(platform=platform, mode=mode)
+        session.add(run)
+    run.status = SyncRunStatus.error
+    run.error_message = _describe_error(error)
+    run.finished_at = datetime.now(timezone.utc)
     await session.commit()
 
 
@@ -674,3 +722,21 @@ async def record_failed_run(platform: ListingPlatform, mode: SyncRunMode, error:
     callers already do."""
     async with async_session_factory() as session:
         await _record_failure(session, platform, mode, error)
+
+
+async def fail_orphaned_runs() -> int:
+    """Finalise any `running` rows left behind by a previous process — a sync that was
+    mid-fetch when the app was quit, crashed, or upgraded never reaches either of its own
+    end states. Called once at startup, before the scheduler starts, so a stale row can't
+    be mistaken for the sync that is about to begin. Returns how many were closed."""
+    async with async_session_factory() as session:
+        result = await session.execute(select(PlatformSyncRun).where(PlatformSyncRun.status == SyncRunStatus.running))
+        orphans = list(result.scalars())
+        for run in orphans:
+            run.status = SyncRunStatus.error
+            run.error_message = "Interrupted — StockSmith stopped before this sync finished"
+            run.finished_at = datetime.now(timezone.utc)
+        if orphans:
+            await session.commit()
+            logger.warning("Closed %d sync run(s) left running by a previous process", len(orphans))
+        return len(orphans)
