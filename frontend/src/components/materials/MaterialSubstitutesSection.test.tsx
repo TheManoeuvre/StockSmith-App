@@ -13,6 +13,7 @@ const MATERIALS = [
   { id: 2, name: "Medium box", category: "packaging", is_active: true },
   { id: 3, name: "Large box", category: "packaging", is_active: true },
   { id: 4, name: "Sturdy box", category: "packaging", is_active: true },
+  { id: 5, name: "PLA Black", category: "filament", is_active: true },
 ];
 
 const CATEGORIES = [
@@ -156,4 +157,14 @@ it("requires notes before a new fallback can be added", async () => {
     expect(posts).toHaveLength(1);
   });
   expect(calls.find((c) => c.method === "POST")?.body).toMatchObject({ notes: "Backup colour match" });
+});
+
+it("only offers materials from the same category as fallbacks", async () => {
+  renderSection();
+  await screen.findByText("Medium box");
+
+  const options = screen.getAllByRole("option").map((o) => o.textContent);
+  // Sturdy box is the only packaging material that isn't the material itself or already a fallback.
+  expect(options.some((t) => t?.includes("Sturdy box"))).toBe(true);
+  expect(options.some((t) => t?.includes("PLA Black"))).toBe(false);
 });
