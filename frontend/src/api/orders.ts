@@ -93,6 +93,10 @@ export const ordersApi = {
   unassignLine: (lineId: number, qty: number) => api.post<Order>(`/orders/lines/${lineId}/unassign`, { qty }),
   mapSku: (lineId: number, input: { product_id?: number | null; variant_id?: number | null }) =>
     api.post<Order>(`/orders/lines/${lineId}/map-sku`, input),
+  substituteLine: (lineId: number, input: { variant_id: number; qty: number; reason?: string | null }) =>
+    api.post<Order>(`/orders/lines/${lineId}/substitute`, input),
+  undoSubstitution: (substitutionId: number) =>
+    api.post<Order>(`/orders/substitutions/${substitutionId}/undo`),
   createProductAndMap: (lineId: number, input: { name: string; sku?: string | null }) =>
     api.post<Order>(`/orders/lines/${lineId}/create-product-and-map`, input),
   getKittingOverrides: (id: number) => api.get<OrderKittingSummary>(`/orders/${id}/kitting-overrides`),

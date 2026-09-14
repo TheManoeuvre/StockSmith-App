@@ -559,6 +559,77 @@ function OrderFinancialsPanel({ order }: { order: Order }) {
   );
 }
 
+function UndoIcon() {
+  return (
+    <svg
+      width="11"
+      height="11"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 7v6h6" />
+      <path d="M3.51 13a9 9 0 1 0 2.13-9.36L3 7" />
+    </svg>
+  );
+}
+
+function ArrowRightIcon() {
+  return (
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M5 12h14" />
+      <path d="M13 6l6 6-6 6" />
+    </svg>
+  );
+}
+
+function ArrowLeftIcon() {
+  return (
+    <svg
+      width="10"
+      height="10"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M19 12H5" />
+      <path d="M11 6l-6 6 6 6" />
+    </svg>
+  );
+}
+
+function MinusIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+      <path d="M5 12h14" />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+      <path d="M12 5v14" />
+      <path d="M5 12h14" />
+    </svg>
+  );
+}
+
 function OrderLineRow({
   line,
   currency,
@@ -568,16 +639,42 @@ function OrderLineRow({
   currency: string | null;
   onUnassign: (qty: number) => void;
 }) {
+  const queryClient = useQueryClient();
   const unassignable = line.allocated_qty - line.shipped_qty;
+  const substitutable = line.product_id != null && line.ordered_qty - line.shipped_qty > 0;
+  const isFullySubstituted = line.ordered_qty === 0;
+  // A row is visually "linked" to another when it's either side of a still-active
+  // substitution — the shared connector bar is what makes a split legible across rows
+  // that may not be adjacent once other lines exist.
+  const isLinked = line.substituted_from != null || line.substituted_to.length > 0;
   const lineValue =
     line.unit_price != null ? Number(line.unit_price) * line.ordered_qty : null;
   const lineCost =
     line.cost_per_unit_snapshot != null
       ? Number(line.cost_per_unit_snapshot) * line.ordered_qty
       : null;
+
+  const undoMutation = useMutation({
+    mutationFn: (substitutionId: number) => ordersApi.undoSubstitution(substitutionId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["orders", line.order_id] });
+      queryClient.invalidateQueries({ queryKey: ["orders"] });
+      queryClient.invalidateQueries({ queryKey: ["products"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
+    },
+  });
+
+  const productCellClasses = isFullySubstituted
+    ? "border-l-[3px] border-l-slate-200 py-2 pr-2 pl-[9px]"
+    : isLinked
+      ? "border-l-[3px] border-l-blue-300 py-2 pr-2 pl-[9px]"
+      : "p-2";
+
+  const dash = <span className="text-slate-300">—</span>;
+
   return (
-    <tr className="border-b border-slate-100">
-      <td className="p-2">
+    <tr className={`border-b border-slate-100 ${isFullySubstituted ? "bg-slate-50" : ""}`}>
+      <td className={productCellClasses}>
         {line.needs_mapping ? (
           <div className="flex flex-col gap-1">
             <span className="text-amber-700">
@@ -586,10 +683,10 @@ function OrderLineRow({
             <UnmappedLineResolver line={line} />
           </div>
         ) : (
-          <>
+          <span className={isFullySubstituted ? "text-slate-400" : ""}>
             {line.product_name ?? "—"}
             {line.variant_name ? ` — ${line.variant_name}` : ""}
-          </>
+          </span>
         )}
         {line.variation_text && (
           <div className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-slate-500">
@@ -597,29 +694,221 @@ function OrderLineRow({
             <CopyButton value={line.variation_text} label="Copy personalization" />
           </div>
         )}
-      </td>
-      <td className="p-2">{line.ordered_qty}</td>
-      <td className="p-2">{line.allocated_qty}</td>
-      <td className="p-2">{line.shipped_qty}</td>
-      <td className="p-2">
-        {lineValue != null
-          ? formatMoney(lineValue.toFixed(2), line.currency ?? currency)
-          : "—"}
-      </td>
-      <td className="p-2">
-        {lineCost != null ? formatMoney(lineCost.toFixed(2), currency) : "—"}
-      </td>
-      <td className="p-2">
-        {unassignable > 0 && (
-          <button
-            onClick={() => onUnassign(unassignable)}
-            className="rounded border border-slate-300 px-2 py-1 text-xs"
-          >
-            Unassign
-          </button>
+        {line.substituted_from && (
+          <div className="mt-1">
+            <span className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold bg-blue-50 text-blue-700">
+              <ArrowLeftIcon />
+              from {line.substituted_from.variant_name ?? "another variation"}
+            </span>
+          </div>
         )}
+        {line.substituted_to.length > 0 && (
+          <div className="mt-1 flex flex-col items-start gap-1">
+            {line.substituted_to.map((sub) => (
+              <div key={sub.substitution_id} className="flex items-center gap-1.5">
+                <span
+                  className={`inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-semibold ${
+                    isFullySubstituted ? "bg-slate-100 text-slate-600" : "bg-blue-50 text-blue-700"
+                  }`}
+                >
+                  {isFullySubstituted ? (
+                    <>Fully substituted → {sub.variant_name ?? "another variation"}</>
+                  ) : (
+                    <>
+                      <ArrowRightIcon />
+                      {sub.qty} → {sub.variant_name ?? "another variation"}
+                    </>
+                  )}
+                </span>
+                <button
+                  onClick={() => undoMutation.mutate(sub.substitution_id)}
+                  disabled={undoMutation.isPending}
+                  className="inline-flex items-center gap-1 rounded border border-slate-300 px-1.5 py-0.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  <UndoIcon />
+                  Undo
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <ErrorBanner error={undoMutation.error} />
+      </td>
+      <td className="p-2">{isFullySubstituted ? dash : line.ordered_qty}</td>
+      <td className="p-2">{isFullySubstituted ? dash : line.allocated_qty}</td>
+      <td className="p-2">{isFullySubstituted ? dash : line.shipped_qty}</td>
+      <td className="p-2">
+        {isFullySubstituted
+          ? dash
+          : lineValue != null
+            ? formatMoney(lineValue.toFixed(2), line.currency ?? currency)
+            : "—"}
+      </td>
+      <td className="p-2">
+        {isFullySubstituted ? dash : lineCost != null ? formatMoney(lineCost.toFixed(2), currency) : "—"}
+      </td>
+      <td className="p-2">
+        <div className="flex flex-col items-start gap-1">
+          {unassignable > 0 && (
+            <button
+              onClick={() => onUnassign(unassignable)}
+              className="rounded border border-slate-300 px-2 py-1 text-xs"
+            >
+              Unassign
+            </button>
+          )}
+          {substitutable && <SubstituteLineControl line={line} />}
+        </div>
       </td>
     </tr>
+  );
+}
+
+function SubstituteLineControl({ line }: { line: OrderLine }) {
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [variantId, setVariantId] = useState<number | "">("");
+  const maxQty = line.ordered_qty - line.shipped_qty;
+  const [qty, setQty] = useState(maxQty);
+  const [reason, setReason] = useState("");
+
+  const { data: siblingVariants } = useQuery({
+    queryKey: ["products", line.product_id, "variants"],
+    queryFn: () => productsApi.listVariants(line.product_id as number),
+    enabled: open && line.product_id != null,
+  });
+  const targets = (siblingVariants ?? []).filter(
+    (v) => v.is_active && v.id !== line.variant_id,
+  );
+
+  const substituteMutation = useMutation({
+    mutationFn: () =>
+      ordersApi.substituteLine(line.id, {
+        variant_id: variantId as number,
+        qty,
+        reason: reason || null,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["orders", line.order_id] });
+      queryClient.invalidateQueries({ queryKey: ["orders"] });
+      queryClient.invalidateQueries({ queryKey: ["products"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
+      setOpen(false);
+      setVariantId("");
+      setReason("");
+    },
+  });
+
+  return (
+    <div className="relative inline-block">
+      <button
+        onClick={() => {
+          setQty(maxQty);
+          setOpen((v) => !v);
+        }}
+        className="rounded border border-slate-300 px-2 py-1 text-xs"
+      >
+        Substitute
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-20 mt-2 w-64 rounded-lg border border-slate-200 bg-white p-3 text-xs shadow-lg">
+          <div className="mb-2 text-[11px] font-semibold text-slate-500">
+            Substitute · {line.product_name ?? "Product"}
+            {line.variant_name ? ` — ${line.variant_name}` : ""}
+          </div>
+          {targets.length === 0 ? (
+            <span className="text-slate-500">No other variations to substitute.</span>
+          ) : (
+            <>
+              <label className="mb-1 block text-[11px] font-semibold text-slate-500">
+                Substitute for
+              </label>
+              <select
+                className="w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
+                value={variantId}
+                onChange={(e) => setVariantId(e.target.value ? Number(e.target.value) : "")}
+              >
+                <option value="">Choose a variation…</option>
+                {targets.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.variant_name}
+                  </option>
+                ))}
+              </select>
+
+              <label className="mb-1 mt-2 block text-[11px] font-semibold text-slate-500">
+                Quantity
+              </label>
+              <div className="flex items-center gap-2">
+                <div className="flex items-stretch overflow-hidden rounded border border-slate-300">
+                  <button
+                    type="button"
+                    onClick={() => setQty((q) => Math.max(1, q - 1))}
+                    disabled={qty <= 1}
+                    className="flex w-7 items-center justify-center border-r border-slate-300 bg-slate-50 text-slate-600 disabled:opacity-40"
+                  >
+                    <MinusIcon />
+                  </button>
+                  <div className="flex w-10 items-center justify-center text-sm font-semibold">
+                    {qty}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setQty((q) => Math.min(maxQty, q + 1))}
+                    disabled={qty >= maxQty}
+                    className="flex w-7 items-center justify-center border-l border-slate-300 bg-slate-50 text-slate-600 disabled:opacity-40"
+                  >
+                    <PlusIcon />
+                  </button>
+                </div>
+                <span className="text-[11px] text-slate-400">
+                  of {maxQty}
+                  {qty !== maxQty && (
+                    <>
+                      {" · "}
+                      <button
+                        type="button"
+                        onClick={() => setQty(maxQty)}
+                        className="font-semibold text-blue-600"
+                      >
+                        max
+                      </button>
+                    </>
+                  )}
+                </span>
+              </div>
+
+              <label className="mb-1 mt-2 block text-[11px] font-semibold text-slate-500">
+                Reason <span className="font-normal text-slate-400">(optional)</span>
+              </label>
+              <input
+                placeholder="e.g. customer changed mind"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                className="w-full rounded border border-slate-300 px-2 py-1.5 text-xs"
+              />
+
+              <div className="mt-3 flex gap-2">
+                <button
+                  onClick={() => substituteMutation.mutate()}
+                  disabled={!variantId || substituteMutation.isPending}
+                  className="flex-1 rounded bg-slate-900 px-2 py-1.5 font-semibold text-white disabled:opacity-50"
+                >
+                  Substitute
+                </button>
+                <button
+                  onClick={() => setOpen(false)}
+                  className="rounded border border-slate-300 px-2 py-1.5 text-slate-700"
+                >
+                  Cancel
+                </button>
+              </div>
+            </>
+          )}
+          <ErrorBanner error={substituteMutation.error} />
+        </div>
+      )}
+    </div>
   );
 }
 

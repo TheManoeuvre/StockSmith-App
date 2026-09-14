@@ -66,6 +66,20 @@ class CreateProductAndMapRequest(BaseModel):
     sku: str | None = None
 
 
+class SubstituteLineRequest(BaseModel):
+    variant_id: int
+    qty: int
+    reason: str | None = None
+
+
+class SubstitutionRef(BaseModel):
+    substitution_id: int
+    line_id: int
+    variant_name: str | None = None
+    qty: int
+    created_at: datetime
+
+
 class OrderLineRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -85,6 +99,11 @@ class OrderLineRead(BaseModel):
     needs_mapping: bool
     cost_per_unit_snapshot: Decimal | None = None
     variation_text: str | None = None
+    # Substitution provenance — see app.models.order_substitution.OrderLineSubstitution.
+    # substituted_from is set when this line was itself created by a substitution;
+    # substituted_to lists the still-active (not undone) substitutions made FROM this line.
+    substituted_from: SubstitutionRef | None = None
+    substituted_to: list[SubstitutionRef] = []
 
 
 class OrderRead(BaseModel):

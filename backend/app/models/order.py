@@ -139,11 +139,18 @@ class OrderLine(Base):
     product_id/variant_id are nullable to support needs_mapping lines pulled from a
     marketplace whose SKU didn't match anything in our catalog yet — sku holds the raw
     text so the user has something to map from.
+
+    ordered_qty can legitimately be 0: a line fully moved onto a replacement variant by
+    services/order_substitution.py (see OrderLineSubstitution) is deliberately kept around
+    at 0 rather than deleted, so its AllocationEvent/OrderLineReturn history — and the
+    substitution's own undo path — survive. A 0-qty line is inert everywhere else: it
+    contributes nothing to sums, and `allocated_qty < ordered_qty` (buildability's
+    awaiting-inventory query, _recompute_order_status) is never true for it.
     """
 
     __tablename__ = "order_lines"
     __table_args__ = (
-        CheckConstraint("ordered_qty > 0", name="ck_order_lines_ordered_qty_positive"),
+        CheckConstraint("ordered_qty >= 0", name="ck_order_lines_ordered_qty_nonneg"),
         CheckConstraint(
             "allocated_qty >= 0 AND allocated_qty <= ordered_qty", name="ck_order_lines_allocated_qty_range"
         ),

@@ -10,6 +10,7 @@ from app.deps import get_db, require_auth
 from app.models.kitting import OrderKittingOverride
 from app.models.listing import ListingPlatform
 from app.models.order import Order, OrderLine, OrderStatus
+from app.models.order_substitution import OrderLineSubstitution
 from app.models.product import Product
 from app.models.shipping_profile import ShippingProfile
 from app.models.sku_alias import SkuAlias
@@ -25,9 +26,11 @@ from app.schemas.order import (
     OrderPage,
     OrderRead,
     OrderUpdate,
+    SubstituteLineRequest,
+    SubstitutionRef,
 )
 from app.schemas.order_return import CancellationPreview, OrderCancelRequest
-from app.services import allocation, returns
+from app.services import allocation, order_substitution, returns
 from app.services.csv_io import export_orders_csv
 from app.services.kitting import (
     apply_default_kitting_bom,
@@ -205,10 +208,39 @@ async def _recompute_manual_order_totals(session: AsyncSession, order: Order) ->
     order.grand_total = subtotal + Decimal(order.shipping_charged or 0)
 
 
-def _serialize_order(order: Order, kitting_cogs: Decimal | None) -> OrderRead:
+def _serialize_order(
+    order: Order, kitting_cogs: Decimal | None, substitutions: list[OrderLineSubstitution] = ()
+) -> OrderRead:
     """kitting_cogs is passed in rather than computed here because it needs a DB round-trip
     and this stays synchronous — list_orders fetches one aggregate for its whole page. Single
-    order? Use _serialize_one."""
+    order? Use _serialize_one.
+
+    substitutions is likewise pre-fetched (see _load_substitutions) rather than queried
+    here — it's scoped to whatever batch of orders the caller is serializing, filtered
+    below to just this order's own lines. Only active (not yet undone) rows are surfaced;
+    a reverted substitution has nothing left to show — the line it created sits at
+    ordered_qty 0 same as if it had never been allocated any demand."""
+    lines_by_id = {line.id: line for line in order.lines}
+    subs_by_original: dict[int, list[OrderLineSubstitution]] = {}
+    subs_by_new: dict[int, OrderLineSubstitution] = {}
+    for sub in substitutions:
+        if sub.reverted_at is not None:
+            continue
+        if sub.original_line_id in lines_by_id:
+            subs_by_original.setdefault(sub.original_line_id, []).append(sub)
+        if sub.new_line_id in lines_by_id:
+            subs_by_new[sub.new_line_id] = sub
+
+    def _ref(sub: OrderLineSubstitution, other_line_id: int) -> SubstitutionRef:
+        other = lines_by_id.get(other_line_id)
+        return SubstitutionRef(
+            substitution_id=sub.id,
+            line_id=other_line_id,
+            variant_name=other.variant.variant_name if other and other.variant else None,
+            qty=sub.qty,
+            created_at=sub.created_at,
+        )
+
     lines = [
         OrderLineRead(
             id=line.id,
@@ -227,6 +259,10 @@ def _serialize_order(order: Order, kitting_cogs: Decimal | None) -> OrderRead:
             needs_mapping=line.needs_mapping,
             cost_per_unit_snapshot=line.cost_per_unit_snapshot,
             variation_text=line.variation_text,
+            substituted_from=(
+                _ref(subs_by_new[line.id], subs_by_new[line.id].original_line_id) if line.id in subs_by_new else None
+            ),
+            substituted_to=[_ref(sub, sub.new_line_id) for sub in subs_by_original.get(line.id, [])],
         )
         for line in order.lines
     ]
@@ -274,10 +310,24 @@ def _serialize_order(order: Order, kitting_cogs: Decimal | None) -> OrderRead:
     )
 
 
+async def _load_substitutions(session: AsyncSession, line_ids: list[int]) -> list[OrderLineSubstitution]:
+    """Every substitution's new_line_id belongs to the same order as its original_line_id
+    (substitute_line only ever creates the new line on line.order_id) — so filtering by
+    original_line_id alone, against the full set of an order/page's own line ids, is
+    enough to find every row relevant to them."""
+    if not line_ids:
+        return []
+    result = await session.execute(
+        select(OrderLineSubstitution).where(OrderLineSubstitution.original_line_id.in_(line_ids))
+    )
+    return list(result.scalars())
+
+
 async def _serialize_one(session: AsyncSession, order: Order) -> OrderRead:
     """_serialize_order for the single-order endpoints, fetching that order's kitting COGS."""
     kitting = await get_kitting_cogs_by_order(session, [order.id])
-    return _serialize_order(order, kitting.get(order.id))
+    substitutions = await _load_substitutions(session, [line.id for line in order.lines])
+    return _serialize_order(order, kitting.get(order.id), substitutions)
 
 
 @router.get("", response_model=OrderPage)
@@ -325,8 +375,9 @@ async def list_orders(
     # One aggregate for the whole page rather than one per order — this endpoint serves up
     # to 200 at a time. See get_kitting_cogs_by_order.
     kitting_by_order = await get_kitting_cogs_by_order(session, [o.id for o in orders])
+    substitutions = await _load_substitutions(session, [line.id for o in orders for line in o.lines])
     return OrderPage(
-        items=[_serialize_order(o, kitting_by_order.get(o.id)) for o in orders],
+        items=[_serialize_order(o, kitting_by_order.get(o.id), substitutions) for o in orders],
         total=total or 0,
     )
 
@@ -530,6 +581,27 @@ async def unassign_line(
     await allocation.deallocate_line(session, line, payload.qty)
     await session.commit()
     return await _serialize_one(session, await _get_order_with_lines(session, line.order_id))
+
+
+@router.post("/lines/{line_id}/substitute", response_model=OrderRead)
+async def substitute_line(
+    line_id: int, payload: SubstituteLineRequest, session: AsyncSession = Depends(get_db)
+) -> OrderRead:
+    line = await _get_line(session, line_id)
+    new_line = await order_substitution.substitute_line(session, line, payload.variant_id, payload.qty, payload.reason)
+    await session.commit()
+    return await _serialize_one(session, await _get_order_with_lines(session, new_line.order_id))
+
+
+@router.post("/substitutions/{substitution_id}/undo", response_model=OrderRead)
+async def undo_substitution(substitution_id: int, session: AsyncSession = Depends(get_db)) -> OrderRead:
+    substitution = await session.get(OrderLineSubstitution, substitution_id)
+    if substitution is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Substitution not found")
+    original_line = await _get_line(session, substitution.original_line_id)
+    await order_substitution.undo_substitution(session, substitution)
+    await session.commit()
+    return await _serialize_one(session, await _get_order_with_lines(session, original_line.order_id))
 
 
 @router.post("/lines/{line_id}/map-sku", response_model=OrderRead)
