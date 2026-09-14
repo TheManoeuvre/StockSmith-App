@@ -98,6 +98,32 @@ async def raise_marketplace_sync_failure_alert(session: AsyncSession, platform: 
     )
 
 
+async def raise_platform_reconnect_required_alert(session: AsyncSession, platform: ListingPlatform) -> None:
+    """Called from sync_scheduler._record_auth_failure the moment auto-sync disables itself
+    after _MAX_CONSECUTIVE_AUTH_FAILURES. Needs no separate dedup state (contrast the
+    check_* functions above): that disable only happens once per failure episode — the
+    background loop stops ticking that platform the instant auto_sync_enabled goes False, so
+    nothing can call this again until the connection is reconnected and auto-sync is turned
+    back on."""
+    type_settings = await get_type_settings_map(session)
+    config = type_settings.get(NotificationCategory.platform_reconnect_required)
+    if config is None or not config.enabled:
+        return
+    label = platform.value.capitalize()
+    await dispatch_notification(
+        session,
+        category=NotificationCategory.platform_reconnect_required,
+        urgency=NotificationUrgency.immediate,
+        title=f"{label} needs reconnecting",
+        body=(
+            f"Auto-sync for {label} has been disabled after repeated authentication "
+            "failures. Reconnect the account to resume syncing."
+        ),
+        delivery_mode=config.delivery_mode,
+        related_entity_type="platform",
+    )
+
+
 async def raise_backup_failed_alert(session: AsyncSession, error: str) -> None:
     """Called from services/backup.run_backup's own failure path, using the session it
     already holds — see BackupSettings.last_run_status/last_run_error, which this mirrors
