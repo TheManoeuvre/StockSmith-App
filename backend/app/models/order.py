@@ -63,6 +63,11 @@ class Order(Base):
     buyer_note: Mapped[str | None] = mapped_column(String, nullable=True)
     order_placed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     shipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # The marketplace's own fulfillment deadline (Etsy's expected_ship_date, eBay's
+    # shipByDate) — refreshed on every sync like the financial fields below, since it's
+    # marketplace-owned and never user-edited. NULL for manual orders and for any synced
+    # order the marketplace didn't report one for.
+    ship_by_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notes: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

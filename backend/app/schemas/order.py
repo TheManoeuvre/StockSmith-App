@@ -98,6 +98,7 @@ class OrderRead(BaseModel):
     buyer_note: str | None
     order_placed_at: datetime
     shipped_at: datetime | None
+    ship_by_date: datetime | None = None
     cancelled_at: datetime | None
     notes: str | None
     created_at: datetime

@@ -786,6 +786,10 @@ export interface Order {
   buyer_note: string | null;
   order_placed_at: string;
   shipped_at: string | null;
+  // The marketplace's own fulfillment deadline (Etsy expected_ship_date / eBay
+  // shipByDate). Null for manual orders and for any synced order the marketplace
+  // didn't report one for.
+  ship_by_date: string | null;
   cancelled_at: string | null;
   notes: string | null;
   created_at: string;

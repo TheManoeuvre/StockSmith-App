@@ -61,6 +61,23 @@ function orderMarginPct(order: Order): number | null {
   return v > 0 ? (Number(order.net_profit) / v) * 100 : null;
 }
 
+// The marketplace's ship-by deadline, or "—" when it didn't report one (manual orders,
+// and any synced order predating this field). A done order shows the date plain — the
+// deadline no longer matters once it's shipped or cancelled.
+function dueLabel(order: Order): string {
+  if (!order.ship_by_date) return "—";
+  return formatDayMonth(order.ship_by_date);
+}
+
+// Red once the deadline has passed on an order still awaiting shipment — the one state
+// that actually needs chasing. Shipped/cancelled orders never render as overdue.
+function dueTone(order: Order): string {
+  if (isDone(order) || !order.ship_by_date) return "text-slate-500";
+  return new Date(order.ship_by_date).getTime() < Date.now()
+    ? "font-semibold text-red-600"
+    : "text-slate-500";
+}
+
 function netProfitSub(order: Order): string {
   if (order.cogs_pending) return "COGS pending";
   if (order.postage_cost_missing) return "No postage cost";
@@ -124,13 +141,18 @@ function OrdersListContent() {
 
   const items = data?.items ?? [];
   const placedTs = (o: Order) => new Date(o.order_placed_at).getTime();
-  // Anything still to fulfil is pinned above, oldest first — a stale order is the one that
-  // needs chasing. Shipped and cancelled fall to a second group, newest first. The backend
-  // already returns rows in exactly this order (see list_orders), so the awaiting pin holds
-  // across pages; re-sorting here just keeps the grouping self-contained.
+  // Anything still to fulfil is pinned above, soonest-due first — the order most urgently
+  // needing chasing leads. Ties (a shared due date, or no due date at all — a manual order,
+  // or a synced one the marketplace didn't report one for) fall back to oldest-placed-first;
+  // no due date sorts as if it were furthest out, not most urgent. Shipped and cancelled
+  // fall to a second group, newest first. The backend already returns rows in exactly this
+  // order (see list_orders), so the awaiting pin holds across pages; re-sorting here just
+  // keeps the grouping self-contained.
+  const dueTs = (o: Order) =>
+    o.ship_by_date ? new Date(o.ship_by_date).getTime() : Infinity;
   const awaiting = items
     .filter((o) => !isDone(o))
-    .sort((a, b) => placedTs(a) - placedTs(b));
+    .sort((a, b) => dueTs(a) - dueTs(b) || placedTs(a) - placedTs(b));
   const done = items
     .filter(isDone)
     .sort((a, b) => placedTs(b) - placedTs(a));
@@ -184,7 +206,7 @@ function OrdersListContent() {
           <tr className="border-b border-slate-200 bg-slate-50/60">
             <Th>Order</Th>
             <Th>Channel</Th>
-            <Th>Placed</Th>
+            <Th>Due</Th>
             <Th>Items</Th>
             <Th>Fulfilment</Th>
             <Th align="right">Value</Th>
@@ -300,13 +322,7 @@ function OrderRow({
           {order.platform ? PLATFORM_LABELS[order.platform] : "Manual"}
         </span>
       </td>
-      <td className="p-2 align-top text-slate-500">
-        {formatDayMonth(order.order_placed_at)}{" "}
-        {new Date(order.order_placed_at).toLocaleTimeString(undefined, {
-          hour: "2-digit",
-          minute: "2-digit",
-        })}
-      </td>
+      <td className={`p-2 align-top ${dueTone(order)}`}>{dueLabel(order)}</td>
       <td className="p-2 align-top">
         {order.lines.map((l) => (
           <div key={l.id} className="flex items-center gap-1.5 leading-tight">

@@ -412,6 +412,12 @@ class EtsyAdapter:
             datetime.fromtimestamp(modified_ts, tz=timezone.utc) if modified_ts is not None else placed_at
         )
 
+        # Like create_timestamp/update_timestamp, Etsy reports this as a Unix timestamp,
+        # not an ISO date string. Absent on receipts placed before Etsy started returning
+        # it, so None here is a real "unknown", not "not due".
+        ship_by_ts = receipt.get("expected_ship_date")
+        ship_by_date = datetime.fromtimestamp(ship_by_ts, tz=timezone.utc) if ship_by_ts is not None else None
+
         transactions = receipt.get("transactions")
         if transactions is None:
             # The `includes=Transactions` embed didn't come through — fall back to a
@@ -506,6 +512,7 @@ class EtsyAdapter:
             last_modified=last_modified,
             is_cancelled=is_cancelled,
             is_shipped=is_shipped,
+            ship_by_date=ship_by_date,
             lines=lines,
             raw=receipt,
             currency=currency,

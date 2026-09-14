@@ -759,6 +759,17 @@ class EbayAdapter:
         line_items = order.get("lineItems", [])
         lines = [self._parse_line_item(li) for li in line_items]
 
+        # shipByDate lives per line item, not on the order — but a multi-line eBay order
+        # ships as one parcel, so the binding deadline for the whole order is the
+        # earliest of them. None when no line item reports one.
+        ship_by_dates = [
+            parsed
+            for li in line_items
+            if (parsed := self._parse_timestamp((li.get("lineItemFulfillmentInstructions") or {}).get("shipByDate")))
+            is not None
+        ]
+        ship_by_date = min(ship_by_dates) if ship_by_dates else None
+
         pricing = order.get("pricingSummary") or {}
         currency = (pricing.get("total") or {}).get("currency")
 
@@ -799,6 +810,7 @@ class EbayAdapter:
             last_modified=last_modified,
             is_cancelled=is_cancelled,
             is_shipped=is_shipped,
+            ship_by_date=ship_by_date,
             lines=lines,
             raw=order,
             currency=currency,
