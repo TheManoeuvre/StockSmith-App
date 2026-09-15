@@ -25,12 +25,14 @@ class MaterialSubstitute(Base):
     Substitutes are curated, never computed: nothing here infers a match from size,
     dimension, or material type, and no such column should ever be added — a person
     decides "Y is a suitable stand-in for X" and this row is just where that decision is
-    written down. The shortage consumers (buildability shortfall, kitting shortfall)
-    only ever *suggest* a listed substitute; nothing auto-applies one. Packaging
-    capacity (services/kitting.py, _FALLBACK_POOL_BY_MATERIAL_SQL) does count an active
-    fallback's free stock as available for the material it backs, so a short box with a
-    well-stocked fallback doesn't cap a product's sellable figure — that's a number, not
-    an allocation; which box actually gets used is still chosen at pack time.
+    written down. The shortage consumers (buildability lines, kitting lines, orders
+    awaiting packaging) only ever *suggest* a listed substitute; nothing auto-applies one.
+    Build and packaging capacity (services/material_substitutes.FALLBACK_POOL_BY_MATERIAL_SQL)
+    do count an active fallback's free stock as available for the material it backs — so a
+    short material with a well-stocked fallback doesn't cap a product's sellable figure —
+    but report it beside the material-only figure rather than in place of it. That's a
+    number, not an allocation; which material actually gets used is still chosen at
+    build/pack time.
 
     rank orders multiple fallbacks for the same material — lower tried/offered first.
     is_active soft-disables a fallback without losing its history, matching how

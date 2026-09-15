@@ -414,8 +414,13 @@ export interface Product {
   is_bundle: boolean;
   created_at: string;
   updated_at: string;
+  /** From the BOM's own materials only... */
   max_buildable: number | null;
   expected_max_buildable: number | null;
+  /** ...and counting each material's active fallback substitutes — what the sellable
+   *  figures are built on. Equal to the pair above when no fallback adds anything. */
+  max_buildable_incl_fallbacks: number | null;
+  expected_max_buildable_incl_fallbacks: number | null;
   max_sellable: number | null;
   max_sellable_reason: string | null;
   expected_max_sellable: number | null;
@@ -562,10 +567,15 @@ export interface BomLineRead extends BomLine {
 
 export interface VariantBomLine extends BomLine {
   replaces_material_id: number | null;
+  /** From the material's own stock... */
   line_max_buildable?: number | null;
   line_expected_max_buildable?: number | null;
-  /** Populated only when this line is the bottleneck (line_max_buildable === 0) — ranked,
-   *  human-curated fallbacks for material_id. Suggested only, never auto-applied. */
+  /** ...and pooled with its active fallback substitutes. */
+  line_max_buildable_incl_fallbacks?: number | null;
+  line_expected_max_buildable_incl_fallbacks?: number | null;
+  /** Populated only when the material's own shelf is empty (line_max_buildable === 0),
+   *  whether or not a fallback is covering it — ranked, human-curated fallbacks for
+   *  material_id. Suggested only, never auto-applied. */
   suggested_substitutes?: SubstituteSuggestion[];
 }
 
@@ -581,11 +591,13 @@ export interface KittingBomLineRead extends KittingBomLine {
 
 export interface VariantKittingBomLine extends KittingBomLine {
   replaces_material_id: number | null;
-  /** Pooled with the material's active fallback substitutes' free stock. */
+  /** Same shape as VariantBomLine: the material's own free stock, then pooled with its
+   *  active fallback substitutes; suggestions when its own shelf is empty. */
   line_max_buildable?: number | null;
   line_expected_max_buildable?: number | null;
-  /** Share of the pooled free stock that came from fallbacks rather than the material itself. */
-  line_fallback_free_qty?: string | null;
+  line_max_buildable_incl_fallbacks?: number | null;
+  line_expected_max_buildable_incl_fallbacks?: number | null;
+  suggested_substitutes?: SubstituteSuggestion[];
   unit_cost?: string | null;
 }
 
@@ -660,8 +672,13 @@ export interface Variant {
   effective_shipping_profile_id: number | null;
   platform_fee_percent: string | null;
   effective_platform_fee_percent: string | null;
+  /** From the BOM's own materials only... */
   max_buildable: number | null;
   expected_max_buildable: number | null;
+  /** ...and counting each material's active fallback substitutes — what the sellable
+   *  figures are built on. Equal to the pair above when no fallback adds anything. */
+  max_buildable_incl_fallbacks: number | null;
+  expected_max_buildable_incl_fallbacks: number | null;
   max_sellable: number | null;
   max_sellable_reason: string | null;
   expected_max_sellable: number | null;

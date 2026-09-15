@@ -38,14 +38,14 @@ from app.schemas.product import (
 )
 from app.schemas.variant import VariantCreate, VariantRead
 from app.services.buildability import (
+    buildable_fields,
     compute_variant_buildability,
     compute_variants_buildability_bulk,
     get_active_variant_stock_totals_by_product,
     get_bundle_cost_per_unit,
     get_cost_per_unit_by_product,
     get_cost_per_unit_range_by_product,
-    get_expected_max_buildable_by_product,
-    get_max_buildable_by_product,
+    get_buildable_by_product,
     get_ready_to_ship_by_bundle,
 )
 from app.services import abc, listing_push, platform_fees
@@ -171,8 +171,7 @@ class _ProductReadContext:
     page of fifty.
     """
 
-    max_buildable_by_product: dict
-    expected_max_buildable_by_product: dict
+    buildable_by_product: dict
     cost_per_unit_by_product: dict
     kitting_cost_per_unit_by_product: dict
     cost_range_by_product: dict
@@ -196,8 +195,7 @@ class _ProductReadContext:
         bundle_cost_per_unit = await get_bundle_cost_per_unit(session, cost_per_unit_by_product)
         fee_source, fee_components = await platform_fees.get_resolver_context(session)
         return _ProductReadContext(
-            max_buildable_by_product=await get_max_buildable_by_product(session),
-            expected_max_buildable_by_product=await get_expected_max_buildable_by_product(session),
+            buildable_by_product=await get_buildable_by_product(session),
             cost_per_unit_by_product=cost_per_unit_by_product,
             kitting_cost_per_unit_by_product=await get_kitting_cost_per_unit_by_product(session),
             cost_range_by_product=cost_range_by_product,
@@ -222,8 +220,7 @@ def _read_product(product: Product, ctx: "_ProductReadContext") -> ProductRead:
     current_stock = product.current_stock
     allocated_qty = product.allocated_qty
     if product.is_bundle:
-        max_buildable = None
-        expected_max_buildable = None
+        buildable = None
         cost_per_unit = ctx.bundle_cost_per_unit.get(product.id)
         # A bundle has no kitting BOM of its own — packaging for one is whatever its
         # components' own BOMs say, which isn't a single per-unit figure.
@@ -243,8 +240,7 @@ def _read_product(product: Product, ctx: "_ProductReadContext") -> ProductRead:
         current_stock, allocated_qty = ctx.active_variant_stock_totals_by_product.get(
             product.id, (product.current_stock, product.allocated_qty)
         )
-        max_buildable = ctx.max_buildable_by_product.get(product.id)
-        expected_max_buildable = ctx.expected_max_buildable_by_product.get(product.id)
+        buildable = ctx.buildable_by_product.get(product.id)
         cost_per_unit = ctx.cost_per_unit_by_product.get(product.id)
         kitting_cost_per_unit = ctx.kitting_cost_per_unit_by_product.get(product.id)
         ready_to_ship = None
@@ -252,10 +248,11 @@ def _read_product(product: Product, ctx: "_ProductReadContext") -> ProductRead:
         kitting_capacity = ctx.kitting_capacity_by_product.get(product.id)
         max_sellable, max_sellable_reason = combine_max_sellable(free_stock, kitting_capacity)
         expected_max_sellable, expected_max_sellable_reason = combine_expected_max_sellable(
-            expected_max_buildable, ctx.expected_kitting_capacity_by_product.get(product.id)
+            buildable.expected_max_buildable_incl_fallbacks if buildable else None,
+            ctx.expected_kitting_capacity_by_product.get(product.id),
         )
         theoretical_max_sellable, theoretical_max_sellable_reason = combine_theoretical_max_sellable(
-            free_stock, max_buildable, kitting_capacity
+            free_stock, buildable.max_buildable_incl_fallbacks if buildable else None, kitting_capacity
         )
         max_sellable, max_sellable_reason, expected_max_sellable, expected_max_sellable_reason = apply_platform_ceiling(
             max_sellable, max_sellable_reason, expected_max_sellable, expected_max_sellable_reason,
@@ -280,8 +277,7 @@ def _read_product(product: Product, ctx: "_ProductReadContext") -> ProductRead:
         update={
             "current_stock": current_stock,
             "allocated_qty": allocated_qty,
-            "max_buildable": max_buildable,
-            "expected_max_buildable": expected_max_buildable,
+            **buildable_fields(buildable),
             "max_sellable": max_sellable,
             "max_sellable_reason": max_sellable_reason,
             "expected_max_sellable": expected_max_sellable,
@@ -658,7 +654,7 @@ async def _variants_to_reads_bulk(
 
     reads = []
     for variant in variants:
-        max_buildable, expected_max_buildable, cost_per_unit, effective_bom = buildability_by_variant[variant.id]
+        buildable, cost_per_unit, effective_bom = buildability_by_variant[variant.id]
         (
             max_sellable,
             max_sellable_reason,
@@ -673,8 +669,7 @@ async def _variants_to_reads_bulk(
         reads.append(
             VariantRead.model_validate(variant).model_copy(
                 update={
-                    "max_buildable": max_buildable,
-                    "expected_max_buildable": expected_max_buildable,
+                    **buildable_fields(buildable),
                     "max_sellable": max_sellable,
                     "max_sellable_reason": max_sellable_reason,
                     "expected_max_sellable": expected_max_sellable,
@@ -805,7 +800,7 @@ async def amend_variant_bom_overrides(
 
 async def _to_variant_read_with_buildability(session: AsyncSession, variant: ProductVariant) -> VariantRead:
     product = await session.get(Product, variant.product_id)
-    max_buildable, expected_max_buildable, cost_per_unit, effective_bom = await compute_variant_buildability(
+    buildable, cost_per_unit, effective_bom = await compute_variant_buildability(
         session, variant.product_id, variant.id
     )
     (
@@ -822,9 +817,9 @@ async def _to_variant_read_with_buildability(session: AsyncSession, variant: Pro
         variant.id,
         variant.current_stock,
         variant.allocated_qty,
-        expected_max_buildable,
+        buildable.expected_max_buildable_incl_fallbacks if buildable else None,
         product.platform_ceiling_qty if product else None,
-        max_buildable,
+        buildable.max_buildable_incl_fallbacks if buildable else None,
     )
     full_sku = compute_full_sku(product.sku if product else None, variant.sku_suffix)
     fee_source, fee_components = await platform_fees.get_resolver_context(session)
@@ -832,8 +827,7 @@ async def _to_variant_read_with_buildability(session: AsyncSession, variant: Pro
     effective_shipping_profile = resolve_variant_shipping_profile(shipping_profiles_by_id, variant, product)
     return VariantRead.model_validate(variant).model_copy(
         update={
-            "max_buildable": max_buildable,
-            "expected_max_buildable": expected_max_buildable,
+            **buildable_fields(buildable),
             "max_sellable": max_sellable,
             "max_sellable_reason": max_sellable_reason,
             "expected_max_sellable": expected_max_sellable,

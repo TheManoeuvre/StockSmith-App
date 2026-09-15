@@ -98,7 +98,7 @@ async def test_range_agrees_with_the_per_product_resolver(session):
     active_ids = [variants["plain"].id, variants["override"].id, variants["substitute"].id]
 
     per_variant = await compute_variants_buildability_bulk(session, product.id, active_ids)
-    expected_costs = [per_variant[vid][2] for vid in active_ids]
+    expected_costs = [per_variant[vid][1] for vid in active_ids]
 
     ranges = await get_cost_per_unit_range_by_product(session)
     cost_min, cost_max = ranges[product.id]
@@ -117,7 +117,7 @@ async def test_range_excludes_inactive_variants(session):
 
     disabled_cost = (await compute_variants_buildability_bulk(session, product.id, [variants["disabled"].id]))[
         variants["disabled"].id
-    ][2]
+    ][1]
     assert disabled_cost > cost_max
 
 

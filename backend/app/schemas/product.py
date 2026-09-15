@@ -66,8 +66,20 @@ class ProductRead(ProductBase):
     pricing_variable_attribute: int | None = None
     created_at: datetime
     updated_at: datetime
+    # From the BOM's own materials only, vs. counting each material's active fallbacks —
+    # the sellable figures below are built on the latter. See buildability.BuildableFigures.
+    # From the BOM's own materials only, vs. counting each material's active fallbacks —
+    # the sellable figures below are built on the latter. See buildability.BuildableFigures.
+    # From the BOM's own materials only, vs. counting each material's active fallbacks —
+    # the sellable figures below are built on the latter. See buildability.BuildableFigures.
     max_buildable: int | None = None
     expected_max_buildable: int | None = None
+    max_buildable_incl_fallbacks: int | None = None
+    expected_max_buildable_incl_fallbacks: int | None = None
+    max_buildable_incl_fallbacks: int | None = None
+    expected_max_buildable_incl_fallbacks: int | None = None
+    max_buildable_incl_fallbacks: int | None = None
+    expected_max_buildable_incl_fallbacks: int | None = None
     max_sellable: int | None = None
     max_sellable_reason: str | None = None
     expected_max_sellable: int | None = None

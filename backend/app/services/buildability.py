@@ -1,3 +1,6 @@
+from dataclasses import dataclass
+from dataclasses import dataclass
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -15,7 +18,7 @@ from app.schemas.dashboard import (
 )
 from app.schemas.variant import VariantBomLine
 from app.services.abc import compute_due_for_count
-from app.services.material_substitutes import get_ranked_substitutes_by_material
+from app.services.material_substitutes import FALLBACK_POOL_BY_MATERIAL_SQL, get_ranked_substitutes_by_material
 from app.services.platforms.base import ensure_utc
 from app.services.purchase_sql import ON_ORDER_BY_MATERIAL_SQL
 
@@ -42,25 +45,59 @@ _ORDERS_AWAITING_INVENTORY_SQL = text(
     """
 )
 
-_MAX_BUILDABLE_BY_PRODUCT_SQL = text(
-    """
-    SELECT pm.product_id, MIN(FLOOR(m.current_qty / pm.qty_required)) AS max_buildable
+@dataclass(frozen=True)
+class BuildableFigures:
+    """How many units a BOM allows, four ways: from what's on hand now vs. once open
+    purchase orders land (expected_*), each measured on the BOM's own materials only vs.
+    pooling in each material's active fallbacks (*_incl_fallbacks — see
+    material_substitutes.FALLBACK_POOL_BY_MATERIAL_SQL). The sellable figures
+    (kitting.compute_max_sellable) build on the *_incl_fallbacks pair, so a short material
+    with a well-stocked fallback doesn't cap a listing; the material-only pair is reported
+    beside it so the UI can say "10 from the BOM, 20 counting fallbacks" rather than
+    silently showing 20."""
+
+    max_buildable: int
+    expected_max_buildable: int
+    max_buildable_incl_fallbacks: int
+    expected_max_buildable_incl_fallbacks: int
+
+
+# One aggregate for all four BuildableFigures — the material-only and fallback-pooled
+# figures come from the same rows, so splitting them into separate queries (as the
+# on-hand/expected pair once was) only invites drift.
+_BUILDABLE_BY_PRODUCT_SQL = text(
+    f"""
+    SELECT pm.product_id,
+           MIN(FLOOR(m.current_qty / pm.qty_required)) AS max_buildable,
+           MIN(FLOOR((m.current_qty + COALESCE(oo.on_order_qty, 0)) / pm.qty_required))
+               AS expected_max_buildable,
+           MIN(FLOOR((m.current_qty + COALESCE(fb.fallback_free_qty, 0)) / pm.qty_required))
+               AS max_buildable_incl_fallbacks,
+           MIN(FLOOR((m.current_qty + COALESCE(oo.on_order_qty, 0) + COALESCE(fb.fallback_expected_free_qty, 0))
+                     / pm.qty_required))
+               AS expected_max_buildable_incl_fallbacks
     FROM product_materials pm
     JOIN materials m ON m.id = pm.material_id
+    LEFT JOIN ({ON_ORDER_BY_MATERIAL_SQL}) oo ON oo.material_id = m.id
+    LEFT JOIN ({FALLBACK_POOL_BY_MATERIAL_SQL}) fb ON fb.material_id = m.id
     GROUP BY pm.product_id
     """
 )
 
-_EXPECTED_MAX_BUILDABLE_BY_PRODUCT_SQL = text(
+# Per-material stock for the per-variant paths below — the same inputs as
+# _BUILDABLE_BY_PRODUCT_SQL, so a variant and its product's list-page row agree.
+_MATERIAL_STOCK_FOR_BUILDABILITY_SQL = text(
     f"""
-    SELECT pm.product_id,
-           MIN(FLOOR((m.current_qty + COALESCE(oo.on_order_qty, 0)) / pm.qty_required)) AS expected_max_buildable
-    FROM product_materials pm
-    JOIN materials m ON m.id = pm.material_id
+    SELECT m.id, m.current_qty, m.avg_unit_cost,
+           COALESCE(oo.on_order_qty, 0) AS on_order_qty,
+           COALESCE(fb.fallback_free_qty, 0) AS fallback_free_qty,
+           COALESCE(fb.fallback_expected_free_qty, 0) AS fallback_expected_free_qty
+    FROM materials m
     LEFT JOIN ({ON_ORDER_BY_MATERIAL_SQL}) oo ON oo.material_id = m.id
-    GROUP BY pm.product_id
+    LEFT JOIN ({FALLBACK_POOL_BY_MATERIAL_SQL}) fb ON fb.material_id = m.id
+    WHERE m.id IN :ids
     """
-)
+).bindparams(bindparam("ids", expanding=True))
 
 _COST_PER_UNIT_BY_PRODUCT_SQL = text(
     """
@@ -199,17 +236,83 @@ _READY_TO_SHIP_BY_BUNDLE_SQL = text(
 )
 
 
+def buildable_fields(figures: BuildableFigures | None) -> dict[str, int | None]:
+    """The four BuildableFigures as ProductRead/VariantRead fields, all None when the
+    product/variant has no BOM (buildability isn't tracked, rather than zero)."""
+    return {
+        "max_buildable": figures.max_buildable if figures else None,
+        "expected_max_buildable": figures.expected_max_buildable if figures else None,
+        "max_buildable_incl_fallbacks": figures.max_buildable_incl_fallbacks if figures else None,
+        "expected_max_buildable_incl_fallbacks": figures.expected_max_buildable_incl_fallbacks if figures else None,
+    }
+
+
+async def get_buildable_by_product(session: AsyncSession) -> dict[int, BuildableFigures]:
+    """Bulk, base-BOM-only (no variant resolution) buildability per product. Products with
+    no BOM at all are simply absent — callers treat that as "not tracked", never zero."""
+    result = await session.execute(_BUILDABLE_BY_PRODUCT_SQL)
+    return {
+        row.product_id: BuildableFigures(
+            max_buildable=int(row.max_buildable),
+            expected_max_buildable=int(row.expected_max_buildable),
+            max_buildable_incl_fallbacks=int(row.max_buildable_incl_fallbacks),
+            expected_max_buildable_incl_fallbacks=int(row.expected_max_buildable_incl_fallbacks),
+        )
+        for row in result
+    }
+
+
 async def get_max_buildable_by_product(session: AsyncSession) -> dict[int, int]:
-    result = await session.execute(_MAX_BUILDABLE_BY_PRODUCT_SQL)
-    return {row.product_id: int(row.max_buildable) for row in result}
+    """Material-only figure — see BuildableFigures for the fallback-pooled one."""
+    return {pid: f.max_buildable for pid, f in (await get_buildable_by_product(session)).items()}
 
 
 async def get_expected_max_buildable_by_product(session: AsyncSession) -> dict[int, int]:
     """Like get_max_buildable_by_product, but also counts materials already on an open
     purchase order — i.e. what could be built once pending orders arrive, not just what
     could be built right now."""
-    result = await session.execute(_EXPECTED_MAX_BUILDABLE_BY_PRODUCT_SQL)
-    return {row.product_id: int(row.expected_max_buildable) for row in result}
+    return {pid: f.expected_max_buildable for pid, f in (await get_buildable_by_product(session)).items()}
+
+
+def _fill_line_buildability(line: VariantBomLine, m: object) -> None:
+    """Attaches one resolved BOM line's own bottleneck (how many units *this material
+    alone* would allow) from a _MATERIAL_STOCK_FOR_BUILDABILITY_SQL row — gross on-hand
+    for the material itself (build capacity has always counted gross; only packaging
+    reserves against materials), free stock for its pooled fallbacks. The overall figures
+    are just the min() of these per-line values, so computing them here rather than
+    discarding them lets the BOM editor show which material is the actual constraint."""
+    on_hand = Decimal(m.current_qty)
+    expected = on_hand + Decimal(m.on_order_qty)
+    line.line_max_buildable = int(on_hand // line.qty_required)
+    line.line_expected_max_buildable = int(expected // line.qty_required)
+    line.line_max_buildable_incl_fallbacks = int((on_hand + Decimal(m.fallback_free_qty)) // line.qty_required)
+    line.line_expected_max_buildable_incl_fallbacks = int(
+        (expected + Decimal(m.fallback_expected_free_qty)) // line.qty_required
+    )
+
+
+def _figures_from_bom(bom: list[VariantBomLine]) -> BuildableFigures:
+    return BuildableFigures(
+        max_buildable=min(line.line_max_buildable for line in bom),
+        expected_max_buildable=min(line.line_expected_max_buildable for line in bom),
+        max_buildable_incl_fallbacks=min(line.line_max_buildable_incl_fallbacks for line in bom),
+        expected_max_buildable_incl_fallbacks=min(line.line_expected_max_buildable_incl_fallbacks for line in bom),
+    )
+
+
+async def _attach_suggestions(session: AsyncSession, boms: list[list[VariantBomLine]]) -> None:
+    """A line at 0 on its OWN stock can't build even a single unit right now — that's the
+    shortfall this surfaces suggestions for, whether or not a fallback is already carrying
+    the pooled figure (someone still has to choose which fallback to actually pull).
+    Suggestions are looked up only for those lines, and only ever offered, never applied."""
+    short_material_ids = {line.material_id for bom in boms for line in bom if line.line_max_buildable == 0}
+    if not short_material_ids:
+        return
+    substitutes_by_material = await get_ranked_substitutes_by_material(session, short_material_ids)
+    for bom in boms:
+        for line in bom:
+            if line.material_id in short_material_ids:
+                line.suggested_substitutes = substitutes_by_material.get(line.material_id, [])
 
 
 async def get_active_variant_stock_totals_by_product(session: AsyncSession) -> dict[int, tuple[int, int]]:
@@ -287,52 +390,27 @@ async def get_resolved_variant_bom(session: AsyncSession, product_id: int, varia
 
 async def compute_variant_buildability(
     session: AsyncSession, product_id: int, variant_id: int
-) -> tuple[int | None, int | None, Decimal | None, list[VariantBomLine]]:
+) -> tuple[BuildableFigures | None, Decimal | None, list[VariantBomLine]]:
+    """(figures, cost_per_unit, resolved BOM with per-line bottlenecks attached) — or
+    (None, None, []) when the variant has no BOM at all, meaning buildability isn't
+    tracked rather than zero."""
     bom = await get_resolved_variant_bom(session, product_id, variant_id)
     if not bom:
-        return None, None, None, bom
+        return None, None, bom
 
     material_ids = [line.material_id for line in bom]
-    rows = await session.execute(
-        text(
-            f"""
-            SELECT m.id, m.current_qty, m.avg_unit_cost, COALESCE(oo.on_order_qty, 0) AS on_order_qty
-            FROM materials m
-            LEFT JOIN ({ON_ORDER_BY_MATERIAL_SQL}) oo ON oo.material_id = m.id
-            WHERE m.id IN :ids
-            """
-        ).bindparams(bindparam("ids", expanding=True)),
-        {"ids": material_ids},
-    )
+    rows = await session.execute(_MATERIAL_STOCK_FOR_BUILDABILITY_SQL, {"ids": material_ids})
     materials = {row.id: row for row in rows}
 
-    # Attach each line's own bottleneck (how many units *this material alone* would
-    # allow) directly on the returned line objects — the overall max_buildable/
-    # expected_max_buildable are just the min() of these per-line values, so computing
-    # them here rather than discarding them lets the BOM editor show which material is
-    # the actual constraint.
     for line in bom:
-        m = materials[line.material_id]
-        line.line_max_buildable = int(Decimal(m.current_qty) // line.qty_required)
-        line.line_expected_max_buildable = int((Decimal(m.current_qty) + Decimal(m.on_order_qty)) // line.qty_required)
+        _fill_line_buildability(line, materials[line.material_id])
+    await _attach_suggestions(session, [bom])
 
-    # A line at 0 can't build even a single unit right now — that's the shortfall this
-    # surfaces suggestions for. Suggestions are looked up only for those lines, and only
-    # ever offered, never applied — a person still has to choose one.
-    short_material_ids = {line.material_id for line in bom if line.line_max_buildable == 0}
-    if short_material_ids:
-        substitutes_by_material = await get_ranked_substitutes_by_material(session, short_material_ids)
-        for line in bom:
-            if line.material_id in short_material_ids:
-                line.suggested_substitutes = substitutes_by_material.get(line.material_id, [])
-
-    max_buildable = min(line.line_max_buildable for line in bom)
-    expected_max_buildable = min(line.line_expected_max_buildable for line in bom)
     cost_per_unit = sum(
         (Decimal(materials[line.material_id].avg_unit_cost) * line.qty_required for line in bom),
         start=Decimal(0),
     )
-    return max_buildable, expected_max_buildable, cost_per_unit, bom
+    return _figures_from_bom(bom), cost_per_unit, bom
 
 
 async def get_resolved_variant_boms_by_variant(
@@ -359,47 +437,32 @@ async def get_resolved_variant_boms_by_variant(
 
 async def compute_variants_buildability_bulk(
     session: AsyncSession, product_id: int, variant_ids: list[int]
-) -> dict[int, tuple[int | None, int | None, Decimal | None, list[VariantBomLine]]]:
+) -> dict[int, tuple[BuildableFigures | None, Decimal | None, list[VariantBomLine]]]:
     """Bulk analog of compute_variant_buildability for every variant_id given (all must
-    belong to product_id). 2 queries total regardless of len(variant_ids), instead of
-    2 queries per variant."""
+    belong to product_id). A fixed number of queries regardless of len(variant_ids),
+    instead of that many per variant."""
     boms_by_variant = await get_resolved_variant_boms_by_variant(session, product_id)
 
     all_material_ids = {line.material_id for bom in boms_by_variant.values() for line in bom}
     materials: dict[int, object] = {}
     if all_material_ids:
-        rows = await session.execute(
-            text(
-                f"""
-                SELECT m.id, m.current_qty, m.avg_unit_cost, COALESCE(oo.on_order_qty, 0) AS on_order_qty
-                FROM materials m
-                LEFT JOIN ({ON_ORDER_BY_MATERIAL_SQL}) oo ON oo.material_id = m.id
-                WHERE m.id IN :ids
-                """
-            ).bindparams(bindparam("ids", expanding=True)),
-            {"ids": list(all_material_ids)},
-        )
+        rows = await session.execute(_MATERIAL_STOCK_FOR_BUILDABILITY_SQL, {"ids": list(all_material_ids)})
         materials = {row.id: row for row in rows}
 
-    results: dict[int, tuple[int | None, int | None, Decimal | None, list[VariantBomLine]]] = {}
+    results: dict[int, tuple[BuildableFigures | None, Decimal | None, list[VariantBomLine]]] = {}
     for variant_id in variant_ids:
         bom = boms_by_variant.get(variant_id, [])
         if not bom:
-            results[variant_id] = (None, None, None, bom)
+            results[variant_id] = (None, None, bom)
             continue
         for line in bom:
-            m = materials[line.material_id]
-            line.line_max_buildable = int(Decimal(m.current_qty) // line.qty_required)
-            line.line_expected_max_buildable = int(
-                (Decimal(m.current_qty) + Decimal(m.on_order_qty)) // line.qty_required
-            )
-        max_buildable = min(line.line_max_buildable for line in bom)
-        expected_max_buildable = min(line.line_expected_max_buildable for line in bom)
+            _fill_line_buildability(line, materials[line.material_id])
         cost_per_unit = sum(
             (Decimal(materials[line.material_id].avg_unit_cost) * line.qty_required for line in bom),
             start=Decimal(0),
         )
-        results[variant_id] = (max_buildable, expected_max_buildable, cost_per_unit, bom)
+        results[variant_id] = (_figures_from_bom(bom), cost_per_unit, bom)
+    await _attach_suggestions(session, [bom for _, _, bom in results.values()])
     return results
 
 

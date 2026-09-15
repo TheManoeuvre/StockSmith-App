@@ -59,6 +59,8 @@ export interface SellableInput {
   allocated_qty: number;
   max_buildable: number | null;
   expected_max_buildable: number | null;
+  max_buildable_incl_fallbacks: number | null;
+  expected_max_buildable_incl_fallbacks: number | null;
   max_sellable: number | null;
   max_sellable_reason: string | null;
   expected_max_sellable: number | null;
@@ -71,8 +73,15 @@ export interface SellableSummary {
   headline: number | null;
   /** Already built and unreserved. */
   builtFree: number;
-  /** Buildable from raw materials on hand, on top of builtFree. */
+  /** Buildable from the BOM's own raw materials on hand, on top of builtFree. */
   buildable: number | null;
+  /**
+   * Buildable once each material's fallback substitutes are counted too — the figure the
+   * sellable numbers actually build on. Only set when it beats `buildable`, so callers
+   * can render it as a qualifier ("10 buildable (20 incl. fallbacks)") and omit it when
+   * fallbacks add nothing.
+   */
+  buildableInclFallbacks: number | null;
   /** Only set when something OTHER than stock/materials is holding the number down. */
   capLabel: string | null;
   /** Sellable once open purchase orders land — null unless that's actually more. */
@@ -103,13 +112,33 @@ export function sellableSummary(
         ? `capped at ${headline}`
         : null;
 
-  return { headline, builtFree, buildable: item.max_buildable, capLabel, expected: expectedSellable(item, builtFree, platformCeilingQty) };
+  const buildableInclFallbacks =
+    item.max_buildable != null &&
+    item.max_buildable_incl_fallbacks != null &&
+    item.max_buildable_incl_fallbacks > item.max_buildable
+      ? item.max_buildable_incl_fallbacks
+      : null;
+
+  return {
+    headline,
+    builtFree,
+    buildable: item.max_buildable,
+    buildableInclFallbacks,
+    capLabel,
+    expected: expectedSellable(item, builtFree, platformCeilingQty),
+  };
+}
+
+/** "20 incl. fallbacks" when fallbacks lift the buildable figure, else null. */
+export function inclFallbacksNote(s: SellableSummary): string | null {
+  return s.buildableInclFallbacks == null ? null : `${s.buildableInclFallbacks} incl. fallbacks`;
 }
 
 function expectedSellable(item: SellableInput, builtFree: number, platformCeilingQty: number | null): number | null {
-  // Only worth a line when open purchase orders genuinely raise the ceiling.
-  if (item.max_buildable == null || item.expected_max_buildable == null) return null;
-  if (item.expected_max_buildable <= item.max_buildable) return null;
+  // Only worth a line when open purchase orders genuinely raise the ceiling. Compared on
+  // the fallback-pooled pair, since that's what expected_max_sellable is built from.
+  if (item.max_buildable_incl_fallbacks == null || item.expected_max_buildable_incl_fallbacks == null) return null;
+  if (item.expected_max_buildable_incl_fallbacks <= item.max_buildable_incl_fallbacks) return null;
   if (item.expected_max_sellable == null) return null;
   // expected_max_sellable is materials-and-packaging only — the backend never adds free
   // stock to it (combine_expected_max_sellable in kitting.py), which is why the raw
