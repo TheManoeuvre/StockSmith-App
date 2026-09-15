@@ -82,6 +82,12 @@ class MaterialForecast:
     supplier_name: str | None
     consumption_rate_per_week: Decimal | None
     weeks_of_supply: Decimal | None
+    # Same forecast with on-order purchase lines left out: how long what is physically on
+    # the shelf (plus finished-goods cover) lasts. `weeks_of_supply` drives the status —
+    # an order arriving in time really does defuse the risk — but the dashboard shows this
+    # figure, so a row never reads as "8 weeks" when the shelf is bare and the 8 weeks are
+    # sitting on a PO.
+    weeks_of_supply_on_hand: Decimal | None
     fg_buffer_weeks: Decimal | None
     # The lead time (business days) actually applied: the default supplier's own figure where
     # it has one, else the shop-wide GeneralSettings.default_lead_time_days. Always populated —
@@ -105,6 +111,16 @@ class _DemandPiece:
     # is consumed at ship time, not delayed by finished-goods stock).
     buffer_weeks: Decimal
     rate: Decimal  # units/week drawn once buffer_weeks has elapsed
+
+
+_FOUR_DP = Decimal("0.0001")
+
+
+def _quantize(value: Decimal | None) -> Decimal | None:
+    """The forecast arithmetic runs at full Decimal precision, which is fine internally but
+    leaks out as 0E-26 and 30-digit expansions on the wire. Four places is more than the UI
+    shows (one) and still exact enough for the threshold comparisons."""
+    return None if value is None else value.quantize(_FOUR_DP)
 
 
 def _week_bucket(at: datetime, now: datetime) -> int:
@@ -385,6 +401,7 @@ async def compute_material_forecasts(
                         supplier_name=m.supplier_name,
                         consumption_rate_per_week=None,
                         weeks_of_supply=None,
+                        weeks_of_supply_on_hand=None,
                         fg_buffer_weeks=None,
                         lead_time_days=lead_time_days,
                         status="insufficient_data",
@@ -393,14 +410,15 @@ async def compute_material_forecasts(
             continue
 
         position = current_qty - allocated_qty
-        weeks = _piecewise_weeks_of_supply(position, pieces, inflows)
-        weeks_no_fg = _piecewise_weeks_of_supply(
-            position, [_DemandPiece(Decimal(0), p.rate) for p in pieces], inflows
+        weeks = _quantize(_piecewise_weeks_of_supply(position, pieces, inflows))
+        weeks_on_hand = _quantize(_piecewise_weeks_of_supply(position, pieces, []))
+        weeks_no_fg = _quantize(
+            _piecewise_weeks_of_supply(position, [_DemandPiece(Decimal(0), p.rate) for p in pieces], inflows)
         )
         fg_buffer_weeks = (
             (weeks - weeks_no_fg) if (weeks is not None and weeks_no_fg is not None) else Decimal(0)
         )
-        consumption_rate_per_week = sum((p.rate for p in pieces), Decimal(0))
+        consumption_rate_per_week = _quantize(sum((p.rate for p in pieces), Decimal(0)))
 
         # The reorder point is pushed out by the lead time: cover that runs out in less time
         # than it takes to restock (plus the configured buffer) is already a problem, so an
@@ -434,6 +452,7 @@ async def compute_material_forecasts(
                 supplier_name=m.supplier_name,
                 consumption_rate_per_week=consumption_rate_per_week,
                 weeks_of_supply=weeks,
+                weeks_of_supply_on_hand=weeks_on_hand,
                 fg_buffer_weeks=fg_buffer_weeks,
                 lead_time_days=lead_time_days,
                 status=status,

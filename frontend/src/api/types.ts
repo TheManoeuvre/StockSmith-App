@@ -698,6 +698,9 @@ export interface LowStockMaterial {
   supplier_name: string | null;
   consumption_rate_per_week: string | null;
   weeks_of_supply: string | null;
+  /** `weeks_of_supply` with on-order purchase lines left out — what the shelf alone covers.
+   *  The dashboard shows this one; `weeks_of_supply` is what decided `status`. */
+  weeks_of_supply_on_hand: string | null;
   fg_buffer_weeks: string | null;
   /** Lead time (business days) applied to this material's reorder point. Shown next to the
    *  supplier. */
@@ -796,7 +799,10 @@ export interface MaterialSubstituteUsageInput {
 }
 
 export interface DashboardSummary {
+  /** Stock on hand at cost, 2dp: materials plus finished goods. total is their sum. */
   total_inventory_value: string;
+  material_value: string;
+  finished_goods_value: string;
   active_product_count: number;
   low_stock_materials: LowStockMaterial[];
   lowest_buildable_products: BuildableProduct[];
