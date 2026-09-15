@@ -164,9 +164,28 @@ it("merges short-stock and short-packaging rows into the Orders awaiting product
 it("shows the on-hand time to stockout, not the figure that credits on-order stock", async () => {
   await renderDashboard();
   // 1.5 wk on the shelf; the 14.0 wk including the 1000 on order is the status input only.
-  expect(await screen.findByText("1.5 wk")).toBeInTheDocument();
+  const cell = await screen.findByText("1.5 wk");
+  expect(cell).toBeInTheDocument();
   expect(screen.queryByText("14.0 wk")).not.toBeInTheDocument();
   expect(screen.getByText("1000")).toBeInTheDocument();
+  // The inclusive figure is still reachable on hover, since it's what set the status.
+  expect(cell).toHaveAttribute("title", "14.0 wk counting stock on order");
+  // On hand is coloured by status, not unconditionally red.
+  expect(screen.getByText("120")).toHaveClass("text-red-600");
+});
+
+it("gives the stockout table the full width when the side cards have nothing to show", async () => {
+  await renderDashboard({
+    open_stock_take: null,
+    unresolved_variance_count: 0,
+    items_due_for_count: [],
+    items_due_for_count_total: 0,
+    margin_alerts: [],
+  });
+  const stockout = await screen.findByText("Time to stockout");
+  const grid = stockout.closest("section")?.parentElement;
+  expect(grid).not.toHaveClass("lg:grid-cols-[1.4fr_1fr]");
+  expect(screen.queryByText("Stock take")).not.toBeInTheDocument();
 });
 
 it("shows the stock-take progress line and a due-for-count entry", async () => {

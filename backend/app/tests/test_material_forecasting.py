@@ -218,6 +218,26 @@ async def test_on_hand_weeks_leave_on_order_stock_out_but_status_keeps_it(sessio
     assert f.status == "critical"  # judged on the 3, still inside the lead-time-adjusted window
 
 
+async def test_fully_allocated_material_reads_as_a_clean_zero(session):
+    """Everything on hand is spoken for, so the position is 0 and so are the weeks. The
+    figures come back quantised — a 0E-26 from the full-precision subtraction would render
+    as 0 but is noise on the wire."""
+    await _settings(session)
+    material = await _material(session, current_qty=Decimal(5), allocated_qty=Decimal(5))
+    product = await _product(session, "Widget", "SKU-5c", current_stock=0)
+    session.add(ProductMaterial(product_id=product.id, material_id=material.id, qty_required=Decimal(1)))
+    await session.commit()
+    for w in range(8):
+        await _place_order(session, product.id, qty=1, weeks_ago=w)
+    await session.commit()
+
+    f = {f.material_id: f for f in await compute_material_forecasts(session)}[material.id]
+    assert f.weeks_of_supply == Decimal(0)
+    assert f.weeks_of_supply_on_hand == Decimal(0)
+    assert str(f.fg_buffer_weeks) == "0.0000"
+    assert f.status == "critical"
+
+
 async def test_insufficient_history_falls_back_to_reorder_threshold(session):
     """A material with too little sales history to forecast falls back to the static
     current_qty <= reorder_threshold check, flagged distinctly as insufficient_data."""

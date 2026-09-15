@@ -113,6 +113,16 @@ class _DemandPiece:
     rate: Decimal  # units/week drawn once buffer_weeks has elapsed
 
 
+_FOUR_DP = Decimal("0.0001")
+
+
+def _quantize(value: Decimal | None) -> Decimal | None:
+    """The forecast arithmetic runs at full Decimal precision, which is fine internally but
+    leaks out as 0E-26 and 30-digit expansions on the wire. Four places is more than the UI
+    shows (one) and still exact enough for the threshold comparisons."""
+    return None if value is None else value.quantize(_FOUR_DP)
+
+
 def _week_bucket(at: datetime, now: datetime) -> int:
     if at.tzinfo is None:
         at = at.replace(tzinfo=timezone.utc)
@@ -400,15 +410,15 @@ async def compute_material_forecasts(
             continue
 
         position = current_qty - allocated_qty
-        weeks = _piecewise_weeks_of_supply(position, pieces, inflows)
-        weeks_on_hand = _piecewise_weeks_of_supply(position, pieces, [])
-        weeks_no_fg = _piecewise_weeks_of_supply(
-            position, [_DemandPiece(Decimal(0), p.rate) for p in pieces], inflows
+        weeks = _quantize(_piecewise_weeks_of_supply(position, pieces, inflows))
+        weeks_on_hand = _quantize(_piecewise_weeks_of_supply(position, pieces, []))
+        weeks_no_fg = _quantize(
+            _piecewise_weeks_of_supply(position, [_DemandPiece(Decimal(0), p.rate) for p in pieces], inflows)
         )
         fg_buffer_weeks = (
             (weeks - weeks_no_fg) if (weeks is not None and weeks_no_fg is not None) else Decimal(0)
         )
-        consumption_rate_per_week = sum((p.rate for p in pieces), Decimal(0))
+        consumption_rate_per_week = _quantize(sum((p.rate for p in pieces), Decimal(0)))
 
         # The reorder point is pushed out by the lead time: cover that runs out in less time
         # than it takes to restock (plus the configured buffer) is already a problem, so an
