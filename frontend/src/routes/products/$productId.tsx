@@ -37,7 +37,7 @@ import {
 } from "../../hooks/useDirtyRegistry";
 import { useAssetUrl } from "../../hooks/useAssetUrl";
 import { pickFile } from "../../lib/tauri";
-import { sellableSummary } from "../../lib/format";
+import { inclFallbacksNote, sellableSummary } from "../../lib/format";
 import { productCategoriesApi } from "../../api/productCategories";
 import { CreatableSelect } from "../../components/common/CreatableSelect";
 import { StockCountFields } from "../../components/common/StockCountFields";
@@ -496,7 +496,11 @@ function ProductDetail() {
                   sellable.buildable == null ? "—" : String(sellable.buildable)
                 }
                 sub={
-                  sellable.buildable == null ? "no BOM set" : "from materials"
+                  sellable.buildable == null
+                    ? "no BOM set"
+                    : inclFallbacksNote(sellable)
+                      ? `from BOM · ${inclFallbacksNote(sellable)}`
+                      : "from materials"
                 }
                 valueClassName={
                   sellable.buildable == null ? "text-amber-700" : undefined

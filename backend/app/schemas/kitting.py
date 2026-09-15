@@ -2,6 +2,12 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict
 
+from app.schemas.material_substitute import SubstituteSuggestion
+
+from app.schemas.material_substitute import SubstituteSuggestion
+
+from app.schemas.material_substitute import SubstituteSuggestion
+
 
 class KittingBomLine(BaseModel):
     material_id: int
@@ -26,8 +32,16 @@ class DefaultKittingBomLineRead(KittingBomLine):
 
 class VariantKittingBomLine(KittingBomLine):
     replaces_material_id: int | None = None
+    # Same pair of pairs as VariantBomLine: the material's own shelf, then pooled with its
+    # active fallbacks (material_substitutes.FALLBACK_POOL_BY_MATERIAL_SQL). Packaging
+    # capacity is the min() of the *_incl_fallbacks figures.
     line_max_buildable: int | None = None
     line_expected_max_buildable: int | None = None
+    line_max_buildable_incl_fallbacks: int | None = None
+    line_expected_max_buildable_incl_fallbacks: int | None = None
+    # Populated only when line_max_buildable == 0 — the material's own shelf can't pack a
+    # unit, fallback or not. Ranked, human-curated; never auto-applied.
+    suggested_substitutes: list[SubstituteSuggestion] = []
     # Populated only by the capacity paths, which already SELECT the material row — lets
     # kitting.kitting_cost_per_unit_from_bom cost an already-resolved BOM without re-querying.
     unit_cost: Decimal | None = None

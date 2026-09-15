@@ -20,14 +20,22 @@ from app.schemas.dashboard import OrderAwaitingPackaging
 from app.schemas.kitting import OrderKittingOverrideLine, OrderKittingRequirementLine, OrderKittingSummary, VariantKittingBomLine
 from app.services.costing import recompute_material
 from app.services.material_categories import category_flag
-from app.services.material_substitutes import get_ranked_substitutes_by_material
+from app.services.material_substitutes import FALLBACK_POOL_BY_MATERIAL_SQL, get_ranked_substitutes_by_material
 from app.services.purchase_sql import ON_ORDER_BY_MATERIAL_SQL
 
+# Packaging capacity counts each material's active fallbacks as stock of that material —
+# see material_substitutes.FALLBACK_POOL_BY_MATERIAL_SQL. Unlike build capacity, the
+# material-only figure isn't reported separately here: kitting capacity only ever reaches
+# a caller through max_sellable and its "packaging" reason, and the per-line split lives
+# on VariantKittingBomLine.
 _KITTING_CAPACITY_BY_PRODUCT_SQL = text(
-    """
-    SELECT pkm.product_id, MIN(FLOOR((m.current_qty - m.allocated_qty) / pkm.qty_required)) AS kitting_capacity
+    f"""
+    SELECT pkm.product_id,
+           MIN(FLOOR((m.current_qty - m.allocated_qty + COALESCE(fb.fallback_free_qty, 0)) / pkm.qty_required))
+               AS kitting_capacity
     FROM product_kitting_materials pkm
     JOIN materials m ON m.id = pkm.material_id
+    LEFT JOIN ({FALLBACK_POOL_BY_MATERIAL_SQL}) fb ON fb.material_id = m.id
     GROUP BY pkm.product_id
     """
 )
@@ -44,14 +52,32 @@ _KITTING_COST_PER_UNIT_BY_PRODUCT_SQL = text(
 _EXPECTED_KITTING_CAPACITY_BY_PRODUCT_SQL = text(
     f"""
     SELECT pkm.product_id,
-           MIN(FLOOR((m.current_qty - m.allocated_qty + COALESCE(oo.on_order_qty, 0)) / pkm.qty_required))
+           MIN(FLOOR((m.current_qty - m.allocated_qty + COALESCE(oo.on_order_qty, 0)
+                      + COALESCE(fb.fallback_expected_free_qty, 0)) / pkm.qty_required))
                AS expected_kitting_capacity
     FROM product_kitting_materials pkm
     JOIN materials m ON m.id = pkm.material_id
     LEFT JOIN ({ON_ORDER_BY_MATERIAL_SQL}) oo ON oo.material_id = m.id
+    LEFT JOIN ({FALLBACK_POOL_BY_MATERIAL_SQL}) fb ON fb.material_id = m.id
     GROUP BY pkm.product_id
     """
 )
+
+# Per-material stock for the Python capacity paths below — the same inputs the two SQL
+# aggregates above use, so a variant's capacity and its product's list-page capacity
+# agree on what counts as available packaging.
+_MATERIAL_STOCK_FOR_CAPACITY_SQL = text(
+    f"""
+    SELECT m.id, m.current_qty, m.allocated_qty, m.avg_unit_cost,
+           COALESCE(oo.on_order_qty, 0) AS on_order_qty,
+           COALESCE(fb.fallback_free_qty, 0) AS fallback_free_qty,
+           COALESCE(fb.fallback_expected_free_qty, 0) AS fallback_expected_free_qty
+    FROM materials m
+    LEFT JOIN ({ON_ORDER_BY_MATERIAL_SQL}) oo ON oo.material_id = m.id
+    LEFT JOIN ({FALLBACK_POOL_BY_MATERIAL_SQL}) fb ON fb.material_id = m.id
+    WHERE m.id IN :ids
+    """
+).bindparams(bindparam("ids", expanding=True))
 
 _RESOLVED_VARIANT_KITTING_BOM_SQL = text(
     """
@@ -283,6 +309,46 @@ def combine_theoretical_max_sellable(
     return kitting_capacity, "packaging"
 
 
+def _fill_line_capacity(line: VariantKittingBomLine, m: object) -> None:
+    """Attaches one resolved kitting line's own bottleneck, from a
+    _MATERIAL_STOCK_FOR_CAPACITY_SQL row: free on-hand stock now vs. eventually (counting
+    on-order), once from the material's own shelf (line_max_buildable) and once pooled
+    with its active fallbacks (line_max_buildable_incl_fallbacks — see
+    material_substitutes.FALLBACK_POOL_BY_MATERIAL_SQL). Capacity is the pooled figure;
+    the own-shelf one is what the shortage suggestions key off."""
+    free = Decimal(m.current_qty) - Decimal(m.allocated_qty)
+    expected_free = free + Decimal(m.on_order_qty)
+    line.line_max_buildable = int(free // line.qty_required)
+    line.line_expected_max_buildable = int(expected_free // line.qty_required)
+    line.line_max_buildable_incl_fallbacks = int((free + Decimal(m.fallback_free_qty)) // line.qty_required)
+    line.line_expected_max_buildable_incl_fallbacks = int(
+        (expected_free + Decimal(m.fallback_expected_free_qty)) // line.qty_required
+    )
+    line.unit_cost = Decimal(m.avg_unit_cost)
+
+
+async def _attach_kitting_suggestions(session: AsyncSession, boms: list[list[VariantKittingBomLine]]) -> None:
+    """Same rule as buildability.compute_variant_buildability: a line whose OWN shelf can't
+    pack a single unit is a shortfall a person has to resolve, so its ranked fallbacks are
+    offered on the line — even when a fallback is already carrying the capacity figure,
+    because someone still has to choose which one to reach for at pack time."""
+    short_material_ids = {line.material_id for bom in boms for line in bom if line.line_max_buildable == 0}
+    if not short_material_ids:
+        return
+    substitutes_by_material = await get_ranked_substitutes_by_material(session, short_material_ids)
+    for bom in boms:
+        for line in bom:
+            if line.material_id in short_material_ids:
+                line.suggested_substitutes = substitutes_by_material.get(line.material_id, [])
+
+
+def _kitting_capacity(bom: list[VariantKittingBomLine]) -> tuple[int, int]:
+    return (
+        min(line.line_max_buildable_incl_fallbacks for line in bom),
+        min(line.line_expected_max_buildable_incl_fallbacks for line in bom),
+    )
+
+
 async def compute_variant_kitting_capacity(
     session: AsyncSession, product_id: int, variant_id: int | None
 ) -> tuple[int | None, int | None, list[VariantKittingBomLine]]:
@@ -297,30 +363,14 @@ async def compute_variant_kitting_capacity(
         return None, None, bom
 
     material_ids = [line.material_id for line in bom]
-    rows = await session.execute(
-        text(
-            f"""
-            SELECT m.id, m.current_qty, m.allocated_qty, m.avg_unit_cost,
-                   COALESCE(oo.on_order_qty, 0) AS on_order_qty
-            FROM materials m
-            LEFT JOIN ({ON_ORDER_BY_MATERIAL_SQL}) oo ON oo.material_id = m.id
-            WHERE m.id IN :ids
-            """
-        ).bindparams(bindparam("ids", expanding=True)),
-        {"ids": material_ids},
-    )
+    rows = await session.execute(_MATERIAL_STOCK_FOR_CAPACITY_SQL, {"ids": material_ids})
     materials = {row.id: row for row in rows}
 
     for line in bom:
-        m = materials[line.material_id]
-        free = Decimal(m.current_qty) - Decimal(m.allocated_qty)
-        expected_free = free + Decimal(m.on_order_qty)
-        line.line_max_buildable = int(free // line.qty_required)
-        line.line_expected_max_buildable = int(expected_free // line.qty_required)
-        line.unit_cost = Decimal(m.avg_unit_cost)
+        _fill_line_capacity(line, materials[line.material_id])
+    await _attach_kitting_suggestions(session, [bom])
 
-    kitting_capacity = min(line.line_max_buildable for line in bom)
-    expected_kitting_capacity = min(line.line_expected_max_buildable for line in bom)
+    kitting_capacity, expected_kitting_capacity = _kitting_capacity(bom)
     return kitting_capacity, expected_kitting_capacity, bom
 
 
@@ -487,18 +537,7 @@ async def compute_variants_kitting_capacity_bulk(
     all_material_ids = {line.material_id for bom in boms_by_variant.values() for line in bom}
     materials: dict[int, object] = {}
     if all_material_ids:
-        rows = await session.execute(
-            text(
-                f"""
-                SELECT m.id, m.current_qty, m.allocated_qty, m.avg_unit_cost,
-                       COALESCE(oo.on_order_qty, 0) AS on_order_qty
-                FROM materials m
-                LEFT JOIN ({ON_ORDER_BY_MATERIAL_SQL}) oo ON oo.material_id = m.id
-                WHERE m.id IN :ids
-                """
-            ).bindparams(bindparam("ids", expanding=True)),
-            {"ids": list(all_material_ids)},
-        )
+        rows = await session.execute(_MATERIAL_STOCK_FOR_CAPACITY_SQL, {"ids": list(all_material_ids)})
         materials = {row.id: row for row in rows}
 
     results: dict[int, tuple[int | None, int | None, list[VariantKittingBomLine]]] = {}
@@ -508,15 +547,10 @@ async def compute_variants_kitting_capacity_bulk(
             results[variant_id] = (None, None, bom)
             continue
         for line in bom:
-            m = materials[line.material_id]
-            free = Decimal(m.current_qty) - Decimal(m.allocated_qty)
-            expected_free = free + Decimal(m.on_order_qty)
-            line.line_max_buildable = int(free // line.qty_required)
-            line.line_expected_max_buildable = int(expected_free // line.qty_required)
-            line.unit_cost = Decimal(m.avg_unit_cost)
-        kitting_capacity = min(line.line_max_buildable for line in bom)
-        expected_kitting_capacity = min(line.line_expected_max_buildable for line in bom)
+            _fill_line_capacity(line, materials[line.material_id])
+        kitting_capacity, expected_kitting_capacity = _kitting_capacity(bom)
         results[variant_id] = (kitting_capacity, expected_kitting_capacity, bom)
+    await _attach_kitting_suggestions(session, [bom for _, _, bom in results.values()])
     return results
 
 

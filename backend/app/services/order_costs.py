@@ -34,7 +34,7 @@ async def compute_line_cost_snapshot(
         return None
 
     if variant_id is not None:
-        _, _, cost_per_unit, _ = await compute_variant_buildability(session, product_id, variant_id)
+        _, cost_per_unit, _ = await compute_variant_buildability(session, product_id, variant_id)
     else:
         cost_per_unit = (await get_cost_per_unit_by_product(session)).get(product_id)
 

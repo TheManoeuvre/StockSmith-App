@@ -269,26 +269,23 @@ async def _resolve_max_sellable(session: AsyncSession, product_id: int, variant_
         variant = await session.get(ProductVariant, variant_id)
         if variant is None:
             return None
-        max_buildable, expected_max_buildable, _, _ = await buildability.compute_variant_buildability(
-            session, product_id, variant_id
-        )
+        buildable, _, _ = await buildability.compute_variant_buildability(session, product_id, variant_id)
         current_stock, allocated_qty = variant.current_stock, variant.allocated_qty
     else:
-        max_buildable_by_product = await buildability.get_max_buildable_by_product(session)
-        max_buildable = max_buildable_by_product.get(product_id)
-        expected_max_buildable_by_product = await buildability.get_expected_max_buildable_by_product(session)
-        expected_max_buildable = expected_max_buildable_by_product.get(product_id)
+        buildable = (await buildability.get_buildable_by_product(session)).get(product_id)
         current_stock, allocated_qty = product.current_stock, product.allocated_qty
 
+    # The fallback-pooled figures, same as the product/variant reads: a short material
+    # with a stocked fallback shouldn't cap what's pushed to a marketplace.
     max_sellable, _, _, _, theoretical_max_sellable, _, _ = await kitting.compute_max_sellable(
         session,
         product_id,
         variant_id,
         current_stock,
         allocated_qty,
-        expected_max_buildable,
+        buildable.expected_max_buildable_incl_fallbacks if buildable else None,
         product.platform_ceiling_qty,
-        max_buildable,
+        buildable.max_buildable_incl_fallbacks if buildable else None,
     )
     return theoretical_max_sellable if product.push_buildable_capacity else max_sellable
 

@@ -34,6 +34,8 @@ const ORANGE: SellableInput = {
   allocated_qty: 0,
   max_buildable: 97,
   expected_max_buildable: 97,
+  max_buildable_incl_fallbacks: 97,
+  expected_max_buildable_incl_fallbacks: 97,
   max_sellable: 3,
   max_sellable_reason: "stock",
   expected_max_sellable: 20,
@@ -84,7 +86,13 @@ describe("sellableSummary", () => {
       // The backend's expected_max_sellable is materials-and-packaging only. Left raw it
       // would read 40 against a current figure of 43 — as if capacity shrank.
       const s = sellableSummary(
-        { ...ORANGE, expected_max_buildable: 140, expected_max_sellable: 140, theoretical_max_sellable: 100 },
+        {
+          ...ORANGE,
+          expected_max_buildable: 140,
+          expected_max_buildable_incl_fallbacks: 140,
+          expected_max_sellable: 140,
+          theoretical_max_sellable: 100,
+        },
         { pushBuildableCapacity: true }
       );
       expect(s.expected).toBe(143);
@@ -92,7 +100,7 @@ describe("sellableSummary", () => {
 
     it("stays under the platform ceiling", () => {
       const s = sellableSummary(
-        { ...ORANGE, expected_max_buildable: 140, expected_max_sellable: 140 },
+        { ...ORANGE, expected_max_buildable: 140, expected_max_buildable_incl_fallbacks: 140, expected_max_sellable: 140 },
         { pushBuildableCapacity: true, platformCeilingQty: 20 }
       );
       expect(s.expected).toBe(20);
@@ -100,7 +108,13 @@ describe("sellableSummary", () => {
 
     it("is null when there's no BOM to build from", () => {
       const s = sellableSummary(
-        { ...ORANGE, max_buildable: null, expected_max_buildable: null },
+        {
+          ...ORANGE,
+          max_buildable: null,
+          expected_max_buildable: null,
+          max_buildable_incl_fallbacks: null,
+          expected_max_buildable_incl_fallbacks: null,
+        },
         { pushBuildableCapacity: true }
       );
       expect(s.expected).toBeNull();

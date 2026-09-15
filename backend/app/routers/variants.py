@@ -11,7 +11,7 @@ from app.models.variant import ProductVariant, ProductVariantMaterial
 from app.schemas.kitting import VariantKittingBomLine
 from app.schemas.variant import VariantBomLine, VariantRead, VariantUpdate
 from app.services import listing_push, platform_fees
-from app.services.buildability import compute_variant_buildability
+from app.services.buildability import buildable_fields, compute_variant_buildability
 from app.services.kitting import compute_max_sellable, kitting_cost_per_unit_from_bom, sync_listing_ceiling_qty
 from app.services.shipping_profiles import get_shipping_profiles_by_id, resolve_variant_shipping_profile
 from app.services.validation import validate_lines_against_units
@@ -72,7 +72,7 @@ async def _validate_substitution_categories(
 
 async def _to_variant_read(session: AsyncSession, variant: ProductVariant) -> VariantRead:
     product = await session.get(Product, variant.product_id)
-    max_buildable, expected_max_buildable, cost_per_unit, effective_bom = await compute_variant_buildability(
+    buildable, cost_per_unit, effective_bom = await compute_variant_buildability(
         session, variant.product_id, variant.id
     )
     (
@@ -89,9 +89,9 @@ async def _to_variant_read(session: AsyncSession, variant: ProductVariant) -> Va
         variant.id,
         variant.current_stock,
         variant.allocated_qty,
-        expected_max_buildable,
+        buildable.expected_max_buildable_incl_fallbacks if buildable else None,
         product.platform_ceiling_qty if product else None,
-        max_buildable,
+        buildable.max_buildable_incl_fallbacks if buildable else None,
     )
     full_sku = compute_full_sku(product.sku if product else None, variant.sku_suffix)
     fee_source, fee_components = await platform_fees.get_resolver_context(session)
@@ -99,8 +99,7 @@ async def _to_variant_read(session: AsyncSession, variant: ProductVariant) -> Va
     effective_shipping_profile = resolve_variant_shipping_profile(shipping_profiles_by_id, variant, product)
     return VariantRead.model_validate(variant).model_copy(
         update={
-            "max_buildable": max_buildable,
-            "expected_max_buildable": expected_max_buildable,
+            **buildable_fields(buildable),
             "max_sellable": max_sellable,
             "max_sellable_reason": max_sellable_reason,
             "expected_max_sellable": expected_max_sellable,

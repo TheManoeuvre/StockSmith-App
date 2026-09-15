@@ -7,7 +7,7 @@ import { materialsApi } from "../../api/materials";
 import { variantsApi } from "../../api/variants";
 import type { ProductStockEvent } from "../../api/types";
 import { ErrorBanner } from "../common/ErrorBanner";
-import { formatDayMonth, sellableSummary } from "../../lib/format";
+import { formatDayMonth, inclFallbacksNote, sellableSummary } from "../../lib/format";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 
 interface BuildForm {
@@ -303,6 +303,7 @@ export function StockSection({
           <FigureRow label="Reserved to orders" value={allocated} />
           <FigureRow
             label="Buildable from materials"
+            sub={inclFallbacksNote(sellable) ?? undefined}
             value={sellable.buildable == null ? "—" : sellable.buildable}
           />
           {sellable.expected != null && sellable.expected !== sellable.headline && (

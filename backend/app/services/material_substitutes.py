@@ -14,6 +14,96 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.material import Material
 from app.models.material_substitute import MaterialSubstitute, MaterialSubstituteUsage
 from app.schemas.material_substitute import SubstituteSuggestion
+from app.services.purchase_sql import ON_ORDER_BY_MATERIAL_SQL
+
+# Free (and expected-free) stock of every active, human-curated fallback for a material,
+# summed per material. Build and packaging capacity treat a material's fallbacks as extra
+# stock of that material — a box that's short but has a fallback with plenty on the shelf
+# doesn't cap what can be sold — while ALSO reporting the material-only figure beside it
+# (the *_incl_fallbacks fields on BOM lines, products and variants), so a reader can tell
+# "10 from the BOM as written, 20 counting fallbacks". Suggestions at the shortage points
+# (buildability lines, kitting lines, orders awaiting packaging) still key off the
+# material's OWN stock: a line whose shelf is empty but whose fallback covers it is
+# exactly the line that needs a person to pick which fallback to actually use.
+#
+# Free stock (current - allocated) on both sides, even though build capacity measures the
+# material itself gross: a fallback already reserved to an order's packaging can't be
+# lent to a build.
+#
+# Limitations, accepted deliberately: one level only (a fallback's own fallbacks don't
+# chain in), and a fallback that is also a direct line of the same BOM — or a fallback for
+# two lines of it — is counted once per line rather than shared out, the same per-line
+# min() approximation the base capacity already makes for a material used on two lines.
+FALLBACK_POOL_BY_MATERIAL_SQL = f"""
+    SELECT ms.material_id,
+           SUM(s.current_qty - s.allocated_qty) AS fallback_free_qty,
+           SUM(s.current_qty - s.allocated_qty + COALESCE(soo.on_order_qty, 0)) AS fallback_expected_free_qty
+    FROM material_substitutes ms
+    JOIN materials s ON s.id = ms.substitute_material_id
+    LEFT JOIN ({ON_ORDER_BY_MATERIAL_SQL}) soo ON soo.material_id = s.id
+    WHERE ms.is_active = true
+    GROUP BY ms.material_id
+"""
+from app.services.purchase_sql import ON_ORDER_BY_MATERIAL_SQL
+
+# Free (and expected-free) stock of every active, human-curated fallback for a material,
+# summed per material. Build and packaging capacity treat a material's fallbacks as extra
+# stock of that material — a box that's short but has a fallback with plenty on the shelf
+# doesn't cap what can be sold — while ALSO reporting the material-only figure beside it
+# (the *_incl_fallbacks fields on BOM lines, products and variants), so a reader can tell
+# "10 from the BOM as written, 20 counting fallbacks". Suggestions at the shortage points
+# (buildability lines, kitting lines, orders awaiting packaging) still key off the
+# material's OWN stock: a line whose shelf is empty but whose fallback covers it is
+# exactly the line that needs a person to pick which fallback to actually use.
+#
+# Free stock (current - allocated) on both sides, even though build capacity measures the
+# material itself gross: a fallback already reserved to an order's packaging can't be
+# lent to a build.
+#
+# Limitations, accepted deliberately: one level only (a fallback's own fallbacks don't
+# chain in), and a fallback that is also a direct line of the same BOM — or a fallback for
+# two lines of it — is counted once per line rather than shared out, the same per-line
+# min() approximation the base capacity already makes for a material used on two lines.
+FALLBACK_POOL_BY_MATERIAL_SQL = f"""
+    SELECT ms.material_id,
+           SUM(s.current_qty - s.allocated_qty) AS fallback_free_qty,
+           SUM(s.current_qty - s.allocated_qty + COALESCE(soo.on_order_qty, 0)) AS fallback_expected_free_qty
+    FROM material_substitutes ms
+    JOIN materials s ON s.id = ms.substitute_material_id
+    LEFT JOIN ({ON_ORDER_BY_MATERIAL_SQL}) soo ON soo.material_id = s.id
+    WHERE ms.is_active = true
+    GROUP BY ms.material_id
+"""
+from app.services.purchase_sql import ON_ORDER_BY_MATERIAL_SQL
+
+# Free (and expected-free) stock of every active, human-curated fallback for a material,
+# summed per material. Build and packaging capacity treat a material's fallbacks as extra
+# stock of that material — a box that's short but has a fallback with plenty on the shelf
+# doesn't cap what can be sold — while ALSO reporting the material-only figure beside it
+# (the *_incl_fallbacks fields on BOM lines, products and variants), so a reader can tell
+# "10 from the BOM as written, 20 counting fallbacks". Suggestions at the shortage points
+# (buildability lines, kitting lines, orders awaiting packaging) still key off the
+# material's OWN stock: a line whose shelf is empty but whose fallback covers it is
+# exactly the line that needs a person to pick which fallback to actually use.
+#
+# Free stock (current - allocated) on both sides, even though build capacity measures the
+# material itself gross: a fallback already reserved to an order's packaging can't be
+# lent to a build.
+#
+# Limitations, accepted deliberately: one level only (a fallback's own fallbacks don't
+# chain in), and a fallback that is also a direct line of the same BOM — or a fallback for
+# two lines of it — is counted once per line rather than shared out, the same per-line
+# min() approximation the base capacity already makes for a material used on two lines.
+FALLBACK_POOL_BY_MATERIAL_SQL = f"""
+    SELECT ms.material_id,
+           SUM(s.current_qty - s.allocated_qty) AS fallback_free_qty,
+           SUM(s.current_qty - s.allocated_qty + COALESCE(soo.on_order_qty, 0)) AS fallback_expected_free_qty
+    FROM material_substitutes ms
+    JOIN materials s ON s.id = ms.substitute_material_id
+    LEFT JOIN ({ON_ORDER_BY_MATERIAL_SQL}) soo ON soo.material_id = s.id
+    WHERE ms.is_active = true
+    GROUP BY ms.material_id
+"""
 
 
 def _to_suggestion(sub: MaterialSubstitute, material: Material) -> SubstituteSuggestion:
