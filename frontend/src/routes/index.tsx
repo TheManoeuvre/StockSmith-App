@@ -230,8 +230,11 @@ function Dashboard() {
           <KpiCard
             label="Inventory value"
             value={formatMoney(data.total_inventory_value, "GBP")}
-            unit="on hand"
-            note={`${data.active_product_count} active products`}
+            unit="at cost"
+            note={`${formatMoney(data.material_value, "GBP")} materials · ${formatMoney(
+              data.finished_goods_value,
+              "GBP",
+            )} finished goods`}
             accent="border-l-blue-600"
           />
         </Link>
@@ -422,7 +425,7 @@ function Dashboard() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.4fr_1fr]">
         <Card
           title="Time to stockout"
-          hint="Weeks until you can't fulfil demand — grouped by supplier, finished-goods cover included."
+          hint="Weeks until on-hand stock runs out — finished-goods cover included, on-order stock not. Grouped by supplier."
         >
           {data.low_stock_materials.length === 0 ? (
             <p className="text-sm text-slate-500">
@@ -477,7 +480,7 @@ function Dashboard() {
                         </Badge>
                       </td>
                       <td className="p-2 text-right tabular-nums">
-                        {formatWeeksShort(m.weeks_of_supply)}
+                        {formatWeeksShort(m.weeks_of_supply_on_hand)}
                       </td>
                       <td className="p-2 text-right tabular-nums">
                         {m.consumption_rate_per_week != null
