@@ -36,6 +36,7 @@ def _forecast(material_id: int, status: str, name: str = "Filament") -> Material
         supplier_name=None,
         consumption_rate_per_week=Decimal(1),
         weeks_of_supply=Decimal(1) if status != "ok" else Decimal(10),
+        weeks_of_supply_on_hand=Decimal(1) if status != "ok" else Decimal(10),
         fg_buffer_weeks=None,
         lead_time_days=5,
         status=status,

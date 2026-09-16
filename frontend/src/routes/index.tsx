@@ -18,6 +18,7 @@ import {
   formatWeeksShort,
   STOCKOUT_BADGE_CLASS,
   STOCKOUT_LABEL,
+  STOCKOUT_TEXT_CLASS,
 } from "../lib/forecast";
 import { PLATFORM_COLORS, PLATFORM_LABELS } from "../lib/platforms";
 
@@ -35,6 +36,22 @@ function groupBySupplier(
     }
   }
   return groups;
+}
+
+/** Hover text for the "To stockout" cell: where the on-hand figure comes from, and what it
+ * would be if the on-order stock is counted — the number that actually set the status. */
+function stockoutDetail(m: LowStockMaterial): string | undefined {
+  if (m.weeks_of_supply_on_hand == null) return undefined;
+  const parts: string[] = [];
+  const fg = m.fg_buffer_weeks != null ? Number(m.fg_buffer_weeks) : 0;
+  if (fg > 0.05) parts.push(`incl. ${fg.toFixed(1)} wk from finished-goods stock`);
+  if (
+    m.weeks_of_supply != null &&
+    Number(m.weeks_of_supply) - Number(m.weeks_of_supply_on_hand) > 0.05
+  ) {
+    parts.push(`${Number(m.weeks_of_supply).toFixed(1)} wk counting stock on order`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : undefined;
 }
 
 /** One row in either the "Orders awaiting products" or "Blocked orders" table. */
@@ -165,6 +182,14 @@ function Dashboard() {
   const dueByClass = { A: 0, B: 0, C: 0 };
   for (const item of data.items_due_for_count) dueByClass[item.abc_class] += 1;
 
+  // Mirrors the null-returns in StockTakeCard and MarginMovedCard: when neither has anything
+  // to say, the stockout table takes the full width instead of sitting beside a blank column.
+  const hasSideCards =
+    data.open_stock_take != null ||
+    data.unresolved_variance_count > 0 ||
+    data.items_due_for_count.length > 0 ||
+    data.margin_alerts.length > 0;
+
   return (
     <div className="flex flex-col gap-6">
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -230,8 +255,11 @@ function Dashboard() {
           <KpiCard
             label="Inventory value"
             value={formatMoney(data.total_inventory_value, "GBP")}
-            unit="on hand"
-            note={`${data.active_product_count} active products`}
+            unit="at cost"
+            note={`${formatMoney(data.material_value, "GBP")} materials · ${formatMoney(
+              data.finished_goods_value,
+              "GBP",
+            )} finished goods`}
             accent="border-l-blue-600"
           />
         </Link>
@@ -419,10 +447,12 @@ function Dashboard() {
         )}
       </Card>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1.4fr_1fr]">
+      <div
+        className={`grid grid-cols-1 gap-6 ${hasSideCards ? "lg:grid-cols-[1.4fr_1fr]" : ""}`}
+      >
         <Card
           title="Time to stockout"
-          hint="Weeks until you can't fulfil demand — grouped by supplier, finished-goods cover included."
+          hint="Weeks until on-hand stock runs out — finished-goods cover included, on-order stock not. Grouped by supplier."
         >
           {data.low_stock_materials.length === 0 ? (
             <p className="text-sm text-slate-500">
@@ -476,15 +506,20 @@ function Dashboard() {
                           {STOCKOUT_LABEL[m.status]}
                         </Badge>
                       </td>
-                      <td className="p-2 text-right tabular-nums">
-                        {formatWeeksShort(m.weeks_of_supply)}
+                      <td
+                        className="p-2 text-right tabular-nums"
+                        title={stockoutDetail(m)}
+                      >
+                        {formatWeeksShort(m.weeks_of_supply_on_hand)}
                       </td>
                       <td className="p-2 text-right tabular-nums">
                         {m.consumption_rate_per_week != null
                           ? `${roundQty(m.consumption_rate_per_week)}/wk`
                           : "—"}
                       </td>
-                      <td className="p-2 text-right text-red-600 tabular-nums">
+                      <td
+                        className={`p-2 text-right tabular-nums ${STOCKOUT_TEXT_CLASS[m.status]}`}
+                      >
                         {roundQty(m.current_qty)}
                       </td>
                       <td className="p-2 text-right tabular-nums">
@@ -509,10 +544,12 @@ function Dashboard() {
           )}
         </Card>
 
-        <div className="flex flex-col gap-6">
-          <StockTakeCard data={data} />
-          <MarginMovedCard data={data} />
-        </div>
+        {hasSideCards && (
+          <div className="flex flex-col gap-6">
+            <StockTakeCard data={data} />
+            <MarginMovedCard data={data} />
+          </div>
+        )}
       </div>
     </div>
   );

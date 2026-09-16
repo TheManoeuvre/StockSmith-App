@@ -22,6 +22,9 @@ class LowStockMaterial(BaseModel):
     # (static) reorder_threshold, same as pre-forecast behavior.
     consumption_rate_per_week: Decimal | None = None
     weeks_of_supply: Decimal | None = None
+    # weeks_of_supply without on-order purchase lines credited — what the shelf alone covers.
+    # This is the figure the dashboard shows; weeks_of_supply is what sets `status`.
+    weeks_of_supply_on_hand: Decimal | None = None
     # How much of weeks_of_supply comes from finished-goods stock delaying the material
     # draw, rather than the material itself — see forecasting.py. Always 0 when
     # weeks_of_supply is None.
@@ -85,7 +88,11 @@ class OpenStockTake(BaseModel):
 
 
 class DashboardSummary(BaseModel):
+    # Stock on hand at cost, to the penny: materials at avg_unit_cost plus finished goods at
+    # resolved build-BOM cost. total is the sum of the two.
     total_inventory_value: Decimal
+    material_value: Decimal
+    finished_goods_value: Decimal
     active_product_count: int
     low_stock_materials: list[LowStockMaterial]
     lowest_buildable_products: list[BuildableProduct]
