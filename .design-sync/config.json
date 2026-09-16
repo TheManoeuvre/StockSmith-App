@@ -1,0 +1,94 @@
+{
+  "projectId": "f0e6eb34-35ee-4131-9a0a-3f9aac2cb7eb",
+  "pkg": "stocksmith-ui",
+  "globalName": "StockSmithUI",
+  "shape": "package",
+  "entry": "frontend/design-system/index.ts",
+  "buildCmd": "cd frontend/design-system && npm run build",
+  "srcDir": "../src/components/common",
+  "tsconfig": "../tsconfig.json",
+  "componentSrcMap": {
+    "Th": "../src/components/common/ListTable.tsx",
+    "GroupHeaderRow": "../src/components/common/ListTable.tsx"
+  },
+  "docsMap": {
+    "Badge": "../../.design-sync/groups/feedback.md",
+    "ErrorBanner": "../../.design-sync/groups/feedback.md",
+    "SaveIndicator": "../../.design-sync/groups/feedback.md",
+    "Stat": "../../.design-sync/groups/feedback.md",
+    "Tabs": "../../.design-sync/groups/navigation.md",
+    "FilterTabs": "../../.design-sync/groups/navigation.md",
+    "SegmentedControl": "../../.design-sync/groups/navigation.md",
+    "Modal": "../../.design-sync/groups/overlays.md",
+    "ConfirmDialog": "../../.design-sync/groups/overlays.md",
+    "UnsavedChangesDialog": "../../.design-sync/groups/overlays.md",
+    "DetailPanel": "../../.design-sync/groups/overlays.md",
+    "FieldRow": "../../.design-sync/groups/forms.md",
+    "Switch": "../../.design-sync/groups/forms.md",
+    "CreatableSelect": "../../.design-sync/groups/forms.md",
+    "SaveButton": "../../.design-sync/groups/forms.md",
+    "StockCountFields": "../../.design-sync/groups/forms.md",
+    "CopyButton": "../../.design-sync/groups/forms.md",
+    "Th": "../../.design-sync/groups/tables.md",
+    "GroupHeaderRow": "../../.design-sync/groups/tables.md",
+    "BarcodeLabel": "../../.design-sync/groups/labels.md",
+    "DashboardIcon": "../../.design-sync/groups/icons.md",
+    "OrdersIcon": "../../.design-sync/groups/icons.md",
+    "ProductsIcon": "../../.design-sync/groups/icons.md",
+    "MaterialsIcon": "../../.design-sync/groups/icons.md",
+    "PurchasesIcon": "../../.design-sync/groups/icons.md",
+    "StockTakeIcon": "../../.design-sync/groups/icons.md",
+    "AlertsIcon": "../../.design-sync/groups/icons.md",
+    "SyncIcon": "../../.design-sync/groups/icons.md",
+    "SettingsIcon": "../../.design-sync/groups/icons.md"
+  },
+  "dtsPropsFor": {
+    "Tabs": "  tabs: { id: string; label: string }[];\n  active: string;\n  onChange: (id: string) => void;",
+    "FilterTabs": "  tabs: { id: string; label: string; /** Shown as a muted count after the label. Omit for a tab with no meaningful count. */ count?: number }[];\n  active: string;\n  onChange: (id: string) => void;",
+    "DetailPanel": "  title: React.ReactNode;\n  onClose: () => void;\n  onPrev?: () => void;\n  onNext?: () => void;\n  /** Pass tabs + activeTab + onTabChange together to show a tab bar under the header. */\n  tabs?: { id: string; label: string }[];\n  activeTab?: string;\n  onTabChange?: (id: string) => void;\n  /** Extra controls in the header row, e.g. an active/inactive badge. */\n  headerExtra?: React.ReactNode;\n  /** A persistent bar below the scroll area, e.g. the product slide-over's Save/Revert. */\n  footer?: React.ReactNode;\n  children: React.ReactNode;",
+    "SegmentedControl": "  options: { value: string; label: string }[];\n  value: string;\n  onChange: (value: string) => void;\n  ariaLabel?: string;",
+    "CreatableSelect": "  options: { id: number; name: string }[];\n  value: string;\n  onChange: (name: string) => void;\n  /** Called on blur with the matched option's id, or null when the typed name is new. */\n  onResolved: (id: number | null) => void;\n  placeholder?: string;\n  className?: string;",
+    "StockCountFields": "  /** null = inherit from the item's group / shop default. */\n  abcClass: \"A\" | \"B\" | \"C\" | null;\n  /** Kept as a string because it's bound to a free-text number input; \"\" means no override. */\n  intervalDays: string;\n  /** What the overrides currently resolve to (from the server). null hides the summary. */\n  classification: {\n    abc_class: \"A\" | \"B\" | \"C\";\n    interval_days: number;\n    class_source: \"item\" | \"group\" | \"default\";\n    interval_source: \"item\" | \"tier\" | \"default\";\n    last_stock_take_at: string | null;\n    next_due_at: string | null;\n    /** null means never counted. */\n    days_overdue: number | null;\n    is_due: boolean;\n  } | null;\n  /** What the middle level is called for this item — \"the Packaging category\" — so an inherited value can name its source. */\n  groupLabel: string | null;\n  onAbcClassChange: (next: \"A\" | \"B\" | \"C\" | null) => void;\n  onIntervalDaysChange: (next: string) => void;\n  /** \"rows\" = labelled stacked rows (materials Counting tab); \"inline\" = compact two-input block. */\n  layout?: \"inline\" | \"rows\";\n  /** The item's line on the currently-open stock take, if any. Rows layout only. */\n  openTake?: { id: number; status: string } | null;"
+  },
+  "overrides": {
+    "Modal": {
+      "cardMode": "single",
+      "primaryStory": "WithFooter",
+      "viewport": "720x480"
+    },
+    "ConfirmDialog": {
+      "cardMode": "single",
+      "primaryStory": "Danger",
+      "viewport": "720x420"
+    },
+    "UnsavedChangesDialog": {
+      "cardMode": "single",
+      "primaryStory": "NamedEditors",
+      "viewport": "720x360"
+    },
+    "DetailPanel": {
+      "cardMode": "single",
+      "primaryStory": "Material",
+      "viewport": "1000x640"
+    },
+    "Th": {
+      "cardMode": "column"
+    },
+    "GroupHeaderRow": {
+      "cardMode": "column"
+    },
+    "FilterTabs": {
+      "cardMode": "column"
+    },
+    "StockCountFields": {
+      "cardMode": "column"
+    },
+    "FieldRow": {
+      "cardMode": "column"
+    },
+    "ErrorBanner": {
+      "cardMode": "column"
+    }
+  },
+  "readmeHeader": ".design-sync/conventions.md"
+}
