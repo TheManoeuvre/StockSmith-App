@@ -27,11 +27,19 @@ class VariantUpdate(BaseModel):
 
 class VariantBomLine(BomLine):
     replaces_material_id: int | None = None
+    # How many units this line alone allows from the material's own stock, now and once
+    # open purchase orders land...
     line_max_buildable: int | None = None
     line_expected_max_buildable: int | None = None
-    # Populated only when this line is the bottleneck (line_max_buildable == 0) — ranked,
-    # human-curated fallbacks for material_id, surfaced so a person can choose one. Never
-    # auto-applied; see app.models.material_substitute.
+    # ...and the same once the material's active fallbacks are pooled in (see
+    # material_substitutes.FALLBACK_POOL_BY_MATERIAL_SQL). max_buildable is the min() of
+    # the first pair, max_buildable_incl_fallbacks of the second.
+    line_max_buildable_incl_fallbacks: int | None = None
+    line_expected_max_buildable_incl_fallbacks: int | None = None
+    # Populated only when line_max_buildable == 0 — the material's own shelf can't build
+    # a unit, whether or not a fallback is covering it — ranked, human-curated fallbacks
+    # for material_id, surfaced so a person can choose one. Never auto-applied; see
+    # app.models.material_substitute.
     suggested_substitutes: list[SubstituteSuggestion] = []
 
 
@@ -51,8 +59,12 @@ class VariantRead(VariantBase):
     platform_fee_percent: Decimal | None = None
     effective_platform_fee_percent: Decimal | None = None
     effective_shipping_profile_id: int | None = None
+    # From the BOM's own materials only, vs. counting each material's active fallbacks —
+    # the sellable figures below are built on the latter. See buildability.BuildableFigures.
     max_buildable: int | None = None
     expected_max_buildable: int | None = None
+    max_buildable_incl_fallbacks: int | None = None
+    expected_max_buildable_incl_fallbacks: int | None = None
     max_sellable: int | None = None
     max_sellable_reason: str | None = None
     expected_max_sellable: int | None = None

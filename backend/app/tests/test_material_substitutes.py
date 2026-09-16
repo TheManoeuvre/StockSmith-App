@@ -31,8 +31,14 @@ from app.schemas.material_substitute import (
     MaterialSubstituteUpdate,
     MaterialSubstituteUsageCreate,
 )
-from app.services.buildability import compute_variant_buildability
-from app.services.kitting import get_orders_awaiting_packaging
+from app.services.buildability import compute_variant_buildability, get_buildable_by_product
+from app.services.kitting import (
+    compute_variant_kitting_capacity,
+    compute_variants_kitting_capacity_bulk,
+    get_expected_kitting_capacity_by_product,
+    get_kitting_capacity_by_product,
+    get_orders_awaiting_packaging,
+)
 from app.services.material_substitutes import get_ranked_substitutes, record_substitute_usage
 
 
@@ -183,8 +189,12 @@ async def test_build_shortfall_surfaces_ranked_substitutes(session):
     session.add(variant)
     await session.commit()
 
-    max_buildable, _, _, bom = await compute_variant_buildability(session, product.id, variant.id)
-    assert max_buildable == 0
+    figures, _, bom = await compute_variant_buildability(session, product.id, variant.id)
+    assert figures.max_buildable == 0
+    # 500 from each fallback at 10 per unit — the fallback pool is what the sellable
+    # figures build on, while max_buildable stays the material-only 0 so the shortfall
+    # (and its suggestions) stay visible.
+    assert figures.max_buildable_incl_fallbacks == 100
 
     line = next(l for l in bom if l.material_id == short.id)
     assert [s.material_id for s in line.suggested_substitutes] == [fallback_best.id, fallback_worse.id]
@@ -206,7 +216,7 @@ async def test_build_line_with_enough_stock_gets_no_suggestions(session):
     session.add(variant)
     await session.commit()
 
-    _, _, _, bom = await compute_variant_buildability(session, product.id, variant.id)
+    _, _, bom = await compute_variant_buildability(session, product.id, variant.id)
     line = next(l for l in bom if l.material_id == plentiful.id)
     assert line.suggested_substitutes == []
 
@@ -240,6 +250,118 @@ async def test_kitting_packaging_shortfall_surfaces_ranked_substitutes(session):
     assert len(entry.suggested_substitutes) == 1
     assert entry.suggested_substitutes[0].material_id == bigger_box.id
     assert entry.suggested_substitutes[0].notes == "fits, just bigger"
+
+
+# ---------------------------------------------------------------------------
+# Packaging capacity pools fallbacks
+# ---------------------------------------------------------------------------
+
+
+async def _packaging_product_with_fallback(session, *, box_qty, fallback_qty):
+    """A product whose only kitting line is `box` (1 per unit), where `box` lists
+    `bigger_box` as its rank-0 fallback. Returns (product, variant, box, bigger_box)."""
+    box = await _material(session, "Small Box", category=LegacyMaterialCategory.packaging, unit=MaterialUnit.each, qty=box_qty)
+    bigger_box = await _material(
+        session, "Medium Box", category=LegacyMaterialCategory.packaging, unit=MaterialUnit.each, qty=fallback_qty
+    )
+    await session.commit()
+    await add_material_substitute(
+        box.id, MaterialSubstituteCreate(substitute_material_id=bigger_box.id, rank=0), session
+    )
+    product = Product(name="Widget", sku="W-1", current_stock=50)
+    session.add(product)
+    await session.flush()
+    session.add(ProductKittingMaterial(product_id=product.id, material_id=box.id, qty_required=Decimal(1)))
+    variant = ProductVariant(product_id=product.id, variant_name="Default", current_stock=50)
+    session.add(variant)
+    await session.commit()
+    return product, variant, box, bigger_box
+
+
+async def test_kitting_capacity_counts_active_fallback_stock_on_every_path(session):
+    """3 small boxes + 20 medium (the fallback) = 23 packable, not 3 — and the product-list
+    SQL, the per-variant path and the bulk per-variant path all say the same thing."""
+    product, variant, box, bigger_box = await _packaging_product_with_fallback(
+        session, box_qty=Decimal(3), fallback_qty=Decimal(20)
+    )
+
+    assert (await get_kitting_capacity_by_product(session))[product.id] == 23
+    assert (await get_expected_kitting_capacity_by_product(session))[product.id] == 23
+
+    capacity, expected_capacity, bom = await compute_variant_kitting_capacity(session, product.id, variant.id)
+    assert (capacity, expected_capacity) == (23, 23)
+    line = next(l for l in bom if l.material_id == box.id)
+    assert line.line_max_buildable == 3
+    assert line.line_max_buildable_incl_fallbacks == 23
+
+    bulk = await compute_variants_kitting_capacity_bulk(session, product.id, [variant.id])
+    assert bulk[variant.id][:2] == (23, 23)
+
+
+async def test_kitting_capacity_ignores_deactivated_fallback_and_its_allocated_stock(session):
+    product, variant, box, bigger_box = await _packaging_product_with_fallback(
+        session, box_qty=Decimal(3), fallback_qty=Decimal(20)
+    )
+    # Reserved fallback stock isn't free to lend.
+    bigger_box.allocated_qty = Decimal(15)
+    await session.commit()
+    assert (await get_kitting_capacity_by_product(session))[product.id] == 8
+    capacity, _, _ = await compute_variant_kitting_capacity(session, product.id, variant.id)
+    assert capacity == 8
+
+    # A deactivated fallback drops out of the pool entirely.
+    sub = (await list_material_substitutes(box.id, session))[0]
+    await update_material_substitute(box.id, sub.id, MaterialSubstituteUpdate(is_active=False), session)
+    assert (await get_kitting_capacity_by_product(session))[product.id] == 3
+    capacity, _, bom = await compute_variant_kitting_capacity(session, product.id, variant.id)
+    assert capacity == 3
+    assert next(l for l in bom if l.material_id == box.id).line_max_buildable_incl_fallbacks == 3
+
+
+async def test_kitting_line_short_on_its_own_shelf_still_suggests_even_when_fallback_covers(session):
+    """The whole point of keeping line_max_buildable material-only: a box with none on the
+    shelf is a shortfall someone has to resolve at pack time, so its ranked fallbacks are
+    offered on the kitting line — even though the fallback is already carrying capacity."""
+    product, variant, box, bigger_box = await _packaging_product_with_fallback(
+        session, box_qty=Decimal(0), fallback_qty=Decimal(20)
+    )
+    capacity, _, bom = await compute_variant_kitting_capacity(session, product.id, variant.id)
+    assert capacity == 20
+    line = next(l for l in bom if l.material_id == box.id)
+    assert line.line_max_buildable == 0
+    assert [s.material_id for s in line.suggested_substitutes] == [bigger_box.id]
+
+    bulk = await compute_variants_kitting_capacity_bulk(session, product.id, [variant.id])
+    bulk_line = next(l for l in bulk[variant.id][2] if l.material_id == box.id)
+    assert [s.material_id for s in bulk_line.suggested_substitutes] == [bigger_box.id]
+
+
+async def test_build_capacity_reports_material_only_and_fallback_pooled_side_by_side(session):
+    """10 via the BOM as written, 20 counting fallbacks — both figures, on the product-list
+    aggregate and the per-variant path alike, so the UI can show the split."""
+    pla = await _material(session, "PLA Red", qty=Decimal(100))
+    pla_alt = await _material(session, "PLA Blue", qty=Decimal(100))
+    await session.commit()
+    await add_material_substitute(pla.id, MaterialSubstituteCreate(substitute_material_id=pla_alt.id), session)
+
+    product = Product(name="Keyring", sku="K-2")
+    session.add(product)
+    await session.flush()
+    session.add(ProductMaterial(product_id=product.id, material_id=pla.id, qty_required=Decimal(10)))
+    variant = ProductVariant(product_id=product.id, variant_name="Default")
+    session.add(variant)
+    await session.commit()
+
+    by_product = (await get_buildable_by_product(session))[product.id]
+    assert (by_product.max_buildable, by_product.max_buildable_incl_fallbacks) == (10, 20)
+    assert (by_product.expected_max_buildable, by_product.expected_max_buildable_incl_fallbacks) == (10, 20)
+
+    figures, _, bom = await compute_variant_buildability(session, product.id, variant.id)
+    assert (figures.max_buildable, figures.max_buildable_incl_fallbacks) == (10, 20)
+    line = next(l for l in bom if l.material_id == pla.id)
+    assert (line.line_max_buildable, line.line_max_buildable_incl_fallbacks) == (10, 20)
+    # Not short on its own shelf, so nothing to suggest.
+    assert line.suggested_substitutes == []
 
 
 # ---------------------------------------------------------------------------

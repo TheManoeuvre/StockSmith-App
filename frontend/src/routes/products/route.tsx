@@ -22,7 +22,7 @@ import { CsvImportExport } from "../../components/common/CsvImportExport";
 import { FilterTabs } from "../../components/common/FilterTabs";
 import { GroupHeaderRow, Th } from "../../components/common/ListTable";
 import { PlatformSyncBadge } from "../../components/products/PlatformSyncBadge";
-import { sellableSummary } from "../../lib/format";
+import { inclFallbacksNote, sellableSummary } from "../../lib/format";
 import { formatUnitCost } from "../../lib/money";
 
 /**
@@ -485,6 +485,7 @@ function ProductRow({
             </span>
             <span className="block text-xs text-slate-500">
               {sellable.builtFree} built + {sellable.buildable ?? 0} buildable
+              {inclFallbacksNote(sellable) ? ` (${inclFallbacksNote(sellable)})` : ""}
             </span>
           </>
         )}

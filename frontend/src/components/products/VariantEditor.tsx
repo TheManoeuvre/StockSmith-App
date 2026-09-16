@@ -14,7 +14,7 @@ import { DirtyPath, useManagedSave } from "../../hooks/useDirtyRegistry";
 import { useGuard } from "../../hooks/useUnsavedChangesGuard";
 import { PlatformSyncBadge } from "./PlatformSyncBadge";
 import { BomOverrideEditor } from "./BomOverrideEditor";
-import { sellableSummary } from "../../lib/format";
+import { inclFallbacksNote, sellableSummary } from "../../lib/format";
 import { formatUnitCost } from "../../lib/money";
 
 const INITIAL_VARIANT_LIMIT = 5;
@@ -277,7 +277,8 @@ function VariantRow({
               BOM tables carry each material's own "Max theoretical" bottleneck, which is
               the actual answer to "why only this many?". */}
           <div className="text-xs text-slate-500">
-            {sellable.builtFree} built + {sellable.buildable ?? 0} buildable ·{" "}
+            {sellable.builtFree} built + {sellable.buildable ?? 0} buildable
+            {inclFallbacksNote(sellable) ? ` (${inclFallbacksNote(sellable)})` : ""} ·{" "}
             {variant.cost_per_unit ? formatUnitCost(variant.cost_per_unit) : "—"}
           </div>
         </div>

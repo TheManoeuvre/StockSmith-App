@@ -52,6 +52,19 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   sets the product's shipping profile from the listing's, if a linked one matches and the
   product had none — a profile you've already chosen is never replaced.
 
+### Changed
+- **A material's fallback substitutes now count towards build and packaging capacity.**
+  If a material or box is short but lists an active fallback (Materials → Details →
+  Fallbacks) with stock on the shelf, the product's sellable, expected-sellable and
+  build-to-order figures are no longer capped by the empty shelf — the fallback's free
+  stock is pooled in. The buildable figure is shown both ways so nothing is hidden: "10
+  buildable (20 incl. fallbacks)" on the product header, Stock tab, variant rows and the
+  products list. A line whose own shelf is empty still shows its ranked fallback
+  suggestions in the build BOM *and* kitting BOM override tables, even when a fallback is
+  already carrying the number — someone still has to choose which one to reach for. This
+  is only a number: nothing is reserved against the fallback. Fallbacks pool one level
+  deep (a fallback's own fallbacks don't chain in).
+
 ### Fixed
 - **Product margin now counts the postage you charge as income.** A product's profit and
   margin (Pricing tab, product header, and the Etsy vs eBay comparison) were computed on the
