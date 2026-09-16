@@ -9,7 +9,12 @@
   "tsconfig": "../tsconfig.json",
   "componentSrcMap": {
     "Th": "../src/components/common/ListTable.tsx",
-    "GroupHeaderRow": "../src/components/common/ListTable.tsx"
+    "GroupHeaderRow": "../src/components/common/ListTable.tsx",
+    "Disclosure": "../src/components/settings/Disclosure.tsx",
+    "SettingsCard": "../src/components/settings/SettingsCard.tsx",
+    "SettingsNav": "../src/components/settings/SettingsNav.tsx",
+    "PurchaseStatusPill": "../src/components/purchases/PurchaseStatusPill.tsx",
+    "PlatformSyncBadge": "../src/components/products/PlatformSyncBadge.tsx"
   },
   "docsMap": {
     "Badge": "../../.design-sync/groups/feedback.md",
@@ -40,7 +45,12 @@
     "StockTakeIcon": "../../.design-sync/groups/icons.md",
     "AlertsIcon": "../../.design-sync/groups/icons.md",
     "SyncIcon": "../../.design-sync/groups/icons.md",
-    "SettingsIcon": "../../.design-sync/groups/icons.md"
+    "SettingsIcon": "../../.design-sync/groups/icons.md",
+    "PurchaseStatusPill": "../../.design-sync/groups/purchases.md",
+    "PlatformSyncBadge": "../../.design-sync/groups/products.md",
+    "Disclosure": "../../.design-sync/groups/settings.md",
+    "SettingsCard": "../../.design-sync/groups/settings.md",
+    "SettingsNav": "../../.design-sync/groups/settings.md"
   },
   "dtsPropsFor": {
     "Tabs": "  tabs: { id: string; label: string }[];\n  active: string;\n  onChange: (id: string) => void;",
@@ -48,7 +58,9 @@
     "DetailPanel": "  title: React.ReactNode;\n  onClose: () => void;\n  onPrev?: () => void;\n  onNext?: () => void;\n  /** Pass tabs + activeTab + onTabChange together to show a tab bar under the header. */\n  tabs?: { id: string; label: string }[];\n  activeTab?: string;\n  onTabChange?: (id: string) => void;\n  /** Extra controls in the header row, e.g. an active/inactive badge. */\n  headerExtra?: React.ReactNode;\n  /** A persistent bar below the scroll area, e.g. the product slide-over's Save/Revert. */\n  footer?: React.ReactNode;\n  children: React.ReactNode;",
     "SegmentedControl": "  options: { value: string; label: string }[];\n  value: string;\n  onChange: (value: string) => void;\n  ariaLabel?: string;",
     "CreatableSelect": "  options: { id: number; name: string }[];\n  value: string;\n  onChange: (name: string) => void;\n  /** Called on blur with the matched option's id, or null when the typed name is new. */\n  onResolved: (id: number | null) => void;\n  placeholder?: string;\n  className?: string;",
-    "StockCountFields": "  /** null = inherit from the item's group / shop default. */\n  abcClass: \"A\" | \"B\" | \"C\" | null;\n  /** Kept as a string because it's bound to a free-text number input; \"\" means no override. */\n  intervalDays: string;\n  /** What the overrides currently resolve to (from the server). null hides the summary. */\n  classification: {\n    abc_class: \"A\" | \"B\" | \"C\";\n    interval_days: number;\n    class_source: \"item\" | \"group\" | \"default\";\n    interval_source: \"item\" | \"tier\" | \"default\";\n    last_stock_take_at: string | null;\n    next_due_at: string | null;\n    /** null means never counted. */\n    days_overdue: number | null;\n    is_due: boolean;\n  } | null;\n  /** What the middle level is called for this item — \"the Packaging category\" — so an inherited value can name its source. */\n  groupLabel: string | null;\n  onAbcClassChange: (next: \"A\" | \"B\" | \"C\" | null) => void;\n  onIntervalDaysChange: (next: string) => void;\n  /** \"rows\" = labelled stacked rows (materials Counting tab); \"inline\" = compact two-input block. */\n  layout?: \"inline\" | \"rows\";\n  /** The item's line on the currently-open stock take, if any. Rows layout only. */\n  openTake?: { id: number; status: string } | null;"
+    "StockCountFields": "  /** null = inherit from the item's group / shop default. */\n  abcClass: \"A\" | \"B\" | \"C\" | null;\n  /** Kept as a string because it's bound to a free-text number input; \"\" means no override. */\n  intervalDays: string;\n  /** What the overrides currently resolve to (from the server). null hides the summary. */\n  classification: {\n    abc_class: \"A\" | \"B\" | \"C\";\n    interval_days: number;\n    class_source: \"item\" | \"group\" | \"default\";\n    interval_source: \"item\" | \"tier\" | \"default\";\n    last_stock_take_at: string | null;\n    next_due_at: string | null;\n    /** null means never counted. */\n    days_overdue: number | null;\n    is_due: boolean;\n  } | null;\n  /** What the middle level is called for this item \u00e2\u20ac\u201d \"the Packaging category\" \u00e2\u20ac\u201d so an inherited value can name its source. */\n  groupLabel: string | null;\n  onAbcClassChange: (next: \"A\" | \"B\" | \"C\" | null) => void;\n  onIntervalDaysChange: (next: string) => void;\n  /** \"rows\" = labelled stacked rows (materials Counting tab); \"inline\" = compact two-input block. */\n  layout?: \"inline\" | \"rows\";\n  /** The item's line on the currently-open stock take, if any. Rows layout only. */\n  openTake?: { id: number; status: string } | null;",
+    "SettingsNav": "  groups: { label: string; items: { id: string; label: string }[] }[];\n  active: string;\n  onChange: (id: string) => void;",
+    "PlatformSyncBadge": "  platform: \"etsy\" | \"ebay\" | \"shopify\";\n  /** Listing-level: synced | listing_not_active | not_found | not_tested. Product-level roll-up: synced | partial | not_found | not_tested. */\n  status: \"synced\" | \"listing_not_active\" | \"not_found\" | \"not_tested\" | \"partial\";\n  /** Just the platform name instead of the full sentence, for several badges side by side; the sentence moves to the tooltip. */\n  compact?: boolean;"
   },
   "overrides": {
     "Modal": {
@@ -87,6 +99,15 @@
       "cardMode": "column"
     },
     "ErrorBanner": {
+      "cardMode": "column"
+    },
+    "Disclosure": {
+      "cardMode": "column"
+    },
+    "SettingsCard": {
+      "cardMode": "column"
+    },
+    "PurchaseStatusPill": {
       "cardMode": "column"
     }
   },

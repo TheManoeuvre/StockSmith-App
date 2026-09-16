@@ -27,20 +27,30 @@ Target: claude.ai/design project **StockSmith UI** (`f0e6eb34-35ee-4131-9a0a-3f9
 - `docsMap` enumerates every component on purpose: the app has no per-component docs, and the map is
   the only way to put components into named groups (frontmatter-only stubs in `.design-sync/groups/`).
   The stubs have an empty body, so `.prompt.md` is still synthesized from JSDoc + previews.
-- `dtsPropsFor` overrides six components whose auto-extracted body referenced types the emitter
-  didn't inline (`TabDef`, `FilterTabDef`, `Option`, `ResolvedClassification`, generic `T`) or
-  dropped `| null` (the ts-morph project runs `strict: false`). Re-check these if their props change.
-- `componentSrcMap` pins `Th`/`GroupHeaderRow` to `ListTable.tsx` (file name ≠ export name).
+- `dtsPropsFor` overrides eight components whose auto-extracted body referenced types the emitter
+  didn't inline (`TabDef`, `FilterTabDef`, `Option`, `ResolvedClassification`, `SettingsNavGroup`,
+  generic `T`), dropped `| null` (the ts-morph project runs `strict: false`), or lost a `//` prop
+  comment (`PlatformSyncBadge.compact`). Re-check these if their props change.
+- `componentSrcMap` pins `Th`/`GroupHeaderRow` to `ListTable.tsx` (file name ≠ export name) and
+  every component outside `cfg.srcDir` (`settings/`, `purchases/`, `products/`) — the fuzzy-find
+  only walks `srcDir`.
+- **Groups come from the source folder, not `docsMap`.** `source-kit.mjs` sets `c.group` to the last
+  non-generic path segment under `srcDir`'s root, and a doc `category` only applies when that
+  leaves `general`/`misc`. So `Disclosure`/`SettingsCard`/`SettingsNav` are `settings`,
+  `PlatformSyncBadge` is `products`, `PurchaseStatusPill` is `purchases` — not `feedback` — and
+  there's no config knob to move them (a `lib/source-kit.mjs` fork would be the only way). The
+  group stubs' `category` is kept matching the folder so the config doesn't lie.
 - Overlays (`Modal`, `ConfirmDialog`, `UnsavedChangesDialog`, `DetailPanel`) use `cardMode: single`
   with a viewport. Their previews wrap each story in a sized `Frame` div: the card's `.ds-single`
   wrapper is transformed (so it's the containing block for `position: fixed`) but has no height of its
   own, and without the Frame the dialog centres in a 0-px box and gets cropped.
 - Wide/stacked stories (`Th`, `GroupHeaderRow`, `FilterTabs`, `StockCountFields`, `FieldRow`,
-  `ErrorBanner`) use `cardMode: column` after `[GRID_OVERFLOW]` flagged them.
+  `ErrorBanner`, `Disclosure`, `SettingsCard`, `PurchaseStatusPill`) use `cardMode: column` after
+  `[GRID_OVERFLOW]` flagged them (or would have — the 560px card previews).
 
 ## Known render warns
 
-- None outstanding on the final build (29/29 clean, no thin/blank/identical).
+- None outstanding on the final build (34/34 clean, no thin/blank/identical; second sync 2026-09-16).
 
 ## Re-sync risks
 
@@ -57,7 +67,10 @@ Target: claude.ai/design project **StockSmith UI** (`f0e6eb34-35ee-4131-9a0a-3f9
   checks — same errors, so it shouldn't surprise.
 - No fonts are shipped (system stack) — if the app ever adopts a web font, add it via `cfg.extraFonts`.
 
-## Candidates to add next
+## Sync history
 
-`Disclosure`, `SettingsCard`, `SettingsNav` (settings/), `PurchaseStatusPill`, `PlatformSyncBadge` — all
-render standalone. Left out of the first sync because the user scoped it to `common/`.
+- 2026-09-16 (first): the 29 `common/` primitives.
+- 2026-09-16 (second): + `Disclosure`, `SettingsCard`, `SettingsNav`, `PurchaseStatusPill`,
+  `PlatformSyncBadge` — every remaining standalone-renderable leaf. Nothing else in
+  `frontend/src/components` renders without router/query/API context, so the barrel is now the
+  full candidate set; new candidates only appear when a new plain-props leaf is written.
