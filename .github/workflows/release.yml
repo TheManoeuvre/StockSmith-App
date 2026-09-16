@@ -118,6 +118,27 @@ jobs:
           $notes | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "CHANGELOG_EOF" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
+      # A version can reach this job twice — dispatched from main by a cloud session that
+      # cannot push tags, then again when the tag itself is pushed — and tauri-action creates
+      # a fresh draft each time rather than reusing one. The orphan then sits at the top of
+      # the Releases page forever, because GitHub lists drafts above every published release.
+      # Drop any existing draft for this version so there is only ever the one. Published
+      # releases are left alone: re-running against one is a deliberate act, and tauri-action
+      # will update it in place.
+      - name: Remove a stale draft for this version
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          $drafts = gh api "repos/$env:GITHUB_REPOSITORY/releases?per_page=100" --jq ".[] | select(.draft and .tag_name == `"$env:VERSION`") | .id"
+          foreach ($id in $drafts) {
+            if ($id) {
+              Write-Host "Deleting stale draft release $id for $env:VERSION"
+              gh api -X DELETE "repos/$env:GITHUB_REPOSITORY/releases/$id"
+            }
+          }
+
       - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
