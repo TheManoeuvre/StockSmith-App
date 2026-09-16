@@ -651,8 +651,16 @@ async def _variants_to_reads_bulk(
     product_id = product.id if product else variants[0].product_id
     variant_ids = [v.id for v in variants]
     buildability_by_variant = await compute_variants_buildability_bulk(session, product_id, variant_ids)
-    max_buildable_by_variant = {vid: buildability_by_variant[vid][0] for vid in variant_ids}
-    expected_max_buildable_by_variant = {vid: buildability_by_variant[vid][1] for vid in variant_ids}
+    # Sellable figures build on the *_incl_fallbacks pair, same as the single-variant
+    # path (see BuildableFigures).
+    max_buildable_by_variant = {
+        vid: figures.max_buildable_incl_fallbacks if (figures := buildability_by_variant[vid][0]) else None
+        for vid in variant_ids
+    }
+    expected_max_buildable_by_variant = {
+        vid: figures.expected_max_buildable_incl_fallbacks if (figures := buildability_by_variant[vid][0]) else None
+        for vid in variant_ids
+    }
     sellable_by_variant = await compute_max_sellable_bulk(
         session,
         product_id,
