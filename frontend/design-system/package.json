@@ -1,0 +1,11 @@
+{
+  "name": "stocksmith-ui",
+  "version": "0.16.2",
+  "private": true,
+  "type": "module",
+  "description": "Design-sync export of StockSmith's shared UI primitives (not a published package).",
+  "types": "dist/design-system/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node build-css.mjs"
+  }
+}
