@@ -72,6 +72,26 @@ def test_parse_listing_products_indexes_positionally():
     assert [p.index for p in parsed.products] == [0, 1]
     assert [p.sku for p in parsed.products] == ["A", None]
     assert parsed.products[0].variation == "Colour: Black"
+    assert parsed.products[0].attributes == {"Colour": "Black"}
+
+
+def test_parse_keeps_structured_attributes_alongside_display_string():
+    """The display string joins properties and multi-values with the same ", ", so it
+    can't be parsed back; the structured dict is what the matcher uses."""
+    product = _raw_product("A", "Black")
+    product["property_values"].append(
+        {"property_id": 201, "property_name": "Size", "scale_id": None, "value_ids": [2, 3], "values": ["S", "M"]}
+    )
+    parsed = EtsyAdapter.parse_listing_products(_raw_listing(1, "Mug", [product]))
+
+    assert parsed.products[0].variation == "Colour: Black, Size: S, M"
+    assert parsed.products[0].attributes == {"Colour": "Black", "Size": "S, M"}
+
+
+def test_parse_product_without_properties_has_empty_attributes():
+    parsed = EtsyAdapter.parse_listing_products(_raw_listing(1, "Mug", [_raw_product("A")]))
+    assert parsed.products[0].variation is None
+    assert parsed.products[0].attributes == {}
 
 
 def test_parse_skips_deleted_products():
@@ -294,3 +314,28 @@ async def test_write_rejects_out_of_range_index():
         await adapter.update_listing_skus(None, None, "1", {5: "NEW"})
 
     assert adapter.put_body is None  # nothing written
+
+
+# --- Fetching one listing's products for the mapping proposal -----------------------
+
+
+async def test_fetch_listing_products_reads_inventory_endpoint():
+    inventory = _inventory([_raw_product("A", "Black"), _raw_product("B", "White", is_deleted=True), _raw_product("C", "Red")])
+    adapter = _RecordingAdapter(inventory)
+
+    products = await adapter.fetch_listing_products(None, None, "42")
+
+    assert [(p.index, p.sku, p.attributes) for p in products] == [
+        (0, "A", {"Colour": "Black"}),
+        (2, "C", {"Colour": "Red"}),
+    ]
+    assert adapter.put_body is None
+
+
+async def test_fetch_listing_products_surfaces_etsy_errors():
+    class _FailingAdapter(_RecordingAdapter):
+        async def _authed_request(self, session, connection, method, path, **kwargs):
+            return _FakeResponse({"error": "gone"}, status_code=404)
+
+    with pytest.raises(PlatformSyncError):
+        await _FailingAdapter({}).fetch_listing_products(None, None, "42")

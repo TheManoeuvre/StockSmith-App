@@ -197,6 +197,10 @@ class ListingProductRef:
     sku: str | None
     variation: str | None
     quantity: int
+    # The property values behind `variation`, structured as {property_name: value} so
+    # they can be matched against StockSmith's variant attributes rather than parsed
+    # back out of the display string (whose separators are ambiguous).
+    attributes: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass

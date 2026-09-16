@@ -222,16 +222,36 @@ export interface UnmigratedListingsReport {
 
 export type VariationMatchConfidence = "exact" | "count_only" | "unmatched";
 
-export interface VariationMappingEntry {
+// How one StockSmith attribute name was paired with a platform variation attribute for
+// value matching: by name, by overlapping values only ("inferred" — the names differ),
+// by the user ("manual"), or not at all.
+export interface AttributePair {
+  stocksmith_name: string;
+  platform_name: string | null;
+  source: "exact" | "inferred" | "manual" | "unmatched";
+}
+
+// The user's manual attribute-name pairing, sent back on the proposal request:
+// StockSmith attribute name -> platform attribute name, or null to unpair.
+export type AttributeMap = Record<string, string | null>;
+
+// The rows both pickers render identically; each platform adds its own matched key.
+export interface VariationMappingEntryBase {
   variant_id: number | null;
   variant_name: string | null;
   stockssmith_attributes: Record<string, string>;
-  matched_sku: string | null;
-  matched_variation_specifics: Record<string, string> | null;
   match_confidence: VariationMatchConfidence;
 }
 
+export interface VariationMappingEntry extends VariationMappingEntryBase {
+  matched_sku: string | null;
+  matched_variation_specifics: Record<string, string> | null;
+}
+
 export interface VariationMappingProposal {
+  attribute_pairs: AttributePair[];
+  // Union of attribute names across the listing's variations — the pairing dropdown.
+  platform_attribute_names: string[];
   entries: VariationMappingEntry[];
 }
 
@@ -269,6 +289,8 @@ export interface UnadoptedListingProduct {
   sku: string | null;
   variation: string | null;
   quantity: number;
+  // `variation`, structured: {property_name: value}.
+  attributes: Record<string, string>;
 }
 
 export interface UnadoptedListing {
@@ -281,6 +303,18 @@ export interface UnadoptedListing {
 export interface UnadoptedListingsReport {
   total_count: number;
   listings: UnadoptedListing[];
+}
+
+export interface EtsyVariationMappingEntry extends VariationMappingEntryBase {
+  matched_index: number | null;
+  matched_variation: string | null;
+  matched_attributes: Record<string, string> | null;
+}
+
+export interface EtsyVariationMappingProposal {
+  attribute_pairs: AttributePair[];
+  platform_attribute_names: string[];
+  entries: EtsyVariationMappingEntry[];
 }
 
 export interface EtsyLinkChoice {
@@ -321,6 +355,13 @@ export interface EbaySigningKeyStatus {
   signing_key_id: string | null;
   created_at: string | null;
   expires_at: string | null;
+}
+
+// An empty map means "no manual pairing" — same request as omitting it, so it shares
+// the automatic proposal's cache entry.
+function attributeMapQuery(attributeMap?: AttributeMap): string {
+  if (!attributeMap || Object.keys(attributeMap).length === 0) return "";
+  return `?attribute_map=${encodeURIComponent(JSON.stringify(attributeMap))}`;
 }
 
 export const platformsApi = {
@@ -368,9 +409,13 @@ export const platformsApi = {
   fetchEtsyUnadoptedListings: () => api.get<UnadoptedListingsReport>(`/platforms/etsy/unadopted-listings`),
   adoptEtsyListing: (productId: number, payload: EtsyAdoptListingRequest) =>
     api.post<AdoptListingResult>(`/platforms/etsy/products/${productId}/adopt-listing`, payload),
-  fetchVariationMapping: (productId: number, externalListingId: string) =>
+  fetchVariationMapping: (productId: number, externalListingId: string, attributeMap?: AttributeMap) =>
     api.get<VariationMappingProposal>(
-      `/platforms/ebay/products/${productId}/listings/${encodeURIComponent(externalListingId)}/variation-mapping`
+      `/platforms/ebay/products/${productId}/listings/${encodeURIComponent(externalListingId)}/variation-mapping${attributeMapQuery(attributeMap)}`
+    ),
+  fetchEtsyVariationMapping: (productId: number, externalListingId: string, attributeMap?: AttributeMap) =>
+    api.get<EtsyVariationMappingProposal>(
+      `/platforms/etsy/products/${productId}/listings/${encodeURIComponent(externalListingId)}/variation-mapping${attributeMapQuery(attributeMap)}`
     ),
   adoptEbayListing: (productId: number, payload: AdoptListingRequest) =>
     api.post<AdoptListingResult>(`/platforms/ebay/products/${productId}/adopt-listing`, payload),

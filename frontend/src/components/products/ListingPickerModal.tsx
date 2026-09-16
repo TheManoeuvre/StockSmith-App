@@ -3,12 +3,15 @@ import { useMemo, useState } from "react";
 import {
   platformsApi,
   type AdoptListingResult,
+  type AttributeMap,
   type EligibilityAnnotatedCandidate,
   type VariationMappingChoice,
 } from "../../api/platforms";
 import { productsApi } from "../../api/products";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { Modal } from "../common/Modal";
+import { AttributePairingSection } from "./AttributePairingSection";
+import { VariantMatchLabel } from "./VariantMatchLabel";
 
 // eBay-only — a classic (unmigrated) listing is an eBay-specific concept (see
 // EbayAdapter.fetch_classic_listings). Etsy's analogous gap is the reverse situation
@@ -30,6 +33,10 @@ export function ListingPickerModal({
   const [selected, setSelected] =
     useState<EligibilityAnnotatedCandidate | null>(null);
   const [mapping, setMapping] = useState<Record<string, string>>({});
+  // The user's manual attribute-name pairing, layered over the proposal's own.
+  const [attributeOverrides, setAttributeOverrides] = useState<AttributeMap>(
+    {},
+  );
   const [alignSkus, setAlignSkus] = useState(true);
   const [confirmed, setConfirmed] = useState(false);
 
@@ -54,21 +61,34 @@ export function ListingPickerModal({
   // Deliberately keyed on the product too: the proposal pairs THIS product's variants
   // against the listing's variations, so reusing a cached one across products would
   // offer a mapping built for the wrong variant set.
-  const { data: proposal, isLoading: proposalLoading } = useQuery({
+  const {
+    data: proposal,
+    isLoading: proposalLoading,
+    error: proposalError,
+  } = useQuery({
     queryKey: [
       "platforms",
       "ebay",
       "variation-mapping",
       chosenProductId,
       selected?.external_listing_id,
+      attributeOverrides,
     ],
     queryFn: () =>
       platformsApi.fetchVariationMapping(
         chosenProductId!,
         selected!.external_listing_id,
+        attributeOverrides,
       ),
     enabled: selected !== null && chosenProductId !== null,
   });
+
+  // A re-pair changes what every row was pre-filled from, so manual row picks made
+  // under the old pairing are dropped rather than silently kept over a new proposal.
+  const repairAttribute = (stocksmithName: string, platformName: string | null) => {
+    setAttributeOverrides((o) => ({ ...o, [stocksmithName]: platformName }));
+    setMapping({});
+  };
 
   const proposalEntries = useMemo(() => proposal?.entries ?? [], [proposal]);
 
@@ -258,6 +278,18 @@ export function ListingPickerModal({
               Loading listing detail from eBay…
             </p>
           )}
+          <ErrorBanner error={proposalError} />
+
+          {proposal && (
+            <AttributePairingSection
+              pairs={proposal.attribute_pairs}
+              platformNames={proposal.platform_attribute_names}
+              overrides={attributeOverrides}
+              onChange={repairAttribute}
+              platformLabel="eBay"
+              disabled={done}
+            />
+          )}
 
           {proposalEntries.length > 0 && (
             <div className="flex flex-col gap-2 rounded-md border border-slate-200 p-3">
@@ -269,31 +301,15 @@ export function ListingPickerModal({
                   entry.variant_id === null
                     ? "product"
                     : String(entry.variant_id);
-                const attrs = Object.entries(entry.stockssmith_attributes)
-                  .map(([k, v]) => `${k}: ${v}`)
-                  .join(", ");
                 return (
                   <label
                     key={key}
                     className="flex items-center justify-between gap-2 text-sm"
                   >
-                    <span>
-                      {entry.variant_name ?? "(product)"}
-                      {attrs && (
-                        <span className="text-slate-500"> — {attrs}</span>
-                      )}
-                      {entry.match_confidence !== "exact" && (
-                        <span className="ml-1 text-xs text-amber-600">
-                          (
-                          {entry.match_confidence === "count_only"
-                            ? "check this"
-                            : "pick one"}
-                          )
-                        </span>
-                      )}
-                    </span>
+                    <VariantMatchLabel entry={entry} />
                     <select
                       disabled={done}
+                      aria-label={`eBay SKU for ${entry.variant_name ?? "product"}`}
                       className="rounded-md border border-slate-300 px-2 py-1 font-mono text-xs"
                       value={effectiveMapping[key] ?? ""}
                       onChange={(e) =>

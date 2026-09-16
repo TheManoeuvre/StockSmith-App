@@ -1,5 +1,6 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from typing import Literal
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -10,16 +11,23 @@ from app.models.shipping_profile import ShippingProfile
 from app.models.variant import ProductVariant
 from app.schemas.listing_adoption import (
     AdoptListingResult,
+    AttributePair,
+    EtsyVariationMappingEntry,
+    EtsyVariationMappingProposal,
     UnitAdoptionResult,
     VariationMappingEntry,
     VariationMappingProposal,
 )
 from app.services import listing_sync
-from app.services.platforms.base import ClassicListingCandidate, UnadoptedListingCandidate
+from app.services.platforms.base import ClassicListingCandidate, ListingProductRef, UnadoptedListingCandidate
 from app.services.variants import compute_full_sku
 
 __all__ = [
+    "match_variations",
+    "normalise_token",
     "propose_variation_mapping",
+    "propose_etsy_variation_mapping",
+    "UnknownPlatformAttribute",
     "plan_sku_alignment",
     "SkuAlignmentPlan",
     "apply_adoption",
@@ -95,93 +103,271 @@ def _variant_attributes(product: Product, variant: ProductVariant) -> dict[str, 
     return {name: value for name, value in pairs if name and value}
 
 
-def propose_variation_mapping(
-    product: Product, active_variants: list[ProductVariant], candidate: ClassicListingCandidate
-) -> VariationMappingProposal:
-    """Proposes a variant->eBay-SKU mapping for a selected classic listing, matched by
-    attribute value where possible so a human only has to confirm/correct it rather than
-    build it from scratch. Never guesses silently past "exact" — ambiguous or
-    mismatched-count cases come back as "count_only"/"unmatched" for the picker's
-    variation-mapping step to force a manual choice on."""
-    ebay_specifics = candidate.variation_specifics
+def normalise_token(value: str) -> str:
+    """Case-folds and drops everything that isn't a letter or digit, so "Red / Blue",
+    "red-blue" and "RED BLUE" all compare equal. Used for both attribute names and
+    values — marketplaces and sellers punctuate them every which way."""
+    return "".join(ch for ch in value.casefold() if ch.isalnum())
 
-    if not active_variants:
-        sku = candidate.skus[0] if len(candidate.skus) == 1 else None
-        confidence = "exact" if sku else "unmatched"
-        return VariationMappingProposal(
-            entries=[
-                VariationMappingEntry(
-                    variant_id=None,
-                    variant_name=None,
-                    stockssmith_attributes={},
-                    matched_sku=sku,
-                    matched_variation_specifics=None,
-                    match_confidence=confidence,
-                )
-            ]
+
+# Spelling variants folded together *after* normalisation, for attribute names only.
+# Kept tiny on purpose: anything beyond obvious spellings is better handled by the
+# value-overlap inference in _pair_attribute_names than by a growing synonym list.
+_NAME_ALIASES = {"color": "colour", "colors": "colour", "colours": "colour"}
+
+
+def _normalise_name(name: str) -> str:
+    token = normalise_token(name)
+    return _NAME_ALIASES.get(token, token)
+
+
+@dataclass
+class PlatformVariation:
+    """One variation of a marketplace listing, platform-neutral: `key` is whatever the
+    platform's adopt request addresses it by (eBay: the variation SKU; Etsy: the
+    product's index), `attributes` its {name: value} specifics."""
+
+    key: str | int
+    attributes: dict[str, str]
+    display: str | None = None
+
+
+@dataclass
+class AttributePairing:
+    stocksmith_name: str
+    platform_name: str | None
+    source: Literal["exact", "inferred", "manual", "unmatched"]
+
+
+MatchConfidence = Literal["exact", "count_only", "unmatched"]
+
+
+@dataclass
+class VariantMatch:
+    variant: ProductVariant | None
+    matched: PlatformVariation | None
+    confidence: MatchConfidence
+
+
+@dataclass
+class MatchOutcome:
+    attribute_pairs: list[AttributePairing] = field(default_factory=list)
+    platform_attribute_names: list[str] = field(default_factory=list)
+    matches: list[VariantMatch] = field(default_factory=list)
+
+
+class UnknownPlatformAttribute(ValueError):
+    """attribute_map named a platform attribute the listing doesn't carry."""
+
+
+def _pair_attribute_names(
+    product: Product,
+    active_variants: list[ProductVariant],
+    variations: list[PlatformVariation],
+    platform_names: list[str],
+    attribute_map: dict[str, str | None] | None,
+) -> list[AttributePairing]:
+    """Stage one of matching: which platform attribute is each StockSmith attribute?
+    Manual choices win, then normalised-name equality, then a platform attribute whose
+    values overlap this attribute's values (the names differ but the content is plainly
+    the same thing). Each platform attribute is paired at most once."""
+    per_variant = [_variant_attributes(product, v) for v in active_variants]
+    stocksmith_names = [
+        name
+        for name in (
+            product.variant_attribute1_name,
+            product.variant_attribute2_name,
+            product.variant_attribute3_name,
         )
+        if name and any(name in attrs for attrs in per_variant)
+    ]
+    by_normalised = {_normalise_name(name): name for name in platform_names}
+    pairs: dict[str, AttributePairing] = {}
+    taken: set[str] = set()
 
-    if not ebay_specifics or len(ebay_specifics) != len(active_variants):
-        # Count mismatch (or no per-variation specifics at all) — nothing to match
-        # against, force a manual pick for every variant.
-        return VariationMappingProposal(
-            entries=[
-                VariationMappingEntry(
-                    variant_id=v.id,
-                    variant_name=v.variant_name,
-                    stockssmith_attributes=_variant_attributes(product, v),
-                    matched_sku=None,
-                    matched_variation_specifics=None,
-                    match_confidence="unmatched",
-                )
-                for v in active_variants
-            ]
-        )
+    for name in stocksmith_names:
+        if attribute_map is not None and name in attribute_map:
+            chosen = attribute_map[name]
+            if chosen is not None and chosen not in platform_names:
+                raise UnknownPlatformAttribute(chosen)
+            pairs[name] = AttributePairing(name, chosen, "manual" if chosen is not None else "unmatched")
+            if chosen is not None:
+                taken.add(chosen)
 
-    remaining_specifics = list(zip(candidate.skus, ebay_specifics))
-    entries: list[VariationMappingEntry] = []
-    unmatched_variants: list[ProductVariant] = []
+    for name in stocksmith_names:
+        if name in pairs:
+            continue
+        exact = by_normalised.get(_normalise_name(name))
+        if exact is not None and exact not in taken:
+            pairs[name] = AttributePairing(name, exact, "exact")
+            taken.add(exact)
 
-    for variant in active_variants:
-        attrs = _variant_attributes(product, variant)
-        match = None
-        if attrs:
-            for sku, specifics in remaining_specifics:
-                normalized_specifics = {k.lower(): v.lower() for k, v in specifics.items()}
-                if all(normalized_specifics.get(name.lower()) == value.lower() for name, value in attrs.items()):
-                    match = (sku, specifics)
-                    break
-        if match is not None:
-            remaining_specifics.remove(match)
-            entries.append(
-                VariationMappingEntry(
-                    variant_id=variant.id,
-                    variant_name=variant.variant_name,
-                    stockssmith_attributes=attrs,
-                    matched_sku=match[0],
-                    matched_variation_specifics=match[1],
-                    match_confidence="exact",
-                )
-            )
+    for name in stocksmith_names:
+        if name in pairs:
+            continue
+        ours = {normalise_token(attrs[name]) for attrs in per_variant if name in attrs}
+        scores: list[tuple[int, str]] = []
+        for platform_name in platform_names:
+            if platform_name in taken:
+                continue
+            theirs = {normalise_token(v.attributes[platform_name]) for v in variations if platform_name in v.attributes}
+            overlap = len(ours & theirs)
+            if overlap:
+                scores.append((overlap, platform_name))
+        scores.sort(key=lambda entry: -entry[0])
+        if scores and (len(scores) == 1 or scores[0][0] > scores[1][0]):
+            pairs[name] = AttributePairing(name, scores[0][1], "inferred")
+            taken.add(scores[0][1])
         else:
-            unmatched_variants.append(variant)
+            pairs[name] = AttributePairing(name, None, "unmatched")
 
-    # Anything left over: counts matched overall, but attribute values didn't line up
-    # cleanly (ambiguous eBay specifics, or a StockSmith variant with no attributes set)
-    # — fall back to a positional pairing as a starting point, flagged for manual review.
-    for variant, (sku, specifics) in zip(unmatched_variants, remaining_specifics):
-        entries.append(
-            VariationMappingEntry(
-                variant_id=variant.id,
-                variant_name=variant.variant_name,
-                stockssmith_attributes=_variant_attributes(product, variant),
-                matched_sku=sku,
-                matched_variation_specifics=specifics,
-                match_confidence="count_only",
-            )
+    return [pairs[name] for name in stocksmith_names]
+
+
+def match_variations(
+    product: Product,
+    active_variants: list[ProductVariant],
+    variations: list[PlatformVariation],
+    attribute_map: dict[str, str | None] | None = None,
+) -> MatchOutcome:
+    """Proposes a StockSmith-variant -> platform-variation pairing so a human only has
+    to confirm/correct it rather than build it from scratch. Two stages: pair attribute
+    *names* (see _pair_attribute_names), then match each variant's values under those
+    pairs, case- and symbol-insensitively.
+
+    Never guesses silently past "exact": a variant is only paired by value when exactly
+    one untaken variation fits. Whatever is left over is paired positionally as
+    "count_only" when the counts happen to agree (a plausible starting point, flagged
+    for review) and left "unmatched" otherwise. Attribute-exact matches survive a count
+    mismatch — only the positional fallback is withheld then.
+
+    `attribute_map` is the user's manual say on stage one: {stocksmith_name:
+    platform_name | None}; names absent from it are still paired automatically."""
+    if not active_variants:
+        matched = variations[0] if len(variations) == 1 else None
+        return MatchOutcome(matches=[VariantMatch(None, matched, "exact" if matched else "unmatched")])
+
+    platform_names: list[str] = []
+    for variation in variations:
+        for name in variation.attributes:
+            if name not in platform_names:
+                platform_names.append(name)
+
+    # No per-variation attributes at all (an eBay listing with no specifics): there is
+    # nothing to pair names against, so don't offer the user an empty pairing step.
+    pairs = (
+        _pair_attribute_names(product, active_variants, variations, platform_names, attribute_map)
+        if platform_names
+        else []
+    )
+    paired = {p.stocksmith_name: p.platform_name for p in pairs if p.platform_name is not None}
+
+    def wanted(variant: ProductVariant) -> dict[str, str]:
+        attrs = _variant_attributes(product, variant)
+        return {paired[name]: normalise_token(value) for name, value in attrs.items() if name in paired}
+
+    def fits(wants: dict[str, str], variation: PlatformVariation) -> bool:
+        return all(
+            platform_name in variation.attributes and normalise_token(variation.attributes[platform_name]) == value
+            for platform_name, value in wants.items()
         )
 
-    return VariationMappingProposal(entries=entries)
+    matched: dict[int, tuple[PlatformVariation, MatchConfidence]] = {}
+    remaining = list(variations)
+    # Iterate to a fixed point: a variant that fits two variations becomes unambiguous
+    # once another variant claims one of them.
+    progressed = True
+    while progressed:
+        progressed = False
+        for position, variant in enumerate(active_variants):
+            if position in matched:
+                continue
+            wants = wanted(variant)
+            if not wants:
+                continue
+            fitting = [v for v in remaining if fits(wants, v)]
+            if len(fitting) == 1:
+                matched[position] = (fitting[0], "exact")
+                remaining.remove(fitting[0])
+                progressed = True
+
+    leftover = [i for i in range(len(active_variants)) if i not in matched]
+    if len(variations) == len(active_variants):
+        for position, variation in zip(leftover, remaining):
+            matched[position] = (variation, "count_only")
+
+    return MatchOutcome(
+        attribute_pairs=pairs,
+        platform_attribute_names=platform_names,
+        matches=[
+            VariantMatch(variant, *matched[i]) if i in matched else VariantMatch(variant, None, "unmatched")
+            for i, variant in enumerate(active_variants)
+        ],
+    )
+
+
+def _attribute_pairs(outcome: MatchOutcome) -> list[AttributePair]:
+    return [
+        AttributePair(stocksmith_name=p.stocksmith_name, platform_name=p.platform_name, source=p.source)
+        for p in outcome.attribute_pairs
+    ]
+
+
+def propose_variation_mapping(
+    product: Product,
+    active_variants: list[ProductVariant],
+    candidate: ClassicListingCandidate,
+    attribute_map: dict[str, str | None] | None = None,
+) -> VariationMappingProposal:
+    """match_variations for a classic eBay listing, keyed by variation SKU. Without
+    per-variation specifics there is nothing to match by value, so every variant lands
+    on the positional/unmatched fallback."""
+    specifics = candidate.variation_specifics or [{} for _ in candidate.skus]
+    variations = [PlatformVariation(key=sku, attributes=attrs) for sku, attrs in zip(candidate.skus, specifics)]
+    outcome = match_variations(product, active_variants, variations, attribute_map)
+    return VariationMappingProposal(
+        attribute_pairs=_attribute_pairs(outcome),
+        platform_attribute_names=outcome.platform_attribute_names,
+        entries=[
+            VariationMappingEntry(
+                variant_id=m.variant.id if m.variant else None,
+                variant_name=m.variant.variant_name if m.variant else None,
+                stockssmith_attributes=_variant_attributes(product, m.variant) if m.variant else {},
+                matched_sku=str(m.matched.key) if m.matched else None,
+                matched_variation_specifics=(m.matched.attributes or None) if m.matched else None,
+                match_confidence=m.confidence,
+            )
+            for m in outcome.matches
+        ],
+    )
+
+
+def propose_etsy_variation_mapping(
+    product: Product,
+    active_variants: list[ProductVariant],
+    products: list[ListingProductRef],
+    attribute_map: dict[str, str | None] | None = None,
+) -> EtsyVariationMappingProposal:
+    """match_variations for an Etsy listing, keyed by the product's position in the
+    listing (what EtsyLinkChoice.product_index sends back on adopt)."""
+    variations = [PlatformVariation(key=p.index, attributes=p.attributes, display=p.variation) for p in products]
+    outcome = match_variations(product, active_variants, variations, attribute_map)
+    return EtsyVariationMappingProposal(
+        attribute_pairs=_attribute_pairs(outcome),
+        platform_attribute_names=outcome.platform_attribute_names,
+        entries=[
+            EtsyVariationMappingEntry(
+                variant_id=m.variant.id if m.variant else None,
+                variant_name=m.variant.variant_name if m.variant else None,
+                stockssmith_attributes=_variant_attributes(product, m.variant) if m.variant else {},
+                matched_index=int(m.matched.key) if m.matched else None,
+                matched_variation=m.matched.display if m.matched else None,
+                matched_attributes=(m.matched.attributes or None) if m.matched else None,
+                match_confidence=m.confidence,
+            )
+            for m in outcome.matches
+        ],
+    )
 
 
 def plan_sku_alignment(
