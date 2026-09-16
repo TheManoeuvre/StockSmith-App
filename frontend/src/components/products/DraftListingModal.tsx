@@ -88,6 +88,12 @@ export function DraftListingModal({
               <strong>{result.state}</strong>. It isn't visible to buyers — finish it in {label} and publish
               from there.
             </p>
+            {result.shipping_source === "listing_profile" && (
+              <p className="text-xs text-slate-500">
+                Shipping was taken from the listing profile's fallback — the product's shipping profile
+                isn't linked to {label}.
+              </p>
+            )}
             {result.warnings.length > 0 && (
               <ul className="list-inside list-disc text-xs text-amber-800">
                 {result.warnings.map((w) => (
@@ -116,6 +122,8 @@ export function DraftListingModal({
                 <dd>{readiness.description_chars} characters</dd>
                 <dt className="text-slate-500">Profile</dt>
                 <dd>{readiness.profile_name ?? "—"}</dd>
+                <dt className="text-slate-500">Shipping</dt>
+                <dd>{readiness.shipping_source_label ?? "—"}</dd>
                 <dt className="text-slate-500">Variations</dt>
                 <dd>
                   {readiness.priced_unit_count} of {readiness.unit_count} priced

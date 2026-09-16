@@ -85,6 +85,14 @@ class PlatformConnection(Base):
     # sync_scheduler._MAX_CONSECUTIVE_AUTH_FAILURES the scheduler flips auto_sync_enabled
     # back off itself rather than retrying a dead connection forever.
     consecutive_auth_failures: Mapped[int] = mapped_column(default=0, nullable=False)
+    # Scheduled refresh of linked shipping profiles' buyer prices
+    # (services/shipping_price_sync.refresh), run from the end of a successful background
+    # order-sync tick at most once per shipping_price_refresh_hours. Postage prices change
+    # on the order of weeks, so one extra API call per platform per day is the right cost.
+    # last_shipping_price_refresh_at is left untouched when a refresh is skipped for a rate
+    # limit, so the next tick tries again.
+    shipping_price_refresh_hours: Mapped[int] = mapped_column(default=24, nullable=False)
+    last_shipping_price_refresh_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.listing import ListingPlatform
 from app.models.product import Product
+from app.models.shipping_profile import ShippingProfile
 from app.models.variant import ProductVariant
 from app.schemas.listing_adoption import (
     AdoptListingResult,
@@ -426,6 +427,7 @@ async def apply_adoption(
     listing_title: str,
     skus_aligned: bool = False,
     external_listing_id: str | None = None,
+    marketplace_shipping_id: int | str | None = None,
 ) -> AdoptListingResult:
     """Writes the user-confirmed variant->SKU mapping onto each unit's Listing row.
     StockSmith's own computed SKU is always the lookup key going forward (source of
@@ -445,7 +447,13 @@ async def apply_adoption(
     column, and writing the wrong one would break the very sync check this is meant to
     fix. eBay's _index_inventory_item sets it to the SKU (its Inventory API is
     SKU-keyed); Etsy's _index_listing_skus sets it to the listing id. Leave it None for
-    eBay to get the per-unit SKU; pass the listing id for Etsy."""
+    eBay to get the per-unit SKU; pass the listing id for Etsy.
+
+    `marketplace_shipping_id` is the listing's own Etsy shipping profile id / eBay
+    fulfillment policy id when the caller could read it. If a local ShippingProfile is
+    linked to it and the product has no shipping profile yet, the product is pointed at
+    it — the adopted listing already ships that way, so the draft/margin side should say
+    so too. A shipping profile the user has already set is never overwritten."""
     variants_by_id = {v.id: v for v in active_variants}
     now = datetime.now(timezone.utc)
     units: list[UnitAdoptionResult] = []
@@ -474,6 +482,39 @@ async def apply_adoption(
             )
         )
 
+    shipping_profile_assigned = await _assign_linked_shipping_profile(
+        session, product, platform, marketplace_shipping_id
+    )
+
     await session.commit()
     summary = await listing_sync.get_stored_product_sync_status(session, product.id, platform)
-    return AdoptListingResult(summary=summary, units=units, skus_aligned=skus_aligned)
+    return AdoptListingResult(
+        summary=summary,
+        units=units,
+        skus_aligned=skus_aligned,
+        shipping_profile_assigned=shipping_profile_assigned,
+    )
+
+
+async def _assign_linked_shipping_profile(
+    session: AsyncSession,
+    product: Product,
+    platform: ListingPlatform,
+    marketplace_shipping_id: int | str | None,
+) -> str | None:
+    """Sets product.shipping_profile_id to the local profile linked to the listing's
+    marketplace shipping id, only when the product has none. Returns the profile's name
+    when it did, so the UI can say so."""
+    if marketplace_shipping_id is None or product.shipping_profile_id is not None:
+        return None
+    if platform == ListingPlatform.etsy:
+        condition = ShippingProfile.etsy_shipping_profile_id == int(marketplace_shipping_id)
+    elif platform == ListingPlatform.ebay:
+        condition = ShippingProfile.ebay_fulfillment_policy_id == str(marketplace_shipping_id)
+    else:
+        return None
+    profile = (await session.execute(select(ShippingProfile).where(condition))).scalar_one_or_none()
+    if profile is None:
+        return None
+    product.shipping_profile_id = profile.id
+    return profile.name

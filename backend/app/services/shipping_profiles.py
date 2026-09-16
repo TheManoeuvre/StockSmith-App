@@ -89,3 +89,29 @@ def resolve_shipping_cost_for_fee_source(profile: ShippingProfile, fee_source: M
     if fee_source == MarginFeeSource.ebay:
         return Decimal(profile.cost_ebay)
     return Decimal(profile.cost_manual)
+
+
+def resolve_shipping_price_for_platform(profile: ShippingProfile, platform: ListingPlatform | None) -> Decimal:
+    """The postage price the buyer is charged on a given channel — price_<platform> when
+    set, else the manual/default `price`. The per-channel mirror of
+    resolve_shipping_cost_for_platform: the same physical service is genuinely sold at
+    different postage prices on different marketplaces, and once a profile is linked the
+    marketplace's own figure is imported into price_<platform> (see
+    services/shipping_price_sync.py). platform None is a manual order."""
+    if platform == ListingPlatform.etsy and profile.price_etsy is not None:
+        return Decimal(profile.price_etsy)
+    if platform == ListingPlatform.ebay and profile.price_ebay is not None:
+        return Decimal(profile.price_ebay)
+    return Decimal(profile.price)
+
+
+def resolve_shipping_price_for_fee_source(profile: ShippingProfile, fee_source: MarginFeeSource) -> Decimal:
+    """Same per-channel price pick keyed off the shop-wide margin fee source, for the
+    product-level margin estimate. Used everywhere the buyer-charged postage feeds margin
+    or fee calculation (pricing, platform_fees, routers/products) so a linked profile's
+    Etsy price moves the Etsy margin and nothing else."""
+    if fee_source == MarginFeeSource.etsy:
+        return resolve_shipping_price_for_platform(profile, ListingPlatform.etsy)
+    if fee_source == MarginFeeSource.ebay:
+        return resolve_shipping_price_for_platform(profile, ListingPlatform.ebay)
+    return Decimal(profile.price)

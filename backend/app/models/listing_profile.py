@@ -27,6 +27,14 @@ class ListingProfile(Base):
     One table covers both marketplaces, with the platform on the row, because the concepts
     don't map onto each other: Etsy's taxonomy_id and eBay's categoryId are different
     things, so sharing a column would only hide that.
+
+    Shipping is the exception to "the profile carries it". The product's own ShippingProfile
+    (models/shipping_profile.py) can be linked to an Etsy shipping profile / eBay fulfillment
+    policy, and when it is, that link is what the draft sends — the product's shipping
+    profile is the single source of "how this ships", for margin and for listings alike.
+    etsy_shipping_profile_id / ebay_fulfillment_policy_id here are only the fallback for a
+    product whose shipping profile has no link (or that has none). See
+    services/draft_readiness.resolve_marketplace_shipping.
     """
 
     __tablename__ = "listing_profiles"

@@ -10,6 +10,7 @@ from app.services.shipping_profiles import (
     get_shipping_profiles_by_id,
     resolve_product_shipping_profile,
     resolve_shipping_cost_for_fee_source,
+    resolve_shipping_price_for_fee_source,
 )
 
 # A material cost recompute only triggers a fresh snapshot if the product's cost_per_unit
@@ -79,7 +80,7 @@ async def snapshot_product_pricing(session: AsyncSession, product: Product, cost
     fee_source, fee_components = await platform_fees.get_resolver_context(session)
     shipping_profiles_by_id = await get_shipping_profiles_by_id(session)
     shipping_profile = resolve_product_shipping_profile(shipping_profiles_by_id, product)
-    shipping_price = shipping_profile.price if shipping_profile else None
+    shipping_price = resolve_shipping_price_for_fee_source(shipping_profile, fee_source) if shipping_profile else None
     shipping_cost = resolve_shipping_cost_for_fee_source(shipping_profile, fee_source) if shipping_profile else None
     effective_fee_percent = platform_fees.resolve_fee_percent(
         fee_source, fee_components, product.platform_fee_percent, product.sale_price, shipping_price

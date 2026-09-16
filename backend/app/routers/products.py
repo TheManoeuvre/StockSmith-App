@@ -72,6 +72,7 @@ from app.services.shipping_profiles import (
     get_shipping_profiles_by_id,
     resolve_product_shipping_profile,
     resolve_shipping_cost_for_fee_source,
+    resolve_shipping_price_for_fee_source,
     resolve_variant_shipping_profile,
 )
 from app.services.validation import validate_lines_against_units
@@ -265,12 +266,17 @@ def _read_product(product: Product, ctx: "_ProductReadContext") -> ProductRead:
             theoretical_max_sellable, theoretical_max_sellable_reason, product.platform_ceiling_qty
         )
     shipping_profile = resolve_product_shipping_profile(ctx.shipping_profiles_by_id, product)
+    # Per-channel: a linked profile's Etsy price feeds the Etsy margin estimate, the manual
+    # figure feeds the manual one — see resolve_shipping_price_for_fee_source.
+    effective_shipping_price = (
+        resolve_shipping_price_for_fee_source(shipping_profile, ctx.fee_source) if shipping_profile else None
+    )
     effective_platform_fee_percent = platform_fees.resolve_fee_percent(
         ctx.fee_source,
         ctx.fee_components,
         product.platform_fee_percent,
         product.sale_price,
-        shipping_profile.price if shipping_profile else None,
+        effective_shipping_price,
     )
     # A bundle's packaging is whatever its components' own BOMs say, so it has no kitting
     # figure of its own to take a range of either — same rule as kitting_cost_per_unit above.
@@ -299,7 +305,7 @@ def _read_product(product: Product, ctx: "_ProductReadContext") -> ProductRead:
             "effective_platform_fee_percent": effective_platform_fee_percent,
             "effective_shipping_profile_id": shipping_profile.id if shipping_profile else None,
             "effective_shipping_profile_name": shipping_profile.name if shipping_profile else None,
-            "effective_shipping_price": shipping_profile.price if shipping_profile else None,
+            "effective_shipping_price": effective_shipping_price,
             "effective_shipping_cost": (
                 resolve_shipping_cost_for_fee_source(shipping_profile, ctx.fee_source) if shipping_profile else None
             ),

@@ -42,6 +42,7 @@ _ORDER_BLOCKED_KEY = "order_blocked"
 _PENDING_ORDER_THRESHOLD_KEY = "pending_order_threshold"
 _API_SOFT_LIMIT_KEY = "marketplace_api_soft_limit"
 _API_HARD_LIMIT_KEY = "marketplace_api_hard_limit"
+_SHIPPING_PROFILE_MISSING_KEY = "shipping_profile_missing"
 
 # Items listed in a grouped order-shortfall body before it collapses into "...and N more".
 _ORDER_BODY_LINE_CAP = 6
@@ -125,6 +126,82 @@ async def raise_platform_reconnect_required_alert(session: AsyncSession, platfor
         delivery_mode=config.delivery_mode,
         related_entity_type="platform",
     )
+
+
+async def raise_shipping_price_changed_alert(
+    session: AsyncSession, platform: ListingPlatform, changes: list[tuple[str, object, object]]
+) -> None:
+    """Called once per shipping_price_sync.refresh that rewrote at least one price, with
+    (profile name, old, new) per profile that moved. One alert listing them all, not one
+    per profile: a marketplace-wide postage change touches every profile at once and the
+    user wants the list, not a dozen notifications."""
+    if not changes:
+        return
+    type_settings = await get_type_settings_map(session)
+    config = type_settings.get(NotificationCategory.shipping_price_changed)
+    if config is None or not config.enabled:
+        return
+    label = "Etsy" if platform == ListingPlatform.etsy else platform.value.capitalize()
+
+    def _fmt(value: object) -> str:
+        return "unset" if value is None else f"£{float(value):.2f}"
+
+    lines = [f"{name}: {_fmt(old)} → {_fmt(new)}" for name, old, new in changes]
+    count = len(changes)
+    await dispatch_notification(
+        session,
+        category=NotificationCategory.shipping_price_changed,
+        urgency=NotificationUrgency.digest,
+        title=f"{label} postage price{'s' if count != 1 else ''} changed for {count} shipping profile{'s' if count != 1 else ''}",
+        body=(
+            f"Buyer postage prices were refreshed from {label} and product margins now use them:\n"
+            + "\n".join(lines)
+        ),
+        delivery_mode=config.delivery_mode,
+        related_entity_type="shipping_profile",
+    )
+
+
+async def check_shipping_profile_missing_alerts(
+    session: AsyncSession, platform: ListingPlatform, missing: list, present: list
+) -> None:
+    """Called by every shipping_price_sync.refresh with the linked local profiles whose
+    marketplace profile has vanished (`missing`) and those still found (`present`).
+
+    Deduplicated per profile per platform through NotificationAlertState, the same way
+    the periodic check_* functions are: a profile deleted on Etsy stays deleted, and the
+    refresh runs daily, so without the state row the same alert would fire every day
+    until someone re-linked it. Clears when the profile reappears or is re-linked to
+    something that exists, so a later disappearance alerts again."""
+    entity = lambda profile: f"{platform.value}:{profile.id}"  # noqa: E731
+    flagged = await _load_alert_state_map(session, _SHIPPING_PROFILE_MISSING_KEY)
+    for profile in present:
+        if entity(profile) in flagged:
+            await _clear_alert_state(session, _SHIPPING_PROFILE_MISSING_KEY, entity(profile))
+
+    type_settings = await get_type_settings_map(session)
+    config = type_settings.get(NotificationCategory.shipping_profile_missing)
+    label = "Etsy" if platform == ListingPlatform.etsy else platform.value.capitalize()
+    thing = "shipping profile" if platform == ListingPlatform.etsy else "postage policy"
+    for profile in missing:
+        if entity(profile) in flagged:
+            continue
+        if config is not None and config.enabled:
+            await dispatch_notification(
+                session,
+                category=NotificationCategory.shipping_profile_missing,
+                urgency=NotificationUrgency.immediate,
+                title=f"Shipping profile '{profile.name}' is missing on {label}",
+                body=(
+                    f"The {label} {thing} that '{profile.name}' is linked to no longer exists. Its last price has "
+                    f"been kept, but drafts sent with that {thing} will fail and the margin on products using it "
+                    f"can't be verified. Re-link it in Settings › Shipping profiles."
+                ),
+                delivery_mode=config.delivery_mode,
+                related_entity_type="shipping_profile",
+                related_entity_id=profile.id,
+            )
+        await _set_alert_state(session, _SHIPPING_PROFILE_MISSING_KEY, entity(profile), "missing")
 
 
 async def raise_backup_failed_alert(session: AsyncSession, error: str) -> None:

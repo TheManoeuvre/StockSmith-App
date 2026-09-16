@@ -289,3 +289,112 @@ async def test_is_supply_is_a_warning_not_a_blocker(session):
     report = await evaluate(session, product.id, ETSY)
     assert report.can_create is True
     assert "etsy_is_supply" in _fields(report, WARNING)
+
+
+# --- Shipping: the product's ShippingProfile is the primary source, the listing profile
+# the fallback. Three situations, three messages, so the fix hint is the right one.
+
+
+async def _shipping_profile(session, **overrides):
+    from app.models.shipping_profile import ShippingProfile
+
+    fields = dict(name="Small parcel", price=Decimal("3.50"))
+    fields.update(overrides)
+    profile = ShippingProfile(**fields)
+    session.add(profile)
+    await session.commit()
+    return profile
+
+
+@pytest.mark.asyncio
+async def test_a_linked_shipping_profile_wins_over_the_listing_profile(session):
+    await _complete_etsy_profile(session, etsy_shipping_profile_id=99)
+    shipping = await _shipping_profile(session, etsy_shipping_profile_id=555)
+    product = await _ready_product(session, shipping_profile_id=shipping.id)
+
+    report = await evaluate(session, product.id, ETSY)
+    assert report.shipping.value == 555
+    assert report.shipping_source == "shipping_profile"
+    assert "Small parcel" in report.shipping_source_label
+    assert "etsy_shipping_profile_id" not in _fields(report)
+
+
+@pytest.mark.asyncio
+async def test_the_listing_profile_is_the_fallback_when_the_shipping_profile_is_unlinked(session):
+    await _complete_etsy_profile(session, etsy_shipping_profile_id=99)
+    shipping = await _shipping_profile(session)
+    product = await _ready_product(session, shipping_profile_id=shipping.id)
+
+    report = await evaluate(session, product.id, ETSY)
+    assert report.shipping.value == 99
+    assert report.shipping_source == "listing_profile"
+    assert "etsy_shipping_profile_id" not in _fields(report)
+
+
+@pytest.mark.asyncio
+async def test_an_unlinked_shipping_profile_with_no_fallback_says_to_link_it(session):
+    await _complete_etsy_profile(session, etsy_shipping_profile_id=None)
+    shipping = await _shipping_profile(session)
+    product = await _ready_product(session, shipping_profile_id=shipping.id)
+
+    report = await evaluate(session, product.id, ETSY)
+    issue = next(i for i in report.issues if i.field == "etsy_shipping_profile_id")
+    assert issue.severity == BLOCKER
+    assert "not linked to Etsy" in issue.message
+    assert "Link 'Small parcel'" in issue.fix_hint
+    assert "fallback" in issue.fix_hint  # the listing profile exists, so it is offered too
+    assert report.shipping_source is None
+
+
+@pytest.mark.asyncio
+async def test_no_shipping_profile_at_all_says_to_assign_one(session):
+    await _complete_etsy_profile(session, etsy_shipping_profile_id=None)
+    product = await _ready_product(session)
+
+    report = await evaluate(session, product.id, ETSY)
+    issue = next(i for i in report.issues if i.field == "etsy_shipping_profile_id")
+    assert "no shipping profile" in issue.message
+    assert "Assign the product a shipping profile" in issue.fix_hint
+
+
+@pytest.mark.asyncio
+async def test_variants_sharing_one_linked_profile_count_as_the_products(session):
+    """A draft is one listing covering every variant, so one shared variant-level profile
+    is as good as a product-level one — but variants that differ can't be sent as one id."""
+    await _complete_etsy_profile(session, etsy_shipping_profile_id=None)
+    shared = await _shipping_profile(session, etsy_shipping_profile_id=555)
+    other = await _shipping_profile(session, name="Large parcel", etsy_shipping_profile_id=556)
+    product = await _ready_product(session)
+    red = ProductVariant(product_id=product.id, variant_name="Red", shipping_profile_id=shared.id)
+    blue = ProductVariant(product_id=product.id, variant_name="Blue", shipping_profile_id=shared.id)
+    session.add_all([red, blue])
+    await session.commit()
+    report = await evaluate(session, product.id, ETSY)
+    assert report.shipping.value == 555
+
+    blue.shipping_profile_id = other.id
+    await session.commit()
+    report = await evaluate(session, product.id, ETSY)
+    assert report.shipping.value is None
+
+
+@pytest.mark.asyncio
+async def test_ebay_uses_the_fulfillment_policy_link(session):
+    profile = ListingProfile(
+        platform=EBAY,
+        name="Default",
+        is_default=True,
+        ebay_category_id="123",
+        ebay_condition="NEW",
+        ebay_fulfillment_policy_id="fallback-policy",
+        ebay_payment_policy_id="p",
+        ebay_return_policy_id="r",
+        ebay_merchant_location_key="loc",
+    )
+    session.add(profile)
+    shipping = await _shipping_profile(session, ebay_fulfillment_policy_id="policy-42")
+    product = await _ready_product(session, shipping_profile_id=shipping.id)
+
+    report = await evaluate(session, product.id, EBAY)
+    assert report.shipping.value == "policy-42"
+    assert report.shipping_source == "shipping_profile"

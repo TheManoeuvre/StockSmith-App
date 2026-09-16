@@ -89,14 +89,14 @@ it("asks Etsy's questions on Etsy and eBay's on eBay", async () => {
   await userEvent.click(await screen.findByText("New profile"));
   expect(screen.getByPlaceholderText(/Search Etsy categories/)).toBeTruthy();
   expect(screen.getByRole("combobox", { name: /Who made it/ })).toBeTruthy();
-  expect(screen.queryByRole("textbox", { name: /Postage policy id/ })).toBeNull();
+  expect(screen.queryByRole("textbox", { name: /Fallback postage policy id/ })).toBeNull();
 });
 
 it("asks for eBay's policies on eBay", async () => {
   profiles = [];
   renderPanel("ebay");
   await userEvent.click(await screen.findByText("New profile"));
-  expect(screen.getByRole("textbox", { name: /Postage policy id/ })).toBeTruthy();
+  expect(screen.getByRole("textbox", { name: /Fallback postage policy id/ })).toBeTruthy();
   expect(screen.getByRole("textbox", { name: /Location key/ })).toBeTruthy();
   expect(screen.queryByRole("combobox", { name: /Who made it/ })).toBeNull();
 });
@@ -138,7 +138,7 @@ it("offers shipping profiles and return policies by name", async () => {
   await userEvent.click(await screen.findByText("New profile"));
 
   const shippingSelect = (await screen.findByRole("combobox", {
-    name: /Shipping profile/,
+    name: /Fallback shipping profile/,
   })) as HTMLSelectElement;
   expect([...shippingSelect.options].map((o) => o.textContent)).toContain("UK Standard");
 

@@ -37,8 +37,10 @@ from app.models.asset import AssetType, ProductAsset
 from app.models.listing import ListingPlatform
 from app.models.listing_profile import ListingProfile
 from app.models.product import Product
+from app.models.shipping_profile import ShippingProfile
 from app.models.variant import ProductVariant
 from app.services import listing_copy, listing_profiles, listing_push
+from app.services.shipping_profiles import get_shipping_profiles_by_id, resolve_variant_shipping_profile
 from app.services.platform_limits import (
     LimitField,
     Severity,
@@ -62,6 +64,31 @@ class ReadinessIssue:
     fix_hint: str | None = None
 
 
+# Where a draft's marketplace shipping id came from — see resolve_marketplace_shipping.
+SHIPPING_FROM_SHIPPING_PROFILE = "shipping_profile"
+SHIPPING_FROM_LISTING_PROFILE = "listing_profile"
+
+
+@dataclass
+class MarketplaceShipping:
+    """The marketplace shipping profile / postage policy id a draft should carry, and where
+    it came from. `value` is None when neither source has one; `source` says which won."""
+
+    value: int | str | None
+    source: str | None
+    # The product's (or its variants' shared) local shipping profile, whether or not it is
+    # linked — so the readiness message can name it.
+    shipping_profile: ShippingProfile | None
+
+    @property
+    def source_label(self) -> str | None:
+        if self.source == SHIPPING_FROM_SHIPPING_PROFILE and self.shipping_profile is not None:
+            return f"shipping profile '{self.shipping_profile.name}'"
+        if self.source == SHIPPING_FROM_LISTING_PROFILE:
+            return "listing profile (fallback)"
+        return None
+
+
 @dataclass
 class DraftReadiness:
     product_id: int
@@ -76,10 +103,19 @@ class DraftReadiness:
     priced_unit_count: int
     image_count: int
     issues: list[ReadinessIssue] = field(default_factory=list)
+    shipping: MarketplaceShipping | None = None
 
     @property
     def blockers(self) -> list[ReadinessIssue]:
         return [i for i in self.issues if i.severity == BLOCKER]
+
+    @property
+    def shipping_source(self) -> str | None:
+        return self.shipping.source if self.shipping else None
+
+    @property
+    def shipping_source_label(self) -> str | None:
+        return self.shipping.source_label if self.shipping else None
 
 
 # Fields each marketplace refuses a create call without. Everything absent from these
@@ -88,11 +124,6 @@ _ETSY_REQUIRED: list[tuple[str, str, str]] = [
     ("etsy_taxonomy_id", "Category", "Etsy needs a category (taxonomy) before it will accept a listing."),
     ("etsy_who_made", "Who made it", "Etsy needs to know who made this."),
     ("etsy_when_made", "When made", "Etsy needs to know when this was made."),
-    (
-        "etsy_shipping_profile_id",
-        "Shipping profile",
-        "Etsy requires a shipping profile for a physical listing.",
-    ),
     (
         "etsy_readiness_state_id",
         "Processing profile",
@@ -103,11 +134,109 @@ _ETSY_REQUIRED: list[tuple[str, str, str]] = [
 _EBAY_REQUIRED: list[tuple[str, str, str]] = [
     ("ebay_category_id", "Category", "eBay needs a category id."),
     ("ebay_condition", "Condition", "eBay needs an item condition."),
-    ("ebay_fulfillment_policy_id", "Postage policy", "eBay needs a postage business policy."),
     ("ebay_payment_policy_id", "Payment policy", "eBay needs a payment business policy."),
     ("ebay_return_policy_id", "Returns policy", "eBay needs a returns business policy."),
     ("ebay_merchant_location_key", "Location", "eBay needs the location this ships from."),
 ]
+
+
+# The marketplace shipping id is required by both marketplaces, but unlike the fields above
+# it has two sources, so it is checked by _shipping_issue rather than listed here.
+_SHIPPING_FIELD = {
+    ListingPlatform.etsy: ("etsy_shipping_profile_id", "Etsy shipping profile"),
+    ListingPlatform.ebay: ("ebay_fulfillment_policy_id", "eBay postage policy"),
+}
+
+
+def _link_id(profile: ShippingProfile, platform: ListingPlatform) -> int | str | None:
+    if platform == ListingPlatform.etsy:
+        return profile.etsy_shipping_profile_id
+    if platform == ListingPlatform.ebay:
+        return profile.ebay_fulfillment_policy_id
+    return None
+
+
+def _listing_profile_shipping(profile: ListingProfile | None, platform: ListingPlatform) -> int | str | None:
+    if profile is None:
+        return None
+    if platform == ListingPlatform.etsy:
+        return profile.etsy_shipping_profile_id
+    if platform == ListingPlatform.ebay:
+        return profile.ebay_fulfillment_policy_id
+    return None
+
+
+async def resolve_marketplace_shipping(
+    session: AsyncSession,
+    product: Product,
+    variants: list[ProductVariant],
+    platform: ListingPlatform,
+    listing_profile: ListingProfile | None,
+) -> MarketplaceShipping:
+    """The product's ShippingProfile is the single source of "how this ships": if it is
+    linked to this marketplace, its link id is the draft's shipping profile / postage
+    policy. The ListingProfile's own shipping field is only a fallback for a product whose
+    shipping profile has no link (or that has no shipping profile at all).
+
+    The product-level profile is used; a product with none of its own whose active
+    variants all share one profile counts as having that one, since a draft is a single
+    listing covering every variant and there is only one shipping id to send."""
+    profiles_by_id = await get_shipping_profiles_by_id(session)
+    local = resolve_variant_shipping_profile(profiles_by_id, None, product)
+    if local is None and variants:
+        shared = {
+            resolve_variant_shipping_profile(profiles_by_id, v, product).id
+            for v in variants
+            if resolve_variant_shipping_profile(profiles_by_id, v, product) is not None
+        }
+        if len(shared) == 1 and all(v.shipping_profile_id is not None for v in variants):
+            local = profiles_by_id.get(shared.pop())
+
+    if local is not None:
+        linked = _link_id(local, platform)
+        if linked is not None:
+            return MarketplaceShipping(value=linked, source=SHIPPING_FROM_SHIPPING_PROFILE, shipping_profile=local)
+    fallback = _listing_profile_shipping(listing_profile, platform)
+    if fallback is not None:
+        return MarketplaceShipping(value=fallback, source=SHIPPING_FROM_LISTING_PROFILE, shipping_profile=local)
+    return MarketplaceShipping(value=None, source=None, shipping_profile=local)
+
+
+def _shipping_issue(
+    platform: ListingPlatform, shipping: MarketplaceShipping, listing_profile: ListingProfile | None
+) -> ReadinessIssue | None:
+    """Three distinct situations, three distinct messages: a shipping profile that is not
+    linked to this marketplace is a different fix (link it) from having no shipping profile
+    at all (assign one), and both differ from the old single "set it on the listing
+    profile" — which is now only the fallback."""
+    if shipping.value is not None:
+        return None
+    field_name, label = _SHIPPING_FIELD[platform]
+    marketplace = "Etsy" if platform == ListingPlatform.etsy else "eBay"
+    thing = "shipping profile" if platform == ListingPlatform.etsy else "postage policy"
+    fallback_hint = (
+        f", or set a fallback {thing} on the '{listing_profile.name}' listing profile (Settings › Integrations)"
+        if listing_profile is not None
+        else ""
+    )
+    if shipping.shipping_profile is not None:
+        return ReadinessIssue(
+            field=field_name,
+            severity=BLOCKER,
+            message=(
+                f"The product's shipping profile '{shipping.shipping_profile.name}' is not linked to {marketplace}, "
+                f"and {marketplace} requires a {thing} for a physical listing."
+            ),
+            fix_hint=(
+                f"Link '{shipping.shipping_profile.name}' to its {label} in Settings › Shipping profiles{fallback_hint}."
+            ),
+        )
+    return ReadinessIssue(
+        field=field_name,
+        severity=BLOCKER,
+        message=f"This product has no shipping profile, and {marketplace} requires a {thing} for a physical listing.",
+        fix_hint=f"Assign the product a shipping profile that is linked to {marketplace} (Pricing tab){fallback_hint}.",
+    )
 
 
 def _profile_issues(platform: ListingPlatform, profile: ListingProfile | None) -> list[ReadinessIssue]:
@@ -180,6 +309,10 @@ async def evaluate(
     profile = await listing_profiles.resolve_profile(session, product_id, platform)
 
     issues: list[ReadinessIssue] = list(_profile_issues(platform, profile))
+    shipping = await resolve_marketplace_shipping(session, product, variants, platform, profile)
+    shipping_issue = _shipping_issue(platform, shipping, profile)
+    if shipping_issue is not None:
+        issues.append(shipping_issue)
 
     if not copy.description or not copy.description.strip():
         issues.append(
@@ -288,6 +421,7 @@ async def evaluate(
         priced_unit_count=priced,
         image_count=image_count,
         issues=issues,
+        shipping=shipping,
     )
 
 
