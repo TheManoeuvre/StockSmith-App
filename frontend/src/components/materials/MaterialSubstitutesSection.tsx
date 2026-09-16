@@ -71,8 +71,15 @@ export function MaterialSubstitutesSection({ materialId }: { materialId: number 
 
   // A material can't fall back to itself, and offering an already-active fallback again would
   // just hit the backend's duplicate-substitute 400 — so both are excluded from the picker.
+  // The picker is also scoped to the material's own category: a filament falling back to a
+  // box is never a sensible suggestion, and the full list is long enough that the wrong
+  // categories drown out the real candidates. Until the materials list has loaded the
+  // category is unknown, so nothing is offered rather than briefly offering everything.
   const excludedIds = new Set([materialId, ...active.map((s) => s.substitute_material_id)]);
-  const pickable = (materials ?? []).filter((m) => m.is_active && !excludedIds.has(m.id));
+  const category = materials?.find((m) => m.id === materialId)?.category;
+  const pickable = (materials ?? []).filter(
+    (m) => m.is_active && !excludedIds.has(m.id) && category != null && m.category === category
+  );
 
   const effectiveNewSubstituteId = newSubstituteId ?? pickable[0]?.id ?? null;
   const canAdd = effectiveNewSubstituteId != null && newNotes.trim() !== "" && !addMutation.isPending;
