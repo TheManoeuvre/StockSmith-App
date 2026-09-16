@@ -19,7 +19,7 @@ the ground truth this cleanup rests on.
 
 ## What was NOT removed
 
-`4128127298` reported payment status `POSTED` and was initially a deletion candidate. It
+One further receipt reported payment status `POSTED` and was initially a deletion candidate. It
 was checked and **kept** — it is visible in the Etsy UI awaiting shipment and is a genuine
 paid order.
 
@@ -33,8 +33,8 @@ paid. A gate built on it would have deleted a real customer order.
 
 | Order id | Etsy receipt | Placed | Total | SKU | Allocated at deletion |
 |---|---|---|---|---|---|
-| 73 | `4128199713` | 2026-07-27 15:40:37 | £18.09 | `SKU-0015-REGULAR` | 0 |
-| 78 | `4128119214` | 2026-07-28 04:13:43 | £12.59 | `SKU-0006-Orange` | 0 |
+| 73 | (redacted) | 2026-07-27 15:40:37 | £18.09 | `SKU-0015-REGULAR` | 0 |
+| 78 | (redacted) | 2026-07-28 04:13:43 | £12.59 | `SKU-0006-Orange` | 0 |
 
 Both held zero allocated units, zero shipped units and zero packaging-material
 reservations at the moment of deletion, so **no stock was released by this cleanup** and

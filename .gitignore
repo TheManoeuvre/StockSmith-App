@@ -21,6 +21,8 @@ frontend/src-tauri/Cargo.lock
 
 # Editors/OS
 .vscode/
+# Per-machine dev-server launch config (absolute local paths, worktree ports)
+.claude/launch.json
 .idea/
 .DS_Store
 Thumbs.db
