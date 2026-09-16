@@ -12,6 +12,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-09-16
+
+### Fixed
+- **0.16.0 would not start after installing.** The app showed "The backend did not become
+  ready in time" on every launch and never got past "Loading dashboard…". Two changes in
+  0.16.0 each added a database migration from the same starting point, and the migration
+  runner refused to pick between them, so it stopped before the app could open. This
+  release joins the two back together; no data was touched by the failed starts, and
+  installing 0.16.1 over 0.16.0 completes the upgrade normally.
+
 ## [0.16.0] - 2026-09-16
 
 ### Added
