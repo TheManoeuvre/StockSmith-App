@@ -55,6 +55,7 @@ budget, and a dry run is how you confirm connectivity before trusting the number
 
 import argparse
 import asyncio
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
@@ -67,6 +68,22 @@ from app.services.platforms import get_adapter
 from app.services.platforms.ebay import EbayAdapter
 from app.services.platforms.errors import PlatformError
 from app.services.platforms.etsy import EtsyAdapter
+
+
+def _ship_by_date_changed(stored: datetime | None, fetched: datetime | None) -> bool:
+    """SQLite hands back a naive datetime for the DateTime(timezone=True) column, while
+    both adapters build an aware UTC one — a plain != then reports every already-correct
+    order as changed (and, under --apply, dirties it for no reason). Compare on the same
+    footing."""
+    if stored is not None and stored.tzinfo is None:
+        stored = stored.replace(tzinfo=timezone.utc)
+    return stored != fetched
+
+
+def _tracking_changed(order: Order, tracking_number: str | None, carrier: str | None) -> bool:
+    """Same idea for tracking: only a value that differs from what's stored is a change
+    worth logging or counting, not merely "the marketplace returned one"."""
+    return bool(tracking_number) and (tracking_number, carrier) != (order.tracking_number, order.carrier)
 
 
 async def _get_connection(session, platform: ListingPlatform) -> PlatformConnection | None:
@@ -118,7 +135,7 @@ async def _backfill_ebay(session, args) -> int:
             except PlatformError as e:
                 print(f"  #{order.id} {order.external_order_id}: FAILED — {e}")
                 continue
-            if tracking_number:
+            if _tracking_changed(order, tracking_number, carrier):
                 changed.append(f"tracking {carrier or '?'} {tracking_number}")
                 if args.apply:
                     order.tracking_number = tracking_number
@@ -132,7 +149,7 @@ async def _backfill_ebay(session, args) -> int:
                 continue
             if raw_order is not None:
                 ship_by_date = EbayAdapter._ship_by_date_from_line_items(raw_order.get("lineItems", []))
-                if ship_by_date != order.ship_by_date:
+                if _ship_by_date_changed(order.ship_by_date, ship_by_date):
                     changed.append(f"ship_by_date {order.ship_by_date} -> {ship_by_date}")
                     if args.apply:
                         order.ship_by_date = ship_by_date
@@ -216,7 +233,7 @@ async def _backfill_etsy(session, args) -> int:
         first_shipment = shipments[0] if shipments else {}
         tracking_number = first_shipment.get("tracking_code")
         carrier = first_shipment.get("carrier_name")
-        if tracking_number:
+        if _tracking_changed(order, tracking_number, carrier):
             changed.append(f"tracking {carrier or '?'} {tracking_number}")
             if args.apply:
                 order.tracking_number = tracking_number
@@ -227,7 +244,7 @@ async def _backfill_etsy(session, args) -> int:
         # (see module docstring), so an already-set ship_by_date can be wrong too, not
         # just missing.
         ship_by_date = EtsyAdapter._ship_by_date_from_transactions(transactions)
-        if ship_by_date != order.ship_by_date:
+        if _ship_by_date_changed(order.ship_by_date, ship_by_date):
             changed.append(f"ship_by_date {order.ship_by_date} -> {ship_by_date}")
             if args.apply:
                 order.ship_by_date = ship_by_date
