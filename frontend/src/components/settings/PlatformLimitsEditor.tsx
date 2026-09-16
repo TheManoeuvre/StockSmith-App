@@ -5,6 +5,7 @@ import type { LimitField } from "../../api/platformLimits";
 import type { ListingPlatform } from "../../api/types";
 import { PLATFORM_LABELS } from "../../lib/platforms";
 import { ErrorBanner } from "../common/ErrorBanner";
+import { Disclosure } from "./Disclosure";
 
 /**
  * Lets a marketplace's field limits be corrected without waiting for a release.
@@ -28,40 +29,36 @@ export function PlatformLimitsEditor({ platform }: { platform: ListingPlatform }
   const overrideCount = (data ?? []).filter((limit) => limit.is_override).length;
 
   return (
-    <div className="rounded border border-slate-200 bg-white p-3 text-sm">
-      <button onClick={() => setOpen((v) => !v)} className="flex w-full items-center justify-between text-left">
-        <span>
-          <span className="font-medium">{PLATFORM_LABELS[platform]} listing limits</span>
-          {overrideCount > 0 && <span className="ml-2 text-xs text-amber-700">{overrideCount} overridden</span>}
-        </span>
-        <span className="text-slate-500">{open ? "Hide" : "Show"}</span>
-      </button>
-
-      {open && (
-        <>
-          <p className="mt-1 text-xs text-slate-500">
-            StockSmith's built-in values are used unless you override one here. Overriding a single limit
-            leaves the rest free to pick up corrections in future updates.
-          </p>
-          <ErrorBanner error={error} />
-          <table className="mt-2 w-full text-left">
-            <thead>
-              <tr className="border-b border-slate-200 text-xs text-slate-500">
-                <th className="p-1">Limit</th>
-                <th className="p-1">Default</th>
-                <th className="p-1">In use</th>
-                <th className="p-1" />
-              </tr>
-            </thead>
-            <tbody>
-              {(data ?? []).map((limit) => (
-                <LimitRow key={limit.field} platform={platform} limit={limit} />
-              ))}
-            </tbody>
-          </table>
-        </>
-      )}
-    </div>
+    <Disclosure
+      title={`${PLATFORM_LABELS[platform]} listing limits`}
+      summary={overrideCount > 0 ? `${overrideCount} overridden` : "built-in values"}
+      tone={overrideCount > 0 ? "warning" : "normal"}
+      open={open}
+      onOpenChange={setOpen}
+    >
+      <div className="text-sm">
+        <p className="text-xs text-slate-500">
+          StockSmith's built-in values are used unless you override one here. Overriding a single limit leaves
+          the rest free to pick up corrections in future updates.
+        </p>
+        <ErrorBanner error={error} />
+        <table className="mt-2 w-full text-left">
+          <thead>
+            <tr className="border-b border-slate-200 text-xs text-slate-500">
+              <th className="p-1">Limit</th>
+              <th className="p-1">Default</th>
+              <th className="p-1">In use</th>
+              <th className="p-1" />
+            </tr>
+          </thead>
+          <tbody>
+            {(data ?? []).map((limit) => (
+              <LimitRow key={limit.field} platform={platform} limit={limit} />
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Disclosure>
   );
 }
 
@@ -72,9 +69,13 @@ function LimitRow({ platform, limit }: { platform: ListingPlatform; limit: Platf
   const [note, setNote] = useState(limit.note ?? "");
 
   const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ["settings", "platform-limits", platform] });
+    queryClient.invalidateQueries({
+      queryKey: ["settings", "platform-limits", platform],
+    });
     // A changed limit has to change what the compatibility report says immediately.
-    queryClient.invalidateQueries({ queryKey: ["platforms", platform, "catalogue-compatibility"] });
+    queryClient.invalidateQueries({
+      queryKey: ["platforms", platform, "catalogue-compatibility"],
+    });
   };
 
   const saveMutation = useMutation({

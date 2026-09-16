@@ -69,11 +69,15 @@ export function EtsyProfileProposalsPanel() {
           return link != null
             ? { etsy_shipping_profile_id: id, link_shipping_profile_id: link }
             : { etsy_shipping_profile_id: id, name: shippingNames[id] ?? "" };
-        })
+        }),
       ),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["settings", "listing-profiles", "etsy"] });
-      queryClient.invalidateQueries({ queryKey: ["settings", "shipping-profiles"] });
+      queryClient.invalidateQueries({
+        queryKey: ["settings", "listing-profiles", "etsy"],
+      });
+      queryClient.invalidateQueries({
+        queryKey: ["settings", "shipping-profiles"],
+      });
       queryClient.invalidateQueries({ queryKey: ["platforms", "etsy"] });
       queryClient.invalidateQueries({ queryKey: ["products"] });
       previewMutation.mutate();
@@ -102,13 +106,12 @@ export function EtsyProfileProposalsPanel() {
   const result = applyMutation.data;
 
   return (
-    <div className="flex flex-col gap-2 rounded border border-slate-200 bg-white p-3 text-sm">
+    <div className="flex flex-col gap-2 text-sm">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="font-medium">Suggest profiles from Etsy</p>
           <p className="text-xs text-slate-500">
-            Reads the category, policies and making details off your existing listings and groups them
-            into profiles, and offers a shipping profile for each Etsy one you use.
+            Reads the category, policies and making details off your existing listings and groups them into
+            profiles, and offers a shipping profile for each Etsy one you use.
           </p>
         </div>
         <button
@@ -146,8 +149,8 @@ export function EtsyProfileProposalsPanel() {
             <p className="font-medium">Shipping profiles</p>
             <p className="text-xs text-slate-500">
               Etsy shipping profiles your listings use that no StockSmith shipping profile is linked to.
-              Drafts take their Etsy shipping profile from the product's shipping profile, so each needs
-              a local one — new, or an existing one linked to it.
+              Drafts take their Etsy shipping profile from the product's shipping profile, so each needs a
+              local one — new, or an existing one linked to it.
             </p>
           </div>
           {shippingProposals.map((proposal) => (
@@ -160,10 +163,16 @@ export function EtsyProfileProposalsPanel() {
               accepted={shippingAccepted.has(proposal.etsy_shipping_profile_id)}
               onToggle={() => toggleShipping(proposal.etsy_shipping_profile_id)}
               onRename={(value) =>
-                setShippingNames((n) => ({ ...n, [proposal.etsy_shipping_profile_id]: value }))
+                setShippingNames((n) => ({
+                  ...n,
+                  [proposal.etsy_shipping_profile_id]: value,
+                }))
               }
               onLink={(value) =>
-                setShippingLinks((l) => ({ ...l, [proposal.etsy_shipping_profile_id]: value }))
+                setShippingLinks((l) => ({
+                  ...l,
+                  [proposal.etsy_shipping_profile_id]: value,
+                }))
               }
             />
           ))}
@@ -263,7 +272,12 @@ function ShippingProposalRow({
   return (
     <div className="rounded border border-slate-200 p-2">
       <div className="flex items-center gap-2">
-        <input type="checkbox" checked={accepted} onChange={onToggle} aria-label={`Accept ${proposal.title}`} />
+        <input
+          type="checkbox"
+          checked={accepted}
+          onChange={onToggle}
+          aria-label={`Accept ${proposal.title}`}
+        />
         {link == null ? (
           <input
             className="flex-1 rounded border border-slate-300 px-2 py-1 text-sm"

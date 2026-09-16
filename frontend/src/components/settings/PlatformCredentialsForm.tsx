@@ -1,9 +1,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { platformsApi, type PlatformEnvironment } from "../../api/platforms";
 import type { ListingPlatform } from "../../api/types";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
-import { useGuard } from "../../hooks/useUnsavedChangesGuard";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { SaveButton } from "../common/SaveButton";
@@ -15,7 +14,12 @@ interface CredentialsForm {
   ruName: string;
 }
 
-const EMPTY_CREDENTIALS: CredentialsForm = { clientId: "", clientSecret: "", publicBaseUrl: "", ruName: "" };
+const EMPTY_CREDENTIALS: CredentialsForm = {
+  clientId: "",
+  clientSecret: "",
+  publicBaseUrl: "",
+  ruName: "",
+};
 
 // A packaged desktop install has no build-time secret-injection pipeline and no `.env`
 // file a user would ever edit by hand — the developer-app Client ID/Secret registered
@@ -24,15 +28,11 @@ const EMPTY_CREDENTIALS: CredentialsForm = { clientId: "", clientSecret: "", pub
 export function PlatformCredentialsForm({
   platform,
   environment,
-  onEnvironmentChange,
 }: {
   platform: ListingPlatform;
   environment: PlatformEnvironment;
-  onEnvironmentChange: (environment: PlatformEnvironment) => void;
 }) {
   const queryClient = useQueryClient();
-  const guard = useGuard();
-  const [expanded, setExpanded] = useState(false);
 
   const { data } = useQuery({
     queryKey: ["platforms", platform, "credentials", environment],
@@ -52,7 +52,7 @@ export function PlatformCredentialsForm({
             ruName: data.ru_name ?? "",
           }
         : undefined,
-    [data]
+    [data],
   );
 
   const {
@@ -85,115 +85,74 @@ export function PlatformCredentialsForm({
           public_base_url: form.publicBaseUrl,
           ...(platform === "ebay" ? { ru_name: form.ruName } : {}),
         },
-        environment
+        environment,
       ),
     onSuccess: () => {
       // Blank the secret again: it was write-only going out, so keeping it on screen would imply
       // it's readable, and it must not count towards dirty afterwards.
       markSaved({ ...form, clientSecret: "" });
-      queryClient.invalidateQueries({ queryKey: ["platforms", platform, "credentials", environment] });
+      queryClient.invalidateQueries({
+        queryKey: ["platforms", platform, "credentials", environment],
+      });
     },
   });
   const saveStatus = useSaveStatus(saveMutation.status);
 
   return (
-    <div className="flex flex-col gap-2 border-t border-slate-200 pt-2">
-      <div className="flex items-center justify-between">
-        <button
-          type="button"
-          // Collapsing unmounts the form, and a React unmount can't be cancelled after the fact —
-          // so the veto has to happen before the state setter runs. Same pattern as VariantEditor.
-          onClick={() => guard.attempt(() => setExpanded((v) => !v), { prefix: "credentials" })}
-          className="self-start text-sm text-slate-600 underline"
+    <div className="flex flex-col gap-2">
+      <label className="flex flex-col gap-1">
+        <span className="text-sm font-medium">Client ID</span>
+        <input
+          className="rounded border border-slate-300 px-2 py-1.5 text-sm"
+          value={form.clientId}
+          onChange={(e) => setField("clientId", e.target.value)}
+        />
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="text-sm font-medium">Client secret</span>
+        <input
+          type="password"
+          className="rounded border border-slate-300 px-2 py-1.5 text-sm"
+          placeholder={data?.client_secret_set ? "Leave blank to keep the current secret" : ""}
+          value={form.clientSecret}
+          onChange={(e) => setField("clientSecret", e.target.value)}
+        />
+      </label>
+      {platform === "ebay" ? (
+        <label className="flex flex-col gap-1">
+          <span className="text-sm font-medium">RuName ({environment})</span>
+          <input
+            className="rounded border border-slate-300 px-2 py-1.5 text-sm"
+            placeholder="Not a URL — the redirect config name from eBay's dev portal"
+            value={form.ruName}
+            onChange={(e) => setField("ruName", e.target.value)}
+          />
+        </label>
+      ) : (
+        <label className="flex flex-col gap-1">
+          <span className="text-sm font-medium">Public base URL</span>
+          <input
+            className="rounded border border-slate-300 px-2 py-1.5 text-sm"
+            placeholder="http://127.0.0.1:8000"
+            value={form.publicBaseUrl}
+            onChange={(e) => setField("publicBaseUrl", e.target.value)}
+          />
+          <span className="text-xs text-slate-500">
+            Used to build the OAuth redirect URI — must match what's registered with Etsy.
+          </span>
+        </label>
+      )}
+      <div className="flex items-center gap-2">
+        <SaveButton
+          isDirty={isDirty}
+          isPending={saveMutation.isPending}
+          status={saveStatus}
+          onClick={() => saveMutation.mutate()}
         >
-          {expanded ? "Hide" : "Show"} developer app credentials
-        </button>
-        {platform === "ebay" && (
-          <div className="flex items-center gap-1 text-xs">
-            <button
-              type="button"
-              // Switching environment re-seeds the form, discarding edits just as surely as
-              // collapsing it would.
-              onClick={() => guard.attempt(() => onEnvironmentChange("sandbox"), { prefix: "credentials" })}
-              className={`rounded px-2 py-1 ${environment === "sandbox" ? "bg-amber-100 font-medium text-amber-800" : "text-slate-500"}`}
-            >
-              Sandbox
-            </button>
-            <button
-              type="button"
-              onClick={() => guard.attempt(() => onEnvironmentChange("production"), { prefix: "credentials" })}
-              className={`rounded px-2 py-1 ${environment === "production" ? "bg-slate-900 font-medium text-white" : "text-slate-500"}`}
-            >
-              Production
-            </button>
-          </div>
-        )}
+          Save credentials
+        </SaveButton>
       </div>
-      {!expanded && (
-        <p className="text-xs text-slate-500">
-          Client ID {data?.client_id ? <span className="font-mono">{data.client_id}</span> : "not set"} · Secret{" "}
-          {data?.client_secret_set ? "configured" : "not set"}
-          {platform === "ebay" && ` (${environment})`}
-        </p>
-      )}
-
-      {expanded && (
-        <div className="flex flex-col gap-2">
-          <label className="flex flex-col gap-1">
-            <span className="text-sm font-medium">Client ID</span>
-            <input
-              className="rounded border border-slate-300 px-2 py-1.5 text-sm"
-              value={form.clientId}
-              onChange={(e) => setField("clientId", e.target.value)}
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-sm font-medium">Client secret</span>
-            <input
-              type="password"
-              className="rounded border border-slate-300 px-2 py-1.5 text-sm"
-              placeholder={data?.client_secret_set ? "Leave blank to keep the current secret" : ""}
-              value={form.clientSecret}
-              onChange={(e) => setField("clientSecret", e.target.value)}
-            />
-          </label>
-          {platform === "ebay" ? (
-            <label className="flex flex-col gap-1">
-              <span className="text-sm font-medium">RuName ({environment})</span>
-              <input
-                className="rounded border border-slate-300 px-2 py-1.5 text-sm"
-                placeholder="Not a URL — the redirect config name from eBay's dev portal"
-                value={form.ruName}
-                onChange={(e) => setField("ruName", e.target.value)}
-              />
-            </label>
-          ) : (
-            <label className="flex flex-col gap-1">
-              <span className="text-sm font-medium">Public base URL</span>
-              <input
-                className="rounded border border-slate-300 px-2 py-1.5 text-sm"
-                placeholder="http://127.0.0.1:8000"
-                value={form.publicBaseUrl}
-                onChange={(e) => setField("publicBaseUrl", e.target.value)}
-              />
-              <span className="text-xs text-slate-500">
-                Used to build the OAuth redirect URI — must match what's registered with Etsy.
-              </span>
-            </label>
-          )}
-          <div className="flex items-center gap-2">
-            <SaveButton
-              isDirty={isDirty}
-              isPending={saveMutation.isPending}
-              status={saveStatus}
-              onClick={() => saveMutation.mutate()}
-            >
-              Save credentials
-            </SaveButton>
-          </div>
-          <ErrorBanner error={saveMutation.error} />
-        </div>
-      )}
+      <ErrorBanner error={saveMutation.error} />
     </div>
   );
 }

@@ -58,26 +58,34 @@ export function SyncStatusIndicator() {
   if (connected.length === 0) return null;
 
   const hasProblem = errored.length > 0 || failingPushes > 0;
+  // Land on the store that has the problem when there is exactly one; the hub otherwise —
+  // it shows every store's state side by side, which is the right place to start from when
+  // more than one needs attention.
+  const problemStores = connected.filter((s) => s.last_sync_status === "error" || s.failing_push_count > 0);
+  const target = problemStores.length === 1 ? problemStores[0].platform : undefined;
   const problems = [
-    ...errored.map((s) => `${PLATFORM_LABELS[s.platform]} sync failed: ${s.last_sync_error ?? "unknown error"}`),
+    ...errored.map(
+      (s) => `${PLATFORM_LABELS[s.platform]} sync failed: ${s.last_sync_error ?? "unknown error"}`,
+    ),
     ...connected
       .filter((s) => s.failing_push_count > 0)
       .map(
         (s) =>
-          `${PLATFORM_LABELS[s.platform]}: ${s.failing_push_count} listing(s) failed to receive a stock update`
+          `${PLATFORM_LABELS[s.platform]}: ${s.failing_push_count} listing(s) failed to receive a stock update`,
       ),
   ];
 
   return (
     <Link
       to="/settings"
+      search={{ page: "stores-sync", ...(target ? { store: target } : {}) }}
       title={
         hasProblem
           ? problems.join("\n")
           : connected
               .map(
                 (s) =>
-                  `${PLATFORM_LABELS[s.platform]}: ${s.last_sync_at ? formatRelative(s.last_sync_at) : "never synced"}`
+                  `${PLATFORM_LABELS[s.platform]}: ${s.last_sync_at ? formatRelative(s.last_sync_at) : "never synced"}`,
               )
               .join("\n")
       }

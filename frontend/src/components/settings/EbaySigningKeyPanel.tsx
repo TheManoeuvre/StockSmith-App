@@ -22,17 +22,19 @@ export function EbaySigningKeyPanel({ environment }: { environment: PlatformEnvi
   const createMutation = useMutation({
     mutationFn: () => platformsApi.createEbaySigningKey(environment),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["platforms", "ebay", "signing-key", environment] });
+      queryClient.invalidateQueries({
+        queryKey: ["platforms", "ebay", "signing-key", environment],
+      });
     },
   });
 
   const configured = data?.configured ?? false;
 
   return (
-    <div className="flex flex-col gap-2 border-t border-slate-200 pt-2">
+    <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-3">
         <div className="flex flex-col">
-          <span className="text-sm font-medium">Fee reporting signature ({environment})</span>
+          <span className="text-sm font-medium">Signing key ({environment})</span>
           <span className="text-xs text-slate-500">
             {configured ? (
               <>
@@ -58,8 +60,8 @@ export function EbaySigningKeyPanel({ environment }: { environment: PlatformEnvi
         // replacing it is not reversible and the old key cannot be restored from
         // anywhere. Worth saying plainly next to a button that does it in one click.
         <p className="text-xs text-slate-500">
-          Replacing mints a new keypair. eBay issues the private half once and stores no copy, so the current key
-          cannot be recovered afterwards.
+          Replacing mints a new keypair. eBay issues the private half once and stores no copy, so the current
+          key cannot be recovered afterwards.
         </p>
       )}
       <ErrorBanner error={createMutation.error} />

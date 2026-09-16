@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { listingProfilesApi, type ListingProfile, type ListingProfileWrite } from "../../api/listingProfiles";
 import type { ListingPlatform } from "../../api/types";
 import { useDirtyRegistration } from "../../hooks/useDirtyRegistry";
@@ -14,6 +14,7 @@ import {
 import { PLATFORM_LABELS } from "../../lib/platforms";
 import { ConfirmDialog } from "../common/ConfirmDialog";
 import { ErrorBanner } from "../common/ErrorBanner";
+import { SettingsCard } from "./SettingsCard";
 import { TaxonomyPicker } from "./TaxonomyPicker";
 
 /**
@@ -28,7 +29,7 @@ import { TaxonomyPicker } from "./TaxonomyPicker";
  * particular surfaces none of those ids in its own seller UI, so a form asking for them
  * directly was asking the user to go and read an API response.
  */
-export function ListingProfiles({ platform }: { platform: ListingPlatform }) {
+export function ListingProfiles({ platform, children }: { platform: ListingPlatform; children?: ReactNode }) {
   const queryClient = useQueryClient();
   const [editingId, setEditingId] = useState<number | "new" | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<ListingProfile | null>(null);
@@ -39,7 +40,9 @@ export function ListingProfiles({ platform }: { platform: ListingPlatform }) {
   });
 
   const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ["settings", "listing-profiles", platform] });
+    queryClient.invalidateQueries({
+      queryKey: ["settings", "listing-profiles", platform],
+    });
     // Readiness for every product depends on these, so it all goes stale at once.
     queryClient.invalidateQueries({ queryKey: ["platforms", platform] });
   };
@@ -53,85 +56,90 @@ export function ListingProfiles({ platform }: { platform: ListingPlatform }) {
   });
 
   return (
-    <div className="flex flex-col gap-2 rounded border border-slate-200 bg-white p-3 text-sm">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="font-medium">{PLATFORM_LABELS[platform]} listing profiles</p>
-          <p className="text-xs text-slate-500">
-            The category, policies and making details a new listing needs. Products use the default unless
-            you give them their own.
-          </p>
-        </div>
+    <SettingsCard
+      title="Listing profiles"
+      help="The category, policies and making details a new listing needs. Products use the default unless you give them their own."
+      action={
         <button
+          type="button"
           onClick={() => setEditingId("new")}
-          className="shrink-0 rounded border border-slate-300 px-3 py-1.5"
+          className="h-7 shrink-0 rounded-md border border-slate-300 bg-white px-2.5 text-xs font-medium"
         >
           New profile
         </button>
-      </div>
+      }
+    >
+      <div className="flex flex-col gap-2 text-sm">
+        <ErrorBanner error={error} />
+        <ErrorBanner error={deleteMutation.error} />
 
-      <ErrorBanner error={error} />
-      <ErrorBanner error={deleteMutation.error} />
+        {profiles?.length === 0 && (
+          <p className="text-slate-600">
+            No profiles yet. Products can't be drafted to {PLATFORM_LABELS[platform]} until one exists.
+          </p>
+        )}
 
-      {profiles?.length === 0 && (
-        <p className="text-slate-600">
-          No profiles yet. Products can't be drafted to {PLATFORM_LABELS[platform]} until one exists.
-        </p>
-      )}
+        {profiles?.map((profile) =>
+          editingId === profile.id ? (
+            <ProfileForm
+              key={profile.id}
+              platform={platform}
+              profile={profile}
+              onDone={() => {
+                setEditingId(null);
+                invalidate();
+              }}
+            />
+          ) : (
+            <div
+              key={profile.id}
+              className="flex items-center justify-between rounded border border-slate-200 p-2"
+            >
+              <span>
+                {profile.name}
+                {profile.is_default && (
+                  <span className="ml-2 rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+                    Default
+                  </span>
+                )}
+              </span>
+              <span className="flex gap-3 text-xs">
+                <button onClick={() => setEditingId(profile.id)} className="text-slate-600 underline">
+                  Edit
+                </button>
+                <button onClick={() => setConfirmDelete(profile)} className="text-slate-600 underline">
+                  Delete
+                </button>
+              </span>
+            </div>
+          ),
+        )}
 
-      {profiles?.map((profile) =>
-        editingId === profile.id ? (
+        {editingId === "new" && (
           <ProfileForm
-            key={profile.id}
             platform={platform}
-            profile={profile}
             onDone={() => {
               setEditingId(null);
               invalidate();
             }}
           />
-        ) : (
-          <div key={profile.id} className="flex items-center justify-between rounded border border-slate-200 p-2">
-            <span>
-              {profile.name}
-              {profile.is_default && (
-                <span className="ml-2 rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">Default</span>
-              )}
-            </span>
-            <span className="flex gap-3 text-xs">
-              <button onClick={() => setEditingId(profile.id)} className="text-slate-600 underline">
-                Edit
-              </button>
-              <button onClick={() => setConfirmDelete(profile)} className="text-slate-600 underline">
-                Delete
-              </button>
-            </span>
-          </div>
-        )
-      )}
+        )}
 
-      {editingId === "new" && (
-        <ProfileForm
-          platform={platform}
-          onDone={() => {
-            setEditingId(null);
-            invalidate();
-          }}
-        />
-      )}
-
-      {confirmDelete && (
-        <ConfirmDialog
-          open
-          title={`Delete "${confirmDelete.name}"?`}
-          body="Products using it fall back to the default profile. Their listing copy is kept."
-          confirmLabel="Delete"
-          busy={deleteMutation.isPending}
-          onConfirm={() => deleteMutation.mutate(confirmDelete.id)}
-          onCancel={() => setConfirmDelete(null)}
-        />
-      )}
-    </div>
+        {confirmDelete && (
+          <ConfirmDialog
+            open
+            title={`Delete "${confirmDelete.name}"?`}
+            body="Products using it fall back to the default profile. Their listing copy is kept."
+            confirmLabel="Delete"
+            busy={deleteMutation.isPending}
+            onConfirm={() => deleteMutation.mutate(confirmDelete.id)}
+            onCancel={() => setConfirmDelete(null)}
+          />
+        )}
+      </div>
+      {/* Secondary rows the caller wants under the list — Etsy suggestions, the limits editor. */}
+      {children && <div className="-mx-4 -mb-4 border-t border-slate-100">{children}</div>}
+    </SettingsCard>
   );
 }
 
