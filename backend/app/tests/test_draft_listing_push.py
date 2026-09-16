@@ -269,3 +269,39 @@ async def test_quantity_comes_from_the_single_sellable_definition(session):
 
     draft = await build_draft(session, product.id, ETSY)
     assert draft.units[0].quantity >= 0
+
+
+@pytest.mark.asyncio
+async def test_draft_takes_the_shipping_id_from_the_products_linked_shipping_profile(session):
+    """The product's ShippingProfile is the single source of "how this ships"; the listing
+    profile's own field is only the fallback for a product whose profile has no link."""
+    from app.models.shipping_profile import ShippingProfile
+
+    await _profile(session, etsy_shipping_profile_id=99)
+    shipping = ShippingProfile(name="Small parcel", price=Decimal("3.50"), etsy_shipping_profile_id=555)
+    session.add(shipping)
+    await session.commit()
+    product = await _product(session, shipping_profile_id=shipping.id)
+
+    draft = await build_draft(session, product.id, ETSY)
+    assert draft.metadata["etsy.shipping_profile_id"] == 555
+
+    result = await push_draft(session, RecordingAdapter(), None, product.id, ETSY)
+    assert result.shipping_source == "shipping_profile"
+
+
+@pytest.mark.asyncio
+async def test_draft_falls_back_to_the_listing_profiles_shipping_id(session):
+    from app.models.shipping_profile import ShippingProfile
+
+    await _profile(session, etsy_shipping_profile_id=99)
+    shipping = ShippingProfile(name="Small parcel", price=Decimal("3.50"))
+    session.add(shipping)
+    await session.commit()
+    product = await _product(session, shipping_profile_id=shipping.id)
+
+    draft = await build_draft(session, product.id, ETSY)
+    assert draft.metadata["etsy.shipping_profile_id"] == 99
+
+    result = await push_draft(session, RecordingAdapter(), None, product.id, ETSY)
+    assert result.shipping_source == "listing_profile"

@@ -1727,6 +1727,10 @@ class EbayAdapter:
         # a separate field from the per-variation SKUs, and eBay's migration needs it set
         # (see ClassicListingCandidate.listing_sku).
         listing_sku = item.findtext("e:SKU", "", _TRADING_NS).strip() or None
+        fulfillment_policy_id = (
+            item.findtext("e:SellerProfiles/e:SellerShippingProfile/e:ShippingProfileID", "", _TRADING_NS).strip()
+            or None
+        )
 
         variations_el = item.find("e:Variations", _TRADING_NS)
         skus: list[str] = []
@@ -1759,6 +1763,7 @@ class EbayAdapter:
             quantity=quantity,
             is_migrated=False,  # filled in by the caller cross-referencing build_listing_sku_index
             listing_sku=listing_sku,
+            fulfillment_policy_id=fulfillment_policy_id,
             ineligibility_reasons=_evaluate_eligibility(
                 listing_type, skus, variation_specifics, detail_loaded, listing_sku=listing_sku
             ),

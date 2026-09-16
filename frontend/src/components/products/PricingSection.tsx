@@ -5,6 +5,7 @@ import {
   type MarginFeeSource,
   type PlatformFeeComponent,
 } from "../../api/feeConfig";
+import { platformsApi } from "../../api/platforms";
 import { productsApi } from "../../api/products";
 import { shippingProfilesApi } from "../../api/shippingProfiles";
 import { variantsApi } from "../../api/variants";
@@ -139,6 +140,53 @@ function ShippingProfileSelect({
         </option>
       ))}
     </select>
+  );
+}
+
+/**
+ * Where the chosen shipping profile points on each connected marketplace. A draft takes
+ * its Etsy shipping profile / eBay postage policy from this link, so an unlinked profile
+ * on a connected platform is worth an amber note here rather than a blocker discovered
+ * in the draft modal.
+ */
+function ShippingProfileLinks({ profile }: { profile: ShippingProfile | undefined }) {
+  if (!profile) return null;
+  return (
+    <div className="flex flex-col gap-0.5 text-xs">
+      <ShippingProfileLink profile={profile} platform="etsy" />
+      <ShippingProfileLink profile={profile} platform="ebay" />
+    </div>
+  );
+}
+
+function ShippingProfileLink({ profile, platform }: { profile: ShippingProfile; platform: "etsy" | "ebay" }) {
+  const label = platform === "etsy" ? "Etsy" : "eBay";
+  const linkId = platform === "etsy" ? profile.etsy_shipping_profile_id : profile.ebay_fulfillment_policy_id;
+  const { data: status } = useQuery({
+    queryKey: ["platforms", platform, "status"],
+    queryFn: () => platformsApi.status(platform),
+  });
+  const connected = status?.connected ?? false;
+  const { data: remote } = useQuery({
+    queryKey: ["shipping-profiles", "marketplace", platform],
+    queryFn: () => shippingProfilesApi.marketplace(platform),
+    enabled: connected && linkId != null,
+    retry: false,
+  });
+  if (!connected) return null;
+  if (linkId == null) {
+    return (
+      <span className="text-amber-700">
+        Not linked to {label} — drafts fall back to the listing profile's shipping. Link it in Settings ›
+        Shipping profiles.
+      </span>
+    );
+  }
+  const title = remote?.find((p) => p.id === String(linkId))?.title ?? String(linkId);
+  return (
+    <span className="text-slate-500">
+      → {label}: {title}
+    </span>
   );
 }
 
@@ -374,16 +422,19 @@ function ProductDefaultShippingProfile({
   });
 
   return (
-    <label className="flex items-center gap-2 text-sm">
-      <span className="font-medium">Default shipping profile</span>
-      <ShippingProfileSelect
-        profiles={profiles}
-        value={product.shipping_profile_id != null ? String(product.shipping_profile_id) : ""}
-        onChange={(value) => saveMutation.mutate(value ? Number(value) : null)}
-        feeSource={feeSource}
-      />
-      <ErrorBanner error={saveMutation.error} />
-    </label>
+    <div className="flex flex-col gap-1">
+      <label className="flex items-center gap-2 text-sm">
+        <span className="font-medium">Default shipping profile</span>
+        <ShippingProfileSelect
+          profiles={profiles}
+          value={product.shipping_profile_id != null ? String(product.shipping_profile_id) : ""}
+          onChange={(value) => saveMutation.mutate(value ? Number(value) : null)}
+          feeSource={feeSource}
+        />
+        <ErrorBanner error={saveMutation.error} />
+      </label>
+      <ShippingProfileLinks profile={profiles.find((p) => p.id === product.shipping_profile_id)} />
+    </div>
   );
 }
 
@@ -704,12 +755,15 @@ function ProductPriceForm({
           />
         </FieldRow>
         <FieldRow label="Shipping profile" align="right">
-          <ShippingProfileSelect
-            profiles={profiles}
-            value={shippingProfileId}
-            onChange={setShippingProfileId}
-            feeSource={feeSource}
-          />
+          <div className="flex flex-col items-end gap-1">
+            <ShippingProfileSelect
+              profiles={profiles}
+              value={shippingProfileId}
+              onChange={setShippingProfileId}
+              feeSource={feeSource}
+            />
+            <ShippingProfileLinks profile={profiles.find((p) => String(p.id) === shippingProfileId)} />
+          </div>
         </FieldRow>
         <FieldRow label="Platform fee (%)" align="right">
           {isCalculatedFee ? (

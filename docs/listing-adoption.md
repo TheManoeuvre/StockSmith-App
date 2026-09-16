@@ -84,6 +84,12 @@ These are enforced in code and covered by tests (`test_listing_adoption_flow.py`
 - **`Listing.external_listing_id` holds different things per platform** (eBay: the SKU;
   Etsy: the listing id), matching what each adapter's index writes. Swapping them would
   break every subsequent sync check and push.
+- **Adoption never overwrites a product's shipping profile.** If the adopted listing's
+  Etsy shipping profile / eBay postage policy (`GetItem`'s `SellerShippingProfile`) matches
+  a linked StockSmith shipping profile, a product with *no* shipping profile is pointed at
+  it (`AdoptListingResult.shipping_profile_assigned` names it); one the user has already
+  set is left alone. Reading the listing's shipping id is best effort — a failed read
+  never fails the adoption.
 
 ## If a migration times out
 

@@ -88,6 +88,12 @@ class FakeEtsyAdapter:
     async def fetch_all_listings(self, session, connection):
         return self.listings
 
+    async def fetch_listing(self, session, connection, listing_id):
+        for listing in self.listings:
+            if str(listing.get("listing_id")) == str(listing_id):
+                return listing
+        return {}
+
     async def update_listing_skus(self, session, connection, listing_id, sku_by_index):
         self.calls.append(("write_skus", listing_id, dict(sku_by_index)))
         if self.write_error is not None:

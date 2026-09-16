@@ -63,6 +63,9 @@ class DraftPushResult:
     units_linked: int
     warnings: list[str] = field(default_factory=list)
     publish_blockers: list[str] = field(default_factory=list)
+    # Where the marketplace shipping id came from — the product's linked shipping profile
+    # or the listing profile's fallback — so the modal can say which was sent.
+    shipping_source: str | None = None
 
 
 # Profile fields that map onto the neutral metadata bag the adapters read.
@@ -75,6 +78,11 @@ _ETSY_METADATA = {
     "etsy.readiness_state_id": "etsy_readiness_state_id",
     "etsy.return_policy_id": "etsy_return_policy_id",
     "etsy.shop_section_id": "etsy_shop_section_id",
+}
+
+_SHIPPING_METADATA_KEY = {
+    ListingPlatform.etsy: "etsy.shipping_profile_id",
+    ListingPlatform.ebay: "ebay.fulfillment_policy_id",
 }
 
 _EBAY_METADATA = {
@@ -97,6 +105,13 @@ async def build_draft(
     never an empty string, never a zero. A required field with no value is a blocker, and
     readiness has already said so by the time this runs.
     """
+    draft, _ = await _build_draft_with_source(session, product_id, platform)
+    return draft
+
+
+async def _build_draft_with_source(
+    session: AsyncSession, product_id: int, platform: ListingPlatform
+) -> tuple[DraftListing, str | None]:
     readiness = await draft_readiness.evaluate(session, product_id, platform)
     if readiness is None:
         raise DraftPushError("Product not found")
@@ -125,6 +140,16 @@ async def build_draft(
         value = getattr(profile, attribute, None) if profile else None
         if value is not None:
             metadata[key] = value
+
+    # The product's shipping profile is the single source of "how this ships": its link to
+    # this marketplace wins over the listing profile's own field, which is only the
+    # fallback. Readiness has already resolved (and blocked on) this, so reuse its answer
+    # rather than deriving it a second time and risking the two disagreeing.
+    shipping_key = _SHIPPING_METADATA_KEY[platform]
+    if readiness.shipping is not None and readiness.shipping.value is not None:
+        metadata[shipping_key] = readiness.shipping.value
+    else:
+        metadata.pop(shipping_key, None)
 
     attribute_names = [
         name
@@ -184,7 +209,7 @@ async def build_draft(
             pass
 
     general = await get_general_settings(session)
-    return DraftListing(
+    draft = DraftListing(
         title=copy.title,
         description=copy.description or "",
         currency=general.default_currency.value,
@@ -193,6 +218,7 @@ async def build_draft(
         images=images,
         metadata=metadata,
     )
+    return draft, readiness.shipping_source
 
 
 async def push_draft(
@@ -221,7 +247,7 @@ async def push_draft(
                 "Creating another would leave a duplicate that can't be removed from here."
             )
 
-        draft = await build_draft(session, product_id, platform)
+        draft, shipping_source = await _build_draft_with_source(session, product_id, platform)
         result = await adapter.create_draft_listing(session, connection, draft)
 
         # Written from the response rather than left for the next sync check to discover.
@@ -264,4 +290,5 @@ async def push_draft(
             units_linked=linked,
             warnings=result.warnings,
             publish_blockers=result.publish_blockers,
+            shipping_source=shipping_source,
         )

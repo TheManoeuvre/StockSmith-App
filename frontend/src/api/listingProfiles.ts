@@ -65,6 +65,11 @@ export interface DraftReadinessReport {
   priced_unit_count: number;
   image_count: number;
   issues: ReadinessIssue[];
+  // Where the marketplace shipping id comes from: "shipping_profile" (the product's own
+  // shipping profile, linked to the marketplace) or "listing_profile" (the fallback field
+  // on the listing profile). Null when neither has one — a blocker says so.
+  shipping_source: "shipping_profile" | "listing_profile" | null;
+  shipping_source_label: string | null;
 }
 
 export interface NamedOption {
@@ -89,6 +94,8 @@ export interface DraftPushResult {
   // Things the marketplace tolerates on create but refuses at publish — an Etsy draft with
   // no image, for instance. Surfaced so the draft isn't a dead end discovered later.
   publish_blockers: string[];
+  // Which source the shipping id was taken from — see DraftReadinessReport.shipping_source.
+  shipping_source: "shipping_profile" | "listing_profile" | null;
 }
 
 export const listingProfilesApi = {

@@ -6,13 +6,22 @@ useless — twenty-six proposals is not a shortcut — so most of these pin what
 doesn't split a group.
 """
 
+from decimal import Decimal
+
 import pytest
 from sqlalchemy import select
 
 from app.models.listing import Listing, ListingPlatform
 from app.models.listing_profile import ListingProfile, ProductPlatformSettings
 from app.models.product import Product
-from app.services.listing_profile_backfill import apply_proposals, propose_profiles
+from app.models.shipping_profile import ShippingProfile
+from app.services.listing_profile_backfill import (
+    ShippingSelection,
+    apply_proposals,
+    apply_shipping_proposals,
+    propose_profiles,
+    propose_shipping_profiles,
+)
 
 ETSY = ListingPlatform.etsy
 
@@ -131,7 +140,7 @@ async def test_an_incomplete_combination_is_still_proposed_but_flagged(session):
     single field to go and set."""
     await _matched(session, "Pot", 1)
 
-    proposals = await propose_profiles(session, [listing(1, shipping_profile_id=None)])
+    proposals = await propose_profiles(session, [listing(1, who_made=None)])
     assert len(proposals) == 1
     assert proposals[0].is_complete is False
 
@@ -156,7 +165,9 @@ async def test_apply_creates_the_profile_and_assigns_its_products(session):
     assert profile.name == "3D printed home"
     assert profile.etsy_taxonomy_id == 1234
     assert profile.etsy_who_made == "i_did"
-    assert profile.etsy_shipping_profile_id == 99
+    # Shipping is no longer the listing profile's to carry: the draft takes it from the
+    # product's linked ShippingProfile, proposed separately below.
+    assert profile.etsy_shipping_profile_id is None
     # Carried through even though it doesn't define the group.
     assert profile.etsy_processing_min == 1
 
@@ -209,3 +220,124 @@ async def test_an_empty_name_falls_back_to_the_suggestion(session):
     await apply_proposals(session, [listing(1)], {0: "   "})
     profile = (await session.execute(select(ListingProfile))).scalar_one()
     assert profile.name.startswith("Handmade")
+
+
+# --- Shipping profiles -----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_postage_alone_no_longer_splits_a_group(session):
+    """The old signature included Etsy's shipping_profile_id, so two products that differed
+    only in postage became two listing profiles. They are the same kind of listing; the
+    postage now belongs to the product's own shipping profile."""
+    await _matched(session, "Pot", 1)
+    await _matched(session, "Big pot", 2)
+
+    proposals = await propose_profiles(session, [listing(1, shipping_profile_id=99), listing(2, shipping_profile_id=100)])
+    assert len(proposals) == 1
+    assert proposals[0].is_complete is True
+
+
+@pytest.mark.asyncio
+async def test_each_unlinked_etsy_shipping_profile_is_proposed_once(session):
+    await _matched(session, "Pot", 1)
+    await _matched(session, "Big pot", 2)
+    await _matched(session, "Keychain", 3)
+
+    etsy_profiles = [
+        {"id": 99, "title": "Small parcel", "profile_type": "manual", "domestic_price": Decimal("3.60")},
+        {"id": 100, "title": "Large parcel", "profile_type": "manual", "domestic_price": Decimal("5.20")},
+    ]
+    proposals = await propose_shipping_profiles(
+        session,
+        [listing(1, shipping_profile_id=99), listing(2, shipping_profile_id=100), listing(3, shipping_profile_id=99)],
+        etsy_profiles,
+    )
+    assert [(p.etsy_shipping_profile_id, p.title, len(p.product_ids)) for p in proposals] == [
+        (99, "Small parcel", 2),
+        (100, "Large parcel", 1),
+    ]
+    assert proposals[0].domestic_price == Decimal("3.60")
+
+
+@pytest.mark.asyncio
+async def test_an_etsy_profile_already_linked_locally_is_not_proposed(session):
+    await _matched(session, "Pot", 1)
+    session.add(ShippingProfile(name="Small parcel", price=Decimal("3.60"), etsy_shipping_profile_id=99))
+    await session.commit()
+
+    assert await propose_shipping_profiles(session, [listing(1, shipping_profile_id=99)]) == []
+
+
+@pytest.mark.asyncio
+async def test_accepting_creates_a_linked_profile_priced_from_etsy_and_assigns_products(session):
+    pot = await _matched(session, "Pot", 1)
+    etsy_profiles = [{"id": 99, "title": "Small parcel", "profile_type": "manual", "domestic_price": Decimal("3.60")}]
+
+    result = await apply_shipping_proposals(
+        session, [listing(1, shipping_profile_id=99)], [ShippingSelection(etsy_shipping_profile_id=99)], etsy_profiles=etsy_profiles
+    )
+
+    assert result.shipping_profiles_created == 1 and result.shipping_products_assigned == 1
+    profile = (await session.execute(select(ShippingProfile))).scalar_one()
+    assert profile.name == "Small parcel"
+    assert profile.etsy_shipping_profile_id == 99
+    assert Decimal(profile.price_etsy) == Decimal("3.60")
+    # A new profile with £0 default postage would flatter every manual margin, so the Etsy
+    # figure seeds the default too. Costs stay zero — Etsy knows nothing about them.
+    assert Decimal(profile.price) == Decimal("3.60")
+    assert Decimal(profile.cost_etsy) == 0
+    await session.refresh(pot)
+    assert pot.shipping_profile_id == profile.id
+
+
+@pytest.mark.asyncio
+async def test_accepting_can_link_an_existing_profile_instead(session):
+    pot = await _matched(session, "Pot", 1)
+    existing = ShippingProfile(name="Small parcel 48", price=Decimal("3.00"))
+    session.add(existing)
+    await session.commit()
+
+    result = await apply_shipping_proposals(
+        session,
+        [listing(1, shipping_profile_id=99)],
+        [ShippingSelection(etsy_shipping_profile_id=99, link_shipping_profile_id=existing.id)],
+        etsy_profiles=[{"id": 99, "title": "Small parcel", "profile_type": "manual", "domestic_price": Decimal("3.60")}],
+    )
+
+    assert result.shipping_profiles_linked == 1 and result.shipping_profiles_created == 0
+    await session.refresh(existing)
+    assert existing.etsy_shipping_profile_id == 99
+    assert Decimal(existing.price_etsy) == Decimal("3.60")
+    # Linking imports the Etsy price into the Etsy column only; the manual figure is the user's.
+    assert Decimal(existing.price) == Decimal("3.00")
+    await session.refresh(pot)
+    assert pot.shipping_profile_id == existing.id
+
+
+@pytest.mark.asyncio
+async def test_a_product_with_its_own_shipping_profile_is_never_reassigned(session):
+    pot = await _matched(session, "Pot", 1)
+    own = ShippingProfile(name="Own choice", price=Decimal("1"))
+    session.add(own)
+    await session.commit()
+    pot.shipping_profile_id = own.id
+    await session.commit()
+
+    await apply_shipping_proposals(session, [listing(1, shipping_profile_id=99)], [ShippingSelection(etsy_shipping_profile_id=99)])
+
+    await session.refresh(pot)
+    assert pot.shipping_profile_id == own.id
+
+
+@pytest.mark.asyncio
+async def test_a_calculated_etsy_profile_is_created_without_a_price(session):
+    await _matched(session, "Pot", 1)
+    await apply_shipping_proposals(
+        session,
+        [listing(1, shipping_profile_id=99)],
+        [ShippingSelection(etsy_shipping_profile_id=99)],
+        etsy_profiles=[{"id": 99, "title": "Calculated", "profile_type": "calculated", "domestic_price": None}],
+    )
+    profile = (await session.execute(select(ShippingProfile))).scalar_one()
+    assert profile.price_etsy is None and Decimal(profile.price) == 0

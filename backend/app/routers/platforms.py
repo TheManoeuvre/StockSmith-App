@@ -54,6 +54,7 @@ from app.schemas.etsy_backfill import (
     ProductBackfillProposal,
     ProfileProposalRead,
     ProfileProposalsRead,
+    ShippingProfileProposalRead,
     VariantPriceProposal,
 )
 from app.schemas.listing_adoption import (
@@ -916,10 +917,12 @@ async def get_etsy_profile_proposals(session: AsyncSession = Depends(get_db)) ->
     adapter, connection = await _get_etsy_adapter(session)
     try:
         listings = await adapter.fetch_all_listings(session, connection)
+        etsy_profiles = await _etsy_shipping_profiles_best_effort(adapter, session, connection)
     except PlatformError as e:
         raise _map_platform_error(e)
 
     proposals = await listing_profile_backfill.propose_profiles(session, listings)
+    shipping = await listing_profile_backfill.propose_shipping_profiles(session, listings, etsy_profiles)
     return ProfileProposalsRead(
         proposals=[
             ProfileProposalRead(
@@ -932,14 +935,34 @@ async def get_etsy_profile_proposals(session: AsyncSession = Depends(get_db)) ->
                 who_made=p.signature.who_made,
                 when_made=p.signature.when_made,
                 is_supply=p.signature.is_supply,
-                shipping_profile_id=p.signature.shipping_profile_id,
                 return_policy_id=p.signature.return_policy_id,
                 processing_min=p.processing_min,
                 processing_max=p.processing_max,
             )
             for index, p in enumerate(proposals)
-        ]
+        ],
+        shipping_profiles=[
+            ShippingProfileProposalRead(
+                etsy_shipping_profile_id=p.etsy_shipping_profile_id,
+                title=p.title,
+                domestic_price=p.domestic_price,
+                is_calculated=p.is_calculated,
+                product_count=len(p.product_ids),
+                product_names=p.product_names[:5],
+            )
+            for p in shipping
+        ],
     )
+
+
+async def _etsy_shipping_profiles_best_effort(adapter: EtsyAdapter, session: AsyncSession, connection) -> list[dict] | None:
+    """Etsy's shipping profile list, for naming and pricing shipping proposals. Best effort:
+    it needs the shops_r scope an older connection may lack, and a missing title is a
+    worse-labelled proposal, not a reason to refuse the listing-profile proposals too."""
+    try:
+        return await adapter.fetch_shipping_profiles(session, connection)
+    except PlatformError:
+        return None
 
 
 @router.post(
@@ -954,6 +977,9 @@ async def apply_etsy_profile_proposals(
     adapter, connection = await _get_etsy_adapter(session)
     try:
         listings = await adapter.fetch_all_listings(session, connection)
+        etsy_profiles = (
+            await _etsy_shipping_profiles_best_effort(adapter, session, connection) if payload.shipping_items else None
+        )
     except PlatformError as e:
         raise _map_platform_error(e)
 
@@ -963,8 +989,26 @@ async def apply_etsy_profile_proposals(
         {item.index: item.name for item in payload.items},
         assign_products=payload.assign_products,
     )
+    shipping = await listing_profile_backfill.apply_shipping_proposals(
+        session,
+        listings,
+        [
+            listing_profile_backfill.ShippingSelection(
+                etsy_shipping_profile_id=item.etsy_shipping_profile_id,
+                name=item.name,
+                link_shipping_profile_id=item.link_shipping_profile_id,
+            )
+            for item in payload.shipping_items
+        ],
+        etsy_profiles=etsy_profiles,
+        assign_products=payload.assign_products,
+    )
     return ApplyProfileProposalsResult(
-        profiles_created=result.profiles_created, products_assigned=result.products_assigned
+        profiles_created=result.profiles_created,
+        products_assigned=result.products_assigned,
+        shipping_profiles_created=shipping.shipping_profiles_created,
+        shipping_profiles_linked=shipping.shipping_profiles_linked,
+        shipping_products_assigned=shipping.shipping_products_assigned,
     )
 
 
@@ -1107,6 +1151,7 @@ async def create_draft_listing(
         units_linked=result.units_linked,
         warnings=result.warnings,
         publish_blockers=result.publish_blockers,
+        shipping_source=result.shipping_source,
     )
 
 
@@ -1144,6 +1189,8 @@ async def get_draft_readiness(
             )
             for i in report.issues
         ],
+        shipping_source=report.shipping_source,
+        shipping_source_label=report.shipping_source_label,
     )
 
 
@@ -1510,6 +1557,7 @@ async def adopt_ebay_listing(
         ListingPlatform.ebay,
         body.listing_title or candidate.title,
         skus_aligned=skus_aligned,
+        marketplace_shipping_id=candidate.fulfillment_policy_id,
     )
 
 
@@ -1611,6 +1659,16 @@ async def adopt_etsy_listing(
         except PlatformError as e:
             raise _map_platform_error(e)
 
+    # Best effort: the listing's shipping profile only decides whether the product is
+    # pointed at a linked local profile, and a failed read shouldn't fail an adoption
+    # whose SKUs may already have been written.
+    try:
+        etsy_shipping_id = (await adapter.fetch_listing(session, connection, body.external_listing_id)).get(
+            "shipping_profile_id"
+        )
+    except PlatformError:
+        etsy_shipping_id = None
+
     # Etsy's Listing rows key on the listing id (unlike eBay's, which key on SKU) —
     # see EtsyAdapter._index_listing_skus, which sets external_listing_id to listing_id.
     return await listing_adoption.apply_adoption(
@@ -1621,4 +1679,5 @@ async def adopt_etsy_listing(
         ListingPlatform.etsy,
         body.listing_title or "",
         external_listing_id=body.external_listing_id,
+        marketplace_shipping_id=etsy_shipping_id,
     )

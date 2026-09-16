@@ -1093,6 +1093,17 @@ class EtsyAdapter:
             products=products,
         )
 
+    async def fetch_listing(self, session, connection: PlatformConnection, listing_id: str) -> dict:
+        """One listing by id (GET /listings/{listing_id}) — the listing-level fields only,
+        no Inventory association. Used where a single listing's shipping_profile_id is
+        wanted (adoption) and re-running the whole shop crawl for it would be absurd."""
+        response = await self._authed_request(session, connection, "GET", f"/listings/{listing_id}")
+        if response.status_code != 200:
+            raise PlatformSyncError(
+                f"Failed to fetch Etsy listing {listing_id}: {response.status_code} {response.text}"
+            )
+        return response.json()
+
     async def update_listing_skus(
         self, session, connection: PlatformConnection, listing_id: str, sku_by_index: dict[int, str]
     ) -> None:
