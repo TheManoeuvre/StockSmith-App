@@ -12,6 +12,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-09-16
+
 ### Added
 - **Shipping profiles can be linked to your Etsy shipping profiles and eBay postage
   policies, and take their buyer price from there.** Settings → Shipping & packaging →
@@ -51,6 +53,19 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   shipping profile are pointed at it. Adopting an existing Etsy or eBay listing likewise
   sets the product's shipping profile from the listing's, if a linked one matches and the
   product had none — a profile you've already chosen is never replaced.
+- **Linking an Etsy or eBay listing pre-fills the variation pairing.** When you link an
+  existing marketplace listing to a product (Settings → Unlinked listings → Review), the
+  variation picker now arrives already paired: StockSmith attributes are matched to the
+  listing's by name ("Colour" / "Color") or, failing that, by the values they share, and
+  each variant is pre-filled with the one variation whose values fit it. A section above
+  the rows shows how each attribute was paired and lets you change it; every row can still
+  be overridden by hand. Etsy pickers previously had to be filled in entirely by hand.
+- **The dashboard values finished goods, and shows how long the shelf itself lasts.** The
+  Inventory value tile now adds finished goods (at build cost) to materials, and shows the
+  split. "Time to stockout" now shows cover from what is actually on hand — a material
+  with 10 on the shelf and 200 on order reads *0.9 wk · 200 on order* instead of 19.7 wk —
+  while the warning status still allows for the order arriving; hover the cell for the
+  with-on-order figure.
 
 ### Changed
 - **A material's fallback substitutes now count towards build and packaging capacity.**
@@ -64,6 +79,19 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   already carrying the number — someone still has to choose which one to reach for. This
   is only a number: nothing is reserved against the fallback. Fallbacks pool one level
   deep (a fallback's own fallbacks don't chain in).
+- **The sidebar is grouped by workflow, with an icon on every row.** Dashboard, then
+  *Sell* (Orders, Products) and *Stock* (Materials, Purchases, Stock Take). Badges are kept
+  only where they mean something to act on: the Dashboard badge (which double-counted the
+  Orders and Materials figures) and the Products count are gone. A failing sync now reads
+  "Sync problem" rather than relying on colour alone.
+- **New, never-stocked items no longer appear as due for a stock take.** A material or
+  product that has never held stock has nothing to count; its detail page says "Nothing to
+  count yet" instead of an amber "Never counted". Anything that has ever held stock — even
+  if it's at zero now — still comes due as before, and once counted, its cadence applies
+  regardless of stock level.
+- **The fallback-materials picker only offers materials from the same category.** A
+  filament's fallback list no longer wades through hardware, blanks and packaging.
+  Cross-category fallbacks you already set up still work.
 
 ### Fixed
 - **Product margin now counts the postage you charge as income.** A product's profit and
@@ -76,6 +104,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   rather than of the item price, so it reads lower. Manual fee %s are likewise applied to
   sale price + postage from now on. Margin history recorded before this change keeps its old
   figures.
+- **Undoing an order-line substitution no longer leaves a blank row behind.** The
+  replacement line the substitution created was left on the order at quantity 0, showing
+  as an empty grey row; substituting, undoing and substituting again grew the order by a
+  row each time. The emptied line is now removed (the substitution stays in the order's
+  history), and existing blank rows are cleaned up on update.
 
 ## [0.15.0] - 2026-09-14
 
