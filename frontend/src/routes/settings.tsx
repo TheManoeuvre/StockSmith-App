@@ -1,26 +1,14 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { getSettings, openExternalUrl } from "../lib/tauri";
-import { platformsApi, type PlatformEnvironment } from "../api/platforms";
+import { getSettings } from "../lib/tauri";
 import type { ListingPlatform } from "../api/types";
 import { CONNECTABLE_PLATFORMS, PLATFORM_LABELS } from "../lib/platforms";
-import { ErrorBanner } from "../components/common/ErrorBanner";
 import { SegmentedControl } from "../components/common/SegmentedControl";
-import { PlatformSyncPanel } from "../components/settings/PlatformSyncPanel";
-import { PlatformCompatibilityPanel } from "../components/settings/PlatformCompatibilityPanel";
-import { EtsyBackfillPanel } from "../components/settings/EtsyBackfillPanel";
-import { PlatformLimitsEditor } from "../components/settings/PlatformLimitsEditor";
-import { ListingProfiles } from "../components/settings/ListingProfiles";
-import { EtsyProfileProposalsPanel } from "../components/settings/EtsyProfileProposalsPanel";
-import { PlatformCredentialsForm } from "../components/settings/PlatformCredentialsForm";
-import { EbaySigningKeyPanel } from "../components/settings/EbaySigningKeyPanel";
 import { MarginFeeSettings } from "../components/settings/MarginFeeSettings";
 import { PlatformFeeComponents } from "../components/settings/PlatformFeeComponents";
 import { ShippingProfileSettings } from "../components/settings/ShippingProfileSettings";
 import { SettingsCard } from "../components/settings/SettingsCard";
 import { ListsMasterDetail } from "../components/settings/ListsMasterDetail";
-import { BackgroundSyncSettings } from "../components/settings/BackgroundSyncSettings";
 import { CurrencySettings } from "../components/settings/CurrencySettings";
 import { ForecastSettings } from "../components/settings/ForecastSettings";
 import { StockCountSettings } from "../components/settings/StockCountSettings";
@@ -28,10 +16,9 @@ import { DefaultKittingBomSettings } from "../components/settings/DefaultKitting
 import { BackupSettings } from "../components/settings/BackupSettings";
 import { NotificationSettings } from "../components/settings/NotificationSettings";
 import { ConnectionSettings } from "../components/settings/ConnectionSettings";
-import { FieldMappingTable } from "../components/settings/FieldMappingTable";
 import { SettingsNav, type SettingsNavGroup } from "../components/settings/SettingsNav";
-import { useShopIconUrl } from "../hooks/useShopIconUrl";
-import { DirtyPath } from "../hooks/useDirtyRegistry";
+import { StoresHub } from "../components/settings/stores/StoresHub";
+import { StorePage } from "../components/settings/stores/StorePage";
 
 const PAGE_IDS = [
   "stores-sync",
@@ -80,15 +67,24 @@ export const Route = createFileRoute("/settings")({
   // unsaved-changes blocker covers it without this route knowing the guard exists. It also
   // makes a section linkable, which Lists needs now that it holds the reference tables
   // themselves rather than links out to standalone pages.
-  validateSearch: (search: Record<string, unknown>): { page?: PageId } => {
+  // `store` narrows Stores & sync to one store's page. It lives in the URL for the same
+  // reasons as `page`: switching stores is then a navigation the guard sees, and a store
+  // page is linkable — the sidebar's sync indicator deep-links to the store with the problem.
+  validateSearch: (search: Record<string, unknown>): { page?: PageId; store?: ListingPlatform } => {
     const page = search.page;
-    return PAGE_IDS.includes(page as PageId) ? { page: page as PageId } : {};
+    const store = search.store;
+    return {
+      ...(PAGE_IDS.includes(page as PageId) ? { page: page as PageId } : {}),
+      ...(CONNECTABLE_PLATFORMS.includes(store as ListingPlatform)
+        ? { store: store as ListingPlatform }
+        : {}),
+    };
   },
 });
 
 function Settings() {
   const navigate = Route.useNavigate();
-  const pageFromUrl = Route.useSearch().page;
+  const { page: pageFromUrl, store } = Route.useSearch();
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [hasConnection, setHasConnection] = useState(true);
 
@@ -123,7 +119,12 @@ function Settings() {
         <SettingsNav groups={NAV_GROUPS} active={activePage} onChange={setActivePage} />
 
         <div className="min-w-0 max-w-[840px] flex-1">
-          {activePage === "stores-sync" && <StoresSyncPage />}
+          {activePage === "stores-sync" && (
+            <StoresSyncPage
+              store={store}
+              onStoreChange={(next) => navigate({ search: { page: "stores-sync", store: next } })}
+            />
+          )}
           {activePage === "pricing-fees" && <PricingFeesPage />}
           {activePage === "shipping-packaging" && <ShippingPackagingPage />}
           {activePage === "forecasting" && <ForecastSettings />}
@@ -161,137 +162,30 @@ function ShippingPackagingPage() {
   );
 }
 
-function StoresSyncPage() {
-  const [platformFilter, setPlatformFilter] = useState<ListingPlatform | "all">("all");
-  const platforms = platformFilter === "all" ? CONNECTABLE_PLATFORMS : [platformFilter];
-
+function StoresSyncPage({
+  store,
+  onStoreChange,
+}: {
+  store: ListingPlatform | undefined;
+  onStoreChange: (store: ListingPlatform | undefined) => void;
+}) {
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col items-start gap-4">
       <SegmentedControl
-        ariaLabel="Platform"
-        value={platformFilter}
-        onChange={setPlatformFilter}
+        ariaLabel="Store"
+        value={store ?? "all"}
+        onChange={(next) => onStoreChange(next === "all" ? undefined : next)}
         options={[
           { value: "all" as const, label: "All stores" },
-          ...CONNECTABLE_PLATFORMS.map((p) => ({ value: p, label: PLATFORM_LABELS[p] })),
+          ...CONNECTABLE_PLATFORMS.map((p) => ({
+            value: p,
+            label: PLATFORM_LABELS[p],
+          })),
         ]}
       />
-
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {platforms.map((platform) => (
-          <PlatformIntegrationCard key={platform} platform={platform} />
-        ))}
+      <div className="w-full">
+        {store ? <StorePage key={store} platform={store} /> : <StoresHub onOpenStore={onStoreChange} />}
       </div>
-
-      {platformFilter === "all" && (
-        <>
-          <BackgroundSyncSettings />
-          <FieldMappingTable />
-        </>
-      )}
     </div>
-  );
-}
-
-function PlatformIntegrationCard({ platform }: { platform: ListingPlatform }) {
-  const label = PLATFORM_LABELS[platform];
-  const queryClient = useQueryClient();
-  // Which environment to connect/edit credentials against — only meaningful for eBay
-  // (the toggle only renders there); Etsy always uses "production". Local UI state, not
-  // server state: it picks which environment's credentials this card is showing/editing
-  // and which one "Connect" targets, independent of whatever's actually connected.
-  const [environment, setEnvironment] = useState<PlatformEnvironment>("production");
-
-  const { data: platformStatus } = useQuery({
-    queryKey: ["platforms", platform, "status"],
-    queryFn: () => platformsApi.status(platform),
-  });
-
-  const iconUrl = useShopIconUrl(
-    platform,
-    platformStatus?.has_shop_icon ?? false,
-    platformStatus?.connected_at ?? null
-  );
-
-  const connectMutation = useMutation({
-    mutationFn: async () => {
-      const { authorize_url } = await platformsApi.connect(platform, environment);
-      await openExternalUrl(authorize_url);
-    },
-  });
-
-  const disconnectMutation = useMutation({
-    mutationFn: () => platformsApi.disconnect(platform),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["platforms", platform, "status"] }),
-  });
-
-  const refreshStatus = () => queryClient.invalidateQueries({ queryKey: ["platforms", platform, "status"] });
-
-  return (
-    // Nested so each platform's editors sit under stores-sync/<platform>/…, which is what lets
-    // a prefix veto target one card without catching the other. The trailing-slash convention in
-    // isDirtyUnder keeps "ebay/" from matching a hypothetical "ebay-sandbox/".
-    <DirtyPath segment="stores-sync">
-      <DirtyPath segment={platform}>
-        <div className="flex flex-col gap-2">
-          <div className="rounded-[9px] border border-slate-200 bg-white p-3" style={{ boxShadow: "0 1px 2px rgba(15,23,42,.04)" }}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                {platformStatus?.connected && iconUrl && (
-                  <img src={iconUrl} alt="" className="h-8 w-8 rounded-full object-cover" />
-                )}
-                <div>
-                  <p className="font-medium">{label}</p>
-                  {platformStatus?.connected ? (
-                    <p className="text-sm text-green-700">
-                      {platformStatus.shop_name ?? `Connected — account ${platformStatus.account_id}`}
-                      {platformStatus.environment === "sandbox" && (
-                        <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-800">
-                          Sandbox
-                        </span>
-                      )}
-                    </p>
-                  ) : (
-                    <p className="text-sm text-slate-500">Not connected</p>
-                  )}
-                </div>
-              </div>
-              <div className="flex gap-2">
-                <button onClick={refreshStatus} className="rounded border border-slate-300 px-3 py-1.5 text-sm">
-                  Refresh
-                </button>
-                {platformStatus?.connected ? (
-                  <button
-                    onClick={() => disconnectMutation.mutate()}
-                    className="rounded border border-red-300 px-3 py-1.5 text-sm text-red-600"
-                  >
-                    Disconnect
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => connectMutation.mutate()}
-                    className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white"
-                  >
-                    Connect
-                  </button>
-                )}
-              </div>
-            </div>
-            <ErrorBanner error={connectMutation.error ?? disconnectMutation.error} />
-            <PlatformCredentialsForm platform={platform} environment={environment} onEnvironmentChange={setEnvironment} />
-            {platform === "ebay" && <EbaySigningKeyPanel environment={environment} />}
-            <p className="mt-2 text-xs text-slate-400">
-              Per-profile {label} shipping costs live under Shipping & packaging.
-            </p>
-          </div>
-          {platformStatus?.connected && <PlatformCompatibilityPanel platform={platform} />}
-          {platformStatus?.connected && platform === "etsy" && <EtsyBackfillPanel />}
-          {platformStatus?.connected && <ListingProfiles platform={platform} />}
-          {platformStatus?.connected && platform === "etsy" && <EtsyProfileProposalsPanel />}
-          {platformStatus?.connected && <PlatformLimitsEditor platform={platform} />}
-          {platformStatus?.connected && <PlatformSyncPanel platform={platform} />}
-        </div>
-      </DirtyPath>
-    </DirtyPath>
   );
 }

@@ -1,10 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import {
-  etsyBackfillApi,
-  type BackfillField,
-  type ProductBackfillProposal,
-} from "../../api/etsyBackfill";
+import { etsyBackfillApi, type BackfillField, type ProductBackfillProposal } from "../../api/etsyBackfill";
 import { ErrorBanner } from "../common/ErrorBanner";
 
 /**
@@ -39,7 +35,10 @@ export function EtsyBackfillPanel() {
       etsyBackfillApi.apply(
         Object.entries(selections)
           .filter(([, fields]) => fields.size > 0)
-          .map(([productId, fields]) => ({ product_id: Number(productId), fields: [...fields] }))
+          .map(([productId, fields]) => ({
+            product_id: Number(productId),
+            fields: [...fields],
+          })),
       ),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["products"] });
@@ -60,10 +59,9 @@ export function EtsyBackfillPanel() {
   }
 
   return (
-    <div className="flex flex-col gap-2 rounded border border-slate-200 bg-white p-3 text-sm">
+    <div className="flex flex-col gap-2 text-sm">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <p className="font-medium">Backfill from Etsy</p>
           <p className="text-xs text-slate-500">
             Copies descriptions, prices and hero images from listings already linked to your products. Never
             overwrites anything you've already filled in.
@@ -118,8 +116,8 @@ export function EtsyBackfillPanel() {
       {applyMutation.data && (
         <div className="rounded bg-slate-50 p-2">
           Updated <strong>{applyMutation.data.products_updated}</strong> product(s) —{" "}
-          {applyMutation.data.descriptions_filled} description(s), {applyMutation.data.prices_filled} price(s),{" "}
-          {applyMutation.data.images_filled} image(s).
+          {applyMutation.data.descriptions_filled} description(s), {applyMutation.data.prices_filled}{" "}
+          price(s), {applyMutation.data.images_filled} image(s).
           {applyMutation.data.errors.length > 0 && (
             <ul className="mt-1 list-inside list-disc text-xs text-red-700">
               {applyMutation.data.errors.map((error) => (

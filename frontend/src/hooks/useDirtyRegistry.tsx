@@ -39,6 +39,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalS
  *   stock-counts                                      ABC tiers and count cadences
  *   shipping-packaging/default-kitting-bom            default packaging BOM
  *   stores-sync/${platform}/credentials               developer app credentials
+ *   stores-sync/${platform}/order-sync                auto-sync, interval and start date
  *   pricing-fees/fee-components/${platform}/new       add-a-fee-component form
  *   backup-restore/settings                           schedule and second-folder form
  *   ${resource}/new                                   reference-data create form
