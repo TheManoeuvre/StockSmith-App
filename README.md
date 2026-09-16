@@ -147,3 +147,7 @@ GitHub Actions secret (with `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` alongside it) â
 committed to the repo. If this keypair is ever lost, existing installs can no longer
 receive signed updates and a new keypair (and a fresh non-updating release for users to
 manually reinstall) would be needed.
+
+## License
+
+All rights reserved â€” see [LICENSE](LICENSE). The source is public to read, not to reuse.
