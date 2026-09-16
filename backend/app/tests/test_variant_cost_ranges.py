@@ -11,6 +11,8 @@ disagrees with it is wrong however plausible its arithmetic looks.
 
 from decimal import Decimal
 
+from sqlalchemy import select
+
 from app.models.kitting import ProductKittingMaterial, ProductVariantKittingMaterial
 from app.models.material import Material, MaterialUnit
 from app.models.product import Product, ProductMaterial
@@ -191,3 +193,31 @@ async def _costed_kitting_bom(session, product_id: int, variant_id: int):
         material = await session.get(Material, line.material_id)
         line.unit_cost = Decimal(material.avg_unit_cost)
     return bom
+
+
+async def test_list_variants_reports_sellable_figures_for_a_product_with_a_bom(session):
+    """Regression: GET /products/{id}/variants (the bulk path behind the variants tab and
+    bulk variant creation) 500'd with "unsupported operand type(s) for +: 'int' and
+    'BuildableFigures'" for any product with a build BOM. The bulk buildability helper
+    returns (BuildableFigures, cost, bom) per variant, but list_variants was still
+    unpacking it as (max_buildable, expected_max_buildable) from before BuildableFigures
+    existed, so the sellable arithmetic got a dataclass and a Decimal cost instead of ints.
+    """
+    from app.routers.products import list_variants
+
+    product, variants = await _product_with_overriding_variants(session)
+    for material_name, qty in (("Base A", "20"), ("Base B", "30"), ("Swapped In", "5")):
+        material = (await session.execute(select(Material).where(Material.name == material_name))).scalar_one()
+        material.current_qty = Decimal(qty)
+    await session.commit()
+
+    reads = {r.variant_name: r for r in await list_variants(product.id, session)}
+
+    plain = reads["Plain"]
+    # 2 x A (20 → 10) and 3 x B (30 → 10): 10 buildable, nothing built, so 10 sellable
+    # once built — reported via the fallback-inclusive figures, which equal the plain ones
+    # here since no substitutes are configured.
+    assert plain.max_buildable == 10
+    assert plain.theoretical_max_sellable == 10
+    assert plain.expected_max_sellable == 10
+    assert reads["Substitute"].theoretical_max_sellable == 5  # 1 x Swapped In (5) caps it
