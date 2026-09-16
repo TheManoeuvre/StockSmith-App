@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import HTTPException, status
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.order import Order, OrderLine
@@ -101,3 +102,16 @@ async def undo_substitution(session: AsyncSession, substitution: OrderLineSubsti
     order = await session.get(Order, original_line.order_id)
     if order is not None:
         await allocation.allocate_order(session, order, source="substitution-undo")
+
+    # The emptied line is only worth keeping if a later substitution split it further —
+    # that row points at it as original_line_id and would cascade away with it. Otherwise
+    # drop it, so a substitute → undo → substitute again cycle doesn't leave blank rows
+    # behind (see OrderLineSubstitution's docstring).
+    still_split = await session.scalar(
+        select(func.count())
+        .select_from(OrderLineSubstitution)
+        .where(OrderLineSubstitution.original_line_id == new_line.id, OrderLineSubstitution.reverted_at.is_(None))
+    )
+    if not still_split:
+        await session.delete(new_line)
+        await session.flush()
