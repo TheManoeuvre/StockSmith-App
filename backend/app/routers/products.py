@@ -315,7 +315,11 @@ def _read_product(product: Product, ctx: "_ProductReadContext") -> ProductRead:
             "classification": (
                 None
                 if product.is_bundle
-                else abc.describe(ctx.abc_rules.for_product(product), product.last_stock_take_at)
+                else abc.describe(
+                    ctx.abc_rules.for_product(product),
+                    product.last_stock_take_at,
+                    ever_stocked=ctx.abc_rules.ever_stocked_product(product),
+                )
             ),
         }
     )
