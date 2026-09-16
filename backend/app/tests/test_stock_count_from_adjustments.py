@@ -42,7 +42,9 @@ async def _category(session, name: str) -> MaterialCategory:
 
 
 async def _material(session, name="Grey Resin", **kwargs) -> Material:
+    # Stocked, so that never-counted means due — a row that has never held anything isn't.
     row = await _category(session, "resin")
+    kwargs.setdefault("current_qty", 1)
     m = Material(
         name=name, category=legacy_value_for("resin"), category_id=row.id, unit=MaterialUnit.ml, **kwargs
     )
@@ -52,6 +54,7 @@ async def _material(session, name="Grey Resin", **kwargs) -> Material:
 
 
 async def _product(session, name="Oak Coaster", **kwargs) -> Product:
+    kwargs.setdefault("current_stock", 1)
     p = Product(name=name, sku=f"SKU-{name}", **kwargs)
     session.add(p)
     await session.flush()
@@ -95,7 +98,7 @@ async def test_a_set_confirming_the_current_qty_still_counts(session):
     """Zero delta, but the count happened — the whole point is not having to count it
     again next week. The models already allow a zero-delta 'set' for this reason."""
     await _settings(session)
-    material = await _material(session)
+    material = await _material(session, current_qty=0)
     await session.commit()
 
     await create_adjustment(session, material.id, MaterialAdjustmentMode.set, Decimal(0), "Recount, still empty")
@@ -161,8 +164,8 @@ async def test_set_adjustment_dates_the_variant_not_its_product(session, pushes)
     other variant as counted too."""
     await _settings(session)
     product = await _product(session)
-    counted = ProductVariant(product_id=product.id, variant_name="Red")
-    untouched = ProductVariant(product_id=product.id, variant_name="Blue")
+    counted = ProductVariant(product_id=product.id, variant_name="Red", current_stock=1)
+    untouched = ProductVariant(product_id=product.id, variant_name="Blue", current_stock=1)
     session.add_all([counted, untouched])
     await session.commit()
 

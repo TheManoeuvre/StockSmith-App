@@ -151,7 +151,13 @@ export function StockCountFields({
           {classification == null ? (
             <p className="text-sm text-slate-600">—</p>
           ) : classification.days_overdue === null ? (
-            <p className="text-sm text-amber-700">Never counted</p>
+            // Never counted, but only due once there has been stock to count — a row
+            // created ahead of its first delivery isn't nagged about a count of nothing.
+            classification.is_due ? (
+              <p className="text-sm text-amber-700">Never counted</p>
+            ) : (
+              <p className="text-sm text-slate-600">Nothing to count yet</p>
+            )
           ) : classification.days_overdue > 0 ? (
             <p className="text-sm text-amber-700">{classification.days_overdue} days overdue</p>
           ) : classification.is_due ? (

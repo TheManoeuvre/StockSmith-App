@@ -19,7 +19,8 @@ from app.models.abc_classification import (
     ProductCategoryABC,
 )
 from app.models.general_settings import GeneralSettings
-from app.models.material import Material, MaterialUnit
+from app.models.build import Build
+from app.models.material import Material, MaterialAdjustment, MaterialAdjustmentMode, MaterialUnit
 from app.models.material_category import MaterialCategory
 from app.models.product import Product, ProductBundleItem
 from app.models.product_category import ProductCategory
@@ -60,7 +61,10 @@ async def _category(session, name: str) -> MaterialCategory:
 
 
 async def _material(session, name="Resin", category="resin", **kwargs) -> Material:
+    """Stocked unless the test says otherwise — a never-counted item is only due once
+    there has been something to count (see test_never_stocked_items_are_not_due)."""
     row = await _category(session, category)
+    kwargs.setdefault("current_qty", 1)
     m = Material(
         name=name, category=legacy_value_for(category), category_id=row.id, unit=MaterialUnit.ml, **kwargs
     )
@@ -70,6 +74,7 @@ async def _material(session, name="Resin", category="resin", **kwargs) -> Materi
 
 
 async def _product(session, name="Keyring", sku=None, **kwargs) -> Product:
+    kwargs.setdefault("current_stock", 1)
     p = Product(name=name, sku=sku or f"SKU-{name}", **kwargs)
     session.add(p)
     await session.flush()
@@ -201,6 +206,16 @@ def test_never_counted_is_due_but_has_no_overdue_figure():
     assert state.next_due_at is None
 
 
+def test_never_counted_and_never_stocked_is_not_due():
+    """Nothing has arrived yet, so there is nothing to count."""
+    assert due_state(None, 30, NOW, ever_stocked=False).is_due is False
+
+
+def test_once_counted_the_cadence_applies_whatever_the_stock():
+    """A counted row back at zero is still a claim about the shelf, and claims get checked."""
+    assert due_state(NOW - timedelta(days=40), 30, NOW, ever_stocked=False).is_due is True
+
+
 def test_not_yet_due_and_exactly_due():
     assert due_state(NOW - timedelta(days=29), 30, NOW).is_due is False
     assert due_state(NOW - timedelta(days=30), 30, NOW).is_due is True
@@ -228,6 +243,45 @@ async def test_never_counted_sorts_before_the_most_overdue(session):
 
     assert [d.name for d in due] == ["Never", "Ancient"]
     assert due[0].days_overdue is None
+
+
+async def test_never_stocked_items_are_not_due(session):
+    """A material or product created ahead of its first order has nothing to count. It
+    joins the list only once stock has moved — and stays on the cadence after that even
+    if it's back at zero, because a zero that used to be something is worth checking."""
+    await _settings(session)
+    await _material(session, "On order", current_qty=0)
+    await _product(session, "Planned", current_stock=0)
+    with_variants = await _product(session, "Keyring", current_stock=0)
+    session.add(ProductVariant(product_id=with_variants.id, variant_name="Red", current_stock=0))
+    await session.commit()
+
+    assert await compute_due_for_count(session, now=NOW) == []
+
+
+async def test_stock_that_came_and_went_is_still_due(session):
+    """Zero on hand is not the same as never stocked: the history tables say which."""
+    await _settings(session)
+    used_up = await _material(session, "Used up", current_qty=0)
+    session.add(
+        MaterialAdjustment(
+            material_id=used_up.id, mode=MaterialAdjustmentMode.adjust, qty_delta=-5, reason="consumed"
+        )
+    )
+    sold_out = await _product(session, "Sold out", current_stock=0)
+    session.add(Build(product_id=sold_out.id, qty_built=3))
+    with_variants = await _product(session, "Keyring", current_stock=0)
+    session.add(ProductVariant(product_id=with_variants.id, variant_name="Red", current_stock=0))
+    await session.flush()
+    red = (await session.execute(select(ProductVariant))).scalar_one()
+    session.add(Build(product_id=with_variants.id, variant_id=red.id, qty_built=2))
+    # Counted once, since consumed to nothing: due on cadence like anything else.
+    await _material(session, "Counted then emptied", current_qty=0, last_stock_take_at=NOW - timedelta(days=400))
+    await session.commit()
+
+    due = await compute_due_for_count(session, now=NOW)
+
+    assert [d.name for d in due] == ["Keyring — Red", "Sold out", "Used up", "Counted then emptied"]
 
 
 async def test_recently_counted_item_is_absent(session):
@@ -267,8 +321,8 @@ async def test_a_product_with_active_variants_is_counted_as_its_variants(session
     product = await _product(session, "Keyring")
     session.add_all(
         [
-            ProductVariant(product_id=product.id, variant_name="Red"),
-            ProductVariant(product_id=product.id, variant_name="Blue"),
+            ProductVariant(product_id=product.id, variant_name="Red", current_stock=1),
+            ProductVariant(product_id=product.id, variant_name="Blue", current_stock=1),
         ]
     )
     await session.commit()
