@@ -12,6 +12,46 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Shipping profiles can be linked to your Etsy shipping profiles and eBay postage
+  policies, and take their buyer price from there.** Settings → Shipping & packaging →
+  Shipping profiles gains an "Etsy shipping profile" and an "eBay postage policy" picker per
+  profile (Etsy connections made before this release need reconnecting once to grant the
+  extra permission). The price you charge for postage is now split per channel the same
+  way the cost already was — "Price charged (Etsy)" / "(eBay)", with the default used
+  wherever a channel figure is blank — because the same service genuinely sells at
+  different postage prices on different marketplaces, and margin counts that price as
+  income. Linking changes no number by itself: "Pull price from Etsy/eBay" writes what the
+  marketplace actually charges the buyer into that channel's price, an amber "Etsy now
+  £x.xx" marker shows when the stored figure has drifted, and neither the default price nor
+  any seller cost is ever touched. Profiles whose postage the marketplace calculates at
+  checkout are labelled as such and have nothing to import.
+- **Linked prices refresh themselves.** After a successful background sync, StockSmith
+  re-reads the marketplace's shipping profiles (at most once a day per marketplace — the
+  interval is adjustable, and "Refresh from Etsy/eBay" runs it on demand) and rewrites
+  any linked price that changed. Every change is written to a per-profile **Price history**
+  (when, old → new, and whether the refresh, a manual pull or an edit made it), so a margin
+  that moved has an explanation. Two new notification types cover it: "Postage price changed
+  on a marketplace" lists every profile that moved (digest by default), and "Linked shipping
+  profile missing on a marketplace" fires right away, once, when a linked profile has been
+  deleted on Etsy or eBay — its last price is kept, but drafts sent with it would fail.
+- **A product's shipping profile now decides how its draft listings ship.** When the
+  product's shipping profile is linked to Etsy or eBay, that link is the shipping profile /
+  postage policy the draft is created with; the listing profile's own shipping fields become
+  a fallback ("used only when the product has none") for products whose profile isn't
+  linked. The draft modal says which was used. The Pricing tab shows "→ Etsy: <profile>"
+  under the chosen shipping profile, or an amber "not linked" note when the marketplace is
+  connected and the profile isn't; the readiness check now says whether the problem is a
+  missing shipping profile or one that isn't linked, and where to fix each.
+- **"Suggest profiles from Etsy" proposes shipping profiles too.** Listing-profile
+  suggestions no longer split into one per Etsy shipping profile — two products that differ
+  only in postage are the same kind of listing. Instead, each Etsy shipping profile your
+  listings use that no StockSmith profile is linked to yet is offered as its own suggestion:
+  create one (named and priced from Etsy) or link an existing profile, and products with no
+  shipping profile are pointed at it. Adopting an existing Etsy or eBay listing likewise
+  sets the product's shipping profile from the listing's, if a linked one matches and the
+  product had none — a profile you've already chosen is never replaced.
+
 ### Fixed
 - **Product margin now counts the postage you charge as income.** A product's profit and
   margin (Pricing tab, product header, and the Etsy vs eBay comparison) were computed on the

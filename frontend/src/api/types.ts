@@ -962,6 +962,44 @@ export interface ShippingProfile {
   updated_at: string;
 }
 
+/** One change to a shipping profile's per-channel buyer price, and what made it. */
+export interface ShippingProfilePriceEvent {
+  id: number;
+  shipping_profile_id: number;
+  platform: ListingPlatform;
+  old_price: string | null;
+  new_price: string | null;
+  source: "sync" | "manual_import" | "user_edit";
+  changed_at: string;
+}
+
+export interface PriceRefreshChange {
+  shipping_profile_id: number;
+  name: string;
+  old_price: string | null;
+  new_price: string | null;
+}
+
+/** What one refresh of a platform's linked shipping profiles did. */
+export interface PriceRefreshResult {
+  platform: ListingPlatform;
+  refreshed_at: string | null;
+  changed: PriceRefreshChange[];
+  unchanged_count: number;
+  skipped_calculated: string[];
+  missing_upstream: string[];
+  /** Set when the marketplace couldn't be read; nothing was written. */
+  error: string | null;
+}
+
+export interface PriceRefreshStatus {
+  platform: ListingPlatform;
+  connected: boolean;
+  linked_count: number;
+  shipping_price_refresh_hours: number | null;
+  last_shipping_price_refresh_at: string | null;
+}
+
 /** One Etsy shipping profile or eBay postage policy as the marketplace reports it. */
 export interface MarketplaceShippingProfile {
   id: string;

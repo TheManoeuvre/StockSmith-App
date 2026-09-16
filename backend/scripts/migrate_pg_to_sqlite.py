@@ -42,6 +42,7 @@ TABLES = [
     "purchases",
     "material_adjustments",
     "shipping_profiles",
+    "shipping_profile_price_events",
     "products",
     "product_variants",
     "product_materials",

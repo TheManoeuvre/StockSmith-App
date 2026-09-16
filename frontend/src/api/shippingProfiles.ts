@@ -1,5 +1,12 @@
 import { api } from "./client";
-import type { ListingPlatform, MarketplaceShippingProfile, ShippingProfile } from "./types";
+import type {
+  ListingPlatform,
+  MarketplaceShippingProfile,
+  PriceRefreshResult,
+  PriceRefreshStatus,
+  ShippingProfile,
+  ShippingProfilePriceEvent,
+} from "./types";
 
 export interface ShippingProfileInput {
   name: string;
@@ -31,4 +38,15 @@ export const shippingProfilesApi = {
   /** Pull the linked marketplace profile's buyer price into price_<platform>. */
   importPrice: (id: number, platform: ListingPlatform) =>
     api.post<ShippingProfile>(`/shipping-profiles/${id}/import-price/${platform}`),
+  /** Per platform: refresh cadence and when the linked prices were last refreshed. */
+  refreshStatus: () => api.get<PriceRefreshStatus[]>(`/shipping-profiles/refresh-status`),
+  updateRefreshSettings: (platform: ListingPlatform, hours: number) =>
+    api.patch<PriceRefreshStatus>(`/shipping-profiles/refresh-status/${platform}`, {
+      shipping_price_refresh_hours: hours,
+    }),
+  /** Run the scheduled refresh now — every linked profile's price_<platform> from one call. */
+  refreshPrices: (platform: ListingPlatform) =>
+    api.post<PriceRefreshResult>(`/shipping-profiles/refresh-prices/${platform}`),
+  /** The profile's per-channel price history, newest first. */
+  priceEvents: (id: number) => api.get<ShippingProfilePriceEvent[]>(`/shipping-profiles/${id}/price-events`),
 };

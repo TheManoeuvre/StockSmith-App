@@ -1,9 +1,12 @@
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, Index, Integer, Numeric, String, func
+import enum
+
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Integer, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base
+from app.models.base import Base, portable_enum
+from app.models.listing import ListingPlatform
 
 
 class ShippingProfile(Base):
@@ -84,3 +87,39 @@ class ShippingProfile(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
+
+class PriceEventSource(str, enum.Enum):
+    """How a price_<platform> value came to change: the scheduled refresh, the explicit
+    "Pull price from Etsy/eBay" action, or someone typing a new figure into Settings."""
+
+    sync = "sync"
+    manual_import = "manual_import"
+    user_edit = "user_edit"
+
+
+class ShippingProfilePriceEvent(Base):
+    """One row per change to a ShippingProfile's per-channel buyer price.
+
+    Margin counts that price as revenue, so "why did margin drop on the 3rd" needs an
+    answer, and the refresh overwrites without asking (the marketplace is the source of
+    truth) — so every change is written down with where it came from, whichever path made
+    it: the scheduled refresh, the manual import, or an edit in Settings. Append-only.
+    """
+
+    __tablename__ = "shipping_profile_price_events"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    shipping_profile_id: Mapped[int] = mapped_column(
+        ForeignKey("shipping_profiles.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    platform: Mapped[ListingPlatform] = mapped_column(
+        portable_enum(ListingPlatform, name="listing_platform"), nullable=False
+    )
+    old_price: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    new_price: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
+    source: Mapped[PriceEventSource] = mapped_column(
+        portable_enum(PriceEventSource, name="shipping_price_event_source"), nullable=False
+    )
+    changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )

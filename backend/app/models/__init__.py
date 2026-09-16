@@ -60,7 +60,7 @@ from app.models.product import Product, ProductBundleItem, ProductMaterial
 from app.models.product_stock_event import ProductStockEvent, ProductStockEventType
 from app.models.product_category import ProductCategory
 from app.models.purchase import MaterialPurchase, MaterialPurchaseReceipt, Purchase, PurchaseStatus
-from app.models.shipping_profile import ShippingProfile
+from app.models.shipping_profile import PriceEventSource, ShippingProfile, ShippingProfilePriceEvent
 from app.models.sku_alias import SkuAlias
 from app.models.stock_adjustment import StockAdjustment, StockAdjustmentMode
 from app.models.stock_take import StockTake, StockTakeLine, StockTakeLineStatus, StockTakeStatus
@@ -146,6 +146,8 @@ __all__ = [
     "MarginFeeConfig",
     "MarginFeeSource",
     "ShippingProfile",
+    "ShippingProfilePriceEvent",
+    "PriceEventSource",
     "GeneralSettings",
     "CurrencyCode",
     "Notification",

@@ -8,7 +8,7 @@ from app.models.listing import ListingPlatform
 from app.models.platform_connection import PlatformConnection
 from app.models.platform_sync_run import SyncRunMode
 from app.schemas.platform import SyncCommitResult
-from app.services import order_sync
+from app.services import order_sync, shipping_price_sync
 from app.services.notification_alerts import (
     raise_marketplace_sync_failure_alert,
     raise_platform_reconnect_required_alert,
@@ -123,6 +123,18 @@ async def _tick(platform: ListingPlatform) -> None:
     async with lock:
         try:
             await run_commit_sync_guarded(platform)
+            # Piggybacks on the tick rather than running its own loop: once the order
+            # sync has succeeded the connection is known good, and the refresh throttles
+            # itself to once per shipping_price_refresh_hours. Still under the lock so it
+            # never interleaves with a manual sync or refresh. An auth failure is the
+            # loop's to count (below); anything else must not stop the tick from
+            # recording the order sync it just completed as a success.
+            try:
+                await shipping_price_sync.refresh_if_due(platform)
+            except PlatformAuthError:
+                raise
+            except Exception:
+                logger.exception("Shipping price refresh failed for %s", platform.value)
         except PlatformAuthError as exc:
             # commit_sync has already rolled back and logged this to PlatformSyncRun
             # (see order_sync._record_failure) — this is purely for the
