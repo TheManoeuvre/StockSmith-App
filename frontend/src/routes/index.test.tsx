@@ -4,7 +4,7 @@ import {
   createMemoryHistory,
   createRouter,
 } from "@tanstack/react-router";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 
@@ -148,12 +148,14 @@ it("navigates to Orders when the Orders awaiting products tile is clicked", asyn
 
 it("merges short-stock and short-packaging rows into the Orders awaiting products table", async () => {
   await renderDashboard();
-  expect(await screen.findByText("Stock")).toBeInTheDocument();
-  expect(screen.getByText("Packaging")).toBeInTheDocument();
-  expect(screen.getAllByText("Widget A").length).toBeGreaterThan(0);
-  expect(screen.getByText("Small box")).toBeInTheDocument();
+  // Scoped to the page: the sidebar's "Stock" group heading would otherwise match too.
+  const page = within(screen.getByRole("main"));
+  expect(await page.findByText("Stock")).toBeInTheDocument();
+  expect(page.getByText("Packaging")).toBeInTheDocument();
+  expect(page.getAllByText("Widget A").length).toBeGreaterThan(0);
+  expect(page.getByText("Small box")).toBeInTheDocument();
   // Oldest-placed first: the short-packaging order (18 Aug) above the short-stock one (20 Aug).
-  const labels = screen.getAllByText(/^(Stock|Packaging)$/);
+  const labels = page.getAllByText(/^(Stock|Packaging)$/);
   expect(labels[0]).toHaveTextContent("Packaging");
 });
 
