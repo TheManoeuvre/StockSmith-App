@@ -1,0 +1,49 @@
+# Weekly dependency-update PRs, one ecosystem each, grouped so a routine week is a handful
+# of PRs rather than dozens. Security advisories are raised immediately regardless of the
+# schedule. Each PR runs the Tests workflow like any other, so a breaking bump goes red
+# before it is merged.
+#
+# Monday morning so the batch is waiting at the start of the week rather than landing
+# mid-release.
+
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      npm-minor-and-patch:
+        update-types: [minor, patch]
+
+  # Reads backend/uv.lock. Dependabot's uv support is lockfile-only, which is exactly what
+  # tests.yml checks with `uv sync --frozen`.
+  - package-ecosystem: uv
+    directory: /backend
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      python-minor-and-patch:
+        update-types: [minor, patch]
+
+  # The Tauri shell. Cargo.lock is gitignored, so Dependabot bumps Cargo.toml only; the
+  # release build resolves the rest.
+  - package-ecosystem: cargo
+    directory: /frontend/src-tauri
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      cargo-minor-and-patch:
+        update-types: [minor, patch]
