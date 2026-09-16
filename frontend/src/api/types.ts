@@ -718,6 +718,9 @@ export interface LowStockMaterial {
   supplier_name: string | null;
   consumption_rate_per_week: string | null;
   weeks_of_supply: string | null;
+  /** `weeks_of_supply` with on-order purchase lines left out — what the shelf alone covers.
+   *  The dashboard shows this one; `weeks_of_supply` is what decided `status`. */
+  weeks_of_supply_on_hand: string | null;
   fg_buffer_weeks: string | null;
   /** Lead time (business days) applied to this material's reorder point. Shown next to the
    *  supplier. */
@@ -816,7 +819,10 @@ export interface MaterialSubstituteUsageInput {
 }
 
 export interface DashboardSummary {
+  /** Stock on hand at cost, 2dp: materials plus finished goods. total is their sum. */
   total_inventory_value: string;
+  material_value: string;
+  finished_goods_value: string;
   active_product_count: number;
   low_stock_materials: LowStockMaterial[];
   lowest_buildable_products: BuildableProduct[];
@@ -966,10 +972,68 @@ export interface ShippingProfile {
   is_archived: boolean;
   /** Products, variants and orders pointing at this. Computed per request. */
   usage_count: number;
+  /** Postage charged to the buyer — the manual/default figure. Counts as revenue in margin. */
   price: string;
+  /** Per-channel buyer price; null means "use price". Imported from the marketplace once
+   *  linked (the marketplace is the source of truth for what it charges). */
+  price_etsy: string | null;
+  price_ebay: string | null;
   cost_etsy: string;
   cost_ebay: string;
   cost_manual: string;
+  /** Marketplace link — Etsy's shipping profile id / eBay's fulfillment policy id. */
+  etsy_shipping_profile_id: number | null;
+  ebay_fulfillment_policy_id: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** One change to a shipping profile's per-channel buyer price, and what made it. */
+export interface ShippingProfilePriceEvent {
+  id: number;
+  shipping_profile_id: number;
+  platform: ListingPlatform;
+  old_price: string | null;
+  new_price: string | null;
+  source: "sync" | "manual_import" | "user_edit";
+  changed_at: string;
+}
+
+export interface PriceRefreshChange {
+  shipping_profile_id: number;
+  name: string;
+  old_price: string | null;
+  new_price: string | null;
+}
+
+/** What one refresh of a platform's linked shipping profiles did. */
+export interface PriceRefreshResult {
+  platform: ListingPlatform;
+  refreshed_at: string | null;
+  changed: PriceRefreshChange[];
+  unchanged_count: number;
+  skipped_calculated: string[];
+  missing_upstream: string[];
+  /** Set when the marketplace couldn't be read; nothing was written. */
+  error: string | null;
+}
+
+export interface PriceRefreshStatus {
+  platform: ListingPlatform;
+  connected: boolean;
+  linked_count: number;
+  shipping_price_refresh_hours: number | null;
+  last_shipping_price_refresh_at: string | null;
+}
+
+/** One Etsy shipping profile or eBay postage policy as the marketplace reports it. */
+export interface MarketplaceShippingProfile {
+  id: string;
+  title: string;
+  /** Postage is worked out per buyer at checkout — nothing fixed to import. */
+  is_calculated: boolean;
+  /** What the buyer is charged for the profile's own domestic destination. */
+  domestic_price: string | null;
+  /** The domestic destination could not be identified and the first one was used. */
+  domestic_fallback: boolean;
 }

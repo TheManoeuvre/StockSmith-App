@@ -1,5 +1,15 @@
+import type { ReactNode } from "react";
 import { createRootRoute, Link, Outlet, useMatchRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
+import {
+  DashboardIcon,
+  MaterialsIcon,
+  OrdersIcon,
+  ProductsIcon,
+  PurchasesIcon,
+  SettingsIcon,
+  StockTakeIcon,
+} from "../components/common/NavIcons";
 import { SyncStatusIndicator } from "../components/common/SyncStatusIndicator";
 import { NotificationCenter } from "../components/common/NotificationCenter";
 import { MaintenanceOverlay } from "../components/common/MaintenanceOverlay";
@@ -54,8 +64,15 @@ type NavBadgeTone = "neutral" | "warm" | "hot";
 interface NavItem {
   label: string;
   to: string;
+  icon: ReactNode;
   badge?: number;
   tone: NavBadgeTone;
+}
+
+/** A labelled run of nav items. Mirrors the Selling / Stock split the Settings page already uses. */
+interface NavGroup {
+  label: string;
+  items: NavItem[];
 }
 
 const BADGE_TONE_CLASSES: Record<NavBadgeTone, string> = {
@@ -69,6 +86,11 @@ const BADGE_TONE_CLASSES: Record<NavBadgeTone, string> = {
  * (["dashboard-summary"] from the Dashboard route, ["purchases"] from the Purchases list) so
  * React Query serves this from the same cache entry rather than issuing a second request —
  * the sidebar is mounted on every page, so a dedicated fetch here would run constantly.
+ *
+ * A badge means "something here wants doing". Dashboard and Products deliberately have none:
+ * the Dashboard figure was the sum of the Orders and Materials badges (the same problem
+ * counted twice in one column), and the Products figure was a plain count of active products
+ * that never changed tone and asked for nothing.
  */
 function useNavBadges() {
   const { data: summary } = useQuery({
@@ -92,12 +114,7 @@ function useNavBadges() {
   const outstandingPurchases = purchases?.filter((p) => p.received_at === null).length ?? 0;
 
   return {
-    dashboard: {
-      badge: awaitingOrders + blockedOrders + riskMaterials,
-      tone: (blockedOrders > 0 ? "hot" : awaitingOrders + riskMaterials > 0 ? "warm" : "neutral") as NavBadgeTone,
-    },
     materials: { badge: riskMaterials, tone: "warm" as NavBadgeTone },
-    products: { badge: summary?.active_product_count ?? 0, tone: "neutral" as NavBadgeTone },
     purchases: { badge: outstandingPurchases, tone: (outstandingPurchases > 0 ? "warm" : "neutral") as NavBadgeTone },
     orders: {
       badge: awaitingOrders + blockedOrders,
@@ -117,6 +134,7 @@ function NavButton({ item }: { item: NavItem }) {
         isActive ? "bg-slate-100 text-slate-900" : "text-slate-600"
       }`}
     >
+      {item.icon}
       <span className="flex-1">{item.label}</span>
       {!!item.badge && (
         <span
@@ -131,13 +149,25 @@ function NavButton({ item }: { item: NavItem }) {
 
 function RootChrome() {
   const badges = useNavBadges();
-  const navItems: NavItem[] = [
-    { label: "Dashboard", to: "/", ...badges.dashboard },
-    { label: "Materials", to: "/materials", ...badges.materials },
-    { label: "Products", to: "/products", ...badges.products },
-    { label: "Purchases", to: "/purchases", ...badges.purchases },
-    { label: "Orders", to: "/orders", ...badges.orders },
-    { label: "Stock Take", to: "/stock-takes", badge: badges.stockTake.badge, tone: badges.stockTake.tone },
+  const dashboard: NavItem = { label: "Dashboard", to: "/", icon: <DashboardIcon />, tone: "neutral" };
+  // Ordered by the daily loop rather than by build order: orders come in, products fulfil
+  // them, materials get consumed, purchases replenish, a stock take checks the books.
+  const navGroups: NavGroup[] = [
+    {
+      label: "Sell",
+      items: [
+        { label: "Orders", to: "/orders", icon: <OrdersIcon />, ...badges.orders },
+        { label: "Products", to: "/products", icon: <ProductsIcon />, tone: "neutral" },
+      ],
+    },
+    {
+      label: "Stock",
+      items: [
+        { label: "Materials", to: "/materials", icon: <MaterialsIcon />, ...badges.materials },
+        { label: "Purchases", to: "/purchases", icon: <PurchasesIcon />, ...badges.purchases },
+        { label: "Stock Take", to: "/stock-takes", icon: <StockTakeIcon />, ...badges.stockTake },
+      ],
+    },
   ];
 
   return (
@@ -148,15 +178,23 @@ function RootChrome() {
           <div className="text-[13.5px] font-semibold tracking-tight">StockSmith</div>
         </div>
         <nav className="flex flex-col gap-px">
-          {navItems.map((item) => (
-            <NavButton key={item.to} item={item} />
+          <NavButton item={dashboard} />
+          {navGroups.map((group) => (
+            <div key={group.label} className="flex flex-col gap-px">
+              <p className="px-2.5 pb-1 pt-2.5 text-[10.5px] font-semibold uppercase tracking-[.06em] text-slate-400">
+                {group.label}
+              </p>
+              {group.items.map((item) => (
+                <NavButton key={item.to} item={item} />
+              ))}
+            </div>
           ))}
         </nav>
         <div className="flex-1" />
         <div className="flex flex-col gap-px border-t border-slate-200 pt-1.5">
           <NotificationCenter />
           <SyncStatusIndicator />
-          <NavButton item={{ label: "Settings", to: "/settings", tone: "neutral" }} />
+          <NavButton item={{ label: "Settings", to: "/settings", icon: <SettingsIcon />, tone: "neutral" }} />
         </div>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">

@@ -1,5 +1,7 @@
 # Plan: link StockSmith shipping profiles to Etsy / eBay and keep the buyer price in sync
 
+**Status (2026-09-16):** all three stages implemented on branch `claude/stocksmith-shipping-sync-11664b`. Kept as the design record; the user-facing summary is the CHANGELOG entry.
+
 Follow-up to the margin fix that made postage charged count as revenue
 (`pricing.compute_profit_margin`). That fix makes `ShippingProfile.price` — what the buyer is
 charged for postage — a number that directly moves every product's margin, so it has to be

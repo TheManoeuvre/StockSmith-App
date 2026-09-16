@@ -53,22 +53,54 @@ export interface ProfileProposal {
   who_made: string | null;
   when_made: string | null;
   is_supply: boolean | null;
-  shipping_profile_id: number | null;
   return_policy_id: number | null;
   processing_min: number | null;
   processing_max: number | null;
 }
 
+/** One Etsy shipping profile in use on your listings that no StockSmith shipping profile
+ *  is linked to yet. Accept it to create a local profile (named and priced from Etsy) or to
+ *  link an existing one. */
+export interface ShippingProfileProposal {
+  etsy_shipping_profile_id: number;
+  title: string;
+  domestic_price: string | null;
+  is_calculated: boolean;
+  product_count: number;
+  product_names: string[];
+}
+
+export interface ProfileProposalsPreview {
+  proposals: ProfileProposal[];
+  shipping_profiles: ShippingProfileProposal[];
+}
+
+export interface ShippingProfileSelection {
+  etsy_shipping_profile_id: number;
+  /** Name for a new local profile (the Etsy title unless renamed). */
+  name?: string;
+  /** Or link this existing local profile instead of creating one. */
+  link_shipping_profile_id?: number;
+}
+
 export interface ApplyProfileProposalsResult {
   profiles_created: number;
   products_assigned: number;
+  shipping_profiles_created: number;
+  shipping_profiles_linked: number;
+  shipping_products_assigned: number;
 }
 
 export const etsyProfileProposalsApi = {
-  preview: () => api.get<{ proposals: ProfileProposal[] }>(`/platforms/etsy/profile-proposals`),
-  apply: (items: { index: number; name: string }[], assignProducts = true) =>
+  preview: () => api.get<ProfileProposalsPreview>(`/platforms/etsy/profile-proposals`),
+  apply: (
+    items: { index: number; name: string }[],
+    shippingItems: ShippingProfileSelection[] = [],
+    assignProducts = true
+  ) =>
     api.post<ApplyProfileProposalsResult>(`/platforms/etsy/profile-proposals/apply`, {
       items,
+      shipping_items: shippingItems,
       assign_products: assignProducts,
     }),
 };

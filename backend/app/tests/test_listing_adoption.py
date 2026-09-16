@@ -116,3 +116,73 @@ async def test_adopt_multi_variant_writes_one_listing_row_per_variant(session):
     by_variant = {row.variant_id: row for row in listings}
     assert by_variant[variants[0].id].external_listing_id == "SKU-0012-A"
     assert by_variant[variants[3].id].external_listing_id == "SKU-0012-D"  # StockSmith's own, not the conflicting eBay one
+
+
+# --- Shipping profile: the adopted listing already ships a certain way, so a product with
+# no shipping profile is pointed at the local one linked to that marketplace id.
+
+
+async def _shipping_profile(session, name="Small parcel", **link):
+    from decimal import Decimal
+
+    from app.models.shipping_profile import ShippingProfile
+
+    profile = ShippingProfile(name=name, price=Decimal("3.50"), **link)
+    session.add(profile)
+    await session.commit()
+    return profile
+
+
+async def _adopt(session, product, platform, marketplace_shipping_id):
+    return await listing_adoption.apply_adoption(
+        session,
+        product,
+        active_variants=[],
+        variation_mapping=[(None, "WIDGET")],
+        platform=platform,
+        listing_title="Widget listing",
+        external_listing_id="1234" if platform == ListingPlatform.etsy else None,
+        marketplace_shipping_id=marketplace_shipping_id,
+    )
+
+
+async def test_adopt_sets_the_products_shipping_profile_from_the_ebay_policy_link(session):
+    profile = await _shipping_profile(session, ebay_fulfillment_policy_id="policy-42")
+    product, _ = await _make_product_with_variants(session, "WIDGET", [])
+
+    result = await _adopt(session, product, ListingPlatform.ebay, "policy-42")
+
+    assert result.shipping_profile_assigned == "Small parcel"
+    assert product.shipping_profile_id == profile.id
+
+
+async def test_adopt_sets_the_products_shipping_profile_from_the_etsy_link(session):
+    profile = await _shipping_profile(session, etsy_shipping_profile_id=555)
+    product, _ = await _make_product_with_variants(session, "WIDGET", [])
+
+    result = await _adopt(session, product, ListingPlatform.etsy, 555)
+
+    assert result.shipping_profile_assigned == "Small parcel"
+    assert product.shipping_profile_id == profile.id
+
+
+async def test_adopt_never_overwrites_a_shipping_profile_the_user_already_set(session):
+    await _shipping_profile(session, ebay_fulfillment_policy_id="policy-42")
+    chosen = await _shipping_profile(session, name="Large parcel")
+    product, _ = await _make_product_with_variants(session, "WIDGET", [])
+    product.shipping_profile_id = chosen.id
+    await session.commit()
+
+    result = await _adopt(session, product, ListingPlatform.ebay, "policy-42")
+
+    assert result.shipping_profile_assigned is None
+    assert product.shipping_profile_id == chosen.id
+
+
+async def test_adopt_leaves_the_product_alone_when_no_local_profile_is_linked(session):
+    product, _ = await _make_product_with_variants(session, "WIDGET", [])
+
+    result = await _adopt(session, product, ListingPlatform.ebay, "policy-unknown")
+
+    assert result.shipping_profile_assigned is None
+    assert product.shipping_profile_id is None

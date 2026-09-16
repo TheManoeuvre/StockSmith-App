@@ -73,14 +73,27 @@ class ProfileProposalRead(BaseModel):
     who_made: str | None
     when_made: str | None
     is_supply: bool | None
-    shipping_profile_id: int | None
     return_policy_id: int | None
     processing_min: int | None
     processing_max: int | None
 
 
+class ShippingProfileProposalRead(BaseModel):
+    """One Etsy shipping profile in use on matched listings with no linked local
+    ShippingProfile. Accept it by creating a local profile (title and Etsy buyer price
+    from Etsy) or by linking an existing one."""
+
+    etsy_shipping_profile_id: int
+    title: str
+    domestic_price: Decimal | None
+    is_calculated: bool
+    product_count: int
+    product_names: list[str]
+
+
 class ProfileProposalsRead(BaseModel):
     proposals: list[ProfileProposalRead]
+    shipping_profiles: list[ShippingProfileProposalRead] = []
 
 
 class ProfileSelection(BaseModel):
@@ -89,11 +102,23 @@ class ProfileSelection(BaseModel):
     name: str
 
 
+class ShippingProfileSelection(BaseModel):
+    etsy_shipping_profile_id: int
+    # For a new local profile: its name (the Etsy title unless renamed).
+    name: str | None = None
+    # Or link this existing local profile instead of creating one.
+    link_shipping_profile_id: int | None = None
+
+
 class ApplyProfileProposalsRequest(BaseModel):
-    items: list[ProfileSelection]
+    items: list[ProfileSelection] = []
+    shipping_items: list[ShippingProfileSelection] = []
     assign_products: bool = True
 
 
 class ApplyProfileProposalsResult(BaseModel):
     profiles_created: int
     products_assigned: int
+    shipping_profiles_created: int = 0
+    shipping_profiles_linked: int = 0
+    shipping_products_assigned: int = 0

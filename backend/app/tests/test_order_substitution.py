@@ -1,6 +1,7 @@
 """Order line substitution — always a split (see app.models.order_substitution), never a
 mutation of the original line or a delete. Covers: whole-line and partial (split)
-substitution, undo before/after shipping, chained substitution + undo, and the
+substitution, undo before/after shipping (undo deletes the emptied replacement line unless
+a later substitution was split from it), chained substitution + undo, and the
 same-product-only validation."""
 
 from decimal import Decimal
@@ -8,6 +9,7 @@ from decimal import Decimal
 from sqlalchemy import select
 
 from app.models.order import Order, OrderLine
+from app.models.order_substitution import OrderLineSubstitution
 from app.models.product import Product
 from app.models.variant import ProductVariant
 from app.routers.orders import _get_order_with_lines, create_order, substitute_line, undo_substitution
@@ -111,10 +113,38 @@ async def test_undo_restores_original_line_and_reallocates_it(session):
     lines = {l.variant_id: l for l in result.lines}
     assert lines[green.id].ordered_qty == 5
     assert lines[green.id].allocated_qty == 5
-    assert lines[blue.id].ordered_qty == 0
-    assert lines[blue.id].allocated_qty == 0
     assert lines[green.id].substituted_to == []
-    assert lines[blue.id].substituted_from is None
+    # The emptied blue line is gone rather than left as a blank 0-qty row; the substitution
+    # row itself survives as the audit record, detached from the deleted line.
+    assert blue.id not in lines
+    substitution = await session.get(OrderLineSubstitution, substitution_id)
+    assert substitution.new_line_id is None
+    assert substitution.reverted_qty == 2
+    assert substitution.reverted_at is not None
+    assert (await session.get(ProductVariant, blue.id)).allocated_qty == 0
+
+
+async def test_substitute_undo_substitute_again_leaves_no_ghost_line(session):
+    product, green, blue = await _product_with_variants(session, green_stock=10, blue_stock=10)
+    order_read = await create_order(
+        OrderCreate(lines=[OrderLineInput(variant_id=green.id, ordered_qty=5, unit_price=Decimal("10"))]),
+        session=session,
+    )
+    original = order_read.lines[0]
+
+    first = await substitute_line(
+        original.id, SubstituteLineRequest(variant_id=blue.id, qty=5, reason=None), session=session
+    )
+    first_sub_id = next(l for l in first.lines if l.variant_id == blue.id).substituted_from.substitution_id
+    await undo_substitution(first_sub_id, session=session)
+    result = await substitute_line(
+        original.id, SubstituteLineRequest(variant_id=blue.id, qty=5, reason=None), session=session
+    )
+
+    # Exactly two lines: the emptied original and the one live replacement.
+    assert sorted((l.variant_id, l.ordered_qty) for l in result.lines) == sorted(
+        [(green.id, 0), (blue.id, 5)]
+    )
 
 
 async def test_undo_blocked_once_substitute_line_has_shipped(session):
@@ -178,8 +208,13 @@ async def test_chained_substitution_undo_returns_only_remaining_qty(session):
     # Only blue's remaining 1 unit comes back onto green's own remaining 1 — the 3 already
     # moved on to red stay put.
     assert lines[green.id].ordered_qty == 2
-    assert lines[blue.id].ordered_qty == 0
     assert lines[red.id].ordered_qty == 3
+    # Blue is kept (at 0) rather than deleted: red's still-active substitution was split
+    # from it, and deleting it would cascade that provenance away.
+    assert lines[blue.id].ordered_qty == 0
+    assert lines[blue.id].substituted_from is None
+    assert [ref.line_id for ref in lines[blue.id].substituted_to] == [lines[red.id].id]
+    assert lines[red.id].substituted_from.line_id == lines[blue.id].id
 
 
 async def test_substitute_rejects_variant_from_a_different_product(session):

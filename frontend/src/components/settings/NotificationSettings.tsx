@@ -16,7 +16,7 @@ import { SegmentedControl } from "../common/SegmentedControl";
 import { Switch } from "../common/Switch";
 import { SettingsCard } from "./SettingsCard";
 
-// Display order for the 11 configurable alert types — grouped by what they're about rather
+// Display order for the configurable alert types — grouped by what they're about rather
 // than the backend's alphabetical-by-enum-value ordering, which interleaves unrelated
 // concerns (the two marketplace-API-limit types would otherwise sit next to backup alerts).
 const ALERT_TYPE_ORDER: NotificationCategory[] = [
@@ -24,6 +24,8 @@ const ALERT_TYPE_ORDER: NotificationCategory[] = [
   "platform_reconnect_required",
   "marketplace_api_soft_limit",
   "marketplace_api_hard_limit",
+  "shipping_price_changed",
+  "shipping_profile_missing",
   "material_forecast_warning",
   "material_forecast_critical",
   "order_unfulfillable",
@@ -38,6 +40,8 @@ const ALERT_TYPE_LABELS: Record<NotificationCategory, string> = {
   platform_reconnect_required: "Marketplace connection needs reconnecting",
   marketplace_api_soft_limit: "Marketplace API usage — approaching limit",
   marketplace_api_hard_limit: "Marketplace API usage — limit hit",
+  shipping_price_changed: "Postage price changed on a marketplace",
+  shipping_profile_missing: "Linked shipping profile missing on a marketplace",
   material_forecast_warning: "Material running low (warning)",
   material_forecast_critical: "Material running low (critical)",
   order_unfulfillable: "Order awaiting product",

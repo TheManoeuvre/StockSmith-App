@@ -169,6 +169,12 @@ class ClassicListingCandidate:
     # or empty", errorId 25002) even though its own migration docs only mention the
     # per-variation ones — confirmed live. None when the listing carries no Item.SKU.
     listing_sku: str | None = None
+    # The business-policy postage profile the listing uses (Trading API
+    # SellerProfiles/SellerShippingProfile/ShippingProfileID), which is the same id the
+    # Sell Account API calls fulfillmentPolicyId. Only GetItem returns it; None from the
+    # list call or for a listing not on business policies. Adoption uses it to point the
+    # product at the local ShippingProfile linked to that policy.
+    fulfillment_policy_id: str | None = None
     ineligibility_reasons: list[str] = field(default_factory=list)
     # False when this came from a bulk list call that doesn't return per-variation
     # detail (eBay's GetMyeBaySelling ActiveList), True when it came from a per-item

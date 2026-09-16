@@ -117,6 +117,11 @@ class DraftReadinessReport(BaseModel):
     priced_unit_count: int
     image_count: int
     issues: list[ReadinessIssue]
+    # Where the marketplace shipping id would come from: "shipping_profile" (the product's
+    # linked ShippingProfile — the primary source) or "listing_profile" (the fallback).
+    # None when neither has one, in which case a blocker says so.
+    shipping_source: str | None = None
+    shipping_source_label: str | None = None
 
 
 class NamedOption(BaseModel):
@@ -148,3 +153,5 @@ class DraftPushResult(BaseModel):
     # with no image, for instance. Reported so the draft isn't a dead end the user
     # discovers only when they try to make it live.
     publish_blockers: list[str]
+    # Which source the shipping id was taken from — see DraftReadinessReport.shipping_source.
+    shipping_source: str | None = None

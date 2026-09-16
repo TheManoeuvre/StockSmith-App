@@ -72,6 +72,18 @@
       "runtimeExecutable": "cmd.exe",
       "runtimeArgs": ["/c", "cd /d D:\\Projects\\StockSmith\\.claude\\worktrees\\etsy-sync-stopped-f2a728\\backend && C:\\Users\\Benja\\AppData\\Local\\Microsoft\\WinGet\\Packages\\astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe\\uv.exe run uvicorn app.main:app --host 127.0.0.1 --port 8050 --reload"],
       "port": 8050
+    },
+    {
+      "name": "frontend-dashboard-review",
+      "runtimeExecutable": "cmd.exe",
+      "runtimeArgs": ["/c", "set PATH=C:\\PROGRA~1\\nodejs;%PATH% && cd /d D:\\Projects\\StockSmith\\.claude\\worktrees\\substitution-ordering-4d87c7\\frontend && C:\\PROGRA~1\\nodejs\\npm.cmd run dev -- --port 1480 --strictPort"],
+      "port": 1480
+    },
+    {
+      "name": "backend-dashboard-review",
+      "runtimeExecutable": "cmd.exe",
+      "runtimeArgs": ["/c", "cd /d D:\\Projects\\StockSmith\\.claude\\worktrees\\substitution-ordering-4d87c7\\backend && C:\\Users\\Benja\\AppData\\Local\\Microsoft\\WinGet\\Packages\\astral-sh.uv_Microsoft.Winget.Source_8wekyb3d8bbwe\\uv.exe run uvicorn app.main:app --host 127.0.0.1 --port 8060 --reload"],
+      "port": 8060
     }
   ]
 }

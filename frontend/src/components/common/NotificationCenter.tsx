@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { notificationsApi, type Notification } from "../../api/notifications";
+import { AlertsIcon } from "./NavIcons";
 
 // Fast enough to feel live for something the user is meant to notice soon, cheap enough (one
 // COUNT(*) query) to poll from every page — this sits in the root layout like
@@ -101,6 +102,7 @@ export function NotificationCenter() {
           open ? "bg-slate-100 text-slate-900" : "text-slate-600"
         }`}
       >
+        <AlertsIcon />
         <span className="flex-1">Alerts</span>
         {count > 0 && (
           <span className="rounded px-1.5 py-0.5 text-[10.5px] font-semibold tabular-nums text-red-800 bg-red-100">

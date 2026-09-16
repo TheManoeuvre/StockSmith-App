@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { platformsApi, type PlatformSyncSummary } from "../../api/platforms";
 import { PLATFORM_LABELS } from "../../lib/platforms";
+import { SyncIcon } from "./NavIcons";
 
 // Slow on purpose. Nothing here changes faster than the sync interval (15 min by
 // default), and this sits in the root layout, so it runs on every page in the app.
@@ -82,17 +83,19 @@ export function SyncStatusIndicator() {
       }
       className="flex w-full items-center gap-2 rounded-md px-[9px] py-[7px] text-[12.5px] hover:bg-slate-100"
     >
-      {/* Not colour alone — the glyph carries the same meaning for anyone who can't
-          distinguish red from green, and this is the app's only passive failure signal. */}
-      <span
-        className={`flex h-[18px] min-w-[18px] flex-none items-center justify-center rounded-full text-[10.5px] font-medium text-white ${
-          hasProblem ? "bg-red-600" : "bg-green-600"
-        }`}
-      >
-        {hasProblem ? "!" : "✓"}
+      <span className={hasProblem ? "text-red-600" : "text-green-600"}>
+        <SyncIcon />
       </span>
-      <span className={`flex-1 ${hasProblem ? "text-red-700" : "text-slate-600"}`}>
-        {syncing ? "Syncing…" : latest ? `Synced ${formatRelative(latest)}` : "Never synced"}
+      {/* Not colour alone — the label changes too, for anyone who can't distinguish red from
+          green; this is the app's only passive failure signal. */}
+      <span className={`flex-1 ${hasProblem ? "font-medium text-red-700" : "text-slate-600"}`}>
+        {hasProblem
+          ? "Sync problem"
+          : syncing
+            ? "Syncing…"
+            : latest
+              ? `Synced ${formatRelative(latest)}`
+              : "Never synced"}
       </span>
     </Link>
   );

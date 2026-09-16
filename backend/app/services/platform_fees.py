@@ -8,7 +8,7 @@ from app.models.platform_fee import FeeBasis, MarginFeeConfig, MarginFeeSource, 
 from app.models.product import Product
 from app.models.shipping_profile import ShippingProfile
 from app.models.variant import ProductVariant
-from app.services.shipping_profiles import resolve_variant_shipping_profile
+from app.services.shipping_profiles import resolve_shipping_price_for_fee_source, resolve_variant_shipping_profile
 
 
 async def get_margin_fee_config(session: AsyncSession) -> MarginFeeConfig:
@@ -133,5 +133,5 @@ def resolve_variant_fee_percent(
     )
     sale_price = variant.sale_price if variant.sale_price is not None else (product.sale_price if product else None)
     profile = resolve_variant_shipping_profile(shipping_profiles_by_id, variant, product)
-    shipping_price = profile.price if profile else None
+    shipping_price = resolve_shipping_price_for_fee_source(profile, fee_source) if profile else None
     return resolve_fee_percent(fee_source, components, manual_fee_percent, sale_price, shipping_price)

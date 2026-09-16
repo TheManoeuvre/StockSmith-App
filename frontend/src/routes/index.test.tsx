@@ -4,7 +4,7 @@ import {
   createMemoryHistory,
   createRouter,
 } from "@tanstack/react-router";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
 
@@ -23,6 +23,8 @@ const { routeTree } = await import("../routeTree.gen");
 function summary(over: Record<string, unknown> = {}) {
   return {
     total_inventory_value: "1234.50",
+    material_value: "1000.25",
+    finished_goods_value: "234.25",
     active_product_count: 12,
     low_stock_materials: [
       {
@@ -30,12 +32,13 @@ function summary(over: Record<string, unknown> = {}) {
         name: "PLA Black",
         current_qty: "120",
         reorder_threshold: "500",
-        on_order_qty: "0",
+        on_order_qty: "1000",
         allocated_qty: "0",
         supplier_id: 3,
         supplier_name: "Polymax",
         consumption_rate_per_week: "80",
-        weeks_of_supply: "1.5",
+        weeks_of_supply: "14.0",
+        weeks_of_supply_on_hand: "1.5",
         fg_buffer_weeks: "0",
         lead_time_days: 10,
         status: "critical",
@@ -132,6 +135,7 @@ it("renders the four KPI tiles off the summary", async () => {
   expect(screen.getByText("Overdue counts")).toBeInTheDocument();
   expect(screen.getByText("Inventory value")).toBeInTheDocument();
   expect(screen.getByText("£1234.50")).toBeInTheDocument();
+  expect(screen.getByText("£1000.25 materials · £234.25 finished goods")).toBeInTheDocument();
 });
 
 it("navigates to Orders when the Orders awaiting products tile is clicked", async () => {
@@ -148,13 +152,42 @@ it("navigates to Orders when the Orders awaiting products tile is clicked", asyn
 
 it("merges short-stock and short-packaging rows into the Orders awaiting products table", async () => {
   await renderDashboard();
-  expect(await screen.findByText("Stock")).toBeInTheDocument();
-  expect(screen.getByText("Packaging")).toBeInTheDocument();
-  expect(screen.getAllByText("Widget A").length).toBeGreaterThan(0);
-  expect(screen.getByText("Small box")).toBeInTheDocument();
+  // Scoped to the page: the sidebar's "Stock" group heading would otherwise match too.
+  const page = within(screen.getByRole("main"));
+  expect(await page.findByText("Stock")).toBeInTheDocument();
+  expect(page.getByText("Packaging")).toBeInTheDocument();
+  expect(page.getAllByText("Widget A").length).toBeGreaterThan(0);
+  expect(page.getByText("Small box")).toBeInTheDocument();
   // Oldest-placed first: the short-packaging order (18 Aug) above the short-stock one (20 Aug).
-  const labels = screen.getAllByText(/^(Stock|Packaging)$/);
+  const labels = page.getAllByText(/^(Stock|Packaging)$/);
   expect(labels[0]).toHaveTextContent("Packaging");
+});
+
+it("shows the on-hand time to stockout, not the figure that credits on-order stock", async () => {
+  await renderDashboard();
+  // 1.5 wk on the shelf; the 14.0 wk including the 1000 on order is the status input only.
+  const cell = await screen.findByText("1.5 wk");
+  expect(cell).toBeInTheDocument();
+  expect(screen.queryByText("14.0 wk")).not.toBeInTheDocument();
+  expect(screen.getByText("1000")).toBeInTheDocument();
+  // The inclusive figure is still reachable on hover, since it's what set the status.
+  expect(cell).toHaveAttribute("title", "14.0 wk counting stock on order");
+  // On hand is coloured by status, not unconditionally red.
+  expect(screen.getByText("120")).toHaveClass("text-red-600");
+});
+
+it("gives the stockout table the full width when the side cards have nothing to show", async () => {
+  await renderDashboard({
+    open_stock_take: null,
+    unresolved_variance_count: 0,
+    items_due_for_count: [],
+    items_due_for_count_total: 0,
+    margin_alerts: [],
+  });
+  const stockout = await screen.findByText("Time to stockout");
+  const grid = stockout.closest("section")?.parentElement;
+  expect(grid).not.toHaveClass("lg:grid-cols-[1.4fr_1fr]");
+  expect(screen.queryByText("Stock take")).not.toBeInTheDocument();
 });
 
 it("shows the stock-take progress line and a due-for-count entry", async () => {

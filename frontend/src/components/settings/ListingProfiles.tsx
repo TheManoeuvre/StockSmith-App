@@ -254,7 +254,10 @@ function ProfileForm({
               }}
             />
           </Field>
-          <Field label="Shipping profile" required>
+          {/* Not required any more: the draft takes its Etsy shipping profile from the
+              product's own shipping profile when that is linked to Etsy (Settings ›
+              Shipping profiles). This is only what a product with no linked profile uses. */}
+          <Field label="Fallback shipping profile (used only when the product has none)">
             <RemoteSelect
               options={shippingProfiles}
               failed={!!shippingError}
@@ -324,7 +327,7 @@ function ProfileForm({
               onChange={(v) => set({ ebay_condition: v })}
             />
           </Field>
-          <Field label="Postage policy id" required>
+          <Field label="Fallback postage policy id (used only when the product has no linked shipping profile)">
             <input
               className="w-full rounded border border-slate-300 px-2 py-1"
               value={draft.ebay_fulfillment_policy_id ?? ""}

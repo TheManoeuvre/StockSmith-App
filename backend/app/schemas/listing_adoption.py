@@ -95,6 +95,11 @@ class AdoptListingResult(BaseModel):
     # True when align_skus was requested and the eBay listing was actually revised, so
     # the UI can say the conflict was resolved rather than merely reported.
     skus_aligned: bool = False
+    # Name of the local shipping profile the product was pointed at because it is linked
+    # to the adopted listing's Etsy shipping profile / eBay postage policy. None when the
+    # product already had one, no local profile is linked to that id, or the listing's
+    # shipping id couldn't be read.
+    shipping_profile_assigned: str | None = None
 
 
 # --- Etsy: listings with no StockSmith equivalent ----------------------------------

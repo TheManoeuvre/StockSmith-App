@@ -22,6 +22,8 @@ from app.services.material_substitutes import FALLBACK_POOL_BY_MATERIAL_SQL, get
 from app.services.platforms.base import ensure_utc
 from app.services.purchase_sql import ON_ORDER_BY_MATERIAL_SQL
 
+_PENCE = Decimal("0.01")
+
 _ORDERS_AWAITING_INVENTORY_SQL = text(
     """
     SELECT ol.id AS line_id, ol.order_id, ol.product_id, ol.variant_id,
@@ -222,6 +224,68 @@ _VARIANT_COST_RANGE_BY_PRODUCT_SQL = text(
     SELECT product_id, MIN(cost_per_unit) AS cost_min, MAX(cost_per_unit) AS cost_max
     FROM variant_cost
     GROUP BY product_id
+    """
+)
+
+
+# Finished goods on hand at resolved build-BOM cost. Stock lives on active variants where a
+# product has any, else on the product itself — the same convention as forecasting's
+# _get_sellable_entities — so product-level stock is ignored once variants exist. A product
+# with no BOM has no cost and contributes nothing; bundles hold no stock of their own.
+_FINISHED_GOODS_VALUE_SQL = text(
+    """
+    WITH resolved AS (
+        SELECT v.product_id, v.id AS variant_id, pm.material_id,
+               COALESCE(qo.qty_required, pm.qty_required) AS effective_qty_required
+        FROM product_variants v
+        JOIN product_materials pm ON pm.product_id = v.product_id
+        LEFT JOIN product_variant_materials qo
+            ON qo.variant_id = v.id AND qo.material_id = pm.material_id AND qo.replaces_material_id IS NULL
+        LEFT JOIN product_variant_materials sub
+            ON sub.variant_id = v.id AND sub.replaces_material_id = pm.material_id
+        WHERE v.is_active = true AND sub.id IS NULL
+
+        UNION ALL
+
+        SELECT v.product_id, pvm.variant_id, pvm.material_id, pvm.qty_required
+        FROM product_variant_materials pvm
+        JOIN product_variants v ON v.id = pvm.variant_id
+        WHERE v.is_active = true
+          AND (
+              pvm.replaces_material_id IS NOT NULL
+              OR pvm.material_id NOT IN (
+                  SELECT material_id FROM product_materials WHERE product_id = v.product_id
+              )
+          )
+    ),
+    variant_cost AS (
+        SELECT r.variant_id, SUM(r.effective_qty_required * m.avg_unit_cost) AS cost_per_unit
+        FROM resolved r
+        JOIN materials m ON m.id = r.material_id
+        WHERE r.effective_qty_required > 0
+        GROUP BY r.variant_id
+    ),
+    product_cost AS (
+        SELECT pm.product_id, SUM(pm.qty_required * m.avg_unit_cost) AS cost_per_unit
+        FROM product_materials pm
+        JOIN materials m ON m.id = pm.material_id
+        GROUP BY pm.product_id
+    )
+    SELECT
+        COALESCE((
+            SELECT SUM(v.current_stock * vc.cost_per_unit)
+            FROM product_variants v
+            JOIN variant_cost vc ON vc.variant_id = v.id
+            JOIN products p ON p.id = v.product_id
+            WHERE v.is_active = true AND p.is_active = true
+        ), 0)
+        + COALESCE((
+            SELECT SUM(p.current_stock * pc.cost_per_unit)
+            FROM products p
+            JOIN product_cost pc ON pc.product_id = p.id
+            WHERE p.is_active = true
+              AND p.id NOT IN (SELECT product_id FROM product_variants WHERE is_active = true)
+        ), 0) AS total
     """
 )
 
@@ -493,11 +557,21 @@ async def get_orders_awaiting_inventory(session: AsyncSession) -> list[OrderAwai
 
 
 async def compute_dashboard_summary(session: AsyncSession) -> DashboardSummary:
-    inventory_value_row = (
-        await session.execute(
-            text("SELECT COALESCE(SUM(current_qty * avg_unit_cost), 0) AS total FROM materials WHERE is_active = true")
+    # str() before Decimal for the same reason as get_cost_per_unit_range_by_product: SQLite
+    # hands these SUMs back as floats. Money, so quantised to pence here rather than leaving
+    # a 40-digit Decimal for the client to round.
+    material_value = Decimal(
+        str(
+            (
+                await session.execute(
+                    text(
+                        "SELECT COALESCE(SUM(current_qty * avg_unit_cost), 0) AS total FROM materials WHERE is_active = true"
+                    )
+                )
+            ).one().total
         )
-    ).one()
+    ).quantize(_PENCE)
+    finished_goods_value = Decimal(str((await session.execute(_FINISHED_GOODS_VALUE_SQL)).one().total)).quantize(_PENCE)
     active_product_count = (
         await session.execute(text("SELECT COUNT(*) AS n FROM products WHERE is_active = true"))
     ).one().n
@@ -517,6 +591,7 @@ async def compute_dashboard_summary(session: AsyncSession) -> DashboardSummary:
             supplier_name=f.supplier_name,
             consumption_rate_per_week=f.consumption_rate_per_week,
             weeks_of_supply=f.weeks_of_supply,
+            weeks_of_supply_on_hand=f.weeks_of_supply_on_hand,
             fg_buffer_weeks=f.fg_buffer_weeks,
             lead_time_days=f.lead_time_days,
             status=f.status,
@@ -591,7 +666,9 @@ async def compute_dashboard_summary(session: AsyncSession) -> DashboardSummary:
         )
 
     return DashboardSummary(
-        total_inventory_value=Decimal(inventory_value_row.total),
+        total_inventory_value=material_value + finished_goods_value,
+        material_value=material_value,
+        finished_goods_value=finished_goods_value,
         active_product_count=active_product_count,
         low_stock_materials=low_stock,
         lowest_buildable_products=buildable[:10],

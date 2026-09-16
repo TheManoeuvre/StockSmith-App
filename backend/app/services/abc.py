@@ -23,7 +23,7 @@ because their quantity is derived from their components rather than held.
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, exists, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.abc_classification import (
@@ -33,8 +33,11 @@ from app.models.abc_classification import (
     MaterialCategoryABC,
     ProductCategoryABC,
 )
-from app.models.material import Material
+from app.models.build import Build
+from app.models.material import Material, MaterialAdjustment
 from app.models.product import Product
+from app.models.purchase import MaterialPurchase, MaterialPurchaseReceipt
+from app.models.stock_adjustment import StockAdjustment
 from app.models.variant import ProductVariant
 from app.schemas.abc import (
     CategoryTier,
@@ -84,6 +87,11 @@ class Rules:
     category_tiers: dict[int, ABCClass]
     product_category_tiers: dict[int, ABCClass]
     tier_intervals: dict[tuple[ABCScope, ABCClass], int]
+    # Which rows have ever held stock — see ever_stocked_material/ever_stocked_product.
+    # Only rows with a stock-moving history entry are listed; a row whose current figure
+    # is above zero is stocked by definition and doesn't need to appear here.
+    stocked_material_ids: frozenset[int]
+    stocked_product_owners: frozenset[tuple[int, int | None]]
 
     def _resolve(
         self,
@@ -129,12 +137,53 @@ class Rules:
         )
         return self._resolve(ABCScope.product, product.abc_class, group, product.stock_take_interval_days)
 
+    def ever_stocked_material(self, material: Material) -> bool:
+        """Whether there has ever been anything of this material to count.
+
+        A material that was just created ahead of its first order sits at zero with no
+        history, and putting it on the due list would only ever produce a count of
+        nothing. One that was received and used down to zero is different: its zero is a
+        claim about the shelf, and a claim is exactly what a count checks. The history
+        tables tell the two apart; current_qty alone can't.
+        """
+        return material.current_qty > 0 or material.id in self.stocked_material_ids
+
+    def ever_stocked_product(self, product: Product, variant: ProductVariant | None = None) -> bool:
+        """The product-side twin of ever_stocked_material, for whichever row holds the
+        stock — the variant when there is one, else the product itself."""
+        owner = variant if variant is not None else product
+        key = (product.id, variant.id if variant is not None else None)
+        return owner.current_stock > 0 or key in self.stocked_product_owners
+
 
 async def load_rules(session: AsyncSession) -> Rules:
     settings = await get_general_settings(session)
     category_rows = (await session.execute(select(MaterialCategoryABC))).scalars()
     product_category_rows = (await session.execute(select(ProductCategoryABC))).scalars()
     tier_rows = (await session.execute(select(ABCTierSetting))).scalars()
+    # Receipts and adjustments are the whole of a material's stock history — they're what
+    # recompute_material replays. Builds and adjustments are the product-side equivalent;
+    # an order can only ever ship stock one of those put there first.
+    stocked_material_ids = (
+        await session.execute(
+            select(Material.id).where(
+                or_(
+                    exists().where(MaterialAdjustment.material_id == Material.id),
+                    exists().where(
+                        MaterialPurchase.material_id == Material.id,
+                        MaterialPurchaseReceipt.purchase_line_id == MaterialPurchase.id,
+                    ),
+                )
+            )
+        )
+    ).scalars()
+    stocked_product_owners = (
+        await session.execute(
+            select(Build.product_id, Build.variant_id).union(
+                select(StockAdjustment.product_id, StockAdjustment.variant_id)
+            )
+        )
+    ).all()
     return Rules(
         baselines={
             ABCScope.material: settings.default_material_abc_class,
@@ -143,6 +192,8 @@ async def load_rules(session: AsyncSession) -> Rules:
         category_tiers={row.category_id: row.abc_class for row in category_rows},
         product_category_tiers={row.product_category_id: row.abc_class for row in product_category_rows},
         tier_intervals={(row.scope, row.tier): row.interval_days for row in tier_rows},
+        stocked_material_ids=frozenset(stocked_material_ids),
+        stocked_product_owners=frozenset((pid, vid) for pid, vid in stocked_product_owners),
     )
 
 
@@ -230,29 +281,42 @@ class DueState:
     is_due: bool
 
 
-def due_state(last_stock_take_at: datetime | None, interval_days: int, now: datetime) -> DueState:
+def due_state(
+    last_stock_take_at: datetime | None, interval_days: int, now: datetime, *, ever_stocked: bool = True
+) -> DueState:
     """Whether an item wants counting, and by how long it's been waiting.
 
     Never-counted is its own state rather than "infinitely overdue": there is no date to
     measure from, and reporting a made-up number would rank it against genuinely overdue
-    items on a scale it isn't on. It's always due, and the caller sorts it first.
+    items on a scale it isn't on. It's always due, and the caller sorts it first — unless
+    it has never held stock either, in which case there is nothing to count yet and it
+    waits until something arrives. Once counted, the cadence applies regardless of stock:
+    a row that came in and went back to zero is exactly the kind of figure a count is for.
     """
     last = ensure_utc(last_stock_take_at)
     if last is None:
-        return DueState(None, None, None, is_due=True)
+        return DueState(None, None, None, is_due=ever_stocked)
     next_due = last + timedelta(days=interval_days)
     days_overdue = (now - next_due).days
     return DueState(last, next_due, max(days_overdue, 0), is_due=now >= next_due)
 
 
-def describe(resolved: Resolved, last_stock_take_at: datetime | None, now: datetime | None = None):
+def describe(
+    resolved: Resolved,
+    last_stock_take_at: datetime | None,
+    now: datetime | None = None,
+    *,
+    ever_stocked: bool = True,
+):
     """Fold a resolution and a count date into the shape a detail page renders.
 
     Here rather than in the routers so the two callers (materials, products) can't drift
     on what "due" means, and so the UI never has to reimplement the fallback order in
     TypeScript to work out where a value came from.
     """
-    state = due_state(last_stock_take_at, resolved.interval_days, now or datetime.now(timezone.utc))
+    state = due_state(
+        last_stock_take_at, resolved.interval_days, now or datetime.now(timezone.utc), ever_stocked=ever_stocked
+    )
     return ResolvedClassificationRead(
         abc_class=resolved.abc_class,
         interval_days=resolved.interval_days,
@@ -298,7 +362,12 @@ async def compute_due_for_count(session: AsyncSession, now: datetime | None = No
     ).scalars()
     for material in materials:
         resolved = rules.for_material(material)
-        state = due_state(material.last_stock_take_at, resolved.interval_days, now)
+        state = due_state(
+            material.last_stock_take_at,
+            resolved.interval_days,
+            now,
+            ever_stocked=rules.ever_stocked_material(material),
+        )
         if state.is_due:
             due.append(
                 DueForCountItem(
@@ -350,20 +419,24 @@ async def compute_due_for_count(session: AsyncSession, now: datetime | None = No
         # One line per stock-holding row: the variants when there are any, else the
         # product itself. A product with active variants never accumulates its own
         # current_stock, so counting it as well would be counting a number nothing writes.
-        owners: list[tuple[int | None, str, datetime | None]] = (
-            [(v.id, f"{product.name} — {v.variant_name}", v.last_stock_take_at) for v in variants]
-            if variants
-            else [(None, product.name, product.last_stock_take_at)]
+        owners: list[tuple[ProductVariant | None, str]] = (
+            [(v, f"{product.name} — {v.variant_name}") for v in variants] if variants else [(None, product.name)]
         )
-        for variant_id, name, last_at in owners:
-            state = due_state(last_at, resolved.interval_days, now)
+        for variant, name in owners:
+            last_at = variant.last_stock_take_at if variant is not None else product.last_stock_take_at
+            state = due_state(
+                last_at,
+                resolved.interval_days,
+                now,
+                ever_stocked=rules.ever_stocked_product(product, variant),
+            )
             if state.is_due:
                 due.append(
                     DueForCountItem(
                         scope=ABCScope.product,
                         material_id=None,
                         product_id=product.id,
-                        variant_id=variant_id,
+                        variant_id=variant.id if variant is not None else None,
                         name=name,
                         abc_class=resolved.abc_class,
                         interval_days=resolved.interval_days,

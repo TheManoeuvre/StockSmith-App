@@ -155,8 +155,8 @@ async def test_allocated_qty_is_snapshotted_for_products_only(session):
 
 async def test_scoping_by_category_and_overdue(session):
     await _settings(session)
-    await _material(session, "Resin")
-    await _material(session, "Boxes", category="packaging")
+    await _material(session, "Resin", qty=Decimal(5))
+    await _material(session, "Boxes", qty=Decimal(5), category="packaging")
     await session.commit()
 
     by_category = await stock_takes.preview_scope(
@@ -167,8 +167,8 @@ async def test_scoping_by_category_and_overdue(session):
     )
     assert by_category.candidate_count == 1
 
-    # Everything is due on a database with no counting history, so overdue_only is a no-op
-    # here — the point is that it doesn't accidentally exclude everything.
+    # Everything stocked is due on a database with no counting history, so overdue_only
+    # is a no-op here — the point is that it doesn't accidentally exclude everything.
     overdue = await stock_takes.preview_scope(
         session, StockTakeScope(include_materials=True, overdue_only=True)
     )

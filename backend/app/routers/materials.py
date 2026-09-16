@@ -108,7 +108,11 @@ def _to_material_read(
     return MaterialRead.model_validate(material).model_copy(
         update={
             "on_order_qty": on_order_qty_by_material.get(material.id),
-            "classification": abc.describe(rules.for_material(material), material.last_stock_take_at),
+            "classification": abc.describe(
+                rules.for_material(material),
+                material.last_stock_take_at,
+                ever_stocked=rules.ever_stocked_material(material),
+            ),
             "weeks_of_supply": forecast.weeks_of_supply if forecast else None,
             "consumption_rate_per_week": forecast.consumption_rate_per_week if forecast else None,
             "fg_buffer_weeks": forecast.fg_buffer_weeks if forecast else None,

@@ -90,6 +90,12 @@ class FakeEtsyAdapter:
     async def fetch_all_listings(self, session, connection):
         return self.listings
 
+    async def fetch_listing(self, session, connection, listing_id):
+        for listing in self.listings:
+            if str(listing.get("listing_id")) == str(listing_id):
+                return listing
+        return {}
+
     async def fetch_listing_products(self, session, connection, listing_id):
         self.calls.append(("fetch_products", listing_id))
         if self.fetch_error is not None:

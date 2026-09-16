@@ -37,10 +37,20 @@ class NotificationCategory(str, enum.Enum):
     secondary_backup_unreachable = "secondary_backup_unreachable"
     marketplace_api_soft_limit = "marketplace_api_soft_limit"
     marketplace_api_hard_limit = "marketplace_api_hard_limit"
+    # The scheduled shipping-price refresh (services/shipping_price_sync.refresh) rewrote
+    # one or more linked shipping profiles' buyer price to what the marketplace now
+    # charges. Margin counts that price as revenue, so a move is worth knowing about —
+    # but it is information, not a fault: digest by default.
+    shipping_price_changed = "shipping_price_changed"
+    # A linked shipping profile no longer exists on the marketplace (deleted on Etsy, or
+    # gone from eBay's policy list). Its last price is kept, but drafts pushed with that
+    # id will fail and margin is running on an unverifiable number — immediate by
+    # default, once per profile until it reappears or is re-linked.
+    shipping_profile_missing = "shipping_profile_missing"
     daily_summary = "daily_summary"
 
 
-# The 10 user-configurable alert types — every NotificationCategory except daily_summary,
+# The user-configurable alert types — every NotificationCategory except daily_summary,
 # which always fires (see services/notification_summary.py).
 ALERT_TYPES: tuple[NotificationCategory, ...] = (
     NotificationCategory.marketplace_sync_failure,
@@ -54,6 +64,8 @@ ALERT_TYPES: tuple[NotificationCategory, ...] = (
     NotificationCategory.secondary_backup_unreachable,
     NotificationCategory.marketplace_api_soft_limit,
     NotificationCategory.marketplace_api_hard_limit,
+    NotificationCategory.shipping_price_changed,
+    NotificationCategory.shipping_profile_missing,
 )
 
 # Seed defaults: the alert types that most directly need a human's attention right away
@@ -69,6 +81,7 @@ DEFAULT_IMMEDIATE_ALERT_TYPES: frozenset[NotificationCategory] = frozenset(
         NotificationCategory.platform_reconnect_required,
         NotificationCategory.backup_failed,
         NotificationCategory.marketplace_api_hard_limit,
+        NotificationCategory.shipping_profile_missing,
     }
 )
 

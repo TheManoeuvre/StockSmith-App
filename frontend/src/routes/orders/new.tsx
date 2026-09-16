@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { shippingPriceForChannel } from "../../lib/shippingPrice";
 import { productsApi } from "../../api/products";
 import { ordersApi, type OrderLineInput } from "../../api/orders";
 import type { ManualOrderChannel } from "../../api/types";
@@ -149,7 +150,7 @@ function NewOrder() {
                 const id = e.target.value;
                 setShippingProfileId(id);
                 const profile = profiles.find((p) => String(p.id) === id);
-                if (profile) setShippingCharged(profile.price);
+                if (profile) setShippingCharged(shippingPriceForChannel(profile, manualChannel));
               }}
             >
               <option value="">No profile</option>
