@@ -12,6 +12,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.16.2] - 2026-09-16
+
+### Fixed
+- **A product's Variants tab failed to load, and adding variants ended in "Internal
+  Server Error".** Any product with a bill of materials was affected: the variants list
+  (and the response after creating variants in bulk) stopped with a server error, so the
+  tab stayed empty and new variants appeared not to save — they had in fact been created,
+  and show up once this fix is installed. A change in 0.16.0 to how buildable quantities
+  are calculated updated the single-variant screen but not the list, which was still
+  reading the figures in their old shape. No data was affected.
+
 ## [0.16.1] - 2026-09-16
 
 ### Fixed
