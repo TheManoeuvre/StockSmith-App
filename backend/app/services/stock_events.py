@@ -15,6 +15,7 @@ def record_stock_event(
     source_build_id: int | None = None,
     source_adjustment_id: int | None = None,
     source_order_line_id: int | None = None,
+    source_replacement_parcel_id: int | None = None,
 ) -> ProductStockEvent:
     """Appends one row to the unified "Stock" history ledger — every build (success or
     failed), stock adjustment, and order fulfillment adds exactly one row here, in
@@ -32,6 +33,7 @@ def record_stock_event(
         source_build_id=source_build_id,
         source_adjustment_id=source_adjustment_id,
         source_order_line_id=source_order_line_id,
+        source_replacement_parcel_id=source_replacement_parcel_id,
     )
     session.add(event)
     return event

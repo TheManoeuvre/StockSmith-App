@@ -17,6 +17,7 @@ from app.services.platforms.base import (
     ExternalListingRef,
     ExternalOrder,
     ExternalOrderLine,
+    ExternalPostageCharge,
     MigrationResult,
     PaymentState,
     TokenSet,
@@ -776,8 +777,9 @@ class EbayAdapter:
 
         payment_fees = payment_net = payment_status = None
         tracking_number = carrier = None
+        postage_charges: list[ExternalPostageCharge] = []
         if enrich:
-            payment_fees, payment_net, payment_status = await self._fetch_transactions(
+            payment_fees, payment_net, payment_status, postage_charges = await self._fetch_transactions(
                 session, connection, order.get("orderId")
             )
             if is_shipped:
@@ -828,6 +830,7 @@ class EbayAdapter:
             financials_enriched=enrich,
             tracking_number=tracking_number,
             carrier=carrier,
+            postage_charges=postage_charges,
         )
         self._warn_if_unreconciled(external)
         return external
@@ -958,11 +961,17 @@ class EbayAdapter:
 
     async def _fetch_transactions(
         self, session, connection: PlatformConnection, order_id
-    ) -> tuple[str | None, str | None, str | None]:
+    ) -> tuple[str | None, str | None, str | None, list[ExternalPostageCharge]]:
         """Sell Finances API getTransactions filtered by orderId — mirrors Etsy's
         per-receipt _fetch_payment. Reads the SALE transaction's fee total for this order;
         a transaction whose payout hasn't settled yet just means these stay None,
         matching Etsy's own "not failing the sync" behavior.
+
+        The same response lists every postage label bought against the order as its own
+        SHIPPING_LABEL transaction (one per label, DEBIT, and they come *before* the SALE
+        in eBay's ordering). Those are returned as the fourth element — see
+        _parse_shipping_labels — for order_parcels.apply_postage_charges: the first is
+        the real cost of the original shipment, any later one is a resend.
 
         This is one of the APIs eBay gates behind Digital Signatures for EU/UK sellers,
         so _needs_signature covers its path and the call goes out signed. Every failure
@@ -973,7 +982,7 @@ class EbayAdapter:
         settled" forever, which is exactly what a genuinely unsettled order looks like.
         """
         if order_id is None:
-            return None, None, None
+            return None, None, None, []
         try:
             response = await self._authed_request(
                 session,
@@ -988,17 +997,18 @@ class EbayAdapter:
             # breakdown and nothing else; failing the whole sync over it would be a far
             # worse trade.
             logger.warning("Skipping eBay fee lookup for order %s: %s", order_id, e)
-            return None, None, None
+            return None, None, None, []
         if response.status_code != 200:
             logger.warning(
                 "eBay fee lookup failed for order %s: %d %s", order_id, response.status_code, response.text[:500]
             )
-            return None, None, None
+            return None, None, None, []
         results = response.json().get("transactions", [])
+        labels = self._parse_shipping_labels(results)
         sale = next((t for t in results if str(t.get("transactionType")).upper() == "SALE"), None)
         if sale is None:
             logger.info("eBay returned no SALE transaction for order %s — fees not available yet", order_id)
-            return None, None, None
+            return None, None, None, labels
 
         # totalFeeAmount is the dedicated total-fees field on eBay's Transaction schema.
         # This previously summed totalFeeBasisAmount instead, which is wrong twice over:
@@ -1028,7 +1038,45 @@ class EbayAdapter:
             f"{total_fees:.2f}" if total_fees else None,
             f"{float(net):.2f}" if net is not None else None,
             sale.get("transactionStatus"),
+            labels,
         )
+
+    @classmethod
+    def _parse_shipping_labels(cls, transactions: list[dict]) -> list[ExternalPostageCharge]:
+        """Every SHIPPING_LABEL DEBIT in a getTransactions response, oldest first. eBay
+        books a label refund/void as a SHIPPING_LABEL CREDIT — those are deliberately left
+        out for now (logged, so the case is visible on real data) rather than netted off:
+        which of several labels a credit reverses isn't stated, and guessing would silently
+        move money between the original shipment and a replacement parcel. Tracked in
+        docs/backlog.md."""
+        labels: list[ExternalPostageCharge] = []
+        for tx in transactions:
+            if str(tx.get("transactionType")).upper() != "SHIPPING_LABEL":
+                continue
+            booking = str(tx.get("bookingEntry") or "DEBIT").upper()
+            amount = (tx.get("amount") or {}).get("value")
+            if booking != "DEBIT":
+                logger.info(
+                    "eBay shipping label %s on order %s is a %s of %s — label credits are not yet applied",
+                    tx.get("transactionId"),
+                    tx.get("orderId"),
+                    booking,
+                    amount,
+                )
+                continue
+            if tx.get("transactionId") is None or amount is None:
+                continue
+            labels.append(
+                ExternalPostageCharge(
+                    external_id=str(tx["transactionId"]),
+                    amount=f"{abs(float(amount)):.2f}",
+                    currency=(tx.get("amount") or {}).get("currency"),
+                    posted_at=cls._parse_timestamp(tx.get("transactionDate")),
+                    description=tx.get("transactionMemo"),
+                )
+            )
+        labels.sort(key=lambda c: (c.posted_at is None, c.posted_at or datetime.min.replace(tzinfo=timezone.utc)))
+        return labels
 
     async def fetch_order(self, session, connection: PlatformConnection, order_id) -> dict | None:
         """Sell Fulfillment API getOrder — the single-order counterpart to the bulk

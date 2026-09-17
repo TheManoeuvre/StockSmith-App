@@ -12,6 +12,33 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Replacement parcels.** When something goes wrong with an order that has already
+  shipped — a faulty item, something missing from the box, a parcel lost in the post — the
+  second parcel you send can now be recorded against the order: what went in it (products
+  and packaging, both deducted from stock the moment you save), why it went out, what the
+  postage cost, and its tracking number. Replacement parcels sit in their own amber block
+  on the order's Fulfilment tab, separate from the original order lines, and their postage
+  and cost of goods are deducted from the order's net profit. Deleting a parcel puts
+  everything back into stock.
+- **Marketplace shipping labels are picked up automatically.** Every label bought through
+  eBay or Etsy against an order is now recorded from the marketplace's own financials. The
+  first label's real cost replaces the shipping profile's estimate in net profit (the
+  Shipping tab shows both). A second label means a replacement went out: StockSmith
+  creates the parcel with the label's cost, raises an alert ("Replacement parcel detected —
+  needs completing", on by default under Settings → Notifications), lists the order under
+  Awaiting shipment again until you've said what was sent, and the alert opens the order
+  straight onto its Fulfilment tab. Etsy's ledger doesn't document how labels post, so
+  Etsy detection is best-effort for now; a diagnostic line in the backend log records any
+  ledger entry it couldn't classify.
+- A one-off `scripts/backfill_postage_charges.py` fetches labels for orders that shipped
+  before this release (dry run by default).
+
+### Changed
+- **Net profit on marketplace orders now uses the actual postage label cost** where one has
+  been synced, rather than the shipping profile's estimate. Orders synced before this
+  release keep using the estimate until the backfill script is run.
+
 ## [0.16.2] - 2026-09-16
 
 ### Fixed

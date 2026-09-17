@@ -21,6 +21,17 @@ export interface OrderFulfilment {
  * per line, not the design's buildable/packaging-short signals which aren't on the payload).
  */
 export function orderFulfilment(order: Order): OrderFulfilment {
+  // Shipped, but a sync found a second label and nobody has said what went in that
+  // parcel yet — the backend lists this under "awaiting" for the same reason.
+  if (order.replacement_parcels_need_review) {
+    return {
+      label: "Replacement to complete",
+      toneClass: "text-amber-700",
+      detail: "A second shipping label was detected — record what was sent",
+      action: { label: "Complete", kind: "open" },
+      trackingNumber: order.tracking_number ?? undefined,
+    };
+  }
   if (order.status === "shipped") {
     return {
       label: "Shipped",

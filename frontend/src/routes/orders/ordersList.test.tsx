@@ -77,6 +77,13 @@ function order(over: Record<string, unknown> = {}) {
     net_profit: "12.00",
     cogs_pending: false,
     postage_cost_missing: false,
+    postage_cost_actual: null,
+    postage_cost_effective: null,
+    replacement_postage: null,
+    replacement_cogs: null,
+    replacement_parcels_need_review: false,
+    postage_charges: [],
+    replacement_parcels: [],
     sync_issue: null,
     pending_marketplace_cancellation: false,
     tracking_number: null,
@@ -93,7 +100,9 @@ function routes(items: (typeof order extends (...a: never[]) => infer R ? R : ne
   const byTab = (tab: "awaiting" | "shipped" | "cancelled") =>
     items
       .filter((o) =>
-        tab === "awaiting" ? o.status !== "shipped" && o.status !== "cancelled" : o.status === tab,
+        tab === "awaiting"
+          ? (o.status !== "shipped" && o.status !== "cancelled") || o.replacement_parcels_need_review
+          : o.status === tab,
       )
       .sort((a, b) =>
         tab === "awaiting"
@@ -232,4 +241,24 @@ it("opens the slide-over on a row click", async () => {
   await waitFor(() =>
     expect(router.state.location.pathname).toBe("/orders/900"),
   );
+});
+
+it("keeps a shipped order in the awaiting feed while a replacement parcel needs completing", async () => {
+  setRoutes(
+    routes([
+      order({
+        id: 900,
+        external_order_id: "E-900",
+        status: "shipped",
+        order_placed_at: "2026-08-20T09:00:00Z",
+        replacement_parcels_need_review: true,
+        lines: [line({ product_name: "Resent Planter" })],
+      }),
+    ]),
+  );
+  await renderList();
+
+  expect(await screen.findByText("Resent Planter")).toBeInTheDocument();
+  expect(screen.getByText("Replacement to complete")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Complete" })).toBeInTheDocument();
 });

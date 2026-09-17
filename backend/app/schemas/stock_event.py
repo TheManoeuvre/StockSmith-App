@@ -29,5 +29,8 @@ class ProductStockEventRead(BaseModel):
     adjustment_target_qty: int | None = None
 
     source_order_line_id: int | None = None
+    # Set for replacement_parcel / replacement_parcel_reversal events; order_id below is
+    # then the parcel's order.
+    source_replacement_parcel_id: int | None = None
     order_id: int | None = None
     order_external_order_id: str | None = None

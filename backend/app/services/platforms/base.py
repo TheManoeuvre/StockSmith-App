@@ -59,6 +59,22 @@ class ExternalOrderLine:
 
 
 @dataclass
+class ExternalPostageCharge:
+    """One shipping label the seller bought through the marketplace for an order, as that
+    marketplace's own financials report it — an eBay Sell Finances SHIPPING_LABEL
+    transaction, or an Etsy payment-account ledger entry for a label. `amount` is the
+    positive cost as a decimal string (same convention as the other money fields here);
+    external_id is the marketplace's own id for the charge, stable across re-fetches so
+    order_parcels.apply_postage_charges can upsert on it."""
+
+    external_id: str
+    amount: str
+    currency: str | None = None
+    posted_at: datetime | None = None
+    description: str | None = None
+
+
+@dataclass
 class ExternalOrder:
     external_order_id: str
     buyer_name: str | None
@@ -128,6 +144,12 @@ class ExternalOrder:
     # `enrich` gate as the payment trio above, since both need a per-order call.
     tracking_number: str | None = None
     carrier: str | None = None
+
+    # Every shipping label the marketplace reports the seller bought against this order,
+    # oldest first. Fetched under the same `enrich` gate as the payment trio — so, like
+    # them, an empty list when financials_enriched is False means "not fetched", not
+    # "no labels"; order_sync only applies these when financials_enriched is True.
+    postage_charges: list[ExternalPostageCharge] = field(default_factory=list)
 
 
 @dataclass

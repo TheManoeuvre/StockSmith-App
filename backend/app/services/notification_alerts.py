@@ -17,6 +17,9 @@ disabled, so a poll against a fully-disabled feature costs one query and nothing
 """
 
 import logging
+from dataclasses import dataclass
+from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -159,6 +162,53 @@ async def raise_shipping_price_changed_alert(
         ),
         delivery_mode=config.delivery_mode,
         related_entity_type="shipping_profile",
+    )
+
+
+@dataclass
+class PendingReviewAlert:
+    """What raise_replacement_parcel_review_alert needs, captured by
+    order_parcels.apply_postage_charges while its session is still open so the alert can
+    be sent after the sync's own commit (dispatch_notification commits, and the sync's
+    write phase is one transaction)."""
+
+    order_id: int
+    external_order_id: str | None
+    platform: ListingPlatform | None
+    amount: Decimal
+    currency: str | None
+    posted_at: datetime | None
+
+
+async def raise_replacement_parcel_review_alert(session: AsyncSession, alert: PendingReviewAlert) -> None:
+    """Raised once per second-or-later marketplace label that made a sync auto-create a
+    replacement parcel. No dedup state: a label has a unique external id and only ever
+    spawns a parcel once. Linking a label to a parcel the user already recorded by hand
+    does NOT come through here — there's nothing left for them to fill in.
+
+    related_entity_type/id point at the order so the notification centre can open it
+    straight onto the Fulfilment tab, where the parcel sits waiting for items and a
+    reason. Resolved (marked read) by order_parcels when the parcel is completed or
+    deleted."""
+    type_settings = await get_type_settings_map(session)
+    config = type_settings.get(NotificationCategory.replacement_parcel_review)
+    if config is None or not config.enabled:
+        return
+    platform_label = {ListingPlatform.etsy: "Etsy", ListingPlatform.ebay: "eBay"}.get(alert.platform, "Marketplace")
+    when = f" on {alert.posted_at:%d %b %Y}" if alert.posted_at is not None else ""
+    money = f"{alert.amount:.2f}" + (f" {alert.currency}" if alert.currency else "")
+    await dispatch_notification(
+        session,
+        category=NotificationCategory.replacement_parcel_review,
+        urgency=NotificationUrgency.immediate,
+        title=f"Replacement parcel sent for {platform_label} order {alert.external_order_id or alert.order_id}",
+        body=(
+            f"A second shipping label ({money}) was bought against this order{when}. "
+            "Add what was sent and why on the order's Fulfilment tab so stock and profit stay right."
+        ),
+        delivery_mode=config.delivery_mode,
+        related_entity_type="order",
+        related_entity_id=alert.order_id,
     )
 
 

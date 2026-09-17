@@ -14,6 +14,7 @@ export type NotificationCategory =
   | "marketplace_api_hard_limit"
   | "shipping_price_changed"
   | "shipping_profile_missing"
+  | "replacement_parcel_review"
   | "daily_summary";
 
 export type NotificationUrgency = "immediate" | "digest";

@@ -882,6 +882,66 @@ export interface OrderLine {
   substituted_to: SubstitutionRef[];
 }
 
+export type ReplacementParcelReason =
+  | "faulty_item"
+  | "missing_from_order"
+  | "lost_in_transit"
+  | "damaged_in_transit"
+  | "other"
+  | "unspecified";
+
+/** One shipping label the seller bought through the marketplace for this order, as the
+ *  sync found it. sequence 1 is the original shipment (its amount is what profit charges
+ *  as postage); 2+ is a resend, linked to a replacement parcel once one exists. */
+export interface PostageCharge {
+  id: number;
+  platform: ListingPlatform;
+  source: "ebay_shipping_label" | "etsy_ledger";
+  external_id: string;
+  amount: string;
+  currency: string | null;
+  posted_at: string | null;
+  description: string | null;
+  sequence: number;
+  replacement_parcel_id: number | null;
+}
+
+export interface ReplacementParcelItem {
+  id: number;
+  product_id: number | null;
+  variant_id: number | null;
+  material_id: number | null;
+  product_name: string | null;
+  variant_name: string | null;
+  material_name: string | null;
+  material_unit: string | null;
+  qty: string;
+  unit_cost_snapshot: string | null;
+  line_cost: string | null;
+}
+
+/** A second parcel sent against an already-shipped order — see backend
+ *  models/order_parcel.py. Items left stock when it was recorded; a sync-created one
+ *  (source "sync", needs_review true) has no items yet. */
+export interface ReplacementParcel {
+  id: number;
+  order_id: number;
+  reason: ReplacementParcelReason;
+  source: "manual" | "sync";
+  needs_review: boolean;
+  postage_cost: string | null;
+  // The figure profit uses: the linked label's amount when there is one, else postage_cost.
+  effective_postage: string | null;
+  postage_charge: PostageCharge | null;
+  tracking_number: string | null;
+  carrier: string | null;
+  notes: string | null;
+  sent_at: string;
+  created_at: string;
+  items: ReplacementParcelItem[];
+  items_cost: string | null;
+}
+
 export interface Order {
   id: number;
   platform: ListingPlatform | null;
@@ -925,6 +985,20 @@ export interface Order {
   // Shipped without ever recording a postage cost, so net_profit is missing it. Distinct
   // from cogs_pending: different cause, different fix (assign the product a shipping profile).
   postage_cost_missing: boolean;
+  // Postage as profit charges it. postage_cost_actual is the marketplace's figure for the
+  // first label (null until a sync records one); postage_cost_effective is that when known,
+  // else shipping_cost_snapshot — which stays put as the profile estimate for comparison.
+  postage_cost_actual: string | null;
+  postage_cost_effective: string | null;
+  // Replacement parcels' own postage and cost of goods, deducted from net_profit on top of
+  // the original shipment's. Both null when the order has no parcels.
+  replacement_postage: string | null;
+  replacement_cogs: string | null;
+  // A sync-created parcel is still waiting for items and a reason; the order also shows
+  // under "awaiting" while this is true.
+  replacement_parcels_need_review: boolean;
+  postage_charges: PostageCharge[];
+  replacement_parcels: ReplacementParcel[];
   sync_issue: string | null;
   pending_marketplace_cancellation: boolean;
   tracking_number: string | null;
