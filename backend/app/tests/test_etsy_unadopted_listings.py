@@ -231,7 +231,67 @@ async def test_write_preserves_per_property_config():
 
     assert adapter.put_body["price_on_property"] == [200]
     assert "quantity_on_property" in adapter.put_body
-    assert "sku_on_property" in adapter.put_body
+    assert adapter.put_body["sku_on_property"] == []
+
+
+def _two_property_product(sku: str | None, texture: str, colour: str) -> dict:
+    product = _raw_product(sku, colour)
+    product["property_values"].insert(
+        0,
+        {
+            "property_id": 100,
+            "property_name": "Texture",
+            "scale_id": None,
+            "scale_name": "x",
+            "value_ids": [2],
+            "values": [texture],
+        },
+    )
+    return product
+
+
+async def test_write_declares_sku_varying_properties_when_listing_had_none():
+    """A listing without SKUs carries sku_on_property=[]; echoing that back alongside
+    distinct SKUs is what Etsy rejects with "sku must be consistent across all products".
+    """
+    inventory = _inventory([_raw_product(None, "Black"), _raw_product(None, "White")])
+    adapter = _RecordingAdapter(inventory)
+
+    await adapter.update_listing_skus(None, None, "1", {0: "SKU-BLACK", 1: "SKU-WHITE"})
+
+    assert adapter.put_body["sku_on_property"] == [200]
+
+
+async def test_write_declares_every_property_when_sku_varies_on_all():
+    inventory = _inventory(
+        [
+            _two_property_product(None, "Grain", "Apple"),
+            _two_property_product(None, "Grain", "Ash"),
+            _two_property_product(None, "Smooth", "Apple"),
+            _two_property_product(None, "Smooth", "Ash"),
+        ]
+    )
+    adapter = _RecordingAdapter(inventory)
+
+    await adapter.update_listing_skus(None, None, "1", {0: "G-AP", 1: "G-AS", 2: "S-AP", 3: "S-AS"})
+
+    assert adapter.put_body["sku_on_property"] == [100, 200]
+
+
+async def test_write_declares_only_the_property_the_sku_depends_on():
+    inventory = _inventory(
+        [
+            _two_property_product(None, "Grain", "Apple"),
+            _two_property_product(None, "Grain", "Ash"),
+            _two_property_product(None, "Smooth", "Apple"),
+            _two_property_product(None, "Smooth", "Ash"),
+        ]
+    )
+    adapter = _RecordingAdapter(inventory)
+
+    await adapter.update_listing_skus(None, None, "1", {0: "AP", 1: "AS", 2: "AP", 3: "AS"})
+
+    assert adapter.put_body["sku_on_property"] == [200]
 
 
 async def test_write_strips_and_keeps_the_right_property_keys():
