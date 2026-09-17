@@ -44,6 +44,7 @@ export function StoreConnectionCard({ platform, onOpen }: { platform: ListingPla
         queryKey: ["platforms", platform, "sync-log"],
       });
       queryClient.invalidateQueries({ queryKey: ["orders"] });
+      queryClient.invalidateQueries({ queryKey: ["order-counts"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
     },
   });

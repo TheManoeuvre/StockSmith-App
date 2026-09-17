@@ -32,6 +32,14 @@ async function renderShell() {
         open_stock_take: null,
       }),
     },
+    // The Orders badge is the "Awaiting Shipment" tab count, not a dashboard figure — two
+    // orders awaiting, of which only one is short on inventory.
+    {
+      method: "GET" as const,
+      path: /^\/orders\?.*status_filter=awaiting/,
+      respond: () => ({ items: [], total: 2, limit: 1, offset: 0 }),
+    },
+    { method: "GET" as const, path: /^\/orders\?/, respond: () => ({ items: [], total: 0, limit: 1, offset: 0 }) },
     { method: "GET" as const, path: /.*/, respond: () => [] },
   ]);
   const router = createRouter({ routeTree, history: createMemoryHistory({ initialEntries: ["/orders"] }) });
@@ -56,7 +64,7 @@ it("orders the nav by the daily loop, grouped under Sell and Stock", async () =>
 it("badges only the rows that want doing — never Dashboard or Products", async () => {
   const nav = await renderShell();
   expect(await nav.findByText("3", { selector: "a span" })).toBeInTheDocument(); // Materials
-  expect(nav.getByRole("link", { name: /Orders/ })).toHaveTextContent("1");
+  await within(nav.getByRole("link", { name: /Orders/ })).findByText("2");
   expect(nav.getByRole("link", { name: /Dashboard/ })).toHaveTextContent(/^Dashboard$/);
   expect(nav.getByRole("link", { name: /Products/ })).toHaveTextContent(/^Products$/);
 });

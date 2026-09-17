@@ -79,6 +79,7 @@ function NewOrder() {
       }),
     onSuccess: (order) => {
       queryClient.invalidateQueries({ queryKey: ["orders"] });
+      queryClient.invalidateQueries({ queryKey: ["order-counts"] });
       queryClient.invalidateQueries({ queryKey: ["products"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
       navigate({

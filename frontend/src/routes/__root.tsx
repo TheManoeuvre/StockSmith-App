@@ -17,6 +17,7 @@ import { UnsavedChangesDialog } from "../components/common/UnsavedChangesDialog"
 import { DirtyRegistryProvider } from "../hooks/useDirtyRegistry";
 import { GuardProvider, useUnsavedChangesGuard } from "../hooks/useUnsavedChangesGuard";
 import { dashboardApi } from "../api/dashboard";
+import { ordersApi } from "../api/orders";
 import { purchasesApi } from "../api/purchases";
 import appIcon from "../assets/app-icon.png";
 
@@ -102,13 +103,14 @@ function useNavBadges() {
     queryFn: () => purchasesApi.list(),
   });
 
-  // Awaiting products: short on stock/packaging but there's a BOM to build more from — the
-  // common, expected case, so it only ever gets the calmer "warm" tone. Blocked: no BOM at
-  // all to build from, a real problem — reserved for "hot".
+  // Orders: the number awaiting shipment — the same figure the Orders page shows on its
+  // "Awaiting Shipment" tab, served from that page's ["order-counts", "awaiting"] cache entry.
+  // Tone escalates to "hot" when any of them is blocked (no BOM to build the shortfall from).
+  const { data: awaitingOrders } = useQuery({
+    queryKey: ["order-counts", "awaiting"],
+    queryFn: () => ordersApi.list(1, 0, "awaiting").then((p) => p.total),
+  });
   const blockedOrders = summary?.orders_awaiting_inventory?.filter((o) => !o.has_bom).length ?? 0;
-  const awaitingOrders =
-    (summary?.orders_awaiting_inventory?.filter((o) => o.has_bom).length ?? 0) +
-    (summary?.orders_awaiting_packaging?.length ?? 0);
   const riskMaterials = summary?.low_stock_materials?.length ?? 0;
   const dueForCount = summary?.items_due_for_count_total ?? 0;
   const outstandingPurchases = purchases?.filter((p) => p.received_at === null).length ?? 0;
@@ -117,8 +119,8 @@ function useNavBadges() {
     materials: { badge: riskMaterials, tone: "warm" as NavBadgeTone },
     purchases: { badge: outstandingPurchases, tone: (outstandingPurchases > 0 ? "warm" : "neutral") as NavBadgeTone },
     orders: {
-      badge: awaitingOrders + blockedOrders,
-      tone: (blockedOrders > 0 ? "hot" : awaitingOrders > 0 ? "warm" : "neutral") as NavBadgeTone,
+      badge: awaitingOrders ?? 0,
+      tone: (blockedOrders > 0 ? "hot" : (awaitingOrders ?? 0) > 0 ? "warm" : "neutral") as NavBadgeTone,
     },
     stockTake: { badge: dueForCount, tone: (dueForCount > 0 ? "warm" : "neutral") as NavBadgeTone },
   };
