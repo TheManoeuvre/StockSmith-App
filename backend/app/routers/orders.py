@@ -1,8 +1,9 @@
+import re
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
-from sqlalchemy import case, delete, exists, func, select
+from sqlalchemy import String, case, cast, delete, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -440,9 +441,68 @@ async def _serialize_one(session: AsyncSession, order: Order) -> OrderRead:
     return _serialize_order(order, kitting.get(order.id), substitutions, replacement.get(order.id))
 
 
+# Symbols the search box ignores on both sides of the comparison — the ones that turn up in
+# order numbers, SKUs and product names and that nobody reliably remembers to type
+# ("HEX-RD" vs "hexrd", "#3141" vs "3141"). Stripped by nested replace() rather than a
+# regex so the same expression runs on SQLite (no regexp_replace) and Postgres alike.
+_SEARCH_IGNORED_SYMBOLS = "-_#./,:;'\"()[]&+*@ "
+_SEARCH_STRIP_RE = re.compile(r"[^0-9a-z]")
+
+
+def _search_normalise(column):
+    """lower(column) with every _SEARCH_IGNORED_SYMBOLS character removed."""
+    expr = func.lower(column)
+    for ch in _SEARCH_IGNORED_SYMBOLS:
+        expr = func.replace(expr, ch, "")
+    return expr
+
+
+def search_needle(q: str | None) -> str | None:
+    """The user's term as it's compared: lowercased, letters and digits only. None when
+    nothing searchable is left (blank, or just symbols) — no filter applies then."""
+    if not q:
+        return None
+    needle = _SEARCH_STRIP_RE.sub("", q.lower())
+    return needle or None
+
+
+def _order_search_clause(needle: str):
+    """Substring match for the orders list's search box, against the things a user has to
+    hand when looking for an order: the order number as it's shown in the list (the
+    marketplace's external id, or our own id for a manual order), the order's notes, and
+    anything identifying an item on it — the raw marketplace SKU on the line (which is all
+    an unmapped line has), the catalog product's name and SKU, and the variant's name and
+    SKU suffix. Case and _SEARCH_IGNORED_SYMBOLS are ignored on both sides (see
+    search_needle). Line matching is an EXISTS so a multi-line order still comes back as
+    one row rather than once per matching line."""
+    pattern = f"%{needle}%"
+    line_match = exists(
+        select(OrderLine.id)
+        .outerjoin(Product, Product.id == OrderLine.product_id)
+        .outerjoin(ProductVariant, ProductVariant.id == OrderLine.variant_id)
+        .where(
+            OrderLine.order_id == Order.id,
+            or_(
+                _search_normalise(OrderLine.sku).like(pattern),
+                _search_normalise(Product.name).like(pattern),
+                _search_normalise(Product.sku).like(pattern),
+                _search_normalise(ProductVariant.variant_name).like(pattern),
+                _search_normalise(ProductVariant.sku_suffix).like(pattern),
+            ),
+        )
+    )
+    return or_(
+        _search_normalise(Order.external_order_id).like(pattern),
+        cast(Order.id, String).like(pattern),
+        _search_normalise(Order.notes).like(pattern),
+        line_match,
+    )
+
+
 @router.get("", response_model=OrderPage)
 async def list_orders(
     status_filter: str | None = None,
+    q: str | None = None,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_db),
@@ -512,6 +572,11 @@ async def list_orders(
                 raise HTTPException(status_code=422, detail="Invalid status_filter") from None
         count_query = count_query.where(status_clause)
         query = query.where(status_clause)
+    needle = search_needle(q)
+    if needle is not None:
+        search = _order_search_clause(needle)
+        count_query = count_query.where(search)
+        query = query.where(search)
     total = await session.scalar(count_query)
     result = await session.execute(query)
     orders = list(result.scalars())

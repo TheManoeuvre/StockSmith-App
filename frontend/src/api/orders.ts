@@ -107,9 +107,10 @@ export interface ReplacementParcelUpdateInput {
 }
 
 export const ordersApi = {
-  list: (limit: number, offset: number, status?: OrderStatus | "awaiting") => {
+  list: (limit: number, offset: number, status?: OrderStatus | "awaiting", q?: string) => {
     const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     if (status) params.set("status_filter", status);
+    if (q) params.set("q", q);
     return api.get<OrderPage>(`/orders?${params.toString()}`);
   },
   get: (id: number) => api.get<Order>(`/orders/${id}`),
