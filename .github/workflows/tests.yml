@@ -57,7 +57,7 @@ jobs:
       # v9 also flipped `prune-cache` to default false, so the cache this saves is larger
       # than it was under v3. That is the intended trade (less load on PyPI, faster installs);
       # if the Actions cache allowance ever becomes the constraint, set prune-cache: true here.
-      - uses: astral-sh/setup-uv@v10.0.1
+      - uses: astral-sh/setup-uv@v10.1.0
         with:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
