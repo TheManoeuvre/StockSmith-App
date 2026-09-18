@@ -144,11 +144,14 @@ _DEFAULT_LIMITS: dict[ListingPlatform, dict[LimitField, int | str]] = {
         LimitField.title_charset: "allow:L,Nd,P,Sm,Zs:™©®",
         LimitField.description_max_length: 13000,
         # CONFIRMED via updateListingInventory's max_variations_supported parameter,
-        # which documents 2 as today's behaviour and 3 as opt-in. Etsy has announced
-        # third-variation GA but it requires shop-side enrolment in developer mode, so
-        # this ships at 2 and is raised by an override once the shop is enrolled.
-        LimitField.variation_attribute_max_count: 2,
-        LimitField.variation_max_count: 100,
+        # which accepts 2 or 3. Etsy released third-variation support in September 2026,
+        # so this ships at 3. Note the inventory PUT still has to pass
+        # max_variations_supported=3 for a third property to be accepted.
+        LimitField.variation_attribute_max_count: 3,
+        # Etsy itself allows up to 4,900 option combinations on a listing, but only 400
+        # of them can carry their own SKU (or price). StockSmith needs a SKU on every
+        # product it manages, so 400 is the binding limit here, not 4,900.
+        LimitField.variation_max_count: 400,
         LimitField.attribute_name_max_length: 45,
         LimitField.attribute_value_max_length: 45,
         # CONFIRMED - ListingInventoryProduct.property_values in Etsy's spec states

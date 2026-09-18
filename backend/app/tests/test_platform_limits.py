@@ -9,12 +9,14 @@ from app.models.listing import ListingPlatform
 from app.models.product import Product
 from app.models.variant import ProductVariant
 from app.services.platform_limits import (
+    Limit,
     LimitField,
     Severity,
     check_charset,
     check_count,
     check_length,
     check_product,
+    default_limit_table,
     default_limits,
     resolve_effective_limits,
     supported_platforms,
@@ -32,9 +34,9 @@ def test_single_platform_resolves_to_its_own_limits():
 
 def test_strictest_limit_wins_across_platforms():
     effective = resolve_effective_limits({ETSY, EBAY})
-    # Etsy is stricter on SKU (32 vs 50) and on variation attributes (2 vs 5)...
+    # Etsy is stricter on SKU (32 vs 50) and on variation attributes (3 vs 5)...
     assert effective[LimitField.sku_max_length].value == 32
-    assert effective[LimitField.variation_attribute_max_count].value == 2
+    assert effective[LimitField.variation_attribute_max_count].value == 3
     # ...but eBay is stricter on title (80 vs 140). "Strictest" is per field, not per
     # platform — a single "most restrictive platform" would get one of these wrong.
     assert effective[LimitField.title_max_length].value == 80
@@ -144,8 +146,8 @@ def test_etsy_allows_ampersand_once_but_not_twice():
 
 def test_count_check_reports_the_overage():
     effective = resolve_effective_limits({ETSY})
-    assert check_count(LimitField.variation_max_count, 100, "variations", effective) is None
-    violation = check_count(LimitField.variation_max_count, 101, "variations", effective)
+    assert check_count(LimitField.variation_max_count, 400, "variations", effective) is None
+    violation = check_count(LimitField.variation_max_count, 401, "variations", effective)
     assert violation is not None and violation.severity is Severity.blocker
 
 
@@ -194,20 +196,37 @@ def test_variant_units_use_the_composed_full_sku():
     assert units[0].sku == "SKU-0037-4-STUD-BLUE"
 
 
-def test_third_attribute_breaches_etsy_but_not_ebay():
+def test_third_attribute_is_clean_on_etsy_by_default():
+    """Etsy released third-variation support in September 2026, so the shipped default
+    is 3 and a three-attribute product — the most the Product model can hold — is clean."""
     product = _product(
         variant_attribute1_name="Size",
         variant_attribute2_name="Colour",
         variant_attribute3_name="Finish",
     )
-    etsy_violations, _ = check_product(product, [], resolve_effective_limits({ETSY}), {ETSY})
-    fields = [v.field for v in etsy_violations]
-    assert LimitField.variation_attribute_max_count in fields
-    assert next(v for v in etsy_violations if v.field == LimitField.variation_attribute_max_count).severity is (
-        Severity.blocker
-    )
+    for platform in (ETSY, EBAY):
+        violations, _ = check_product(product, [], resolve_effective_limits({platform}), {platform})
+        assert LimitField.variation_attribute_max_count not in [v.field for v in violations]
 
-    ebay_violations, _ = check_product(product, [], resolve_effective_limits({EBAY}), {EBAY})
+
+def test_third_attribute_breaches_an_overridden_two_attribute_cap():
+    """A shop that hasn't opted into third variations can override the cap back to 2, and
+    the check has to block a three-attribute product against that override — there is no
+    subset of attributes a machine can safely drop."""
+    product = _product(
+        variant_attribute1_name="Size",
+        variant_attribute2_name="Colour",
+        variant_attribute3_name="Finish",
+    )
+    table = default_limit_table()
+    table[ETSY][LimitField.variation_attribute_max_count] = Limit(
+        field=LimitField.variation_attribute_max_count, value=2, platform=ETSY, is_override=True
+    )
+    etsy_violations, _ = check_product(product, [], resolve_effective_limits({ETSY}, table), {ETSY})
+    violation = next(v for v in etsy_violations if v.field == LimitField.variation_attribute_max_count)
+    assert violation.severity is Severity.blocker
+
+    ebay_violations, _ = check_product(product, [], resolve_effective_limits({EBAY}, table), {EBAY})
     assert LimitField.variation_attribute_max_count not in [v.field for v in ebay_violations]
 
 
