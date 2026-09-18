@@ -104,10 +104,59 @@ To remove it later: `Unregister-ScheduledTask -TaskName "StockSmith Backend"`.
 
 ## Building the installer locally
 
+Useful for trying out what's on `main` without cutting a release. Needs Rust
+([rustup](https://rustup.rs)), Node LTS, [uv](https://docs.astral.sh/uv/), and the Visual
+Studio Build Tools "Desktop development with C++" workload — Tauri links with MSVC, so
+without that last one `cargo` fails with `link.exe not found`.
+
 ```bash
+cd backend && uv sync --group build && cd ..   # PyInstaller lives in the `build` group,
+                                               # which a plain `uv sync` does not install
+cd frontend && npm ci && cd ..
+
 powershell -File backend/build.ps1   # packages the backend into frontend/src-tauri/binaries/
 cd frontend && npm run tauri build   # produces the Windows installer
 ```
+
+The installer lands in `frontend/src-tauri/target/release/bundle/nsis/`. The first build
+compiles the whole Rust dependency tree and takes a while; later ones reuse `target/` and
+are much quicker. The two `build.ps1`/`tauri build` lines are enough on their own to
+rebuild after a `git pull` — re-run the two dependency-install lines only when
+`uv.lock` or `package-lock.json` changed.
+
+If `tauri build` stops with a complaint about a missing private key, that is
+`bundle.createUpdaterArtifacts` in `tauri.conf.json`: the bundler will not produce updater
+artifacts for a config naming a public key without the matching private one. Set
+`TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` in the shell first
+(the same values as the GitHub Actions secrets) — the signature it writes is unused for a
+local build, it just has to exist.
+
+A locally-built installer installs *over* any existing StockSmith and shares the same
+`%LOCALAPPDATA%\StockSmith\` data folder, so a build carrying a database migration will
+migrate real data forward — back that folder up first. It also won't have the Pushover
+app token, which is injected from a GitHub Actions secret at release-build time only;
+everything else works.
+
+## Dev builds from GitHub Actions
+
+The same installer, built by CI from any branch, for when the toolchain above isn't set up
+or isn't to hand. It needs nothing but a browser, and creates no tag and no release — the
+result is attached to the workflow run and the auto-updater never sees it.
+
+1. **Actions** → **Dev build** → **Run workflow**, pick a branch, run it.
+2. When it finishes, open the run and download the artifact from the **Artifacts**
+   section at the bottom.
+3. Unzip and run the installer inside. `BUILD-INFO.txt` alongside it records the branch,
+   commit and time, which is the only way to tell two dev builds apart: the app displays no
+   version, and every build carries whatever `tauri.conf.json` currently says.
+
+Slower per build than a warm local one — the Rust cache makes repeat runs much quicker
+than the first, but a runner still starts with no `node_modules`, no Python environment and
+a fresh checkout each time. Artifacts are kept for 30 days. Only someone with write access to this repo can start one;
+secrets aren't exposed to forks, so a fork's PR can't.
+
+The same caveats as a local build apply — it installs over your existing StockSmith and
+shares its data folder.
 
 ## Releasing a new version
 
