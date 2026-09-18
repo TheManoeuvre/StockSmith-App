@@ -4,7 +4,7 @@ import { materialsApi } from "../../api/materials";
 import { platformsApi, type UnitSyncResult } from "../../api/platforms";
 import { productsApi } from "../../api/products";
 import { variantsApi } from "../../api/variants";
-import type { BomLineRead, KittingBomLineRead, Variant } from "../../api/types";
+import type { BomLineRead, KittingBomLineRead, PlatformConflictResolution, Variant } from "../../api/types";
 import { CopyButton } from "../common/CopyButton";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { SaveButton } from "../common/SaveButton";
@@ -12,6 +12,7 @@ import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { DirtyPath, useManagedSave } from "../../hooks/useDirtyRegistry";
 import { useGuard } from "../../hooks/useUnsavedChangesGuard";
+import { PlatformConflictDialog, platformConflictDetail } from "./PlatformConflictDialog";
 import { PlatformSyncBadge } from "./PlatformSyncBadge";
 import { BomOverrideEditor } from "./BomOverrideEditor";
 import { inclFallbacksNote, sellableSummary } from "../../lib/format";
@@ -57,13 +58,17 @@ export function VariantEditor({ productId }: { productId: number }) {
   const [showDisabled, setShowDisabled] = useState(false);
   const [showAllVariants, setShowAllVariants] = useState(false);
 
+  // One more active variant can be the one that takes the product past a store's cap, so
+  // the server may answer 409 and the dialog re-sends with the user's go-ahead.
   const createVariantMutation = useMutation({
-    mutationFn: () => productsApi.createVariant(productId, { variant_name: newVariantName }),
+    mutationFn: (onPlatformConflict: PlatformConflictResolution) =>
+      productsApi.createVariant(productId, { variant_name: newVariantName, on_platform_conflict: onPlatformConflict }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["products", productId, "variants"] });
       setNewVariantName("");
     },
   });
+  const platformConflict = platformConflictDetail(createVariantMutation.error);
 
   const filteredVariants = (variants ?? []).filter((v) => showDisabled || v.is_active);
   const disabledCount = (variants ?? []).filter((v) => !v.is_active).length;
@@ -124,7 +129,7 @@ export function VariantEditor({ productId }: { productId: number }) {
         className="flex items-end gap-2"
         onSubmit={(e) => {
           e.preventDefault();
-          createVariantMutation.mutate();
+          createVariantMutation.mutate("ask");
         }}
       >
         <label className="flex flex-col gap-1">
@@ -140,7 +145,15 @@ export function VariantEditor({ productId }: { productId: number }) {
           + Add variant
         </button>
       </form>
-      <ErrorBanner error={createVariantMutation.error} />
+      <ErrorBanner error={platformConflict ? null : createVariantMutation.error} />
+      {platformConflict && (
+        <PlatformConflictDialog
+          detail={platformConflict}
+          busy={createVariantMutation.isPending}
+          onResolve={(resolution) => createVariantMutation.mutate(resolution)}
+          onCancel={() => createVariantMutation.reset()}
+        />
+      )}
     </div>
   );
 }

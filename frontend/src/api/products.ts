@@ -15,6 +15,7 @@ import type {
   ProductPage,
   ProductPriceSnapshot,
   ProductStockEvent,
+  PlatformConflictResolution,
   SharedMaterialResolution,
   StockAdjustment,
   Variant,
@@ -74,10 +75,21 @@ export const productsApi = {
   replaceKittingBom: (id: number, lines: KittingBomLine[]) =>
     api.put<KittingBomLineRead[]>(`/products/${id}/kitting-bom`, lines),
   listVariants: (id: number) => api.get<Variant[]>(`/products/${id}/variants`),
-  createVariant: (id: number, input: { variant_name: string; sku_suffix?: string | null }) =>
-    api.post<Variant>(`/products/${id}/variants`, input),
-  generateVariants: (id: number, attributes: VariantAttributeSpec[], onSharedMaterial: SharedMaterialResolution = "ask") =>
-    api.post<Variant[]>(`/products/${id}/variants/generate`, { attributes, on_shared_material: onSharedMaterial }),
+  createVariant: (
+    id: number,
+    input: { variant_name: string; sku_suffix?: string | null; on_platform_conflict?: PlatformConflictResolution }
+  ) => api.post<Variant>(`/products/${id}/variants`, input),
+  generateVariants: (
+    id: number,
+    attributes: VariantAttributeSpec[],
+    onSharedMaterial: SharedMaterialResolution = "ask",
+    onPlatformConflict: PlatformConflictResolution = "ask"
+  ) =>
+    api.post<Variant[]>(`/products/${id}/variants/generate`, {
+      attributes,
+      on_shared_material: onSharedMaterial,
+      on_platform_conflict: onPlatformConflict,
+    }),
   // Defaults to a preview server-side — pass apply: true only after the user has seen it.
   amendVariantBomOverrides: (id: number, payload: BulkBomAmendRequest) =>
     api.post<BulkBomAmendResult>(`/products/${id}/variants/bom-overrides/amend`, payload),

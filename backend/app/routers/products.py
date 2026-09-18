@@ -49,7 +49,7 @@ from app.services.buildability import (
     get_buildable_by_product,
     get_ready_to_ship_by_bundle,
 )
-from app.services import abc, listing_push, platform_fees
+from app.services import abc, listing_push, platform_fees, variant_platform_conflicts
 from app.services.csv_io import export_products_csv, import_products_csv
 from app.services.kitting import (
     _clamp_value_to_ceiling,
@@ -769,7 +769,9 @@ async def list_stock_history(product_id: int, session: AsyncSession = Depends(ge
 async def generate_product_variants(
     product_id: int, payload: GenerateVariantsRequest, session: AsyncSession = Depends(get_db)
 ) -> list[VariantRead]:
-    created = await generate_variants(session, product_id, payload.attributes, payload.on_shared_material)
+    created = await generate_variants(
+        session, product_id, payload.attributes, payload.on_shared_material, payload.on_platform_conflict
+    )
     if not created:
         return []
     product = await session.get(Product, product_id)
@@ -879,7 +881,18 @@ async def create_variant(
     product = await session.get(Product, product_id)
     if product is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
-    variant = ProductVariant(product_id=product_id, **payload.model_dump())
+    fields = payload.model_dump()
+    on_platform_conflict = fields.pop("on_platform_conflict")
+    # One more active variant may be the one that takes the product past a platform's
+    # cap; the attribute count is untouched by a manual add so only the variation count
+    # is asked about.
+    await variant_platform_conflicts.require_no_platform_conflicts(
+        session,
+        product_id,
+        on_platform_conflict,
+        active_variant_count=await variant_platform_conflicts.active_variant_count(session, product_id) + 1,
+    )
+    variant = ProductVariant(product_id=product_id, **fields)
     session.add(variant)
     await session.commit()
     await session.refresh(variant)

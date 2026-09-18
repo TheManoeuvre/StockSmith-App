@@ -13,7 +13,7 @@ from app.models.material import Material
 from app.models.product import Product, ProductMaterial
 from app.models.sku_alias import SkuAlias
 from app.models.variant import ProductVariant, ProductVariantMaterial
-from app.schemas.product import SharedMaterialResolution, VariantAttributeSpec
+from app.schemas.product import PlatformConflictResolution, SharedMaterialResolution, VariantAttributeSpec
 from app.services.validation import validate_lines_against_units
 
 _SLUG_NON_ALNUM = re.compile(r"[^A-Za-z0-9]+")
@@ -352,6 +352,7 @@ async def generate_variants(
     product_id: int,
     attributes: list[VariantAttributeSpec],
     on_shared_material: SharedMaterialResolution = "ask",
+    on_platform_conflict: PlatformConflictResolution = "ask",
 ) -> list[ProductVariant]:
     """Persists up to 3 attribute names onto the product, computes the cartesian product
     of their values, and creates any combinations that don't already exist — existing
@@ -370,7 +371,11 @@ async def generate_variants(
     409 lists every such combination; the client re-submits with "skip" to create the
     rest without them, or "keep" to create them too, each line keeping its own quantity.
     Detail is structured (code SHARED_MATERIAL_VARIANTS) so the client can offer that
-    choice rather than show an error."""
+    choice rather than show an error.
+
+    The same shape asks a second question once that one is settled: would the result
+    exceed a target platform's variation-attribute or variation count? See
+    services/variant_platform_conflicts — on_platform_conflict="proceed" saves anyway."""
     if not attributes or len(attributes) > 3:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Provide between 1 and 3 attributes")
 
@@ -436,6 +441,20 @@ async def generate_variants(
                 "new_variant_count": len(combos_to_create),
             },
         )
+
+    # Asked only after the shared-material question so the count is what will actually be
+    # created, and before any write so cancelling costs nothing. The attribute names are
+    # replaced wholesale below, so the resulting attribute count is simply len(attributes).
+    from app.services.variant_platform_conflicts import require_no_platform_conflicts
+
+    existing_active = sum(1 for v in existing_variants if v.is_active)
+    await require_no_platform_conflicts(
+        session,
+        product_id,
+        on_platform_conflict,
+        attribute_count=len(attributes),
+        active_variant_count=existing_active + len(resolved_by_combo),
+    )
 
     # The per-variant editor has always validated quantities against each material's unit
     # (routers/variants.replace_bom_overrides); generation never did, so a fractional

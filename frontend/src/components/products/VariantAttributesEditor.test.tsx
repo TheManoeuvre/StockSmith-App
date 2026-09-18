@@ -40,6 +40,21 @@ const SHARED = {
   new_variant_count: 2,
 };
 
+/** The other 409 a generate can answer: the result would breach a target store's limit. */
+const OVER_LIMIT = {
+  code: "platform_limit_conflicts",
+  message: "This would exceed 1 platform limit. Nothing has been saved.",
+  conflicts: [
+    {
+      platform: "etsy",
+      field: "variation_attribute_max_count",
+      resulting_count: 3,
+      limit: 2,
+      message: "This will result in 3 variation attributes; Etsy supports only 2.",
+    },
+  ],
+};
+
 function renderEditor() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -132,6 +147,67 @@ it("cancelling creates nothing and keeps the input", async () => {
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   expect(generateCalls()).toHaveLength(1);
   expect(screen.getByPlaceholderText("Small, Medium, Large")).toHaveValue("Apple, Ash");
+});
+
+it("asks before exceeding a platform limit, and re-submits with 'proceed'", async () => {
+  generateResponses = [
+    () => {
+      throw new FakeApiError(409, OVER_LIMIT.message, OVER_LIMIT);
+    },
+    () => [],
+  ];
+  await fillAndGenerate();
+
+  const dialog = await screen.findByRole("dialog", { name: "Over a platform limit" });
+  expect(dialog).toHaveTextContent("This will result in 3 variation attributes; Etsy supports only 2.");
+  expect(screen.queryByText(OVER_LIMIT.message)).toBeNull();
+
+  await userEvent.click(screen.getByRole("button", { name: "Save anyway" }));
+
+  await waitFor(() => expect(generateCalls()).toHaveLength(2));
+  const bodies = generateCalls().map((c) => c.body as { on_platform_conflict: string; on_shared_material: string });
+  expect(bodies.map((b) => b.on_platform_conflict)).toEqual(["ask", "proceed"]);
+  expect(bodies[1].on_shared_material).toBe("ask");
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
+
+it("keeps the shared-material answer when the platform question follows it", async () => {
+  // The server asks about shared materials first (the count depends on the answer), so
+  // the platform confirm has to carry "keep" forward rather than reopening that question.
+  generateResponses = [
+    () => {
+      throw new FakeApiError(409, SHARED.message, SHARED);
+    },
+    () => {
+      throw new FakeApiError(409, OVER_LIMIT.message, OVER_LIMIT);
+    },
+    () => [],
+  ];
+  await fillAndGenerate();
+
+  await screen.findByRole("dialog", { name: "Same material on two lines" });
+  await userEvent.click(screen.getByRole("button", { name: "Keep it" }));
+  await screen.findByRole("dialog", { name: "Over a platform limit" });
+  await userEvent.click(screen.getByRole("button", { name: "Save anyway" }));
+
+  await waitFor(() => expect(generateCalls()).toHaveLength(3));
+  const third = generateCalls()[2].body as { on_platform_conflict: string; on_shared_material: string };
+  expect(third).toMatchObject({ on_shared_material: "keep", on_platform_conflict: "proceed" });
+});
+
+it("cancelling the platform question creates nothing", async () => {
+  generateResponses = [
+    () => {
+      throw new FakeApiError(409, OVER_LIMIT.message, OVER_LIMIT);
+    },
+  ];
+  await fillAndGenerate();
+
+  await screen.findByRole("dialog", { name: "Over a platform limit" });
+  await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(generateCalls()).toHaveLength(1);
 });
 
 it("shows any other generate failure as a plain error", async () => {
