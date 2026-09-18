@@ -281,7 +281,9 @@ def _serialize_parcel(parcel: OrderReplacementParcel) -> ReplacementParcelRead:
             )
         )
     charge = PostageChargeRead.model_validate(parcel.charge) if parcel.charge is not None else None
-    if charge is not None:
+    # A linked label wins over the typed figure — unless it's a bulk label with no
+    # per-order amount, which is exactly the case the typed figure exists for.
+    if charge is not None and charge.amount is not None:
         effective: Decimal | None = charge.amount
     elif parcel.postage_cost is not None:
         effective = Decimal(parcel.postage_cost)

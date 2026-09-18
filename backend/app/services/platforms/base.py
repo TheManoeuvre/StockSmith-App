@@ -65,10 +65,17 @@ class ExternalPostageCharge:
     transaction, or an Etsy payment-account ledger entry for a label. `amount` is the
     positive cost as a decimal string (same convention as the other money fields here);
     external_id is the marketplace's own id for the charge, stable across re-fetches so
-    order_parcels.apply_postage_charges can upsert on it."""
+    order_parcels.apply_postage_charges can upsert on it.
+
+    `amount` is None when the marketplace confirms a label was bought for the order but
+    won't say what this order's share of it cost — eBay's bulk label purchase books ONE
+    SHIPPING_LABEL transaction for the whole batch, carrying the batch total and no
+    orderId (see EbayAdapter._parse_shipping_labels). Such a label still counts in the
+    order's label sequence (it IS the original shipment); profit just keeps the
+    shipping-profile estimate for it."""
 
     external_id: str
-    amount: str
+    amount: str | None
     currency: str | None = None
     posted_at: datetime | None = None
     description: str | None = None

@@ -175,7 +175,7 @@ class PendingReviewAlert:
     order_id: int
     external_order_id: str | None
     platform: ListingPlatform | None
-    amount: Decimal
+    amount: Decimal | None  # None for a bulk label — see OrderPostageCharge.amount
     currency: str | None
     posted_at: datetime | None
 
@@ -196,7 +196,11 @@ async def raise_replacement_parcel_review_alert(session: AsyncSession, alert: Pe
         return
     platform_label = {ListingPlatform.etsy: "Etsy", ListingPlatform.ebay: "eBay"}.get(alert.platform, "Marketplace")
     when = f" on {alert.posted_at:%d %b %Y}" if alert.posted_at is not None else ""
-    money = f"{alert.amount:.2f}" + (f" {alert.currency}" if alert.currency else "")
+    money = (
+        f"{alert.amount:.2f}" + (f" {alert.currency}" if alert.currency else "")
+        if alert.amount is not None
+        else "cost not itemised by the marketplace"
+    )
     await dispatch_notification(
         session,
         category=NotificationCategory.replacement_parcel_review,

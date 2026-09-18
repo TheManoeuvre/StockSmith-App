@@ -13,6 +13,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **eBay labels bought in bulk no longer charge one order for the whole batch.** Buying
+  several labels in one go from Seller Hub makes eBay book a single transaction for the
+  batch total, and it reports that transaction against one of the orders in it — so that
+  order's postage came through as the whole batch (£21.90 for a £3.65 label, on one
+  order). Such a label is now recorded as "Not itemised" on the Shipping tab: it still
+  counts as the original shipment, so a later label is correctly treated as a resend, but
+  net profit keeps the shipping profile's estimate for it since eBay doesn't say what the
+  order's own share cost. An order already carrying a batch total is corrected the next
+  time its labels are synced (`scripts/backfill_postage_charges.py --all` forces this).
 - **Etsy listings that can't take a stock update are now flagged instead of retried
   forever.** If an Etsy listing has several variations but its quantity isn't attached to
   one of them, every variation has to share a single number — so there is no stock update

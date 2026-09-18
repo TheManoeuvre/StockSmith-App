@@ -100,6 +100,11 @@ export function ReplacementParcelModal({
     parcel?.postage_charge != null || (!editing && linkableCharges.length > 0) ? "label" : "manual",
   );
   const [chargeId, setChargeId] = useState<number | null>(parcel?.postage_charge?.id ?? linkableCharges[0]?.id ?? null);
+  // A bulk-bought label (amount null — see PostageCharge.amount) still links to the parcel,
+  // but carries no cost of its own, so the typed amount is asked for alongside it.
+  const selectedCharge =
+    postageMode === "label" ? (linkableCharges.find((c) => c.id === chargeId) ?? parcel?.postage_charge ?? null) : null;
+  const labelNeedsAmount = selectedCharge != null && selectedCharge.amount == null;
 
   // Seed the item rows once the data they depend on is in.
   const seededProducts =
@@ -125,7 +130,7 @@ export function ReplacementParcelModal({
   const mutation = useMutation({
     mutationFn: async () => {
       const chargeForSave = postageMode === "label" ? chargeId : null;
-      const postageForSave = postageMode === "manual" ? postageCost.trim() || null : null;
+      const postageForSave = postageMode === "manual" || labelNeedsAmount ? postageCost.trim() || null : null;
       if (!itemsEditable) {
         const patch: ReplacementParcelUpdateInput = {
           reason,
@@ -154,7 +159,7 @@ export function ReplacementParcelModal({
         // Always the placeholder's own label (postage mode is pinned to it above) — the
         // backend retires the placeholder for us.
         input.postage_charge_id = parcel.postage_charge?.id ?? null;
-        input.postage_cost = null;
+        input.postage_cost = labelNeedsAmount ? postageForSave : null;
       } else {
         input.postage_charge_id = chargeForSave;
       }
@@ -332,7 +337,8 @@ export function ReplacementParcelModal({
             >
               {linkableCharges.map((c) => (
                 <option key={c.id} value={c.id}>
-                  Label #{c.sequence} · {formatMoney(c.amount, c.currency ?? order.currency)}
+                  Label #{c.sequence} ·{" "}
+                  {c.amount != null ? formatMoney(c.amount, c.currency ?? order.currency) : "cost not itemised"}
                   {c.posted_at ? ` · ${formatDayMonth(c.posted_at)}` : ""}
                 </option>
               ))}
@@ -345,6 +351,20 @@ export function ReplacementParcelModal({
               value={postageCost}
               onChange={(e) => setPostageCost(e.target.value)}
             />
+          )}
+          {labelNeedsAmount && (
+            <div className="ml-31 flex items-center gap-2">
+              <input
+                aria-label="Postage cost"
+                placeholder="0.00"
+                className="w-28 rounded border border-slate-300 px-2 py-1 text-sm"
+                value={postageCost}
+                onChange={(e) => setPostageCost(e.target.value)}
+              />
+              <span className="text-xs text-slate-400" title={selectedCharge?.description ?? undefined}>
+                Bulk-bought label — enter what this one cost
+              </span>
+            </div>
           )}
         </section>
 

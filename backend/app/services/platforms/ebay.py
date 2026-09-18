@@ -1004,7 +1004,7 @@ class EbayAdapter:
             )
             return None, None, None, []
         results = response.json().get("transactions", [])
-        labels = self._parse_shipping_labels(results)
+        labels = self._parse_shipping_labels(results, str(order_id))
         sale = next((t for t in results if str(t.get("transactionType")).upper() == "SALE"), None)
         if sale is None:
             logger.info("eBay returned no SALE transaction for order %s — fees not available yet", order_id)
@@ -1042,13 +1042,26 @@ class EbayAdapter:
         )
 
     @classmethod
-    def _parse_shipping_labels(cls, transactions: list[dict]) -> list[ExternalPostageCharge]:
+    def _parse_shipping_labels(cls, transactions: list[dict], order_id: str | None = None) -> list[ExternalPostageCharge]:
         """Every SHIPPING_LABEL DEBIT in a getTransactions response, oldest first. eBay
         books a label refund/void as a SHIPPING_LABEL CREDIT — those are deliberately left
         out for now (logged, so the case is visible on real data) rather than netted off:
         which of several labels a credit reverses isn't stated, and guessing would silently
         move money between the original shipment and a replacement parcel. Tracked in
-        docs/backlog.md."""
+        docs/backlog.md.
+
+        A label bought through Seller Hub's bulk "buy labels" flow is booked as ONE
+        transaction for the whole batch: its amount is the batch total, it has no orderId
+        (buyer.username is literally "EBAY"), yet the orderId filter still returns it for
+        every order in the batch. Confirmed live on 09-15158-06992 — six £3.65 labels came
+        back as a single £21.90 DEBIT against order 04-15163-59902, and Seller Hub's own
+        per-label breakdown is nowhere in the Finances API. Storing the batch total as
+        that order's postage overstated its cost six-fold, so a label whose orderId isn't
+        the order being fetched is returned with amount=None: it still marks a label
+        bought (keeping the sequence honest — a later per-order label on the same order
+        is a resend, not the original), but its cost is unknown and profit stays on the
+        profile estimate. The batch total goes in the description so the order page can
+        say why."""
         labels: list[ExternalPostageCharge] = []
         for tx in transactions:
             if str(tx.get("transactionType")).upper() != "SHIPPING_LABEL":
@@ -1066,11 +1079,37 @@ class EbayAdapter:
                 continue
             if tx.get("transactionId") is None or amount is None:
                 continue
+            currency = (tx.get("amount") or {}).get("currency")
+            tx_order_id = tx.get("orderId")
+            if order_id is not None and str(tx_order_id or "") != order_id:
+                logger.info(
+                    "eBay shipping label %s (orderId=%s) returned for order %s is a bulk purchase of %s %s — "
+                    "this order's share is not reported, keeping the profile estimate",
+                    tx["transactionId"],
+                    tx_order_id,
+                    order_id,
+                    amount,
+                    currency,
+                )
+                labels.append(
+                    ExternalPostageCharge(
+                        external_id=str(tx["transactionId"]),
+                        amount=None,
+                        currency=currency,
+                        posted_at=cls._parse_timestamp(tx.get("transactionDate")),
+                        description=(
+                            f"Bulk label purchase of {abs(float(amount)):.2f}{' ' + currency if currency else ''} "
+                            "across several orders — eBay doesn't report this order's share, so the profile "
+                            "estimate is used"
+                        ),
+                    )
+                )
+                continue
             labels.append(
                 ExternalPostageCharge(
                     external_id=str(tx["transactionId"]),
                     amount=f"{abs(float(amount)):.2f}",
-                    currency=(tx.get("amount") or {}).get("currency"),
+                    currency=currency,
                     posted_at=cls._parse_timestamp(tx.get("transactionDate")),
                     description=tx.get("transactionMemo"),
                 )
