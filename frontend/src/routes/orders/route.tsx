@@ -18,6 +18,7 @@ import { CopyButton } from "../../components/common/CopyButton";
 import { CsvImportExport } from "../../components/common/CsvImportExport";
 import { FilterTabs } from "../../components/common/FilterTabs";
 import { Th } from "../../components/common/ListTable";
+import { useRefreshOnSync } from "../../hooks/useRefreshOnSync";
 import { formatMoney } from "../../lib/money";
 import { formatDayMonth } from "../../lib/format";
 import { maskBuyerName } from "../../lib/names";
@@ -97,6 +98,9 @@ function netProfitSub(order: Order): string {
 }
 
 function OrdersLayout() {
+  // In the layout rather than the list, so a background import still refreshes the list
+  // (and the open order's siblings) while the slide-over is up.
+  useRefreshOnSync();
   return (
     <>
       <OrdersListContent />
