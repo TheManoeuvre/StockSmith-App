@@ -10,6 +10,7 @@ user has committed to it.
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import select
 
 from app.models.asset import AssetType, ProductAsset
 from app.models.listing import ListingPlatform
@@ -26,7 +27,6 @@ async def _complete_etsy_profile(session, **overrides) -> ListingProfile:
     fields = dict(
         platform=ETSY,
         name="Handmade",
-        is_default=True,
         etsy_taxonomy_id=1234,
         etsy_who_made="i_did",
         etsy_when_made="made_to_order",
@@ -41,7 +41,9 @@ async def _complete_etsy_profile(session, **overrides) -> ListingProfile:
     return profile
 
 
-async def _ready_product(session, **overrides) -> Product:
+async def _ready_product(session, *, profile: ListingProfile | None = None, **overrides) -> Product:
+    """A product pointed at `profile`, or — since nothing applies a profile by itself,
+    there being no platform default — at whichever single profile the test has made."""
     fields = dict(
         name="Brick Pencil Pot",
         sku="SKU-0037",
@@ -52,6 +54,13 @@ async def _ready_product(session, **overrides) -> Product:
     fields.update(overrides)
     product = Product(**fields)
     session.add(product)
+    await session.flush()
+    if profile is None:
+        profile = (await session.execute(select(ListingProfile))).scalars().first()
+    if profile is not None:
+        session.add(
+            ProductPlatformSettings(product_id=product.id, platform=profile.platform, listing_profile_id=profile.id)
+        )
     await session.commit()
     return product
 
@@ -91,6 +100,20 @@ async def test_no_profile_at_all_is_a_blocker(session):
     assert report.can_create is False
     assert "listing_profile" in _fields(report, BLOCKER)
     assert report.profile_id is None
+
+
+@pytest.mark.asyncio
+async def test_a_profile_nobody_chose_is_not_applied(session):
+    """A complete profile existing is not the same as it having been picked for this
+    product: there is no platform default, so the product is blocked until someone does."""
+    await _complete_etsy_profile(session)
+    product = await _ready_product(session)
+    (await session.execute(select(ProductPlatformSettings))).scalar_one().listing_profile_id = None
+    await session.commit()
+
+    report = await evaluate(session, product.id, ETSY)
+    assert report.can_create is False
+    assert "listing_profile" in _fields(report, BLOCKER)
 
 
 @pytest.mark.asyncio
@@ -233,23 +256,17 @@ async def test_resolved_title_is_reported_with_its_source(session):
 
 
 @pytest.mark.asyncio
-async def test_a_products_own_profile_is_used_over_the_default(session):
-    default = await _complete_etsy_profile(session, name="Default")
+async def test_the_products_chosen_profile_is_the_one_evaluated(session):
+    complete = await _complete_etsy_profile(session, name="Complete")
     incomplete = ListingProfile(platform=ETSY, name="Incomplete")
     session.add(incomplete)
     await session.commit()
 
-    product = await _ready_product(session)
-    session.add(
-        ProductPlatformSettings(
-            product_id=product.id, platform=ETSY, listing_profile_id=incomplete.id
-        )
-    )
-    await session.commit()
+    product = await _ready_product(session, profile=incomplete)
 
     report = await evaluate(session, product.id, ETSY)
     assert report.profile_name == "Incomplete"
-    assert report.profile_id != default.id
+    assert report.profile_id != complete.id
     assert report.can_create is False
 
 
@@ -261,7 +278,6 @@ async def test_ebay_requires_a_different_set_of_fields(session):
         ListingProfile(
             platform=EBAY,
             name="Default",
-            is_default=True,
             ebay_category_id="12345",
             ebay_condition="NEW",
         )
@@ -383,7 +399,6 @@ async def test_ebay_uses_the_fulfillment_policy_link(session):
     profile = ListingProfile(
         platform=EBAY,
         name="Default",
-        is_default=True,
         ebay_category_id="123",
         ebay_condition="NEW",
         ebay_fulfillment_policy_id="fallback-policy",

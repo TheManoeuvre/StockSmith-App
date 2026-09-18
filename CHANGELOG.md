@@ -12,6 +12,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Listing profiles no longer have a default — each product picks its own.** A profile
+  decides the category, processing profile and policies a listing goes out with, and
+  those are the parts hardest to correct once a listing exists, so they should be a
+  choice made for that product rather than whichever profile happened to carry the
+  "default" flag. The "Use this profile by default" checkbox is gone from Settings, the
+  product's listing setup asks you to choose a profile, and once chosen it shows what that
+  profile commits the listing to — category, processing, who made it, when, returns — by
+  name. Products that were relying on the old default are pointed at it explicitly when
+  the app updates, so nothing changes for them until you choose otherwise.
+
 ### Fixed
 - **eBay labels bought in bulk no longer charge one order for the whole batch.** Buying
   several labels in one go from Seller Hub makes eBay book a single transaction for the

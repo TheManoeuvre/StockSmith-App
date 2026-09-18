@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, column, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, portable_enum
@@ -38,26 +38,13 @@ class ListingProfile(Base):
     """
 
     __tablename__ = "listing_profiles"
-    __table_args__ = (
-        UniqueConstraint("platform", "name", name="uq_listing_profiles_platform_name"),
-        # At most one default per platform. Partial index rather than a plain unique on
-        # (platform, is_default): every non-default row has is_default=false, and a plain
-        # constraint would let only one of those exist.
-        Index(
-            "uq_listing_profiles_platform_default",
-            "platform",
-            unique=True,
-            sqlite_where=column("is_default").is_(True),
-            postgresql_where=column("is_default").is_(True),
-        ),
-    )
+    __table_args__ = (UniqueConstraint("platform", "name", name="uq_listing_profiles_platform_name"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     platform: Mapped[ListingPlatform] = mapped_column(
         portable_enum(ListingPlatform, name="listing_platform"), nullable=False
     )
     name: Mapped[str] = mapped_column(String, nullable=False)
-    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     # --- Etsy ---
     etsy_taxonomy_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -119,7 +106,11 @@ class ProductPlatformSettings(Base):
     platform: Mapped[ListingPlatform] = mapped_column(
         portable_enum(ListingPlatform, name="listing_platform"), nullable=False
     )
-    # Null means "use the platform's default profile".
+    # Null means no profile has been chosen, and the product cannot be drafted until one
+    # is. There is deliberately no platform-wide default to fall back to: the profile
+    # decides the category, processing time and policies a listing goes out with, and a
+    # fallback nobody picked is how a product ends up listed under the wrong one without
+    # anyone noticing.
     listing_profile_id: Mapped[int | None] = mapped_column(
         ForeignKey("listing_profiles.id", ondelete="SET NULL"), nullable=True
     )

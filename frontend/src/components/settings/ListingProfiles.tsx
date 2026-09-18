@@ -19,7 +19,9 @@ import { TaxonomyPicker } from "./TaxonomyPicker";
 
 /**
  * Named bundles of the marketplace metadata a listing needs — category, policies, who made
- * it — with one marked as the default.
+ * it. Each product picks one; there is no default that applies unasked, because the
+ * category and processing profile are the parts of a listing hardest to correct after the
+ * fact and should be a choice someone made for that product.
  *
  * Bundles rather than per-product fields because products that differ tend to differ
  * together: a different category usually arrives with a different shipping profile and
@@ -58,7 +60,7 @@ export function ListingProfiles({ platform, children }: { platform: ListingPlatf
   return (
     <SettingsCard
       title="Listing profiles"
-      help="The category, policies and making details a new listing needs. Products use the default unless you give them their own."
+      help="The category, policies and making details a new listing needs. Each product picks one on its own listing setup."
       action={
         <button
           type="button"
@@ -95,14 +97,7 @@ export function ListingProfiles({ platform, children }: { platform: ListingPlatf
               key={profile.id}
               className="flex items-center justify-between rounded border border-slate-200 p-2"
             >
-              <span>
-                {profile.name}
-                {profile.is_default && (
-                  <span className="ml-2 rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
-                    Default
-                  </span>
-                )}
-              </span>
+              <span>{profile.name}</span>
               <span className="flex gap-3 text-xs">
                 <button onClick={() => setEditingId(profile.id)} className="text-slate-600 underline">
                   Edit
@@ -129,7 +124,7 @@ export function ListingProfiles({ platform, children }: { platform: ListingPlatf
           <ConfirmDialog
             open
             title={`Delete "${confirmDelete.name}"?`}
-            body="Products using it fall back to the default profile. Their listing copy is kept."
+            body="Products using it will have no profile until you pick another for them. Their listing copy is kept."
             confirmLabel="Delete"
             busy={deleteMutation.isPending}
             onConfirm={() => deleteMutation.mutate(confirmDelete.id)}
@@ -154,7 +149,6 @@ function ProfileForm({
 }) {
   const initialDraft: ListingProfileWrite = {
     name: profile?.name ?? "",
-    is_default: profile?.is_default ?? false,
     etsy_taxonomy_id: profile?.etsy_taxonomy_id ?? null,
     etsy_who_made: profile?.etsy_who_made ?? null,
     etsy_when_made: profile?.etsy_when_made ?? null,
@@ -365,15 +359,6 @@ function ProfileForm({
           </Field>
         </div>
       )}
-
-      <label className="flex items-center gap-2 text-xs">
-        <input
-          type="checkbox"
-          checked={draft.is_default ?? false}
-          onChange={(e) => set({ is_default: e.target.checked })}
-        />
-        <span>Use this profile by default</span>
-      </label>
 
       <ErrorBanner error={saveMutation.error} />
       <div className="flex gap-2">

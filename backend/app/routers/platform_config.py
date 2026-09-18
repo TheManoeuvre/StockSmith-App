@@ -202,20 +202,8 @@ async def create_listing_profile(
     platform: ListingPlatform, payload: ListingProfileCreate, session: AsyncSession = Depends(get_db)
 ) -> ListingProfile:
     _require_supported(platform)
-    fields = payload.model_dump()
-    # Created as a non-default and promoted afterwards: promote_to_default has to demote
-    # the incumbent before this row claims the flag, or the partial unique index rejects
-    # the flush.
-    wants_default = fields.pop("is_default", False)
-    profile = ListingProfile(platform=platform, is_default=False, **fields)
+    profile = ListingProfile(platform=platform, **payload.model_dump())
     session.add(profile)
-    await session.flush()
-
-    # The first profile for a platform becomes its default whether or not it asked to be.
-    # Otherwise every product would report "no listing profile applies" while one plainly
-    # exists.
-    if wants_default or await listing_profiles.get_default_profile(session, platform) is None:
-        await listing_profiles.promote_to_default(session, platform, profile)
     await session.commit()
     await session.refresh(profile)
     return profile
@@ -231,16 +219,8 @@ async def update_listing_profile(
     profile = await session.get(ListingProfile, profile_id)
     if profile is None or profile.platform != platform:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Listing profile not found")
-    fields = payload.model_dump(exclude_unset=True)
-    # Held back and applied through promote_to_default for the ordering reason described
-    # there; setting it inline would let the next query autoflush two defaults at once.
-    wants_default = fields.pop("is_default", None)
-    for field, value in fields.items():
+    for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(profile, field, value)
-    if wants_default:
-        await listing_profiles.promote_to_default(session, platform, profile)
-    elif wants_default is False:
-        profile.is_default = False
     await session.commit()
     await session.refresh(profile)
     return profile
@@ -250,8 +230,9 @@ async def update_listing_profile(
 async def delete_listing_profile(
     platform: ListingPlatform, profile_id: int, session: AsyncSession = Depends(get_db)
 ) -> None:
-    """Products using this profile fall back to the platform default — the FK is
-    ON DELETE SET NULL, so their settings and listing copy survive."""
+    """Products using this profile are left with none, and their readiness report says so
+    until another is picked — the FK is ON DELETE SET NULL, so their settings and listing
+    copy survive."""
     profile = await session.get(ListingProfile, profile_id)
     if profile is None or profile.platform != platform:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Listing profile not found")

@@ -1509,7 +1509,7 @@ class EbayAdapter:
         Sell Account API, GET /sell/account/v1/fulfillment_policy?marketplace_id=… — one
         call, no pagination (eBay returns every policy for the marketplace in one page).
         Business policies are per marketplace, so the caller passes the marketplace the
-        shop lists on (the eBay default listing profile's ebay_marketplace_id, else
+        shop lists on (an eBay listing profile's ebay_marketplace_id, else
         EBAY_GB). Requires the sell.account scope; a 403 is reported as a reconnect
         blocker rather than an empty list, for the same reason the Etsy call does."""
         response = await self._authed_request(

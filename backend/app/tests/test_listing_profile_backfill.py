@@ -177,14 +177,6 @@ async def test_apply_creates_the_profile_and_assigns_its_products(session):
 
 
 @pytest.mark.asyncio
-async def test_the_first_profile_created_becomes_the_default(session):
-    await _matched(session, "Pot", 1)
-    await apply_proposals(session, [listing(1)], {0: "Handmade"})
-    profile = (await session.execute(select(ListingProfile))).scalar_one()
-    assert profile.is_default is True
-
-
-@pytest.mark.asyncio
 async def test_only_the_accepted_proposals_are_created(session):
     await _matched(session, "Pot", 1)
     await _matched(session, "Vintage", 2)

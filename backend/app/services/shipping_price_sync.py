@@ -126,8 +126,12 @@ async def fetch_marketplace_profiles(session: AsyncSession, platform: ListingPla
             if p.get("id") is not None
         ]
     if platform == ListingPlatform.ebay:
-        default_profile = await listing_profiles.get_default_profile(session, platform)
-        marketplace_id = (default_profile.ebay_marketplace_id if default_profile else None) or _DEFAULT_EBAY_MARKETPLACE_ID
+        # Business policies are per marketplace. A shop lists on one, so any profile that
+        # names it will do; EBAY_GB when none does.
+        marketplace_id = next(
+            (p.ebay_marketplace_id for p in await listing_profiles.list_profiles(session, platform) if p.ebay_marketplace_id),
+            _DEFAULT_EBAY_MARKETPLACE_ID,
+        )
         raw = await adapter.fetch_fulfillment_policies(session, connection, marketplace_id)
         return [
             MarketplaceProfile(

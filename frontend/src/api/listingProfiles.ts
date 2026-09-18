@@ -5,7 +5,6 @@ export interface ListingProfile {
   id: number;
   platform: ListingPlatform;
   name: string;
-  is_default: boolean;
 
   etsy_taxonomy_id: number | null;
   etsy_who_made: string | null;

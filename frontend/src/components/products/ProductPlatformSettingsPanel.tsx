@@ -10,6 +10,7 @@ import { useGuard } from "../../hooks/useUnsavedChangesGuard";
 import { PLATFORM_LABELS } from "../../lib/platforms";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { SaveButton } from "../common/SaveButton";
+import { ListingProfileSummary } from "./ListingProfileSummary";
 
 interface ListingSetupForm {
   profileId: number | null;
@@ -30,6 +31,11 @@ function toForm(settings: ProductPlatformSettings): ListingSetupForm {
 /**
  * Per-product listing setup: which profile applies, the listing copy, and whether a draft
  * could be created right now.
+ *
+ * The profile is a choice, not a fallback: there is no platform default, so a product has
+ * no profile until one is picked here, and the picker is followed by what that pick
+ * commits the listing to (category, processing profile, policies) so the consequence is
+ * visible at the moment of choosing rather than after the draft exists.
  *
  * The readiness report drives this rather than decorating it. It's local-only — no
  * marketplace call — so it can load with the page and say plainly what's missing before
@@ -120,6 +126,8 @@ function PanelBody({ productId, platform }: { productId: number; platform: Listi
     );
   };
 
+  const selectedProfile = profiles?.find((p) => p.id === form.profileId) ?? null;
+
   const blockers = readiness?.issues.filter((i) => i.severity === "blocker") ?? [];
   const warnings = readiness?.issues.filter((i) => i.severity === "warning") ?? [];
 
@@ -162,22 +170,34 @@ function PanelBody({ productId, platform }: { productId: number; platform: Listi
             </ul>
           )}
 
-          <label className="flex flex-col gap-1 text-xs">
-            <span>Listing profile</span>
-            <select
-              className="rounded border border-slate-300 px-2 py-1"
-              value={form.profileId ?? ""}
-              onChange={(e) => patch({ profileId: e.target.value === "" ? null : Number(e.target.value) })}
-            >
-              <option value="">Use the default</option>
-              {profiles?.map((profile) => (
-                <option key={profile.id} value={profile.id}>
-                  {profile.name}
-                  {profile.is_default ? " (default)" : ""}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="flex flex-col gap-1 text-xs">
+            <label className="flex flex-col gap-1">
+              <span>Listing profile</span>
+              <select
+                className="rounded border border-slate-300 px-2 py-1"
+                value={form.profileId ?? ""}
+                onChange={(e) => patch({ profileId: e.target.value === "" ? null : Number(e.target.value) })}
+              >
+                <option value="">Choose a profile…</option>
+                {profiles?.map((profile) => (
+                  <option key={profile.id} value={profile.id}>
+                    {profile.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {selectedProfile ? (
+              <ListingProfileSummary profile={selectedProfile} />
+            ) : (
+              profiles && (
+                <span className="text-slate-500">
+                  {profiles.length === 0
+                    ? `No ${label} profiles yet — create one in Settings › Integrations.`
+                    : "Nothing is applied until a profile is chosen."}
+                </span>
+              )
+            )}
+          </div>
 
           <label className="flex flex-col gap-1 text-xs">
             <span className="flex items-center justify-between">
