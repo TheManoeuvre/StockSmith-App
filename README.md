@@ -104,10 +104,31 @@ To remove it later: `Unregister-ScheduledTask -TaskName "StockSmith Backend"`.
 
 ## Building the installer locally
 
+Useful for trying out what's on `main` without cutting a release. Needs Rust
+([rustup](https://rustup.rs)), Node LTS, [uv](https://docs.astral.sh/uv/), and the Visual
+Studio Build Tools "Desktop development with C++" workload — Tauri links with MSVC, so
+without that last one `cargo` fails with `link.exe not found`.
+
 ```bash
+cd backend && uv sync --group build && cd ..   # PyInstaller lives in the `build` group,
+                                               # which a plain `uv sync` does not install
+cd frontend && npm ci && cd ..
+
 powershell -File backend/build.ps1   # packages the backend into frontend/src-tauri/binaries/
 cd frontend && npm run tauri build   # produces the Windows installer
 ```
+
+The installer lands in `frontend/src-tauri/target/release/bundle/nsis/`. The first build
+compiles the whole Rust dependency tree and takes a while; later ones reuse `target/` and
+are much quicker. The two `build.ps1`/`tauri build` lines are enough on their own to
+rebuild after a `git pull` — re-run the two dependency-install lines only when
+`uv.lock` or `package-lock.json` changed.
+
+A locally-built installer installs *over* any existing StockSmith and shares the same
+`%LOCALAPPDATA%\StockSmith\` data folder, so a build carrying a database migration will
+migrate real data forward — back that folder up first. It also won't have the Pushover
+app token, which is injected from a GitHub Actions secret at release-build time only;
+everything else works.
 
 ## Releasing a new version
 
