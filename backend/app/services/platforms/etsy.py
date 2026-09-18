@@ -1176,11 +1176,16 @@ class EtsyAdapter:
                 }
             )
 
+        # sku_on_property cannot simply be echoed back: a listing that had no SKUs (or one
+        # SKU shared by every variation) carries [] here, and Etsy rejects a PUT whose
+        # SKUs then differ between products with "sku must be consistent across all
+        # products". It has to name the properties the SKU now varies on, so derive it
+        # from the SKUs actually being written rather than from the listing's past.
         put_body = {
             "products": products_payload,
             "price_on_property": inventory.get("price_on_property", []),
             "quantity_on_property": inventory.get("quantity_on_property", []),
-            "sku_on_property": inventory.get("sku_on_property", []),
+            "sku_on_property": self._sku_on_property_for(products_payload),
         }
         put_response = await self._authed_request(
             session, connection, "PUT", f"/listings/{listing_id}/inventory", json=put_body
@@ -1189,6 +1194,36 @@ class EtsyAdapter:
             raise PlatformSyncError(
                 f"Failed to write SKUs to Etsy listing {listing_id}: {put_response.status_code} {put_response.text}"
             )
+
+    @staticmethod
+    def _sku_on_property_for(products_payload: list[dict]) -> list[int]:
+        """The property ids the SKU varies on, given the products about to be written.
+        Etsy requires products that agree on every property in this list to share a SKU,
+        so: no variation in SKU -> []; SKU determined by a single property -> just that
+        one; otherwise every property the listing has."""
+        live = [p for p in products_payload if p.get("property_values")]
+        skus = {p.get("sku") or "" for p in products_payload}
+        if len(skus) <= 1 or not live:
+            return []
+
+        def determined_by(property_ids: tuple[int, ...]) -> bool:
+            seen: dict[tuple, str] = {}
+            for p in live:
+                by_id = {pv["property_id"]: tuple(pv.get("values", [])) for pv in p["property_values"]}
+                key = tuple(by_id.get(pid) for pid in property_ids)
+                if seen.setdefault(key, p.get("sku") or "") != (p.get("sku") or ""):
+                    return False
+            return True
+
+        all_ids: list[int] = []
+        for p in live:
+            for pv in p["property_values"]:
+                if pv["property_id"] not in all_ids:
+                    all_ids.append(pv["property_id"])
+        for pid in all_ids:
+            if determined_by((pid,)):
+                return [pid]
+        return all_ids
 
     async def create_draft_listing(self, session, connection: PlatformConnection, draft) -> "DraftListingResult":
         """Creates a real Etsy draft: not publicly visible, and publishing it is a separate
