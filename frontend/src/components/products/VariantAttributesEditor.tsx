@@ -345,6 +345,9 @@ function MaterialRulePanel({
     queryKey: ["materials", "by-type", baseMaterial.material_type_id],
     queryFn: () => materialsApi.listByType(baseMaterial.material_type_id as number),
     enabled: baseMaterial.material_type_id != null,
+    // The server returns siblings in material-name order, but the UI shows the colour
+    // name, so sort by what is actually displayed.
+    select: (list) => [...list].sort((a, b) => colourLabel(a).localeCompare(colourLabel(b))),
   });
 
   if (baseMaterial.material_type_id == null) {
@@ -411,6 +414,10 @@ function MaterialRulePanel({
       ))}
     </div>
   );
+}
+
+function colourLabel(m: Material): string {
+  return m.colour || m.name;
 }
 
 function QuantityRulePanel({
