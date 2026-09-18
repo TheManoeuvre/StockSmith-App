@@ -138,6 +138,28 @@ Phase 4 of the backlog-burndown plan rejects this configuration at generation ti
 
 ---
 
+## Replacement parcels & postage labels
+
+### Voided / refunded shipping labels aren't netted off
+
+**Problem:** eBay reports a label refund as a `SHIPPING_LABEL` transaction with `bookingEntry: CREDIT`; Etsy posts a positive-amount ledger entry. Both are currently logged and skipped (`EbayAdapter._parse_shipping_labels`, `EtsyAdapter._extract_postage_charges`), so a label that was bought, voided and re-bought counts twice against the order's postage until someone deletes the spurious replacement parcel by hand. Which of several labels a credit reverses isn't stated by either marketplace, so it can't simply be matched by amount.
+
+**Ask:** Store credits as negative `order_postage_charges` rows (or a `voided_at` on the charge they most plausibly reverse — same amount, later date, no parcel linked yet) and exclude voided labels from `sequence` numbering so a re-bought original label doesn't spawn a replacement parcel.
+
+### Etsy ledger label shape is unconfirmed
+
+**Problem:** Etsy's `PaymentAccountLedgerEntry` documents `ledger_type`/`reference_type` only as free text, so label detection (`EtsyAdapter._extract_postage_charges`) is a heuristic — a marker word in the type/description plus a reference back to the receipt or one of its transactions. It has not yet been checked against a real Etsy shop's ledger. Misses are the expected failure mode (the profile estimate then stands); the diagnostic INFO line "ledger entries not classified as fee, VAT or shipping label" lists every unrecognised entry that references a shipped receipt.
+
+**Ask:** Run `scripts/backfill_postage_charges.py --platform etsy` (dry run) against the live shop, read the diagnostic lines, and tighten `_LABEL_MARKERS` / the reference rules to the real values. The 30-day ledger window cap in `_fetch_platform_fees_total` also means a replacement sent more than a month after the receipt is never seen — widen it for the label crawl if that turns out to happen.
+
+### Editing a parcel's items
+
+**Problem:** Items on a recorded replacement parcel can't be changed — the UI says delete and re-record. That keeps `services/order_parcels` to one forward and one reverse stock path, but a typo in a quantity currently costs the user the whole parcel (including its tracking number and notes).
+
+**Ask:** A diff-based item edit that restocks removed/reduced items and deducts added/increased ones in one transaction, reusing `_consume_product`/`_consume_material` and their reversals.
+
+---
+
 ## eBay integration hardening
 
 ### eBay refunds are recognised but never recorded

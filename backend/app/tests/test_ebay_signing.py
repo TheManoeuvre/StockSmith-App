@@ -15,6 +15,7 @@ this module's assumptions.
 """
 
 import base64
+import logging
 
 import httpx
 import pytest
@@ -224,7 +225,7 @@ async def test_missing_signing_key_degrades_instead_of_failing_the_sync(recordin
 
     result = await adapter._fetch_transactions(None, _Connection(), "26-14962-77224")
 
-    assert result == (None, None, None)
+    assert result == (None, None, None, [])
     assert "Settings > Integrations" in caplog.text
 
 
@@ -287,7 +288,7 @@ async def test_fees_come_from_total_fee_amount(recording, monkeypatch):
     key, _private = _keypair()
     adapter = _adapter(monkeypatch, key)
 
-    fees, net, status = await adapter._fetch_transactions(None, _Connection(), "26-14962-77224")
+    fees, net, status, _labels = await adapter._fetch_transactions(None, _Connection(), "26-14962-77224")
 
     assert fees == "3.45"
     # Taken from `amount` as-is. Subtracting the fee from it again would give 11.69 —
@@ -303,7 +304,7 @@ async def test_a_regression_to_the_fee_basis_would_be_caught(recording, monkeypa
     key, _private = _keypair()
     adapter = _adapter(monkeypatch, key)
 
-    fees, _net, _status = await adapter._fetch_transactions(None, _Connection(), "26-14962-77224")
+    fees, _net, _status, _labels = await adapter._fetch_transactions(None, _Connection(), "26-14962-77224")
 
     assert fees != "18.59"
 
@@ -317,7 +318,7 @@ async def test_fees_fall_back_to_the_per_line_breakdown(recording, monkeypatch):
     key, _private = _keypair()
     adapter = _adapter(monkeypatch, key)
 
-    fees, net, _status = await adapter._fetch_transactions(None, _Connection(), "26-14962-77224")
+    fees, net, _status, _labels = await adapter._fetch_transactions(None, _Connection(), "26-14962-77224")
 
     assert fees == "3.45"
     assert net == "15.14"
@@ -348,10 +349,62 @@ async def test_non_sale_transactions_are_ignored(recording, monkeypatch):
     key, _private = _keypair()
     adapter = _adapter(monkeypatch, key)
 
-    fees, net, _status = await adapter._fetch_transactions(None, _Connection(), "26-14962-77224")
+    fees, net, _status, labels = await adapter._fetch_transactions(None, _Connection(), "26-14962-77224")
 
     assert fees == "3.45"
     assert net == "15.14"
+    # ...but not dropped either: the label is the order's real postage cost, and a second
+    # one on the same order is how a replacement parcel gets detected
+    # (services/order_parcels.apply_postage_charges).
+    assert [(c.external_id, c.amount, c.currency, c.description) for c in labels] == [
+        ("05-15000-27049", "3.65", "GBP", "Shipping label purchased")
+    ]
+
+
+async def test_label_credits_are_skipped_not_netted(recording, monkeypatch, caplog):
+    """A voided/refunded label comes back as a SHIPPING_LABEL CREDIT. Which label it
+    reverses isn't stated, so it's logged and left out rather than guessed at."""
+    recording.response = httpx.Response(
+        200,
+        json={
+            "transactions": [
+                {
+                    "transactionId": "05-15000-27049",
+                    "orderId": "26-14962-77224",
+                    "transactionType": "SHIPPING_LABEL",
+                    "amount": {"value": "3.65", "currency": "GBP"},
+                    "bookingEntry": "DEBIT",
+                    "transactionDate": "2026-09-01T10:00:00.000Z",
+                },
+                {
+                    "transactionId": "05-15000-27050",
+                    "orderId": "26-14962-77224",
+                    "transactionType": "SHIPPING_LABEL",
+                    "amount": {"value": "3.65", "currency": "GBP"},
+                    "bookingEntry": "CREDIT",
+                    "transactionDate": "2026-09-02T10:00:00.000Z",
+                },
+                {
+                    "transactionId": "05-15000-27051",
+                    "orderId": "26-14962-77224",
+                    "transactionType": "SHIPPING_LABEL",
+                    "amount": {"value": "4.10", "currency": "GBP"},
+                    "bookingEntry": "DEBIT",
+                    "transactionDate": "2026-09-03T10:00:00.000Z",
+                },
+                _sale(),
+            ],
+        },
+    )
+    key, _private = _keypair()
+    adapter = _adapter(monkeypatch, key)
+    caplog.set_level(logging.INFO, logger="stocksmith.ebay")
+
+    _fees, _net, _status, labels = await adapter._fetch_transactions(None, _Connection(), "26-14962-77224")
+
+    assert [(c.external_id, c.amount) for c in labels] == [("05-15000-27049", "3.65"), ("05-15000-27051", "4.10")]
+    assert labels[0].posted_at is not None and labels[0].posted_at < labels[1].posted_at
+    assert "05-15000-27050" in caplog.text
 
 
 async def test_non_200_is_logged_rather_than_swallowed(recording, monkeypatch, caplog):
@@ -365,5 +418,5 @@ async def test_non_200_is_logged_rather_than_swallowed(recording, monkeypatch, c
 
     result = await adapter._fetch_transactions(None, _Connection(), "26-14962-77224")
 
-    assert result == (None, None, None)
+    assert result == (None, None, None, [])
     assert "215001" in caplog.text

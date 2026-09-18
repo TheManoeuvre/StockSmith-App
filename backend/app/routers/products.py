@@ -4,12 +4,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
 from fastapi.responses import Response
 from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import aliased, selectinload
 
 from app.deps import get_db, require_auth
 from app.models.build import Build
 from app.models.kitting import ProductKittingMaterial
 from app.models.order import Order, OrderLine
+from app.models.order_parcel import OrderReplacementParcel
 from app.models.product import Product, ProductBundleItem, ProductMaterial
 from app.models.product_category import ProductCategory
 from app.models.product_stock_event import ProductStockEvent
@@ -732,17 +733,23 @@ async def list_stock_history(product_id: int, session: AsyncSession = Depends(ge
     """Unified "Stock" history: every build (success or failed), stock adjustment, and
     order fulfillment affecting this product/any of its variants, newest first, each
     carrying a running balance — replaces the old separate builds/stock-adjustments views."""
+    # An event's order comes via its line (fulfillment) or via its replacement parcel
+    # (services/order_parcels) — two joins onto the same Order, coalesced below.
+    parcel_order = aliased(Order)
     result = await session.execute(
-        select(ProductStockEvent, Build, StockAdjustment, OrderLine, Order)
+        select(ProductStockEvent, Build, StockAdjustment, OrderLine, Order, OrderReplacementParcel, parcel_order)
         .outerjoin(Build, ProductStockEvent.source_build_id == Build.id)
         .outerjoin(StockAdjustment, ProductStockEvent.source_adjustment_id == StockAdjustment.id)
         .outerjoin(OrderLine, ProductStockEvent.source_order_line_id == OrderLine.id)
         .outerjoin(Order, OrderLine.order_id == Order.id)
+        .outerjoin(OrderReplacementParcel, ProductStockEvent.source_replacement_parcel_id == OrderReplacementParcel.id)
+        .outerjoin(parcel_order, OrderReplacementParcel.order_id == parcel_order.id)
         .where(ProductStockEvent.product_id == product_id)
         .order_by(ProductStockEvent.created_at.desc(), ProductStockEvent.id.desc())
     )
     reads = []
-    for event, build, adjustment, order_line, order in result.all():
+    for event, build, adjustment, order_line, order, parcel, parcel_owner in result.all():
+        linked_order = order if order is not None else parcel_owner
         reads.append(
             ProductStockEventRead.model_validate(event).model_copy(
                 update={
@@ -750,8 +757,8 @@ async def list_stock_history(product_id: int, session: AsyncSession = Depends(ge
                     "build_qty_failed": build.qty_failed if build else None,
                     "adjustment_mode": adjustment.mode if adjustment else None,
                     "adjustment_target_qty": adjustment.target_qty if adjustment else None,
-                    "order_id": order_line.order_id if order_line else None,
-                    "order_external_order_id": order.external_order_id if order else None,
+                    "order_id": linked_order.id if linked_order else None,
+                    "order_external_order_id": linked_order.external_order_id if linked_order else None,
                 }
             )
         )

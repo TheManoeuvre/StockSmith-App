@@ -15,6 +15,7 @@ from app.services.platforms.base import (
     ExternalListingRef,
     ExternalOrder,
     ExternalOrderLine,
+    ExternalPostageCharge,
     ListingProductRef,
     PaymentState,
     TokenSet,
@@ -510,6 +511,7 @@ class EtsyAdapter:
                 enrich = False
 
         payment_fees = payment_net = payment_status = None
+        postage_charges: list[ExternalPostageCharge] = []
         if enrich:
             # A transport-level failure here (timeout, DNS, dropped connection) must not
             # take the whole sync down with it. These calls are already best-effort on a
@@ -539,7 +541,7 @@ class EtsyAdapter:
                 # post) — see _fetch_platform_fees_total. Falls back to the narrow amount_fees
                 # if the ledger fetch comes back empty (e.g. fees haven't posted yet).
                 if is_shipped:
-                    ledger_fees_total = await self._fetch_platform_fees_total(
+                    ledger_fees_total, postage_charges = await self._fetch_platform_fees_total(
                         session, connection, receipt, transactions, payment_id
                     )
                     if ledger_fees_total is not None:
@@ -584,6 +586,7 @@ class EtsyAdapter:
             financials_enriched=enrich,
             tracking_number=tracking_number,
             carrier=carrier,
+            postage_charges=postage_charges,
         )
 
     def _parse_transaction(self, tx: dict) -> ExternalOrderLine:
@@ -736,7 +739,7 @@ class EtsyAdapter:
 
     async def _fetch_platform_fees_total(
         self, session, connection: PlatformConnection, receipt: dict, transactions: list[dict], payment_id: int | None
-    ) -> str | None:
+    ) -> tuple[str | None, list[ExternalPostageCharge]]:
         """Aggregates every ledger entry attributable to this receipt's platform fees —
         the marketplace transaction fee (charged separately on the item and on shipping
         portions), regulatory operating fee, card processing fee, and VAT on all of the
@@ -757,13 +760,17 @@ class EtsyAdapter:
           - any entry whose parent_entry_id points at one of the entries matched above
             (the vat_seller_services children — VAT charged on top of each fee)
 
-        Returns None (leave the caller's existing value alone) if the window couldn't be
-        fetched or nothing matched — fees may simply not have posted to the ledger yet.
+        Returns (fees_total, postage_charges). fees_total is None (leave the caller's
+        existing value alone) if the window couldn't be fetched or nothing matched — fees
+        may simply not have posted to the ledger yet. postage_charges are the shipping
+        labels the same crawl turned up for this receipt (_extract_postage_charges) —
+        returned from here rather than fetched separately so the ledger is only walked
+        once per receipt.
         """
         receipt_id = receipt.get("receipt_id")
         create_ts = receipt.get("create_timestamp") or receipt.get("created_timestamp")
         if receipt_id is None or create_ts is None:
-            return None
+            return None, []
 
         min_created = int(create_ts)
         # Fee/VAT/shipping-label entries were observed posting within hours of shipment
@@ -771,15 +778,16 @@ class EtsyAdapter:
         # order never triggers an unbounded, expensive fetch.
         max_created = min(int(datetime.now(timezone.utc).timestamp()), min_created + 30 * 24 * 3600)
         if max_created <= min_created:
-            return None
+            return None, []
 
         entries = await self._fetch_ledger_entries(session, connection, min_created, max_created)
         if not entries:
-            return None
+            return None, []
 
         transaction_ids = {
             str(tx.get("transaction_id")) for tx in transactions if tx.get("transaction_id") is not None
         }
+        postage_charges = self._extract_postage_charges(entries, receipt_id, transaction_ids)
 
         fee_entries = [
             e
@@ -796,7 +804,7 @@ class EtsyAdapter:
             )
         ]
         if not fee_entries:
-            return None
+            return None, postage_charges
 
         fee_entry_ids = {e["entry_id"] for e in fee_entries if e.get("entry_id") is not None}
         vat_children = [
@@ -804,7 +812,80 @@ class EtsyAdapter:
         ]
 
         total_pennies = sum(e.get("amount", 0) for e in fee_entries) + sum(e.get("amount", 0) for e in vat_children)
-        return f"{abs(total_pennies) / 100:.2f}"
+        return f"{abs(total_pennies) / 100:.2f}", postage_charges
+
+    # Substrings that mark a ledger entry as a shipping-label purchase. Etsy's
+    # PaymentAccountLedgerEntry schema documents ledger_type/description only as free
+    # text, so this is a best-effort match — see _extract_postage_charges.
+    _LABEL_MARKERS = ("shipping_label", "shipping label", "postage")
+
+    @classmethod
+    def _extract_postage_charges(
+        cls, entries: list[dict], receipt_id, transaction_ids: set[str]
+    ) -> list[ExternalPostageCharge]:
+        """Best-effort: the shipping labels this receipt's seller bought through Etsy, as
+        payment-account ledger debits.
+
+        Etsy doesn't document the ledger_type/reference_type values a label posts with —
+        the schema only says "the original reference type" — so this can't be exact. An
+        entry qualifies when it's a debit (amount < 0), its ledger_type or description
+        mentions a label (_LABEL_MARKERS), it isn't the shipping_transaction FEE on the
+        buyer's postage (that's in _FEE_LEDGER_TYPES already), and it points at this
+        receipt: reference_type "receipt" with this receipt_id, "transaction" with one of
+        its transaction ids, or a reference_type that itself names a shipping label. A
+        miss costs a label going unrecorded (the profile estimate stands); a false match
+        would charge someone else's label to this order — so the marker match is
+        required, not just the reference.
+
+        Every entry that references this receipt but that neither this nor the fee
+        classification recognises is logged at INFO with its (ledger_type,
+        reference_type, reference_id, description), which is how the real shape gets
+        confirmed from a live shop. Widen the markers/reference rules from what that log
+        shows."""
+        charges: list[ExternalPostageCharge] = []
+        unclassified: set[tuple] = set()
+        receipt_key = str(receipt_id)
+        for entry in entries:
+            ledger_type = str(entry.get("ledger_type") or "").lower()
+            description = str(entry.get("description") or "").lower()
+            reference_type = str(entry.get("reference_type") or "").lower()
+            reference_id = entry.get("reference_id")
+            amount = entry.get("amount")
+            if entry.get("ledger_type") in cls._FEE_LEDGER_TYPES or entry.get("description") == "vat_seller_services":
+                continue
+            is_label = ledger_type != "shipping_transaction" and any(
+                marker in ledger_type or marker in description for marker in cls._LABEL_MARKERS
+            )
+            references_this = (
+                (reference_type == "receipt" and str(reference_id) == receipt_key)
+                or (reference_type == "transaction" and str(reference_id) in transaction_ids)
+                or "shipping_label" in reference_type
+            )
+            if not references_this:
+                continue
+            if is_label and isinstance(amount, (int, float)) and amount < 0:
+                created = entry.get("created_timestamp") or entry.get("create_date")
+                charges.append(
+                    ExternalPostageCharge(
+                        external_id=str(entry.get("entry_id")),
+                        amount=f"{abs(amount) / 100:.2f}",
+                        currency=entry.get("currency"),
+                        posted_at=datetime.fromtimestamp(int(created), tz=timezone.utc) if created else None,
+                        description=entry.get("description"),
+                    )
+                )
+            else:
+                unclassified.add(
+                    (entry.get("ledger_type"), entry.get("reference_type"), reference_id, entry.get("description"))
+                )
+        if unclassified:
+            logger.info(
+                "Etsy receipt %s: ledger entries not classified as fee, VAT or shipping label: %s",
+                receipt_id,
+                sorted(unclassified, key=str),
+            )
+        charges.sort(key=lambda c: (c.posted_at is None, c.posted_at or datetime.min.replace(tzinfo=timezone.utc)))
+        return charges
 
     async def push_listing_quantity(
         self, session, connection: PlatformConnection, listing_ref: ExternalListingRef, sku: str | None, qty: int

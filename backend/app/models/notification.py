@@ -47,6 +47,13 @@ class NotificationCategory(str, enum.Enum):
     # id will fail and margin is running on an unverifiable number — immediate by
     # default, once per profile until it reappears or is re-linked.
     shipping_profile_missing = "shipping_profile_missing"
+    # A marketplace sync found a second (or later) shipping label bought against an order
+    # that had already shipped and auto-created a replacement parcel for it — with the
+    # label's cost, but no items and no reason. Fires once per detected label, straight
+    # from order_parcels.apply_postage_charges, and auto-resolves when the user completes
+    # or deletes the parcel. Immediate by default: the user just sent that parcel, so
+    # what went in it is freshest now.
+    replacement_parcel_review = "replacement_parcel_review"
     daily_summary = "daily_summary"
 
 
@@ -66,6 +73,7 @@ ALERT_TYPES: tuple[NotificationCategory, ...] = (
     NotificationCategory.marketplace_api_hard_limit,
     NotificationCategory.shipping_price_changed,
     NotificationCategory.shipping_profile_missing,
+    NotificationCategory.replacement_parcel_review,
 )
 
 # Seed defaults: the alert types that most directly need a human's attention right away
@@ -82,6 +90,7 @@ DEFAULT_IMMEDIATE_ALERT_TYPES: frozenset[NotificationCategory] = frozenset(
         NotificationCategory.backup_failed,
         NotificationCategory.marketplace_api_hard_limit,
         NotificationCategory.shipping_profile_missing,
+        NotificationCategory.replacement_parcel_review,
     }
 )
 

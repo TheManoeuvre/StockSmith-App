@@ -45,6 +45,13 @@ function order(overrides: Record<string, unknown> = {}) {
     net_profit: "3.22",
     cogs_pending: false,
     postage_cost_missing: false,
+    postage_cost_actual: null,
+    postage_cost_effective: "3.65",
+    replacement_postage: null,
+    replacement_cogs: null,
+    replacement_parcels_need_review: false,
+    postage_charges: [],
+    replacement_parcels: [],
     lines: [],
     ...overrides,
   };
@@ -183,6 +190,7 @@ it("says the postage cost was never recorded, rather than showing a bare dash", 
   // for postage. A dash reads as "nothing to show"; this figure is wrong, and says so.
   await renderOrder({
     shipping_cost_snapshot: null,
+    postage_cost_effective: null,
     shipping_profile_id: null,
     shipping_profile_name: null,
     postage_cost_missing: true,
@@ -201,6 +209,7 @@ it("keeps quiet about postage on an order that hasn't shipped yet", async () => 
   await renderOrder({
     status: "allocated",
     shipping_cost_snapshot: null,
+    postage_cost_effective: null,
     postage_cost_missing: false,
   });
 

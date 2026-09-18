@@ -128,6 +128,14 @@ class Order(Base):
 
     lines: Mapped[list["OrderLine"]] = relationship(back_populates="order", cascade="all, delete-orphan")
     shipping_profile: Mapped["ShippingProfile | None"] = relationship()
+    # Parcels sent after the original shipment and the marketplace label purchases behind
+    # them — see models/order_parcel.py. Neither is sale demand; the lines above are.
+    replacement_parcels: Mapped[list["OrderReplacementParcel"]] = relationship(  # noqa: F821
+        back_populates="order", cascade="all, delete-orphan", order_by="OrderReplacementParcel.sent_at"
+    )
+    postage_charges: Mapped[list["OrderPostageCharge"]] = relationship(  # noqa: F821
+        back_populates="order", cascade="all, delete-orphan", order_by="OrderPostageCharge.sequence"
+    )
 
 
 class OrderLine(Base):

@@ -18,6 +18,7 @@ from sqlalchemy.orm import selectinload
 from app.models.notification import NotificationCategory, NotificationDeliveryMode, NotificationSettings, NotificationUrgency, SummaryFrequency
 from app.models.order import Order
 from app.services.kitting import get_kitting_cogs_by_order
+from app.services.order_parcels import get_replacement_costs_by_order
 from app.services.notifications import dispatch_notification, start_of_local_day
 
 
@@ -67,6 +68,7 @@ async def maybe_fire_order_summary(session: AsyncSession, settings: Notification
         return
 
     kitting_cogs_by_order = await get_kitting_cogs_by_order(session, [order.id for order in orders])
+    replacement_by_order = await get_replacement_costs_by_order(session, [order.id for order in orders])
 
     items_shipped = 0
     total_revenue = 0
@@ -78,12 +80,13 @@ async def maybe_fire_order_summary(session: AsyncSession, settings: Notification
 
         materials_cogs = _materials_cogs(order)
         kitting_cogs = kitting_cogs_by_order.get(order.id)
-        profit = _compute_net_profit(order, materials_cogs, kitting_cogs)
+        replacement = replacement_by_order.get(order.id)
+        profit = _compute_net_profit(order, materials_cogs, kitting_cogs, replacement)
 
         if order.subtotal is not None:
             total_revenue += float(order.subtotal) + float(order.shipping_charged or 0) - float(order.refunded_amount or 0)
 
-        if profit is None or _cogs_pending(order) or _postage_cost_missing(order):
+        if profit is None or _cogs_pending(order) or _postage_cost_missing(order, replacement):
             flagged_order_ids.add(order.id)
         if profit is not None:
             net_profit_total += float(profit)

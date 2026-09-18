@@ -20,6 +20,7 @@ import {
 } from "../../hooks/useDirtyRegistry";
 import { CancelOrderDialog } from "../../components/orders/CancelOrderDialog";
 import { OrderKittingSection } from "../../components/orders/OrderKittingSection";
+import { OrderReplacementParcelsSection } from "../../components/orders/OrderReplacementParcelsSection";
 import { OrderShippingForm } from "../../components/orders/OrderShippingForm";
 import { OrderTimeline } from "../../components/orders/OrderTimeline";
 import { formatMoney } from "../../lib/money";
@@ -283,6 +284,32 @@ function OrderDetail() {
             {order.sync_issue}
           </div>
         )}
+        {order.replacement_parcels_need_review && (
+          <div className="flex items-center justify-between gap-3 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
+            <span>
+              <span className="font-medium">Replacement parcel detected.</span> A
+              second {channelLabel} shipping label was bought against this order —
+              record what was sent and why so stock and profit stay right.
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveTab("fulfilment");
+                const pending = order.replacement_parcels.find((p) => p.needs_review);
+                if (pending) {
+                  requestAnimationFrame(() =>
+                    document
+                      .getElementById(`replacement-parcel-${pending.id}`)
+                      ?.scrollIntoView({ behavior: "smooth", block: "center" }),
+                  );
+                }
+              }}
+              className="shrink-0 rounded bg-amber-600 px-3 py-1.5 text-white"
+            >
+              Complete
+            </button>
+          </div>
+        )}
         {order.pending_marketplace_cancellation && (
           <div className="flex items-center justify-between rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
             <span>
@@ -388,6 +415,8 @@ function OrderDetail() {
             </p>
 
             <OrderKittingSection orderId={id} currency={order.currency} />
+
+            <OrderReplacementParcelsSection order={order} />
 
             <label className="flex items-start gap-3">
               <span className="mt-1 w-36 shrink-0 text-sm text-slate-600">Notes</span>
@@ -538,17 +567,31 @@ function OrderFinancialsPanel({ order }: { order: Order }) {
             className={
               order.postage_cost_missing ? "text-amber-700" : undefined
             }
+            title={
+              order.postage_cost_actual != null
+                ? "What the marketplace charged for the first shipping label — used instead of the shipping profile's estimate."
+                : undefined
+            }
           >
-            {order.shipping_cost_snapshot != null
-              ? `-${formatMoney(order.shipping_cost_snapshot, currency)}`
+            {order.postage_cost_effective != null
+              ? `-${formatMoney(order.postage_cost_effective, currency)}`
               : order.postage_cost_missing
                 ? "Not recorded"
                 : "—"}
           </p>
-          {order.shipping_profile_name && (
+          {order.postage_cost_actual != null ? (
             <p className="text-xs text-slate-400">
-              {order.shipping_profile_name}
+              Actual label
+              {order.shipping_cost_snapshot != null &&
+                ` · est. ${formatMoney(order.shipping_cost_snapshot, currency)}`}
+              {order.shipping_profile_name && ` (${order.shipping_profile_name})`}
             </p>
+          ) : (
+            order.shipping_profile_name && (
+              <p className="text-xs text-slate-400">
+                {order.shipping_profile_name}
+              </p>
+            )
           )}
         </div>
         <div>
@@ -567,6 +610,22 @@ function OrderFinancialsPanel({ order }: { order: Order }) {
               : "—"}
           </p>
         </div>
+        {order.replacement_postage != null && (
+          <div>
+            <p className="text-slate-500">Replacement postage</p>
+            <p title="Postage on every replacement parcel sent against this order — the marketplace label where one was detected, else the figure you entered.">
+              -{formatMoney(order.replacement_postage, currency)}
+            </p>
+          </div>
+        )}
+        {order.replacement_cogs != null && (
+          <div>
+            <p className="text-slate-500">Replacement COGS</p>
+            <p title="Products and packaging sent in replacement parcels, at the cost frozen when each parcel was recorded.">
+              -{formatMoney(order.replacement_cogs, currency)}
+            </p>
+          </div>
+        )}
         <div>
           <p className="text-slate-500">Net profit</p>
           <p

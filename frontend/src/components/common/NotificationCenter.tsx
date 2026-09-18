@@ -25,16 +25,21 @@ function formatRelative(iso: string): string {
   return new Date(iso).toLocaleDateString();
 }
 
-function NotificationRow({ notification, onRead }: { notification: Notification; onRead: (id: number) => void }) {
+function NotificationRow({
+  notification,
+  onRead,
+  onNavigate,
+}: {
+  notification: Notification;
+  onRead: (id: number) => void;
+  onNavigate: () => void;
+}) {
   const unread = notification.read_at === null;
-  return (
-    <button
-      type="button"
-      onClick={() => unread && onRead(notification.id)}
-      className={`flex w-full flex-col gap-0.5 px-3 py-2 text-left text-[12.5px] hover:bg-slate-50 ${
-        unread ? "bg-blue-50/60" : ""
-      }`}
-    >
+  const className = `flex w-full flex-col gap-0.5 px-3 py-2 text-left text-[12.5px] hover:bg-slate-50 ${
+    unread ? "bg-blue-50/60" : ""
+  }`;
+  const content = (
+    <>
       <div className="flex items-start gap-2">
         {unread && <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-blue-600" aria-hidden="true" />}
         <span className={`flex-1 ${unread ? "font-medium text-slate-900" : "text-slate-600"}`}>
@@ -45,6 +50,30 @@ function NotificationRow({ notification, onRead }: { notification: Notification;
       <span className={`${unread ? "pl-3.5" : ""} text-[11px] text-slate-400`}>
         {formatRelative(notification.created_at)}
       </span>
+    </>
+  );
+  // An alert about a specific order (a replacement parcel to complete) opens that order
+  // on its Fulfilment tab, where the thing to do is. Keyed on related_entity_type so
+  // any future order-scoped alert gets the same behaviour for free.
+  if (notification.related_entity_type === "order" && notification.related_entity_id != null) {
+    return (
+      <Link
+        to="/orders/$orderId"
+        params={{ orderId: String(notification.related_entity_id) }}
+        search={{ tab: "fulfilment" }}
+        onClick={() => {
+          if (unread) onRead(notification.id);
+          onNavigate();
+        }}
+        className={className}
+      >
+        {content}
+      </Link>
+    );
+  }
+  return (
+    <button type="button" onClick={() => unread && onRead(notification.id)} className={className}>
+      {content}
     </button>
   );
 }
@@ -134,6 +163,7 @@ export function NotificationCenter() {
                 key={notification.id}
                 notification={notification}
                 onRead={(id) => markReadMutation.mutate(id)}
+                onNavigate={() => setOpen(false)}
               />
             ))}
           </div>

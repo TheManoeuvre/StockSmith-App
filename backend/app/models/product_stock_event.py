@@ -12,6 +12,10 @@ class ProductStockEventType(str, enum.Enum):
     build_failed = "build_failed"
     adjustment = "adjustment"
     order_fulfillment = "order_fulfillment"
+    # A unit sent in a replacement parcel (services/order_parcels) — leaves stock without
+    # ever being allocated — and its restock when that parcel is deleted.
+    replacement_parcel = "replacement_parcel"
+    replacement_parcel_reversal = "replacement_parcel_reversal"
 
 
 class ProductStockEvent(Base):
@@ -28,7 +32,8 @@ class ProductStockEvent(Base):
     counter rather than an event-sourced value (see Product/ProductVariant.current_stock)
     — full event-replay is a documented follow-up, not part of this pass.
 
-    Exactly one of source_build_id/source_adjustment_id/source_order_line_id is set,
+    Exactly one of source_build_id/source_adjustment_id/source_order_line_id/
+    source_replacement_parcel_id is set,
     matching event_type, so the UI can link back to the originating record (and its own
     detail — qty_built/qty_failed, adjustment mode, order reference) without this table
     needing to duplicate those fields itself.
@@ -60,5 +65,8 @@ class ProductStockEvent(Base):
     )
     source_order_line_id: Mapped[int | None] = mapped_column(
         ForeignKey("order_lines.id", ondelete="SET NULL"), nullable=True
+    )
+    source_replacement_parcel_id: Mapped[int | None] = mapped_column(
+        ForeignKey("order_replacement_parcels.id", ondelete="SET NULL"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

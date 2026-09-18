@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict, model_validator
 
 from app.models.listing import ListingPlatform
 from app.models.order import ManualOrderChannel, OrderStatus
+from app.schemas.order_parcel import PostageChargeRead, ReplacementParcelRead
 
 
 class OrderLineInput(BaseModel):
@@ -151,6 +152,23 @@ class OrderRead(BaseModel):
     # _postage_cost_missing. Kept separate from cogs_pending because the two have
     # different causes and different fixes.
     postage_cost_missing: bool = False
+    # Postage as net profit actually charges it — see routers/orders._effective_postage_cost.
+    # postage_cost_actual is the marketplace's figure for the first shipping label (None
+    # until a sync records one); postage_cost_effective is that when known, else
+    # shipping_cost_snapshot. The profile estimate stays on shipping_cost_snapshot so the
+    # two can be shown side by side.
+    postage_cost_actual: Decimal | None = None
+    postage_cost_effective: Decimal | None = None
+    # Replacement parcels (services/order_parcels): their postage and cost of goods are
+    # deducted from net_profit on top of the original shipment's. Both None when the
+    # order has no parcels.
+    replacement_postage: Decimal | None = None
+    replacement_cogs: Decimal | None = None
+    # True while any parcel a sync auto-created from a second label is still waiting for
+    # the user to say what went in it — the order then also shows under "awaiting".
+    replacement_parcels_need_review: bool = False
+    postage_charges: list[PostageChargeRead] = []
+    replacement_parcels: list[ReplacementParcelRead] = []
     sync_issue: str | None = None
     pending_marketplace_cancellation: bool = False
     tracking_number: str | None = None

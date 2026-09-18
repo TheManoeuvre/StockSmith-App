@@ -23,6 +23,14 @@ from app.models.kitting import (
 from app.models.listing import Listing, ListingPlatform
 from app.models.listing_profile import ListingProfile, ProductPlatformSettings
 from app.models.order import Order, OrderLine, OrderStatus
+from app.models.order_parcel import (
+    OrderPostageCharge,
+    OrderReplacementParcel,
+    OrderReplacementParcelItem,
+    PostageChargeSource,
+    ReplacementParcelReason,
+    ReplacementParcelSource,
+)
 from app.models.order_return import OrderLineReturn, ReturnDisposition, ReturnScope, ReturnSource
 from app.models.order_substitution import OrderLineSubstitution
 from app.models.manufacturer import Manufacturer
@@ -123,6 +131,12 @@ __all__ = [
     "ReturnScope",
     "ReturnSource",
     "OrderLineSubstitution",
+    "OrderReplacementParcel",
+    "OrderReplacementParcelItem",
+    "OrderPostageCharge",
+    "ReplacementParcelReason",
+    "ReplacementParcelSource",
+    "PostageChargeSource",
     "AllocationEvent",
     "AllocationEventType",
     "PlatformConnection",

@@ -6,6 +6,7 @@ import type {
   OrderKittingSummary,
   OrderPage,
   OrderStatus,
+  ReplacementParcelReason,
 } from "./types";
 
 export type ReturnDisposition = "scrap" | "return_to_stock";
@@ -74,6 +75,37 @@ export interface OrderUpdateInput {
   shipping_charged?: string | null;
 }
 
+export interface ReplacementParcelItemInput {
+  product_id?: number | null;
+  variant_id?: number | null;
+  material_id?: number | null;
+  qty: string;
+}
+
+export interface ReplacementParcelCreateInput {
+  reason: ReplacementParcelReason;
+  postage_cost?: string | null;
+  postage_charge_id?: number | null;
+  tracking_number?: string | null;
+  carrier?: string | null;
+  notes?: string | null;
+  sent_at?: string | null;
+  items: ReplacementParcelItemInput[];
+}
+
+/** Metadata only — items are never edited in place (delete and re-record). Only the
+ *  keys present are written, so `postage_charge_id: null` unlinks a label. */
+export interface ReplacementParcelUpdateInput {
+  reason?: ReplacementParcelReason;
+  postage_cost?: string | null;
+  postage_charge_id?: number | null;
+  tracking_number?: string | null;
+  carrier?: string | null;
+  notes?: string | null;
+  sent_at?: string | null;
+  needs_review?: boolean;
+}
+
 export const ordersApi = {
   list: (limit: number, offset: number, status?: OrderStatus | "awaiting") => {
     const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
@@ -99,6 +131,11 @@ export const ordersApi = {
     api.post<Order>(`/orders/substitutions/${substitutionId}/undo`),
   createProductAndMap: (lineId: number, input: { name: string; sku?: string | null }) =>
     api.post<Order>(`/orders/lines/${lineId}/create-product-and-map`, input),
+  createReplacementParcel: (id: number, input: ReplacementParcelCreateInput) =>
+    api.post<Order>(`/orders/${id}/replacement-parcels`, input),
+  updateReplacementParcel: (parcelId: number, input: ReplacementParcelUpdateInput) =>
+    api.patch<Order>(`/orders/replacement-parcels/${parcelId}`, input),
+  deleteReplacementParcel: (parcelId: number) => api.delete<Order>(`/orders/replacement-parcels/${parcelId}`),
   getKittingOverrides: (id: number) => api.get<OrderKittingSummary>(`/orders/${id}/kitting-overrides`),
   replaceKittingOverrides: (id: number, overrides: OrderKittingOverrideLine[]) =>
     api.put<OrderKittingSummary>(`/orders/${id}/kitting-overrides`, overrides),

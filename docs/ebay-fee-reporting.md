@@ -123,7 +123,12 @@ rest.
   `REGULATORY_OPERATING_FEE` — 2.65 + 0.48 + 0.24 + 0.08 = 3.45 on the order above).
 - The postage label is a separate `SHIPPING_LABEL` transaction against the same order,
   and it comes *first* in eBay's response. Reading `transactions[0]` would report postage
-  as the platform fee; StockSmith tracks postage separately, from the shipping profile.
+  as the platform fee. `_fetch_transactions` reads the fee from the `SALE` transaction
+  only, and returns every `SHIPPING_LABEL` DEBIT separately (`_parse_shipping_labels`) as
+  the order's postage charges — the first one replaces the shipping profile's estimate in
+  net profit, any later one is a resend and becomes a replacement parcel
+  (`services/order_parcels.apply_postage_charges`). A `SHIPPING_LABEL` CREDIT (a voided or
+  refunded label) is logged and skipped for now — see docs/backlog.md.
 - `app/tests/test_ebay_signing.py` uses the real captured payload as its fixture rather
   than an invented one, because none of the three properties above is guessable from the
   field names.

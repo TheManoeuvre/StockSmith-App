@@ -1,6 +1,7 @@
 import type { Order } from "../../api/types";
 import { Badge } from "../common/Badge";
 import { formatDayMonth } from "../../lib/format";
+import { REASON_LABELS } from "./replacementParcels";
 
 /**
  * Synthesised from the timestamps the order already carries — there's no order-events log,
@@ -37,6 +38,14 @@ export function OrderTimeline({ order }: { order: Order }) {
       label: `Marked shipped${order.shipping_profile_name ? ` · ${order.shipping_profile_name}` : ""}`,
       badge: "Shipped",
       badgeClass: "bg-green-100 text-green-800",
+    });
+  }
+  for (const parcel of order.replacement_parcels) {
+    events.push({
+      at: parcel.sent_at,
+      label: `Replacement parcel sent · ${REASON_LABELS[parcel.reason]}`,
+      badge: parcel.needs_review ? "To complete" : "Resent",
+      badgeClass: "bg-amber-100 text-amber-800",
     });
   }
   if (order.cancelled_at) {

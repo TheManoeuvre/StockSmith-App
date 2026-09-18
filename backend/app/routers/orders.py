@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
-from sqlalchemy import case, delete, func, select
+from sqlalchemy import case, delete, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -10,6 +10,7 @@ from app.deps import get_db, require_auth
 from app.models.kitting import OrderKittingOverride
 from app.models.listing import ListingPlatform
 from app.models.order import Order, OrderLine, OrderStatus
+from app.models.order_parcel import OrderReplacementParcel, OrderReplacementParcelItem
 from app.models.order_substitution import OrderLineSubstitution
 from app.models.product import Product
 from app.models.shipping_profile import ShippingProfile
@@ -29,8 +30,16 @@ from app.schemas.order import (
     SubstituteLineRequest,
     SubstitutionRef,
 )
+from app.schemas.order_parcel import (
+    PostageChargeRead,
+    ReplacementParcelCreate,
+    ReplacementParcelItemRead,
+    ReplacementParcelRead,
+    ReplacementParcelUpdate,
+)
 from app.schemas.order_return import CancellationPreview, OrderCancelRequest
-from app.services import allocation, order_substitution, returns
+from app.services import allocation, order_parcels, order_substitution, returns
+from app.services.order_parcels import ReplacementCosts, get_replacement_costs_by_order
 from app.services.shipping_profiles import resolve_shipping_price_for_platform
 from app.services.csv_io import export_orders_csv
 from app.services.kitting import (
@@ -55,6 +64,17 @@ async def _get_order_with_lines(session: AsyncSession, order_id: int) -> Order:
             selectinload(Order.lines).selectinload(OrderLine.product),
             selectinload(Order.lines).selectinload(OrderLine.variant),
             selectinload(Order.shipping_profile),
+            selectinload(Order.replacement_parcels)
+            .selectinload(OrderReplacementParcel.items)
+            .selectinload(OrderReplacementParcelItem.product),
+            selectinload(Order.replacement_parcels)
+            .selectinload(OrderReplacementParcel.items)
+            .selectinload(OrderReplacementParcelItem.variant),
+            selectinload(Order.replacement_parcels)
+            .selectinload(OrderReplacementParcel.items)
+            .selectinload(OrderReplacementParcelItem.material),
+            selectinload(Order.replacement_parcels).selectinload(OrderReplacementParcel.charge),
+            selectinload(Order.postage_charges),
         )
         .execution_options(populate_existing=True)
     )
@@ -120,10 +140,25 @@ def _materials_cogs(order: Order) -> Decimal | None:
     return total if found else None
 
 
+def _effective_postage_cost(order: Order, replacement: ReplacementCosts | None) -> Decimal | None:
+    """The postage figure net profit charges: the marketplace's actual cost for the first
+    label when a sync has recorded one (order_parcels.apply_postage_charges), else the
+    shipping-profile estimate frozen at ship time. None only when neither exists — the
+    profile figure stays on OrderRead.shipping_cost_snapshot either way, so the UI can
+    show actual vs. estimate side by side."""
+    if replacement is not None and replacement.first_label_amount is not None:
+        return replacement.first_label_amount
+    return Decimal(order.shipping_cost_snapshot) if order.shipping_cost_snapshot is not None else None
+
+
 def _compute_net_profit(
-    order: Order, materials_cogs: Decimal | None, kitting_cogs: Decimal | None
+    order: Order,
+    materials_cogs: Decimal | None,
+    kitting_cogs: Decimal | None,
+    replacement: ReplacementCosts | None = None,
 ) -> Decimal | None:
-    """Order Value Paid + Postage Paid - Platform Fees - Postage cost - Cost of Goods.
+    """Order Value Paid + Postage Paid - Platform Fees - Postage cost - Cost of Goods
+    - Replacement postage - Replacement cost of goods.
 
     Order Value Paid (subtotal) and Postage Paid (shipping_charged) are what the buyer
     paid, straight off the marketplace receipt (or, for a manual order, derived from its
@@ -131,10 +166,15 @@ def _compute_net_profit(
     (payment_fees) is the full marketplace deduction — for Etsy, aggregated from the
     payment-account ledger once the order has shipped (see platforms/etsy.py
     _fetch_platform_fees_total), since the per-receipt Payments endpoint only reports
-    the card-processing portion of it. Postage cost (shipping_cost_snapshot) is the
-    seller's own cost for that shipping method, frozen at ship time — Etsy doesn't
-    expose actual per-order postage cost anywhere reliably attributable, so this always
-    comes from the assigned Shipping Profile, never from synced marketplace data.
+    the card-processing portion of it. Postage cost is the marketplace's own figure for
+    the first shipping label when a sync has recorded one, else the assigned Shipping
+    Profile's cost frozen at ship time (see _effective_postage_cost).
+
+    Replacement parcels (services/order_parcels) add their own postage — each parcel's
+    linked marketplace label, or the figure the user typed — and their own cost of goods,
+    every item's cost frozen when the parcel was recorded. Both are already summed per
+    order in `replacement` (get_replacement_costs_by_order), batched the same way
+    kitting_cogs is.
 
     Cost of Goods arrives in two halves, computed elsewhere and passed in, because they're
     sourced and frozen differently. materials_cogs (_materials_cogs) is per line: the
@@ -153,10 +193,12 @@ def _compute_net_profit(
 
     revenue = Decimal(order.subtotal) + Decimal(order.shipping_charged or 0) - Decimal(order.refunded_amount or 0)
     platform_fees = Decimal(order.payment_fees or 0)
-    postage_cost = Decimal(order.shipping_cost_snapshot or 0)
+    postage_cost = _effective_postage_cost(order, replacement) or Decimal(0)
     cogs = (materials_cogs or Decimal(0)) + (kitting_cogs or Decimal(0))
+    replacement_postage = replacement.parcel_postage if replacement is not None else Decimal(0)
+    replacement_cogs = (replacement.items_cogs if replacement is not None else None) or Decimal(0)
 
-    return revenue - platform_fees - postage_cost - cogs
+    return revenue - platform_fees - postage_cost - cogs - replacement_postage - replacement_cogs
 
 
 def _cogs_pending(order: Order) -> bool:
@@ -174,7 +216,7 @@ def _cogs_pending(order: Order) -> bool:
     )
 
 
-def _postage_cost_missing(order: Order) -> bool:
+def _postage_cost_missing(order: Order, replacement: ReplacementCosts | None = None) -> bool:
     """True when an order has shipped without ever recording what the postage cost — the
     signal a UI should show instead of letting net_profit read as though postage were free.
 
@@ -189,8 +231,12 @@ def _postage_cost_missing(order: Order) -> bool:
 
     Should be permanently empty for orders placed after the fixes in
     order_costs.default_order_shipping_profile landed, which makes it a standing regression
-    check on that path rather than only a disclaimer about historical rows."""
-    return order.status == OrderStatus.shipped and order.shipping_cost_snapshot is None
+    check on that path rather than only a disclaimer about historical rows.
+
+    A synced first label counts as a recorded cost too — the marketplace's figure is the
+    better one, and an order without a profile but with a real label isn't missing
+    anything."""
+    return order.status == OrderStatus.shipped and _effective_postage_cost(order, replacement) is None
 
 
 async def _recompute_manual_order_totals(session: AsyncSession, order: Order) -> None:
@@ -209,12 +255,66 @@ async def _recompute_manual_order_totals(session: AsyncSession, order: Order) ->
     order.grand_total = subtotal + Decimal(order.shipping_charged or 0)
 
 
+def _serialize_parcel(parcel: OrderReplacementParcel) -> ReplacementParcelRead:
+    items = []
+    items_cost: Decimal | None = None
+    for item in parcel.items:
+        qty = Decimal(item.qty)
+        unit_cost = Decimal(item.unit_cost_snapshot) if item.unit_cost_snapshot is not None else None
+        line_cost = qty * unit_cost if unit_cost is not None else None
+        if line_cost is not None:
+            items_cost = (items_cost or Decimal(0)) + line_cost
+        items.append(
+            ReplacementParcelItemRead(
+                id=item.id,
+                product_id=item.product_id,
+                variant_id=item.variant_id,
+                material_id=item.material_id,
+                product_name=item.product.name if item.product else None,
+                variant_name=item.variant.variant_name if item.variant else None,
+                material_name=item.material.name if item.material else None,
+                material_unit=item.material.unit.value if item.material and item.material.unit else None,
+                qty=qty,
+                unit_cost_snapshot=unit_cost,
+                line_cost=line_cost,
+            )
+        )
+    charge = PostageChargeRead.model_validate(parcel.charge) if parcel.charge is not None else None
+    if charge is not None:
+        effective: Decimal | None = charge.amount
+    elif parcel.postage_cost is not None:
+        effective = Decimal(parcel.postage_cost)
+    else:
+        effective = None
+    return ReplacementParcelRead(
+        id=parcel.id,
+        order_id=parcel.order_id,
+        reason=parcel.reason,
+        source=parcel.source,
+        needs_review=parcel.needs_review,
+        postage_cost=parcel.postage_cost,
+        effective_postage=effective,
+        postage_charge=charge,
+        tracking_number=parcel.tracking_number,
+        carrier=parcel.carrier,
+        notes=parcel.notes,
+        sent_at=parcel.sent_at,
+        created_at=parcel.created_at,
+        items=items,
+        items_cost=items_cost,
+    )
+
+
 def _serialize_order(
-    order: Order, kitting_cogs: Decimal | None, substitutions: list[OrderLineSubstitution] = ()
+    order: Order,
+    kitting_cogs: Decimal | None,
+    substitutions: list[OrderLineSubstitution] = (),
+    replacement: ReplacementCosts | None = None,
 ) -> OrderRead:
     """kitting_cogs is passed in rather than computed here because it needs a DB round-trip
     and this stays synchronous — list_orders fetches one aggregate for its whole page. Single
-    order? Use _serialize_one.
+    order? Use _serialize_one. `replacement` (get_replacement_costs_by_order) is batched the
+    same way; None means the order has no labels and no parcels.
 
     substitutions is likewise pre-fetched (see _load_substitutions) rather than queried
     here — it's scoped to whatever batch of orders the caller is serializing, filtered
@@ -268,6 +368,7 @@ def _serialize_order(
         for line in order.lines
     ]
     materials_cogs = _materials_cogs(order)
+    replacement_parcels = [_serialize_parcel(p) for p in order.replacement_parcels]
     return OrderRead(
         id=order.id,
         platform=order.platform,
@@ -300,9 +401,16 @@ def _serialize_order(
         financials_synced_at=order.financials_synced_at,
         materials_cogs=materials_cogs,
         kitting_cogs=kitting_cogs,
-        net_profit=_compute_net_profit(order, materials_cogs, kitting_cogs),
+        net_profit=_compute_net_profit(order, materials_cogs, kitting_cogs, replacement),
         cogs_pending=_cogs_pending(order),
-        postage_cost_missing=_postage_cost_missing(order),
+        postage_cost_missing=_postage_cost_missing(order, replacement),
+        postage_cost_actual=replacement.first_label_amount if replacement is not None else None,
+        postage_cost_effective=_effective_postage_cost(order, replacement),
+        replacement_postage=(replacement.parcel_postage if replacement is not None and replacement_parcels else None),
+        replacement_cogs=replacement.items_cogs if replacement is not None else None,
+        replacement_parcels_need_review=any(p.needs_review for p in replacement_parcels),
+        postage_charges=[PostageChargeRead.model_validate(c) for c in order.postage_charges],
+        replacement_parcels=replacement_parcels,
         sync_issue=order.sync_issue,
         pending_marketplace_cancellation=order.pending_marketplace_cancellation,
         tracking_number=order.tracking_number,
@@ -328,7 +436,8 @@ async def _serialize_one(session: AsyncSession, order: Order) -> OrderRead:
     """_serialize_order for the single-order endpoints, fetching that order's kitting COGS."""
     kitting = await get_kitting_cogs_by_order(session, [order.id])
     substitutions = await _load_substitutions(session, [line.id for line in order.lines])
-    return _serialize_order(order, kitting.get(order.id), substitutions)
+    replacement = await get_replacement_costs_by_order(session, [order.id])
+    return _serialize_order(order, kitting.get(order.id), substitutions, replacement.get(order.id))
 
 
 @router.get("", response_model=OrderPage)
@@ -348,7 +457,20 @@ async def list_orders(
     # if they were most urgent. Within the terminal block it's newest-first. A NULL from the
     # group that a given CASE doesn't target only ever ties against its own group, so
     # cross-dialect NULL sort position doesn't matter for those.
-    is_terminal = Order.status.in_((OrderStatus.shipped, OrderStatus.cancelled))
+    #
+    # "Active" is wider than "not yet shipped": a shipped order with a replacement parcel
+    # still waiting to be completed (a sync found a second label — see
+    # services/order_parcels) needs attention now, so it joins the awaiting block and the
+    # awaiting filter/count rather than sitting a page or two back in Shipped. Its
+    # ship_by_date is in the past, which puts it right at the front. It drops back out the
+    # moment the parcel is completed or deleted.
+    needs_review = exists(
+        select(OrderReplacementParcel.id).where(
+            OrderReplacementParcel.order_id == Order.id, OrderReplacementParcel.needs_review.is_(True)
+        )
+    )
+    is_active = Order.status.in_((OrderStatus.pending, OrderStatus.allocated)) | needs_review
+    is_terminal = ~is_active
     count_query = select(func.count()).select_from(Order)
     query = (
         select(Order)
@@ -356,6 +478,17 @@ async def list_orders(
             selectinload(Order.lines).selectinload(OrderLine.product),
             selectinload(Order.lines).selectinload(OrderLine.variant),
             selectinload(Order.shipping_profile),
+            selectinload(Order.replacement_parcels)
+            .selectinload(OrderReplacementParcel.items)
+            .selectinload(OrderReplacementParcelItem.product),
+            selectinload(Order.replacement_parcels)
+            .selectinload(OrderReplacementParcel.items)
+            .selectinload(OrderReplacementParcelItem.variant),
+            selectinload(Order.replacement_parcels)
+            .selectinload(OrderReplacementParcel.items)
+            .selectinload(OrderReplacementParcelItem.material),
+            selectinload(Order.replacement_parcels).selectinload(OrderReplacementParcel.charge),
+            selectinload(Order.postage_charges),
         )
         .order_by(
             case((is_terminal, 1), else_=0),
@@ -371,7 +504,7 @@ async def list_orders(
         # "awaiting" is a synthetic status the frontend's tab strip filters on — it has no
         # single OrderStatus of its own, standing in for "not yet shipped or cancelled".
         if status_filter == "awaiting":
-            status_clause = Order.status.in_((OrderStatus.pending, OrderStatus.allocated))
+            status_clause = is_active
         else:
             try:
                 status_clause = Order.status == OrderStatus(status_filter)
@@ -386,8 +519,12 @@ async def list_orders(
     # to 200 at a time. See get_kitting_cogs_by_order.
     kitting_by_order = await get_kitting_cogs_by_order(session, [o.id for o in orders])
     substitutions = await _load_substitutions(session, [line.id for o in orders for line in o.lines])
+    replacement_by_order = await get_replacement_costs_by_order(session, [o.id for o in orders])
     return OrderPage(
-        items=[_serialize_order(o, kitting_by_order.get(o.id), substitutions) for o in orders],
+        items=[
+            _serialize_order(o, kitting_by_order.get(o.id), substitutions, replacement_by_order.get(o.id))
+            for o in orders
+        ],
         total=total or 0,
     )
 
@@ -685,6 +822,53 @@ async def create_product_and_map(
 
     await session.commit()
     return await _serialize_one(session, await _get_order_with_lines(session, line.order_id))
+
+
+@router.post("/{order_id}/replacement-parcels", response_model=OrderRead, status_code=status.HTTP_201_CREATED)
+async def create_replacement_parcel(
+    order_id: int, payload: ReplacementParcelCreate, session: AsyncSession = Depends(get_db)
+) -> OrderRead:
+    """Records a parcel that has already been sent — stock leaves and costs freeze on the
+    spot (see order_parcels.create_manual_parcel). Returns the whole order, like every
+    other order mutation, so the client's single refetch covers the new profit figures."""
+    order = await _get_order_with_lines(session, order_id)
+    await order_parcels.create_manual_parcel(session, order, payload)
+    await session.commit()
+    return await _serialize_one(session, await _get_order_with_lines(session, order_id))
+
+
+async def _get_parcel(session: AsyncSession, parcel_id: int) -> OrderReplacementParcel:
+    result = await session.execute(
+        select(OrderReplacementParcel)
+        .where(OrderReplacementParcel.id == parcel_id)
+        .options(selectinload(OrderReplacementParcel.items))
+    )
+    parcel = result.scalar_one_or_none()
+    if parcel is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Replacement parcel not found")
+    return parcel
+
+
+@router.patch("/replacement-parcels/{parcel_id}", response_model=OrderRead)
+async def update_replacement_parcel(
+    parcel_id: int, payload: ReplacementParcelUpdate, session: AsyncSession = Depends(get_db)
+) -> OrderRead:
+    """Metadata only (reason, postage, tracking, notes, needs_review, which label it's
+    linked to). Items aren't editable — delete and re-record."""
+    parcel = await _get_parcel(session, parcel_id)
+    await order_parcels.update_parcel(session, parcel, payload)
+    await session.commit()
+    return await _serialize_one(session, await _get_order_with_lines(session, parcel.order_id))
+
+
+@router.delete("/replacement-parcels/{parcel_id}", response_model=OrderRead)
+async def delete_replacement_parcel(parcel_id: int, session: AsyncSession = Depends(get_db)) -> OrderRead:
+    """Restocks every item and unlinks (never deletes) any marketplace label."""
+    parcel = await _get_parcel(session, parcel_id)
+    order_id = parcel.order_id
+    await order_parcels.delete_parcel(session, parcel)
+    await session.commit()
+    return await _serialize_one(session, await _get_order_with_lines(session, order_id))
 
 
 @router.get("/{order_id}/kitting-overrides", response_model=OrderKittingSummary)

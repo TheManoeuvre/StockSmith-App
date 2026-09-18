@@ -4,6 +4,7 @@ import { shippingPriceForChannel } from "../../lib/shippingPrice";
 import { ordersApi } from "../../api/orders";
 import { shippingProfilesApi } from "../../api/shippingProfiles";
 import type { Order } from "../../api/types";
+import { Badge } from "../common/Badge";
 import { CopyButton } from "../common/CopyButton";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { FieldRow } from "../common/FieldRow";
@@ -21,11 +22,13 @@ interface ShippingEdits {
  * The Shipping tab. Profile + postage-charged are editable only on a manual order that
  * hasn't shipped (marketplace orders get their shipping from sync, and a shipped order's
  * figures are frozen) — otherwise they show read-only. Tracking number/carrier come from
- * marketplace sync (read-only, never set for manual orders). Ship-to / postage-actually-paid
- * are in the design but have no backend column yet, so they're still deferred.
+ * marketplace sync (read-only, never set for manual orders). Postage actually paid is the
+ * first marketplace label the sync found (Order.postage_charges); ship-to is still deferred.
  */
 export function OrderShippingForm({ order, onSaved }: { order: Order; onSaved: () => void }) {
   const editable = order.platform === null && order.status !== "shipped";
+  const firstLabel = order.postage_charges.find((c) => c.sequence === 1);
+  const extraLabels = order.postage_charges.filter((c) => c.sequence >= 2);
 
   const { data: shippingProfiles } = useQuery({
     queryKey: ["settings", "shipping-profiles"],
@@ -138,7 +141,9 @@ export function OrderShippingForm({ order, onSaved }: { order: Order; onSaved: (
           {order.shipped_at ? formatDayMonth(order.shipped_at) : "Not yet shipped"}
         </span>
       </FieldRow>
-      <FieldRow label="Postage cost" align="right">
+      {/* Estimate (the profile's cost, frozen at ship) vs. actual (the first marketplace
+          label the sync found). Profit uses the actual when there is one. */}
+      <FieldRow label={firstLabel ? "Postage estimate" : "Postage cost"} align="right">
         <span
           className={`tabular-nums ${order.postage_cost_missing ? "text-amber-700" : "text-slate-600"}`}
         >
@@ -149,6 +154,39 @@ export function OrderShippingForm({ order, onSaved }: { order: Order; onSaved: (
               : "—"}
         </span>
       </FieldRow>
+      {firstLabel && (
+        <FieldRow label="Postage actual" align="right">
+          <span className="tabular-nums text-slate-600" title={firstLabel.description ?? undefined}>
+            −{formatMoney(firstLabel.amount, firstLabel.currency ?? order.currency)}
+            {firstLabel.posted_at && (
+              <span className="ml-1 text-xs text-slate-400">label bought {formatDayMonth(firstLabel.posted_at)}</span>
+            )}
+          </span>
+        </FieldRow>
+      )}
+      {extraLabels.length > 0 && (
+        <div className="flex flex-col gap-1 rounded-md border border-amber-200 bg-amber-50/40 p-3 text-sm">
+          <p className="text-xs font-medium text-amber-900">Additional labels</p>
+          <ul className="flex flex-col gap-0.5">
+            {extraLabels.map((c) => (
+              <li key={c.id} className="flex items-center justify-between gap-3 text-slate-600">
+                <span>
+                  Label #{c.sequence}
+                  {c.posted_at && <span className="ml-1 text-xs text-slate-400">{formatDayMonth(c.posted_at)}</span>}
+                </span>
+                <span className="flex items-center gap-2 tabular-nums">
+                  −{formatMoney(c.amount, c.currency ?? order.currency)}
+                  {c.replacement_parcel_id != null ? (
+                    <span className="text-xs text-slate-400">→ replacement parcel</span>
+                  ) : (
+                    <Badge className="bg-amber-100 text-amber-800">Unlinked</Badge>
+                  )}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <ErrorBanner error={saveMutation.error} />
     </div>

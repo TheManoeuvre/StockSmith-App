@@ -15,7 +15,8 @@ from app.models.platform_sync_run import PlatformSyncRun, SyncRunMode, SyncRunSt
 from app.models.product import Product
 from app.models.variant import ProductVariant
 from app.schemas.platform import SyncCommitResult, SyncPreviewLine, SyncPreviewOrder, SyncPreviewResult
-from app.services import allocation
+from app.services import allocation, order_parcels
+from app.services.notification_alerts import PendingReviewAlert
 from app.services.order_costs import default_order_shipping_profile
 from app.services.platforms import get_adapter
 from app.services.platforms.base import ExternalOrder, PaymentState, ensure_utc
@@ -358,6 +359,7 @@ async def commit_sync(platform: ListingPlatform) -> SyncCommitResult:
             needs_mapping_count = 0
             shipped_count = 0
             order_ids: list[int] = []
+            pending_review_alerts: list[PendingReviewAlert] = []
 
             for ext_order in external_orders:
                 order, is_new = await _upsert_order(session, platform, ext_order)
@@ -373,6 +375,12 @@ async def commit_sync(platform: ListingPlatform) -> SyncCommitResult:
                 just_shipped = await _reconcile_status(session, order, ext_order, is_new)
                 if just_shipped:
                     shipped_count += 1
+                # Same gate as the payment trio in _apply_financials: an un-enriched pass
+                # didn't fetch labels, so its empty list says nothing.
+                if ext_order.financials_enriched:
+                    pending_review_alerts.extend(
+                        await order_parcels.apply_postage_charges(session, order, ext_order.postage_charges)
+                    )
                 order_ids.append(order.id)
 
             if raw_external_orders:
@@ -406,6 +414,10 @@ async def commit_sync(platform: ListingPlatform) -> SyncCommitResult:
             run.skipped_unpaid_count = len(skipped_unpaid)
             run.finished_at = datetime.now(timezone.utc)
             await session.commit()
+
+            # After the commit: each dispatch commits on its own, and a parcel whose
+            # alert went out must already be on disk when the user clicks through.
+            await order_parcels.raise_pending_review_alerts(session, pending_review_alerts)
 
             return SyncCommitResult(
                 fetched_count=len(external_orders),
