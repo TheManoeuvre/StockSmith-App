@@ -12,6 +12,21 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **Etsy listings that can't take a stock update are now flagged instead of retried
+  forever.** If an Etsy listing has several variations but its quantity isn't attached to
+  one of them, every variation has to share a single number — so there is no stock update
+  StockSmith can send it, and Etsy rejects every attempt. Until now those listings were
+  treated as ordinary failures: retried on every hourly check, eating into the day's Etsy
+  API allowance, and sitting permanently in the "listings not updating" count with Etsy's
+  own unexplained error message attached. StockSmith now recognises the setup before it
+  sends anything, tells you which listing needs changing and what to change ("tick
+  quantity for the variation that should carry stock"), and stops retrying — it looks
+  again once a week, or immediately if you use Push corrections after fixing the listing.
+  These listings are counted and shown separately from genuine push failures, in amber
+  rather than red, because nothing is broken: they're waiting on a change only you can
+  make on Etsy.
+
 ## [0.17.0] - 2026-09-18
 
 ### Added

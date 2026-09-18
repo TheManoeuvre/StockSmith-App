@@ -22,7 +22,12 @@ from app.services.platforms.base import (
     UnadoptedListingCandidate,
     ensure_utc,
 )
-from app.services.platforms.errors import PlatformAuthError, PlatformRateLimitError, PlatformSyncError
+from app.services.platforms.errors import (
+    PlatformAuthError,
+    PlatformPushBlockedError,
+    PlatformRateLimitError,
+    PlatformSyncError,
+)
 
 logger = logging.getLogger("stocksmith.etsy")
 
@@ -115,6 +120,20 @@ _TAXONOMY_CACHE: list[dict] | None = None
 
 _MAX_LISTING_CONFLICT_RETRIES = 3
 _LISTING_CONFLICT_RETRY_DELAY = 2.0
+
+# Etsy's rejection when a per-SKU quantity is written to a listing whose quantity is not
+# attached to a variation property. Matched as a substring of the 400 body — the backstop
+# for the pre-flight check in push_listing_quantity, which reads the same fact off the GET.
+_QUANTITY_NOT_PER_SKU_ERROR = "quantity must be consistent across all products"
+
+# What the seller has to go and change. Etsy's own 400 body says only the sentence above,
+# which names neither the listing nor what to do about it.
+_QUANTITY_NOT_PER_SKU_MESSAGE = (
+    "This Etsy listing's quantity doesn't vary by variation, so its variants can't be "
+    "stocked independently — every variation shares one quantity. On Etsy, edit the "
+    "listing's variations and tick \"quantity\" for the variation that should carry "
+    "stock. Until then StockSmith can't push stock to this listing."
+)
 
 
 class EtsyAdapter:
@@ -932,6 +951,14 @@ class EtsyAdapter:
         prevent StockSmith's own pushes from racing each other — this retry is the
         remaining safety net for a conflict from outside that (Etsy's own transient lock,
         or the seller editing the listing by hand at the same time).
+
+        Raises PlatformPushBlockedError — not PlatformSyncError — when the listing has
+        several live variations but an empty `quantity_on_property`, i.e. its quantity
+        isn't attached to any variation and every product under it must share one number.
+        Etsy answers a per-SKU write to such a listing with
+        `400 {"error":"quantity must be consistent across all products"}` every single
+        time, so this is a seller-configuration fact, not a transient failure, and the
+        distinction is what keeps the reconcile sweep from retrying it hourly forever.
         """
         listing_id = listing_ref.external_listing_id
         attempt = 0
@@ -949,8 +976,11 @@ class EtsyAdapter:
 
             matched = False
             needs_write = False
+            live_products = 0
             products_payload = []
             for product in inventory.get("products", []):
+                if not product.get("is_deleted"):
+                    live_products += 1
                 is_target_sku = product.get("sku") == sku and not product.get("is_deleted")
                 offerings_payload = []
                 for offering in product.get("offerings", []):
@@ -1004,6 +1034,19 @@ class EtsyAdapter:
                 )
                 return
 
+            if not inventory.get("quantity_on_property") and live_products > 1:
+                # A multi-variation listing whose quantity is not attached to any
+                # variation property: all its products share one quantity, so there is no
+                # per-SKU write that Etsy will accept. Raised *before* the PUT so the
+                # failure costs one GET rather than a GET and a guaranteed 400, and
+                # raised as blocked rather than a sync error so listing_reconcile stops
+                # re-queueing it hourly against the daily API budget.
+                #
+                # Checked after the no-op return above on purpose: a listing already
+                # holding the right number needs no write, so it isn't blocked on
+                # anything today and shouldn't be marked as if it were.
+                raise PlatformPushBlockedError(_QUANTITY_NOT_PER_SKU_MESSAGE)
+
             put_body = {
                 "products": products_payload,
                 "price_on_property": inventory.get("price_on_property", []),
@@ -1026,6 +1069,12 @@ class EtsyAdapter:
                 )
                 await asyncio.sleep(_LISTING_CONFLICT_RETRY_DELAY)
                 continue
+            if _QUANTITY_NOT_PER_SKU_ERROR in (put_response.text or "").lower():
+                # The pre-flight check above should have caught this off the GET; this is
+                # the backstop for any shape of the configuration it doesn't recognise
+                # (e.g. a single-product listing Etsy still refuses a per-SKU write on).
+                # Same conclusion either way: permanent until the seller edits the listing.
+                raise PlatformPushBlockedError(_QUANTITY_NOT_PER_SKU_MESSAGE)
             raise PlatformSyncError(
                 f"Failed to update Etsy listing inventory: {put_response.status_code} {put_response.text}"
             )

@@ -233,3 +233,38 @@ async def test_push_failures_are_separate_from_order_sync_errors(session, push_t
     assert summary.last_sync_status == "success"
     assert summary.last_sync_error is None
     assert summary.failing_push_count == 1
+
+
+# --- Blocked pushes ------------------------------------------------------------------
+
+
+async def test_blocked_pushes_are_counted_apart_from_failing_ones(session, push_targets):
+    """A blocked listing is one the marketplace can't accept a push for as the seller has
+    it configured. Counting it as "failing" would promise a retry that has deliberately
+    been stood down (services/listing_reconcile backs these off), so the badge would keep
+    pointing at a recovery that never comes."""
+    session.add_all([
+        _push(ListingPlatform.etsy, ListingPushStatus.error, product_id=1, error="timeout"),
+        _push(ListingPlatform.etsy, ListingPushStatus.blocked, product_id=2, error="fix the listing"),
+    ])
+    await session.commit()
+
+    summary = _by_platform(await get_sync_summary(session))[ListingPlatform.etsy]
+
+    assert summary.failing_push_count == 1
+    assert summary.blocked_push_count == 1
+
+
+async def test_a_blocked_listing_that_later_succeeded_is_no_longer_counted(session, push_targets):
+    """Same latest-attempt-wins rule as the failure count — a push landing is how the app
+    finds out the seller fixed the listing."""
+    session.add_all([
+        _push(ListingPlatform.etsy, ListingPushStatus.blocked, product_id=1, minutes_ago=60, error="fix it"),
+        _push(ListingPlatform.etsy, ListingPushStatus.success, product_id=1, minutes_ago=5),
+    ])
+    await session.commit()
+
+    summary = _by_platform(await get_sync_summary(session))[ListingPlatform.etsy]
+
+    assert summary.blocked_push_count == 0
+    assert summary.failing_push_count == 0

@@ -206,6 +206,12 @@ class PlatformSyncSummary(BaseModel):
     # importing orders perfectly while silently failing to push stock back, which is the
     # overselling risk this surfaces.
     failing_push_count: int
+    # Listings the marketplace cannot accept a stock push for as the seller currently has
+    # them configured — an Etsy listing whose quantity isn't attached to a variation, say.
+    # Counted separately from failing_push_count because no retry will clear it: the
+    # reconcile sweep has stood down on these (it re-checks weekly in case the listing has
+    # been fixed), so they need the seller to go and change something on the marketplace.
+    blocked_push_count: int
     # Marketplace API calls made to this platform so far today (UTC), and the daily budget
     # they count against. Once usage nears the budget, listing_push stops sending
     # automatic quantity pushes so order sync keeps its headroom — see

@@ -27,8 +27,8 @@ export function StorePage({ platform }: { platform: ListingPlatform }) {
   const label = PLATFORM_LABELS[platform];
   const queryClient = useQueryClient();
   const health = useStoreHealth(platform);
-  const { status, summary, connected, state, failingPushCount } = health;
-  const chip = stateChip(state, failingPushCount);
+  const { status, summary, connected, state, failingPushCount, blockedPushCount } = health;
+  const chip = stateChip(state, failingPushCount, blockedPushCount);
   const iconUrl = useShopIconUrl(platform, status?.has_shop_icon ?? false, status?.connected_at ?? null);
 
   // Which environment to connect/edit credentials against — only meaningful for eBay
@@ -139,12 +139,24 @@ export function StorePage({ platform }: { platform: ListingPlatform }) {
                 receiving stock updates. Details under Stock pushes below.
               </p>
             )}
+            {state === "pushes-blocked" && (
+              <p className="mt-3 rounded border border-amber-200 bg-amber-50 p-2 text-sm text-amber-800">
+                {blockedPushCount === 1 ? "One listing needs" : `${blockedPushCount} listings need`} a change
+                on {label} before stock can be pushed to {blockedPushCount === 1 ? "it" : "them"}. Details
+                under Stock pushes below.
+              </p>
+            )}
           </section>
 
           {connected && (
             <>
               <OrderSyncCard platform={platform} status={status} />
-              <StockPushesCard platform={platform} summary={summary} failingPushCount={failingPushCount} />
+              <StockPushesCard
+                platform={platform}
+                summary={summary}
+                failingPushCount={failingPushCount}
+                blockedPushCount={blockedPushCount}
+              />
               <ListingProfiles platform={platform}>
                 {platform === "etsy" && (
                   <Disclosure

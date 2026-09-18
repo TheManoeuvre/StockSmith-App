@@ -16,6 +16,7 @@ function summary(over: Partial<PlatformSyncSummary> = {}): PlatformSyncSummary {
     last_sync_status: "success",
     last_sync_error: null,
     failing_push_count: 0,
+    blocked_push_count: 0,
     api_calls_today: 0,
     api_call_budget: 5000,
     ...over,
