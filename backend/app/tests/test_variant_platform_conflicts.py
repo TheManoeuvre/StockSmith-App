@@ -1,0 +1,260 @@
+"""The pre-save question: would this variant request breach a target platform's limits?
+
+Etsy caps a listing at 3 variation attributes and 400 variations; eBay at 5 and 250.
+Every path that raises the active count — generating from attributes, adding a single
+variant by hand, and reactivating a disabled one — has to ask before writing anything, and only about platforms the product actually
+targets. The answer is a 409 the client turns into confirm/cancel, so "proceed" must
+create exactly what "ask" would have.
+"""
+
+from datetime import datetime, timedelta, timezone
+
+import pytest
+from fastapi import HTTPException
+from sqlalchemy import select
+
+from app.models.listing import ListingPlatform
+from app.models.listing_profile import ProductPlatformSettings
+from app.models.platform_connection import PlatformConnection
+from app.models.platform_limits import PlatformFieldLimit
+from app.models.product import Product
+from app.models.variant import ProductVariant
+from app.routers.products import create_variant
+from app.routers.variants import update_variant
+from app.schemas.product import VariantAttributeSpec
+from app.schemas.variant import VariantCreate, VariantUpdate
+from app.services import platform_limits
+from app.services.platform_limits import LimitField
+from app.services.variant_platform_conflicts import (
+    PLATFORM_LIMIT_CONFLICTS,
+    find_platform_conflicts,
+    require_no_platform_conflicts,
+)
+from app.services.variants import generate_variants
+
+ETSY = ListingPlatform.etsy
+EBAY = ListingPlatform.ebay
+
+
+async def _product(session) -> Product:
+    product = Product(id=1, name="Widget", sku="SKU-1")
+    session.add(product)
+    await session.commit()
+    return product
+
+
+async def _connect(session, platform: ListingPlatform) -> None:
+    session.add(
+        PlatformConnection(
+            platform=platform,
+            access_token="a",
+            refresh_token="r",
+            access_token_expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            external_account_id="1",
+        )
+    )
+    await session.commit()
+
+
+async def _override(session, platform, field, value) -> None:
+    session.add(PlatformFieldLimit(platform=platform, field_key=field, int_value=value))
+    await session.commit()
+    platform_limits.invalidate_limits_cache()
+
+
+def _attrs(*sizes: int) -> list[VariantAttributeSpec]:
+    return [
+        VariantAttributeSpec(name=f"Attr{i}", values=[f"v{i}-{j}" for j in range(n)])
+        for i, n in enumerate(sizes)
+    ]
+
+
+def _conflicts(exc) -> list[dict]:
+    assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == PLATFORM_LIMIT_CONFLICTS
+    return exc.value.detail["conflicts"]
+
+
+async def _count(session) -> int:
+    return len((await session.execute(select(ProductVariant))).scalars().all())
+
+
+# --- the check itself ---------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_no_target_platforms_means_no_conflicts(session):
+    await _product(session)
+    assert await find_platform_conflicts(session, 1, attribute_count=3, active_variant_count=5000) == []
+
+
+@pytest.mark.asyncio
+async def test_each_platform_reports_its_own_limit(session):
+    """Four attributes is fine on eBay (5) and over on Etsy (3); the message names Etsy
+    and its number so the user knows which store to exclude or override."""
+    await _product(session)
+    await _connect(session, ETSY)
+    await _connect(session, EBAY)
+    conflicts = await find_platform_conflicts(session, 1, attribute_count=4)
+    assert [(c["platform"], c["field"], c["resulting_count"], c["limit"]) for c in conflicts] == [
+        ("etsy", "variation_attribute_max_count", 4, 3)
+    ]
+    assert conflicts[0]["message"] == "This will result in 4 variation attributes; Etsy supports only 3."
+
+
+@pytest.mark.asyncio
+async def test_variation_count_breach_on_both_platforms(session):
+    await _product(session)
+    await _connect(session, ETSY)
+    await _connect(session, EBAY)
+    conflicts = await find_platform_conflicts(session, 1, active_variant_count=500)
+    assert [(c["platform"], c["limit"]) for c in conflicts] == [("ebay", 250), ("etsy", 400)]
+    assert conflicts[0]["message"] == "This will result in 500 active variants on this product; eBay supports only 250."
+
+
+@pytest.mark.asyncio
+async def test_override_is_respected(session):
+    """A shop not yet enrolled for Etsy's third attribute lowers the override; the check
+    follows the override, not the shipped default."""
+    await _product(session)
+    await _connect(session, ETSY)
+    await _override(session, ETSY, LimitField.variation_attribute_max_count, 2)
+    assert await find_platform_conflicts(session, 1, attribute_count=2) == []
+    assert len(await find_platform_conflicts(session, 1, attribute_count=3)) == 1
+
+
+@pytest.mark.asyncio
+async def test_excluded_platform_does_not_object(session):
+    await _product(session)
+    await _connect(session, ETSY)
+    session.add(ProductPlatformSettings(product_id=1, platform=ETSY, is_target=False))
+    await session.commit()
+    assert await find_platform_conflicts(session, 1, attribute_count=4) == []
+
+
+@pytest.mark.asyncio
+async def test_proceed_never_raises(session):
+    await _product(session)
+    await _connect(session, ETSY)
+    await require_no_platform_conflicts(session, 1, "proceed", attribute_count=4)
+
+
+# --- generation ----------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_generate_asks_before_writing_attribute_names(session):
+    """Nothing is persisted when the request is refused — the attribute names in
+    particular, since generate_variants writes those onto the product.
+
+    Generation itself caps at 3 attributes, which is Etsy's shipped default, so an
+    attribute conflict on generate only arises under a lowered override (a shop not
+    enrolled for the third attribute)."""
+    product = await _product(session)
+    await _connect(session, ETSY)
+    await _override(session, ETSY, LimitField.variation_attribute_max_count, 2)
+    with pytest.raises(HTTPException) as exc:
+        await generate_variants(session, 1, _attrs(2, 2, 2))
+    assert [c["field"] for c in _conflicts(exc)] == ["variation_attribute_max_count"]
+    assert await _count(session) == 0
+    await session.refresh(product)
+    assert product.variant_attribute1_name is None
+
+
+@pytest.mark.asyncio
+async def test_generate_counts_existing_active_variants(session):
+    """The limit is on the listing, so what matters is the total after the save: 250
+    existing active + 200 new is over Etsy's 400 even though neither half is."""
+    await _product(session)
+    await _connect(session, ETSY)
+    await generate_variants(session, 1, _attrs(250))
+    assert await _count(session) == 250
+    with pytest.raises(HTTPException) as exc:
+        await generate_variants(session, 1, _attrs(450))
+    (conflict,) = _conflicts(exc)
+    assert (conflict["field"], conflict["resulting_count"]) == ("variation_max_count", 450)
+    assert await _count(session) == 250
+
+
+@pytest.mark.asyncio
+async def test_generate_ignores_disabled_variants(session):
+    await _product(session)
+    await _connect(session, ETSY)
+    await generate_variants(session, 1, _attrs(250))
+    for variant in (await session.execute(select(ProductVariant))).scalars():
+        variant.is_active = False
+    await session.commit()
+    created = await generate_variants(session, 1, _attrs(450))
+    # 250 combos already existed (now disabled), so only the 200 new values are created;
+    # 0 active + 200 is under Etsy's 400, whereas 250 + 200 would not be.
+    assert len(created) == 200
+
+
+@pytest.mark.asyncio
+async def test_generate_proceed_creates_everything(session):
+    await _product(session)
+    await _connect(session, ETSY)
+    await _override(session, ETSY, LimitField.variation_attribute_max_count, 2)
+    created = await generate_variants(session, 1, _attrs(2, 2, 2), on_platform_conflict="proceed")
+    assert len(created) == 8
+
+
+# --- single add and reactivation ----------------------------------------------------
+
+
+async def _fill_to_limit(session, count: int = 400) -> None:
+    """Etsy's default cap, exactly reached: the next active variant is one too many."""
+    await generate_variants(session, 1, _attrs(count))
+
+
+@pytest.mark.asyncio
+async def test_manual_add_asks_at_the_cap(session):
+    await _product(session)
+    await _connect(session, ETSY)
+    await _fill_to_limit(session)
+    with pytest.raises(HTTPException) as exc:
+        await create_variant(1, VariantCreate(variant_name="One more"), session)
+    (conflict,) = _conflicts(exc)
+    assert (conflict["field"], conflict["resulting_count"], conflict["limit"]) == ("variation_max_count", 401, 400)
+    assert await _count(session) == 400
+
+    created = await create_variant(1, VariantCreate(variant_name="One more", on_platform_conflict="proceed"), session)
+    assert created.variant_name == "One more"
+    assert await _count(session) == 401
+
+
+@pytest.mark.asyncio
+async def test_reactivating_asks_at_the_cap(session):
+    """401 variants with one disabled sits exactly at Etsy's cap; bringing the disabled
+    one back is what tips it over."""
+    await _product(session)
+    await _connect(session, ETSY)
+    await generate_variants(session, 1, _attrs(401), on_platform_conflict="proceed")
+    parked = (await session.execute(select(ProductVariant).limit(1))).scalar_one()
+    await update_variant(parked.id, VariantUpdate(is_active=False), session)
+
+    with pytest.raises(HTTPException) as exc:
+        await update_variant(parked.id, VariantUpdate(is_active=True), session)
+    (conflict,) = _conflicts(exc)
+    assert conflict["resulting_count"] == 401
+    await session.refresh(parked)
+    assert parked.is_active is False
+
+    await update_variant(parked.id, VariantUpdate(is_active=True, on_platform_conflict="proceed"), session)
+    await session.refresh(parked)
+    assert parked.is_active is True
+
+
+@pytest.mark.asyncio
+async def test_other_edits_and_disabling_never_ask(session):
+    """Only a false→true flip adds to the count. A rename, disabling, or re-sending
+    is_active=true on an already-active variant must not be interrupted."""
+    await _product(session)
+    await _connect(session, ETSY)
+    await generate_variants(session, 1, _attrs(401), on_platform_conflict="proceed")
+    variant = (await session.execute(select(ProductVariant).limit(1))).scalar_one()
+    await update_variant(variant.id, VariantUpdate(variant_name="Renamed"), session)
+    await update_variant(variant.id, VariantUpdate(is_active=True), session)
+    await update_variant(variant.id, VariantUpdate(is_active=False), session)
+    await session.refresh(variant)
+    assert (variant.variant_name, variant.is_active) == ("Renamed", False)

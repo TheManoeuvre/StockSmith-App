@@ -634,6 +634,28 @@ export interface SharedMaterialVariantsDetail {
   new_variant_count: number;
 }
 
+/**
+ * What a variant save does when the result would exceed a target platform's variation
+ * attribute or variation count. "ask" is the default: the server answers 409 with a
+ * PlatformLimitConflictsDetail and nothing is saved until the user picks "proceed".
+ */
+export type PlatformConflictResolution = "ask" | "proceed";
+
+export interface PlatformLimitConflict {
+  platform: ListingPlatform;
+  field: "variation_attribute_max_count" | "variation_max_count";
+  resulting_count: number;
+  limit: number;
+  /** Complete sentence: "This will result in 3 variation attributes; Etsy supports only 2." */
+  message: string;
+}
+
+export interface PlatformLimitConflictsDetail {
+  code: "platform_limit_conflicts";
+  message: string;
+  conflicts: PlatformLimitConflict[];
+}
+
 export interface BulkBomAmendLine {
   base_material_id: number;
   material_id?: number | null; // substitution target; null keeps the base material

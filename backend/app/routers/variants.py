@@ -10,7 +10,7 @@ from app.models.product import Product, ProductMaterial
 from app.models.variant import ProductVariant, ProductVariantMaterial
 from app.schemas.kitting import VariantKittingBomLine
 from app.schemas.variant import VariantBomLine, VariantPricingBulkUpdate, VariantRead, VariantUpdate
-from app.services import listing_push, platform_fees
+from app.services import listing_push, platform_fees, variant_platform_conflicts
 from app.services.buildability import buildable_fields, compute_variant_buildability
 from app.services.kitting import compute_max_sellable, kitting_cost_per_unit_from_bom, sync_listing_ceiling_qty
 from app.services.shipping_profiles import get_shipping_profiles_by_id, resolve_variant_shipping_profile
@@ -161,7 +161,20 @@ async def update_variant(
     variant = await session.get(ProductVariant, variant_id)
     if variant is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Variant not found")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    fields = payload.model_dump(exclude_unset=True)
+    on_platform_conflict = fields.pop("on_platform_conflict", "ask")
+    # Reactivating adds one to the listing's variation count just as creating does; the
+    # same 409-then-confirm applies (services/variant_platform_conflicts). Disabling, or
+    # re-sending is_active=true on an already-active variant, changes nothing to ask about.
+    if fields.get("is_active") and not variant.is_active:
+        await variant_platform_conflicts.require_no_platform_conflicts(
+            session,
+            variant.product_id,
+            on_platform_conflict,
+            active_variant_count=await variant_platform_conflicts.active_variant_count(session, variant.product_id)
+            + 1,
+        )
+    for field, value in fields.items():
         setattr(variant, field, value)
     await session.commit()
     await session.refresh(variant)

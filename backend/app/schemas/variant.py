@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict
 
 from app.schemas.kitting import VariantKittingBomLine
 from app.schemas.material_substitute import SubstituteSuggestion
-from app.schemas.product import BomLine
+from app.schemas.product import BomLine, PlatformConflictResolution
 
 
 class VariantBase(BaseModel):
@@ -13,7 +13,9 @@ class VariantBase(BaseModel):
 
 
 class VariantCreate(VariantBase):
-    pass
+    # Not a column: popped by the router before the ORM row is built. See
+    # services/variant_platform_conflicts for the 409 it controls.
+    on_platform_conflict: PlatformConflictResolution = "ask"
 
 
 class VariantUpdate(BaseModel):
@@ -23,6 +25,9 @@ class VariantUpdate(BaseModel):
     sale_price: Decimal | None = None
     shipping_profile_id: int | None = None
     platform_fee_percent: Decimal | None = None
+    # Consulted only when is_active flips to true — reactivating is the third way the
+    # active count can pass a platform's cap. Popped by the router, never set on the row.
+    on_platform_conflict: PlatformConflictResolution = "ask"
 
 
 class VariantPricingBulkUpdate(BaseModel):

@@ -189,10 +189,19 @@ class VariantAttributeSpec(BaseModel):
 # "keep" creates them too — each line with its own quantity.
 SharedMaterialResolution = Literal["ask", "skip", "keep"]
 
+# What a variant save does when the result would exceed a target platform's variation
+# attribute or variation count: "ask" refuses with a 409 listing every conflict so the
+# client can confirm, "proceed" saves regardless. Defined here (not in the service that
+# checks it) so the schema module has no service import.
+PlatformConflictResolution = Literal["ask", "proceed"]
+
 
 class GenerateVariantsRequest(BaseModel):
     attributes: list[VariantAttributeSpec]
     on_shared_material: SharedMaterialResolution = "ask"
+    # Whether to save when the result breaches a target platform's variation limits —
+    # see services/variant_platform_conflicts. "ask" answers 409 with the conflicts.
+    on_platform_conflict: PlatformConflictResolution = "ask"
 
 
 class BulkBomAmendLine(BaseModel):

@@ -6,6 +6,7 @@ import type {
   AttributeMaterialRule,
   AttributeQuantityRule,
   Material,
+  PlatformConflictResolution,
   Product,
   SharedMaterialResolution,
   VariantAttributeSpec,
@@ -14,7 +15,21 @@ import { ErrorBanner } from "../common/ErrorBanner";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { useGuard } from "../../hooks/useUnsavedChangesGuard";
 import { BulkBomAmendModal } from "./BulkBomAmendModal";
+import { PlatformConflictDialog, platformConflictDetail } from "./PlatformConflictDialog";
 import { SharedMaterialVariantsDialog, sharedMaterialDetail } from "./SharedMaterialVariantsDialog";
+
+/**
+ * The two questions a generate can come back with, carried together so answering the
+ * second re-sends the answer already given to the first. The server asks about shared
+ * materials before platform limits (the count depends on the first answer), so a run can
+ * see both dialogs in turn — never both at once.
+ */
+interface GenerateResolutions {
+  onSharedMaterial: SharedMaterialResolution;
+  onPlatformConflict: PlatformConflictResolution;
+}
+
+const ASK_BOTH: GenerateResolutions = { onSharedMaterial: "ask", onPlatformConflict: "ask" };
 
 interface MaterialRuleState {
   baseMaterialId: number;
@@ -97,10 +112,10 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
     product.variant_attribute3_name
   );
 
-  // The first attempt always asks. If the server comes back with the shared-material 409,
-  // the dialog re-runs the same input with the user's answer.
+  // The first attempt always asks. If the server comes back with one of its 409s, the
+  // matching dialog re-runs the same input with the user's answer.
   const generateMutation = useMutation({
-    mutationFn: (onSharedMaterial: SharedMaterialResolution) => {
+    mutationFn: ({ onSharedMaterial, onPlatformConflict }: GenerateResolutions) => {
       const attributes: VariantAttributeSpec[] = rows
         .filter((r) => r.name.trim())
         .map((r) => ({
@@ -120,7 +135,7 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
               (qr): AttributeQuantityRule => ({ base_material_id: qr.baseMaterialId, value_to_qty: qr.valueToQty })
             ),
         }));
-      return productsApi.generateVariants(product.id, attributes, onSharedMaterial);
+      return productsApi.generateVariants(product.id, attributes, onSharedMaterial, onPlatformConflict);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["products", product.id, "variants"] });
@@ -132,6 +147,8 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
   });
 
   const sharedMaterial = sharedMaterialDetail(generateMutation.error);
+  const platformConflict = platformConflictDetail(generateMutation.error);
+  const askedWith = generateMutation.variables ?? ASK_BOTH;
 
   // "Generate" is an action, not a save: it needs at least one named attribute with values.
   const canGenerate = rows.some((r) => r.name.trim() && splitValues(r.valuesText).length > 0);
@@ -312,7 +329,7 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
           </button>
         )}
         <button
-          onClick={() => generateMutation.mutate("ask")}
+          onClick={() => generateMutation.mutate(ASK_BOTH)}
           disabled={!canGenerate || generateMutation.isPending}
           className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -330,14 +347,22 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
           </button>
         )}
       </div>
-      {/* The 409 isn't an error to display, it's the question the dialog asks — so it's
+      {/* A 409 isn't an error to display, it's the question a dialog asks — so it's
           kept out of the banner. Cancelling clears it; the pending input stays put. */}
-      <ErrorBanner error={sharedMaterial ? null : generateMutation.error} />
+      <ErrorBanner error={sharedMaterial || platformConflict ? null : generateMutation.error} />
       {sharedMaterial && (
         <SharedMaterialVariantsDialog
           detail={sharedMaterial}
           busy={generateMutation.isPending}
-          onResolve={(resolution) => generateMutation.mutate(resolution)}
+          onResolve={(resolution) => generateMutation.mutate({ ...askedWith, onSharedMaterial: resolution })}
+          onCancel={() => generateMutation.reset()}
+        />
+      )}
+      {platformConflict && (
+        <PlatformConflictDialog
+          detail={platformConflict}
+          busy={generateMutation.isPending}
+          onResolve={(resolution) => generateMutation.mutate({ ...askedWith, onPlatformConflict: resolution })}
           onCancel={() => generateMutation.reset()}
         />
       )}
