@@ -103,16 +103,16 @@ async def test_report_is_scoped_to_the_platform_asked_about(session):
 
 
 @pytest.mark.asyncio
-async def test_three_attributes_block_on_etsy_only(session):
+async def test_three_attributes_are_clean_on_both_platforms(session):
+    """Etsy's shipped cap is 3 since third-variation support went live; the override
+    path back to 2 is covered in test_platform_limit_overrides."""
     await _product(
         session,
         variant_attribute1_name="Size",
         variant_attribute2_name="Colour",
         variant_attribute3_name="Finish",
     )
-    etsy = await scan_catalogue(session, ETSY)
-    assert etsy.blocked_count == 1
-    assert etsy.products[0].is_blocked is True
+    assert (await scan_catalogue(session, ETSY)).products == []
     assert (await scan_catalogue(session, EBAY)).products == []
 
 

@@ -9,6 +9,8 @@ import type { LimitField } from "./platformLimits";
 export interface PlatformFieldLimitRead {
   field: LimitField;
   label: string;
+  // Tooltip text for a default that is deliberately below the marketplace's headline figure.
+  help: string | null;
   kind: "int" | "text";
   default_value: string | null;
   override_value: string | null;

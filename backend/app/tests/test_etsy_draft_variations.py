@@ -18,7 +18,7 @@ from app.models.listing import ListingPlatform
 from app.models.listing_profile import ListingProfile
 from app.models.product import Product
 from app.models.variant import ProductVariant
-from app.services.draft_listing import DraftPushError, build_draft, push_draft
+from app.services.draft_listing import build_draft, push_draft
 from app.services.platforms.etsy import EtsyAdapter
 
 ETSY = ListingPlatform.etsy
@@ -254,10 +254,10 @@ async def test_a_rejected_matrix_surfaces_rather_than_being_swallowed(session):
 
 
 @pytest.mark.asyncio
-async def test_three_attributes_are_refused_before_anything_is_sent(session):
-    """Etsy accepts two. The limits matrix already treats a third as a hard blocker, so
-    readiness stops this — but the point is that it stops it before any call, not after a
-    listing exists."""
+async def test_three_attributes_use_the_third_custom_slot_and_opt_in(session):
+    """Etsy's third variation (September 2026) needs two things on the write: the third
+    custom property slot, and max_variations_supported=3 on the query string — without
+    the latter Etsy 409s the whole PUT."""
     product = await _setup(
         session,
         variants=[("A", ("4 Stud", "Teal", "Matte"), Decimal("12.50"), 1)],
@@ -265,9 +265,12 @@ async def test_three_attributes_are_refused_before_anything_is_sent(session):
     )
     adapter = RecordingEtsy()
 
-    with pytest.raises(DraftPushError):
-        await push_draft(session, adapter, FakeConnection(), product.id, ETSY)
-    assert adapter.requests == []
+    await push_draft(session, adapter, FakeConnection(), product.id, ETSY)
+    body = adapter.inventory_body()
+    assert [pv["property_id"] for pv in body["products"][0]["property_values"]] == [513, 514, 516]
+    assert body["sku_on_property"] == [513, 514, 516]
+    put_kwargs = next(k for m, p, k in adapter.requests if m == "PUT" and p.endswith("/inventory"))
+    assert put_kwargs["params"] == {"max_variations_supported": 3}
 
 
 @pytest.mark.asyncio

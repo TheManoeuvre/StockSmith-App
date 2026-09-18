@@ -14,6 +14,9 @@ class PlatformFieldLimitRead(BaseModel):
 
     field: LimitField
     label: str
+    # Explains a shipped number that is deliberately below the marketplace's own
+    # headline figure, so it doesn't read as a mistake to correct. None for most fields.
+    help: str | None = None
     kind: str  # "int" | "text"
     default_value: str | None
     override_value: str | None

@@ -102,7 +102,15 @@ function LimitRow({ platform, limit }: { platform: ListingPlatform; limit: Platf
   return (
     <>
       <tr className="border-b border-slate-100">
-        <td className="p-1">{limit.label}</td>
+        <td className="p-1">
+          {limit.help ? (
+            <span title={limit.help} className="cursor-help underline decoration-dotted underline-offset-2">
+              {limit.label}
+            </span>
+          ) : (
+            limit.label
+          )}
+        </td>
         <td className="p-1 font-mono text-xs text-slate-500">{limit.default_value}</td>
         <td className={`p-1 font-mono text-xs ${limit.is_override ? "font-medium text-amber-800" : ""}`}>
           {limit.effective_value}

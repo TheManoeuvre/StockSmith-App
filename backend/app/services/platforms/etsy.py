@@ -110,11 +110,18 @@ _RATE_LIMIT_MAX_SLEEP_SECONDS = 120.0
 # within a couple of seconds, not progressively longer.
 # Etsy's taxonomy is identical for every shop and changes on Etsy's schedule; caching it
 # for the process avoids re-downloading thousands of nodes for every keystroke.
-# Etsy's "Custom Property 1/2" slots. StockSmith's attribute names are free text rather
+# Etsy's "Custom Property 1/2/3" slots. StockSmith's attribute names are free text rather
 # than taxonomy properties, so a variation has to go somewhere that accepts an arbitrary
 # name — these are those slots. UNVERIFIED against a live write; the ids come from Etsy's
-# documentation and are the least-confirmed part of the variation mapping.
-_CUSTOM_PROPERTY_IDS = (513, 514)
+# documentation (516 from the third-variation tutorial, September 2026) and are the
+# least-confirmed part of the variation mapping.
+_CUSTOM_PROPERTY_IDS = (513, 514, 516)
+
+# Sent on every inventory PUT. Etsy rejects any write that adds, keeps or removes a third
+# variation unless this says 3, and documents it as harmless for listings with fewer —
+# so it goes on unconditionally rather than being computed per listing, which would
+# otherwise 409 on a quantity push to a listing someone gave a third variation on Etsy.
+_INVENTORY_WRITE_PARAMS = {"max_variations_supported": 3}
 
 _TAXONOMY_CACHE: list[dict] | None = None
 
@@ -1054,7 +1061,7 @@ class EtsyAdapter:
                 "sku_on_property": inventory.get("sku_on_property", []),
             }
             put_response = await self._authed_request(
-                session, connection, "PUT", f"/listings/{listing_id}/inventory", json=put_body
+                session, connection, "PUT", f"/listings/{listing_id}/inventory", json=put_body, params=_INVENTORY_WRITE_PARAMS
             )
             if put_response.status_code == 200:
                 return
@@ -1318,7 +1325,7 @@ class EtsyAdapter:
             "sku_on_property": self._sku_on_property_for(products_payload),
         }
         put_response = await self._authed_request(
-            session, connection, "PUT", f"/listings/{listing_id}/inventory", json=put_body
+            session, connection, "PUT", f"/listings/{listing_id}/inventory", json=put_body, params=_INVENTORY_WRITE_PARAMS
         )
         if put_response.status_code != 200:
             raise PlatformSyncError(
@@ -1542,7 +1549,7 @@ class EtsyAdapter:
         attempt = 0
         while True:
             put_response = await self._authed_request(
-                session, connection, "PUT", f"/listings/{listing_id}/inventory", json=put_body
+                session, connection, "PUT", f"/listings/{listing_id}/inventory", json=put_body, params=_INVENTORY_WRITE_PARAMS
             )
             if put_response.status_code == 200:
                 return
