@@ -25,6 +25,9 @@ class VariantUpdate(BaseModel):
     sale_price: Decimal | None = None
     shipping_profile_id: int | None = None
     platform_fee_percent: Decimal | None = None
+    # Consulted only when is_active flips to true — reactivating is the third way the
+    # active count can pass a platform's cap. Popped by the router, never set on the row.
+    on_platform_conflict: PlatformConflictResolution = "ask"
 
 
 class VariantBomLine(BomLine):

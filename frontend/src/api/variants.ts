@@ -1,5 +1,5 @@
 import { api } from "./client";
-import type { Variant, VariantBomLine, VariantKittingBomLine } from "./types";
+import type { PlatformConflictResolution, Variant, VariantBomLine, VariantKittingBomLine } from "./types";
 
 export const variantsApi = {
   get: (id: number) => api.get<Variant>(`/variants/${id}`),
@@ -12,6 +12,7 @@ export const variantsApi = {
       sale_price?: string | null;
       shipping_profile_id?: number | null;
       platform_fee_percent?: string | null;
+      on_platform_conflict?: PlatformConflictResolution;
     }
   ) => api.patch<Variant>(`/variants/${id}`, input),
   remove: (id: number) => api.delete<void>(`/variants/${id}`),

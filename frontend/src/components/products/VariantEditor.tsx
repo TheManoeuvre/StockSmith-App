@@ -234,10 +234,14 @@ function VariantRow({
     },
   });
 
+  // Reactivating can be the change that takes the product past a store's variation cap,
+  // so it carries the same ask/proceed answer as creating one.
   const toggleActiveMutation = useMutation({
-    mutationFn: () => variantsApi.update(variant.id, { is_active: !variant.is_active }),
+    mutationFn: (onPlatformConflict: PlatformConflictResolution) =>
+      variantsApi.update(variant.id, { is_active: !variant.is_active, on_platform_conflict: onPlatformConflict }),
     onSuccess: invalidateVariants,
   });
+  const togglePlatformConflict = platformConflictDetail(toggleActiveMutation.error);
 
   const badges = attributeBadges(variant);
   const renameStatus = useSaveStatus(renameMutation.status);
@@ -336,14 +340,22 @@ function VariantRow({
               // Never counted dirty (it saves immediately), but disabling can hide the row and
               // so unmount the editors inside it.
               onClick={() =>
-                guard.attempt(() => toggleActiveMutation.mutate(), { prefix: `variant-${variant.id}/` })
+                guard.attempt(() => toggleActiveMutation.mutate("ask"), { prefix: `variant-${variant.id}/` })
               }
               className="rounded border border-slate-300 px-3 py-1.5 text-sm"
             >
               {variant.is_active ? "Disable" : "Reactivate"}
             </button>
           </div>
-          <ErrorBanner error={renameMutation.error ?? toggleActiveMutation.error} />
+          <ErrorBanner error={renameMutation.error ?? (togglePlatformConflict ? null : toggleActiveMutation.error)} />
+          {togglePlatformConflict && (
+            <PlatformConflictDialog
+              detail={togglePlatformConflict}
+              busy={toggleActiveMutation.isPending}
+              onResolve={(resolution) => toggleActiveMutation.mutate(resolution)}
+              onCancel={() => toggleActiveMutation.reset()}
+            />
+          )}
 
           {fullVariant && materials && (
             <>
