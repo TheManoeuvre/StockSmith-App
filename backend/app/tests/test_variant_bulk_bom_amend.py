@@ -215,9 +215,12 @@ async def test_substitution_is_written_with_replaces_material_id(session, produc
 # --- Validation ------------------------------------------------------------------------
 
 
-async def test_collision_with_an_existing_override_is_rejected(session, product):
-    """The amend can collide with a row this variant already has from a different
-    attribute — which neither the existing rows nor the new ones would reveal alone."""
+async def test_landing_on_a_material_another_line_already_uses_is_allowed(session, product, pushes):
+    """Variant 10 already substitutes Glue -> Oak from a different attribute; amending
+    Filament -> Oak for all Large variants gives it two Oak lines. That used to be a
+    unique-constraint collision and a 400. Now a variant may draw on one material from
+    several lines (each with its own quantity), so the amend goes through and the preview
+    simply shows the resulting material per line."""
     session.add(
         ProductVariantMaterial(
             variant_id=10, material_id=OAK, replaces_material_id=GLUE, qty_required=Decimal("1")
@@ -225,35 +228,17 @@ async def test_collision_with_an_existing_override_is_rejected(session, product)
     )
     await session.commit()
 
-    with pytest.raises(HTTPException) as exc:
-        await _amend(
-            session,
-            attribute_name="Size",
-            attribute_value="Large",
-            lines=[BulkBomAmendLine(base_material_id=FILAMENT, material_id=OAK)],
-        )
-
-    assert exc.value.status_code == 400
-    assert "Oak" in exc.value.detail
-
-
-async def test_conflicts_are_rejected_in_preview_too(session, product):
-    """Preview must be a real pre-flight, not just a happy-path renderer."""
-    session.add(
-        ProductVariantMaterial(
-            variant_id=10, material_id=OAK, replaces_material_id=GLUE, qty_required=Decimal("1")
-        )
+    result = await _amend(
+        session,
+        attribute_name="Size",
+        attribute_value="Large",
+        lines=[BulkBomAmendLine(base_material_id=FILAMENT, material_id=OAK)],
+        apply=True,
     )
-    await session.commit()
 
-    with pytest.raises(HTTPException):
-        await _amend(
-            session,
-            attribute_name="Size",
-            attribute_value="Large",
-            lines=[BulkBomAmendLine(base_material_id=FILAMENT, material_id=OAK)],
-            apply=False,
-        )
+    assert len(result.units) == 2
+    rows = await _rows(session, 10)
+    assert sorted((r.material_id, r.replaces_material_id) for r in rows) == [(OAK, FILAMENT), (OAK, GLUE)]
 
 
 async def test_cross_material_type_substitution_is_rejected(session, product):

@@ -338,21 +338,35 @@ async def get_expected_max_buildable_by_product(session: AsyncSession) -> dict[i
     return {pid: f.expected_max_buildable for pid, f in (await get_buildable_by_product(session)).items()}
 
 
-def _fill_line_buildability(line: VariantBomLine, m: object) -> None:
+def _fill_line_buildability(line: VariantBomLine, m: object, qty_per_unit: Decimal) -> None:
     """Attaches one resolved BOM line's own bottleneck (how many units *this material
     alone* would allow) from a _MATERIAL_STOCK_FOR_BUILDABILITY_SQL row — gross on-hand
     for the material itself (build capacity has always counted gross; only packaging
     reserves against materials), free stock for its pooled fallbacks. The overall figures
     are just the min() of these per-line values, so computing them here rather than
-    discarding them lets the BOM editor show which material is the actual constraint."""
+    discarding them lets the BOM editor show which material is the actual constraint.
+
+    qty_per_unit is the variant's TOTAL draw on this material per unit built, not
+    necessarily the line's own quantity: a variant can carry two lines on one material
+    (both colour attributes resolving to Apple Green), and each unit consumes both."""
     on_hand = Decimal(m.current_qty)
     expected = on_hand + Decimal(m.on_order_qty)
-    line.line_max_buildable = int(on_hand // line.qty_required)
-    line.line_expected_max_buildable = int(expected // line.qty_required)
-    line.line_max_buildable_incl_fallbacks = int((on_hand + Decimal(m.fallback_free_qty)) // line.qty_required)
+    line.line_max_buildable = int(on_hand // qty_per_unit)
+    line.line_expected_max_buildable = int(expected // qty_per_unit)
+    line.line_max_buildable_incl_fallbacks = int((on_hand + Decimal(m.fallback_free_qty)) // qty_per_unit)
     line.line_expected_max_buildable_incl_fallbacks = int(
-        (expected + Decimal(m.fallback_expected_free_qty)) // line.qty_required
+        (expected + Decimal(m.fallback_expected_free_qty)) // qty_per_unit
     )
+
+
+def _fill_bom_buildability(bom: list[VariantBomLine], materials: dict) -> None:
+    """Per-line bottlenecks for a whole resolved BOM, with lines sharing a material
+    constrained by their combined quantity rather than each by its own."""
+    qty_by_material: dict[int, Decimal] = {}
+    for line in bom:
+        qty_by_material[line.material_id] = qty_by_material.get(line.material_id, Decimal(0)) + line.qty_required
+    for line in bom:
+        _fill_line_buildability(line, materials[line.material_id], qty_by_material[line.material_id])
 
 
 def _figures_from_bom(bom: list[VariantBomLine]) -> BuildableFigures:
@@ -466,8 +480,7 @@ async def compute_variant_buildability(
     rows = await session.execute(_MATERIAL_STOCK_FOR_BUILDABILITY_SQL, {"ids": material_ids})
     materials = {row.id: row for row in rows}
 
-    for line in bom:
-        _fill_line_buildability(line, materials[line.material_id])
+    _fill_bom_buildability(bom, materials)
     await _attach_suggestions(session, [bom])
 
     cost_per_unit = sum(
@@ -519,8 +532,7 @@ async def compute_variants_buildability_bulk(
         if not bom:
             results[variant_id] = (None, None, bom)
             continue
-        for line in bom:
-            _fill_line_buildability(line, materials[line.material_id])
+        _fill_bom_buildability(bom, materials)
         cost_per_unit = sum(
             (Decimal(materials[line.material_id].avg_unit_cost) * line.qty_required for line in bom),
             start=Decimal(0),

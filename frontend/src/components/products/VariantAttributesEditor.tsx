@@ -2,11 +2,19 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useMemo, useState } from "react";
 import { materialsApi } from "../../api/materials";
 import { productsApi } from "../../api/products";
-import type { AttributeMaterialRule, AttributeQuantityRule, Material, Product, VariantAttributeSpec } from "../../api/types";
+import type {
+  AttributeMaterialRule,
+  AttributeQuantityRule,
+  Material,
+  Product,
+  SharedMaterialResolution,
+  VariantAttributeSpec,
+} from "../../api/types";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { useGuard } from "../../hooks/useUnsavedChangesGuard";
 import { BulkBomAmendModal } from "./BulkBomAmendModal";
+import { SharedMaterialVariantsDialog, sharedMaterialDetail } from "./SharedMaterialVariantsDialog";
 
 interface MaterialRuleState {
   baseMaterialId: number;
@@ -89,8 +97,10 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
     product.variant_attribute3_name
   );
 
+  // The first attempt always asks. If the server comes back with the shared-material 409,
+  // the dialog re-runs the same input with the user's answer.
   const generateMutation = useMutation({
-    mutationFn: () => {
+    mutationFn: (onSharedMaterial: SharedMaterialResolution) => {
       const attributes: VariantAttributeSpec[] = rows
         .filter((r) => r.name.trim())
         .map((r) => ({
@@ -110,7 +120,7 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
               (qr): AttributeQuantityRule => ({ base_material_id: qr.baseMaterialId, value_to_qty: qr.valueToQty })
             ),
         }));
-      return productsApi.generateVariants(product.id, attributes);
+      return productsApi.generateVariants(product.id, attributes, onSharedMaterial);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["products", product.id, "variants"] });
@@ -120,6 +130,8 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
       markGenerated(rows.map((r) => ({ ...r, valuesText: "", materialRules: [], quantityRules: [] })));
     },
   });
+
+  const sharedMaterial = sharedMaterialDetail(generateMutation.error);
 
   // "Generate" is an action, not a save: it needs at least one named attribute with values.
   const canGenerate = rows.some((r) => r.name.trim() && splitValues(r.valuesText).length > 0);
@@ -300,7 +312,7 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
           </button>
         )}
         <button
-          onClick={() => generateMutation.mutate()}
+          onClick={() => generateMutation.mutate("ask")}
           disabled={!canGenerate || generateMutation.isPending}
           className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
@@ -318,7 +330,17 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
           </button>
         )}
       </div>
-      <ErrorBanner error={generateMutation.error} />
+      {/* The 409 isn't an error to display, it's the question the dialog asks — so it's
+          kept out of the banner. Cancelling clears it; the pending input stays put. */}
+      <ErrorBanner error={sharedMaterial ? null : generateMutation.error} />
+      {sharedMaterial && (
+        <SharedMaterialVariantsDialog
+          detail={sharedMaterial}
+          busy={generateMutation.isPending}
+          onResolve={(resolution) => generateMutation.mutate(resolution)}
+          onCancel={() => generateMutation.reset()}
+        />
+      )}
       {showBulkAmend && <BulkBomAmendModal product={product} onClose={() => setShowBulkAmend(false)} />}
         </>
       )}

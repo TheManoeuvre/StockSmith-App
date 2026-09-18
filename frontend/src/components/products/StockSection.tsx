@@ -150,9 +150,15 @@ export function StockSection({
     queryFn: () => variantsApi.get(Number(variantId)),
     enabled: hasActiveVariants && variantId !== "",
   });
-  const resolvedBom = hasActiveVariants
+  const resolvedBomLines = hasActiveVariants
     ? fullSelectedVariant?.effective_bom ?? bom ?? []
     : bom ?? [];
+  // One entry per material: the scrap checkboxes are a per-material decision, and a
+  // variant can carry two lines on one material (both colour attributes resolving to the
+  // same filament) that would otherwise render as duplicate rows.
+  const resolvedBom = resolvedBomLines.filter(
+    (line, i) => resolvedBomLines.findIndex((other) => other.material_id === line.material_id) === i,
+  );
   const materialById = useMemo(() => new Map((materials ?? []).map((m) => [m.id, m])), [materials]);
   const { categories, byName: categoriesByName } = useMaterialCategories();
   const qtyFailedNum = Number(qtyFailed) || 0;

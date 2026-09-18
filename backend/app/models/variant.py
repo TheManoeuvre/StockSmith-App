@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Numeric, String, UniqueConstraint, func
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Index, Numeric, String, UniqueConstraint, column, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base
@@ -75,11 +75,26 @@ class ProductVariantMaterial(Base):
     - substitution: material_id is the new material, replaces_material_id is the base
       line's original material_id (which is dropped from the effective BOM entirely).
     - additive extra line: material_id not in the base BOM, replaces_material_id NULL.
+
+    A variant may carry more than one line on the same material, as long as each comes
+    from a different base line — a two-tone product whose Primary and Accent colours both
+    resolve to Apple Green for one combination keeps two Apple Green lines, each with its
+    own quantity. Consumers that turn the resolved BOM into a per-material figure (build
+    capacity, chiefly) sum those lines first; see services/buildability.
     """
 
     __tablename__ = "product_variant_materials"
     __table_args__ = (
-        UniqueConstraint("variant_id", "material_id", name="uq_product_variant_materials_variant_material"),
+        # One row per (variant, material, base line replaced). Coalesced because NULLs are
+        # distinct under a plain UNIQUE, which would let two qty-override rows for the same
+        # material through.
+        Index(
+            "uq_product_variant_materials_variant_material_line",
+            "variant_id",
+            "material_id",
+            func.coalesce(column("replaces_material_id"), -1),
+            unique=True,
+        ),
         CheckConstraint("qty_required >= 0", name="ck_product_variant_materials_qty_required_nonneg"),
         CheckConstraint(
             "replaces_material_id IS NULL OR replaces_material_id != material_id",

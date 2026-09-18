@@ -618,6 +618,22 @@ export interface VariantAttributeSpec {
   quantity_rules?: AttributeQuantityRule[];
 }
 
+/**
+ * What generation does with a combination whose rules put two base BOM lines on the same
+ * material (Primary Colour "Apple" + Accent Colour "Apple"). "ask" is the default: the
+ * server answers 409 with a SharedMaterialVariantsDetail and nothing is created until the
+ * user picks "skip" (create everything else) or "keep" (create them too, each line with
+ * its own quantity).
+ */
+export type SharedMaterialResolution = "ask" | "skip" | "keep";
+
+export interface SharedMaterialVariantsDetail {
+  code: "shared_material_variants";
+  message: string;
+  variants: { variant_name: string; message: string }[];
+  new_variant_count: number;
+}
+
 export interface BulkBomAmendLine {
   base_material_id: number;
   material_id?: number | null; // substitution target; null keeps the base material

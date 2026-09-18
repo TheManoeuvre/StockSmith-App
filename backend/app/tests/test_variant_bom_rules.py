@@ -1,13 +1,14 @@
-"""Tests for variant generation's BOM rule validation.
+"""Tests for variant generation's BOM rule handling.
 
-services/variants.py had no test coverage at all before this file, and the failure it's
-mainly about was a raw IntegrityError on uq_product_variant_materials_variant_material
-reaching the user as a bare "Internal server error" — nothing in the message said which
-attribute rule caused it or how to fix it.
+Two base BOM lines resolving onto the same material — a two-tone product whose Primary and
+Accent colour attributes both pick Apple Green for one combination — used to be refused
+outright: the override table was unique on (variant_id, material_id), so the second row
+was a raw IntegrityError, and the variant where the second "line" was the product's own
+untouched base line raised nothing but silently overstated max_buildable.
 
-One of the cases here (a substitution onto an un-ruled base line) raises no database error
-at all and instead silently overstates max_buildable, so it can only be caught by
-validation like this.
+Now such a variant is legitimate (each line keeps its own quantity; buildability sums per
+material) and generation instead ASKS: a 409 lists every affected combination, and the
+client re-submits choosing to skip them or keep them.
 """
 
 from decimal import Decimal
@@ -21,7 +22,8 @@ from app.models.material_type import MaterialType
 from app.models.product import Product, ProductMaterial
 from app.models.variant import ProductVariant, ProductVariantMaterial
 from app.schemas.product import AttributeMaterialRule, AttributeQuantityRule, VariantAttributeSpec
-from app.services.variants import generate_variants
+from app.services.buildability import compute_variant_buildability
+from app.services.variants import SHARED_MATERIAL_VARIANTS, generate_variants
 from sqlalchemy import select
 
 # Ids are fixed so rules can reference materials without threading objects around.
@@ -33,21 +35,21 @@ async def product(session):
     """A product whose build BOM is Lilac Purple + Ivory White + Glue.
 
     Ivory White being on the BOM in its own right is the point of several tests: it's what
-    a Colourway rule substituting onto Ivory White would collide with.
+    a Colourway rule substituting onto Ivory White would share the material with.
     """
     filament_type = MaterialType(id=1, name="PLA")
     session.add(filament_type)
     session.add_all([
         Material(id=LILAC, name="Lilac Purple", category=LegacyMaterialCategory.filament,
-                 unit=MaterialUnit.g, material_type_id=1),
+                 unit=MaterialUnit.g, material_type_id=1, current_qty=Decimal("100")),
         Material(id=IVORY, name="Ivory White", category=LegacyMaterialCategory.filament,
-                 unit=MaterialUnit.g, material_type_id=1),
+                 unit=MaterialUnit.g, material_type_id=1, current_qty=Decimal("100")),
         Material(id=OAK, name="Oak", category=LegacyMaterialCategory.filament,
-                 unit=MaterialUnit.g, material_type_id=1),
+                 unit=MaterialUnit.g, material_type_id=1, current_qty=Decimal("100")),
         Material(id=MATTE_LILAC, name="Matte Lilac", category=LegacyMaterialCategory.filament,
                  unit=MaterialUnit.g, material_type_id=1),
         Material(id=GLUE, name="Glue", category=LegacyMaterialCategory.other,
-                 unit=MaterialUnit.each, material_type_id=None),
+                 unit=MaterialUnit.each, material_type_id=None, current_qty=Decimal("100")),
     ])
     p = Product(id=1, name="Widget", sku="SKU-1")
     session.add(p)
@@ -73,38 +75,42 @@ async def _variant_count(session) -> int:
     return len((await session.execute(select(ProductVariant))).scalars().all())
 
 
-# --- Rule 1: two rows landing on the same material ------------------------------------
-
-
-async def test_substituting_onto_a_base_line_with_its_own_rule_is_rejected(session, product):
-    """The backlog's original case. Colourway substitutes Lilac -> Ivory while a Size
-    quantity rule already targets the real Ivory line, so the variant would need two Ivory
-    rows and violate the unique constraint."""
-    with pytest.raises(HTTPException) as exc:
-        await generate_variants(
-            session,
-            1,
-            [
-                _colourway(Ivory=IVORY),
-                VariantAttributeSpec(
-                    name="Size",
-                    values=["Large"],
-                    quantity_rules=[
-                        AttributeQuantityRule(base_material_id=IVORY, value_to_qty={"Large": Decimal("8")})
-                    ],
-                ),
-            ],
-        )
-
-    assert exc.value.status_code == 400
+def _shared(exc) -> dict:
     detail = exc.value.detail
-    # Names the specific rule and material, not just "constraint violated".
-    assert "Colourway 'Ivory'" in detail
-    assert "Ivory White" in detail
-    assert "two Ivory White lines" in detail
+    assert exc.value.status_code == 409
+    assert detail["code"] == SHARED_MATERIAL_VARIANTS
+    return detail
 
 
-async def test_two_substitutions_onto_the_same_material_are_rejected(session, product):
+def _size_rule_on_ivory(qty: str = "8") -> VariantAttributeSpec:
+    return VariantAttributeSpec(
+        name="Size",
+        values=["Large"],
+        quantity_rules=[AttributeQuantityRule(base_material_id=IVORY, value_to_qty={"Large": Decimal(qty)})],
+    )
+
+
+# --- A shared material is a question, not an error ------------------------------------
+
+
+async def test_substituting_onto_a_base_line_with_its_own_rule_asks(session, product):
+    """The backlog's original case. Colourway substitutes Lilac -> Ivory while a Size
+    quantity rule already targets the real Ivory line, so the variant would draw on Ivory
+    from two lines. Nothing is written; the 409 names the rule and the material."""
+    with pytest.raises(HTTPException) as exc:
+        await generate_variants(session, 1, [_colourway(Ivory=IVORY), _size_rule_on_ivory()])
+
+    detail = _shared(exc)
+    assert detail["new_variant_count"] == 1
+    [shared] = detail["variants"]
+    assert shared["variant_name"] == "Ivory / Large"
+    assert "Colourway 'Ivory' substituting Lilac Purple" in shared["message"]
+    assert "own Ivory White line (Size 'Large')" in shared["message"]
+    assert "2 BOM lines" in shared["message"]
+    assert await _variant_count(session) == 0
+
+
+async def test_two_substitutions_onto_the_same_material_asks(session, product):
     with pytest.raises(HTTPException) as exc:
         await generate_variants(
             session,
@@ -121,49 +127,31 @@ async def test_two_substitutions_onto_the_same_material_are_rejected(session, pr
             ],
         )
 
-    assert exc.value.status_code == 400
-    assert "Oak" in exc.value.detail
-    assert "one BOM line per material" in exc.value.detail
+    [shared] = _shared(exc)["variants"]
+    assert "Oak would be used by 2 BOM lines" in shared["message"]
 
 
-async def test_conflict_across_two_different_attributes_is_rejected(session, product):
-    """The collision only exists for the combination — neither rule is wrong alone, which
-    is why this can't be caught by looking at rules in isolation."""
+async def test_only_the_overlapping_combinations_are_listed(session, product):
+    """The overlap only exists for the combination — neither rule is wrong alone, which
+    is why this can't be caught by looking at rules in isolation. The 409 lists just the
+    combinations affected, out of everything the call would create."""
     with pytest.raises(HTTPException) as exc:
-        await generate_variants(
-            session,
-            1,
-            [
-                _colourway(Ivory=IVORY, Oak=OAK),
-                VariantAttributeSpec(
-                    name="Size",
-                    values=["Large"],
-                    quantity_rules=[
-                        AttributeQuantityRule(base_material_id=IVORY, value_to_qty={"Large": Decimal("8")})
-                    ],
-                ),
-            ],
-        )
+        await generate_variants(session, 1, [_colourway(Ivory=IVORY, Oak=OAK), _size_rule_on_ivory()])
 
-    assert exc.value.status_code == 400
-    assert "Ivory White" in exc.value.detail
+    detail = _shared(exc)
+    assert detail["new_variant_count"] == 2
+    assert [v["variant_name"] for v in detail["variants"]] == ["Ivory / Large"]
+    assert "1 of 2 new variants" in detail["message"]
 
 
-# --- Rule 2: the silent one -----------------------------------------------------------
-
-
-async def test_substituting_onto_an_unruled_base_line_is_rejected(session, product):
-    """Raises no database error — no override row exists for the untouched Ivory line to
-    collide with. But the resolved BOM would then emit Ivory twice, and buildability takes
-    min() of per-line bottlenecks rather than summing consumption, so the variant would
-    consume Ivory twice while being costed and constrained as if it used it once."""
+async def test_substituting_onto_an_unruled_base_line_asks(session, product):
+    """Raises no database error — no override row exists for the untouched Ivory line. But
+    the resolved BOM emits Ivory twice, so it's the same question as any other overlap."""
     with pytest.raises(HTTPException) as exc:
         await generate_variants(session, 1, [_colourway(Ivory=IVORY)])
 
-    assert exc.value.status_code == 400
-    detail = exc.value.detail
-    assert "Ivory White" in detail
-    assert "understate" in detail
+    [shared] = _shared(exc)["variants"]
+    assert "Colourway 'Ivory' substituting Lilac Purple, and the product's own Ivory White line" in shared["message"]
 
 
 async def test_substituting_onto_a_material_not_on_the_bom_is_fine(session, product):
@@ -173,6 +161,88 @@ async def test_substituting_onto_a_material_not_on_the_bom_is_fine(session, prod
     assert [v.variant_name for v in created] == ["Oak"]
     rows = (await session.execute(select(ProductVariantMaterial))).scalars().all()
     assert [(r.material_id, r.replaces_material_id) for r in rows] == [(OAK, LILAC)]
+
+
+# --- Skip: create the rest without them ------------------------------------------------
+
+
+async def test_skip_creates_everything_but_the_overlapping_combinations(session, product):
+    created = await generate_variants(
+        session, 1, [_colourway(Ivory=IVORY, Oak=OAK), _size_rule_on_ivory()], on_shared_material="skip"
+    )
+
+    assert [v.variant_name for v in created] == ["Oak / Large"]
+
+
+async def test_skip_with_nothing_to_skip_is_a_plain_generate(session, product):
+    created = await generate_variants(session, 1, [_colourway(Oak=OAK)], on_shared_material="skip")
+
+    assert [v.variant_name for v in created] == ["Oak"]
+
+
+# --- Keep: two lines on one material, each with its own quantity ------------------------
+
+
+def _lines(bom, material_id: int) -> list[Decimal]:
+    return sorted(line.qty_required for line in bom if line.material_id == material_id)
+
+
+async def test_keep_writes_both_lines_and_sums_them_for_buildability(session, product):
+    """Ivory 8 (the product's own line, sized) + Ivory 10 (substituted in for Lilac) is 18
+    per unit. 100 on hand allows 5 units — not the 10 or 12 either line alone would."""
+    created = await generate_variants(
+        session, 1, [_colourway(Ivory=IVORY), _size_rule_on_ivory()], on_shared_material="keep"
+    )
+
+    [variant] = created
+    rows = (await session.execute(select(ProductVariantMaterial))).scalars().all()
+    assert sorted((r.material_id, r.replaces_material_id or 0, Decimal(r.qty_required)) for r in rows) == [
+        (IVORY, 0, Decimal("8")),
+        (IVORY, LILAC, Decimal("10")),
+    ]
+
+    figures, _cost, bom = await compute_variant_buildability(session, 1, variant.id)
+    assert _lines(bom, IVORY) == [Decimal("8"), Decimal("10")]
+    assert _lines(bom, LILAC) == []
+    assert figures.max_buildable == 5
+    assert {line.line_max_buildable for line in bom if line.material_id == IVORY} == {5}
+
+
+async def test_keep_two_substitutions_onto_one_material(session, product):
+    """The two-tone case: both colour attributes pick the same colour for one combination.
+    Lilac -> Oak (10) and Ivory -> Oak (5) — 15 Oak per unit, and both base lines gone."""
+    [variant] = await generate_variants(
+        session,
+        1,
+        [
+            VariantAttributeSpec(
+                name="Primary",
+                values=["Oak"],
+                material_rules=[AttributeMaterialRule(base_material_id=LILAC, value_to_material_id={"Oak": OAK})],
+            ),
+            VariantAttributeSpec(
+                name="Accent",
+                values=["Oak"],
+                material_rules=[AttributeMaterialRule(base_material_id=IVORY, value_to_material_id={"Oak": OAK})],
+            ),
+        ],
+        on_shared_material="keep",
+    )
+
+    figures, _cost, bom = await compute_variant_buildability(session, 1, variant.id)
+    assert _lines(bom, OAK) == [Decimal("5"), Decimal("10")]
+    assert _lines(bom, LILAC) == [] and _lines(bom, IVORY) == []
+    assert figures.max_buildable == 6  # 100 // 15
+
+
+async def test_keep_with_an_untouched_base_line_inherits_it(session, product):
+    """Substituting Lilac -> Ivory with nothing else touching the Ivory line: the product's
+    own Ivory 5 stays and the substituted Ivory 10 joins it."""
+    [variant] = await generate_variants(session, 1, [_colourway(Ivory=IVORY)], on_shared_material="keep")
+
+    figures, _cost, bom = await compute_variant_buildability(session, 1, variant.id)
+    assert _lines(bom, IVORY) == [Decimal("5"), Decimal("10")]
+    assert figures.max_buildable == 6  # 100 // 15
 
 
 # --- Ambiguity: two attributes driving one line ---------------------------------------
@@ -230,7 +300,8 @@ async def test_redundant_but_consistent_rules_are_allowed(session, product):
 
 async def test_a_rejected_request_writes_nothing(session, product):
     """Validation runs before any mutation. Previously the attribute names were persisted
-    first, so a request that then failed left them behind."""
+    first, so a request that then failed left them behind. A shared-material 409 is the
+    same: it exists to ask, and nothing may change before the answer."""
     with pytest.raises(HTTPException):
         await generate_variants(session, 1, [_colourway(Ivory=IVORY)])
 
@@ -272,7 +343,7 @@ async def test_a_latent_conflict_in_an_existing_variant_does_not_block_new_ones(
         ProductVariant(id=99, product_id=1, variant_name="Legacy", attribute1_value="Legacy")
     )
     await session.flush()
-    # A row that today's validation would reject: substitution onto the live Ivory line.
+    # A row generation would stop to ask about: substitution onto the live Ivory line.
     session.add(
         ProductVariantMaterial(
             variant_id=99, material_id=IVORY, replaces_material_id=LILAC, qty_required=Decimal("5")
