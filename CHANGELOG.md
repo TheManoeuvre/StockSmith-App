@@ -12,6 +12,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-09-18
+
 ### Added
 - **Replacement parcels.** When something goes wrong with an order that has already
   shipped — a faulty item, something missing from the box, a parcel lost in the post — the
@@ -34,10 +36,51 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - A one-off `scripts/backfill_postage_charges.py` fetches labels for orders that shipped
   before this release (dry run by default).
 
+- **Generating variants now asks what to do when two attributes land on the same
+  material.** A two-tone product whose Primary Colour and Accent Colour both pick "Apple"
+  used to be refused outright ("a variant can only have one BOM line per material") with
+  nothing to adjust, because the overlap is inherent to the combination. Generation now
+  stops and lists every affected combination, and you choose: leave them out, or keep them.
+  Kept variants carry both lines and their buildable quantity is worked out from the
+  material's combined usage per unit. A substitution that landed on the product's own
+  base line used to slip through silently and overstate how many could be built; it is
+  now handled the same way.
+
 ### Changed
 - **Net profit on marketplace orders now uses the actual postage label cost** where one has
   been synced, rather than the shipping profile's estimate. Orders synced before this
   release keep using the estimate until the backfill script is run.
+- **Settings → Stores & sync is now a hub with a page per store.** The hub shows one card
+  per marketplace with the same facts in the same places — connection status, when it last
+  synced, what needs attention, and Sync now / Configure / Disconnect — above the
+  background-syncing and field-mapping settings. Configure opens a single-column page for
+  that store, ordered by how often each part is needed: health and connection at the top,
+  then Order sync (auto-sync, interval and start date, saved together with one button, with
+  the run log full-width underneath), Stock pushes (every failing listing named with its
+  actual error, plus the API budget), Listing profiles, Tools, and finally the developer-app
+  credentials, collapsed. The old two-column layout never lined up between Etsy and eBay,
+  and the sync log always scrolled sideways.
+- **The sidebar Orders badge is now the number of orders awaiting shipment** — the same
+  figure as the Orders page's "Awaiting Shipment" tab. It used to count only lines short on
+  stock or packaging, so it could read 1 while the tab read 2 whenever an order was waiting
+  for another reason, such as an eBay line needing its SKU mapped. It also updates straight
+  away after cancelling an order, running a store sync, or adding a manual order.
+- **The Orders page refreshes itself when a background sync finishes.** Orders imported by
+  the scheduled marketplace sync used to sit unseen until you left the page and came back.
+- In a product's Variants tab, the colour checkboxes and material pickers for a BOM rule are
+  now listed A→Z by the name shown, rather than by the material's internal name.
+
+### Fixed
+- **"Write SKUs & link" on an existing Etsy listing failed with "sku must be consistent
+  across all products".** Any listing that had never carried SKUs was affected: Etsy was
+  told the SKU did not vary by any option while being sent a different SKU per colour.
+  StockSmith now tells Etsy which option the SKUs vary by, worked out from the SKUs
+  themselves.
+- **The Stores & sync page could show everything green while the sidebar said "Sync
+  problem".** The sidebar counted every listing whose stock push was failing, but the page
+  only looked at the last ten push-log entries — so a listing that had been failing for a
+  while disappeared from the page and the two disagreed. Both now read the same figures,
+  and the sidebar's "Sync problem" link opens the store page that has the problem.
 
 ## [0.16.2] - 2026-09-16
 
