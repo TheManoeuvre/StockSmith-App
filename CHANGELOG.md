@@ -12,6 +12,21 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-09-18
+
+### Added
+- **Search box on the Orders page.** Type an order number (with or without the "#"), part
+  of a note, a product or variant name, or a SKU — including the raw SKU on a marketplace
+  line that hasn't been mapped yet — and the list narrows to matching orders. Dashes,
+  underscores, dots and slashes are ignored on both sides, so "hexrd" finds "HEX-RD".
+- **A warning before a variant change takes a product past a store's limits.** Adding a
+  variation attribute, generating variants, adding one by hand or reactivating a disabled
+  one used to go through silently even when the result was more attributes or more
+  variations than Etsy or eBay accept; the compatibility panel reported it afterwards and
+  the push refused the listing later. Each of those actions now says what it would produce
+  and which store objects ("This will result in 3 variation attributes; eBay supports only
+  2") and asks before continuing.
+
 ### Changed
 - **Listing profiles no longer have a default — each product picks its own.** A profile
   decides the category, processing profile and policies a listing goes out with, and
@@ -22,6 +37,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   profile commits the listing to — category, processing, who made it, when, returns — by
   name. Products that were relying on the old default are pointed at it explicitly when
   the app updates, so nothing changes for them until you choose otherwise.
+- **Etsy's variation limits now default to 3 attributes and 400 variations**, matching
+  Etsy's third-variation support. A product with three attributes can be drafted to Etsy,
+  and pushes to a three-variation listing send what Etsy requires to accept them. The 400
+  figure is Etsy's cap once every property carries a SKU, which is how StockSmith lists;
+  the limits editor explains this in a tooltip. An override you have set is kept.
+- The stock breakdown table on a product's Stores tab (Reserved / Max from free stock /
+  Quantity that would push) is gone: it repeated the On hand, Buildable and Sellable cards
+  shown above the tabs.
 
 ### Fixed
 - **eBay labels bought in bulk no longer charge one order for the whole batch.** Buying
@@ -46,6 +69,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   These listings are counted and shown separately from genuine push failures, in amber
   rather than red, because nothing is broken: they're waiting on a change only you can
   make on Etsy.
+- **Saving a variable-pricing group with hundreds of variants no longer fails with
+  "Something went wrong."** Each variant was saved with its own request, all at once, and a
+  product with a few hundred variants exhausted the backend's database connections part way
+  through, leaving the group half-updated. The group is now saved in one request. When a
+  request does fail on the way to the backend, the error banner shows the actual reason
+  rather than a generic message.
+- **Unsaved edits in a product's Etsy or eBay listing setup are no longer lost silently.**
+  The profile, title and description on the Stores tab weren't part of the product's
+  unsaved-changes tracking, so the footer said "No changes", and closing the panel,
+  hiding the setup or navigating away dropped whatever had been typed. They now save with
+  the footer's Save button like the rest of the product, and closing or hiding over unsaved
+  edits asks first.
 
 ## [0.17.0] - 2026-09-18
 
