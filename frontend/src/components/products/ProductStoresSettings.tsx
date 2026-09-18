@@ -2,7 +2,6 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { productsApi } from "../../api/products";
 import type { Product } from "../../api/types";
-import type { SellableSummary } from "../../lib/format";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { FieldRow } from "../common/FieldRow";
 
@@ -10,19 +9,13 @@ import { FieldRow } from "../common/FieldRow";
  * The product-level marketplace settings that the reviewed design places on the Stores tab
  * rather than Details: the platform quantity ceiling and the "include buildable stock"
  * toggle (both edit a single column on the product, so they live here once, not per
- * platform), plus a read-only breakdown of what a push would actually advertise.
+ * platform).
  */
 export function ProductStoresSettings({
   product,
-  sellable,
-  onHand,
-  allocated,
   showBuildableToggle = true,
 }: {
   product: Product;
-  sellable: SellableSummary;
-  onHand: number;
-  allocated: number;
   /** Bundles hold no build BOM, so "push buildable stock" is meaningless for them. */
   showBuildableToggle?: boolean;
 }) {
@@ -93,26 +86,6 @@ export function ProductStoresSettings({
           </p>
         </>
       )}
-
-      <div className="mt-1 flex flex-col gap-2 border-t border-slate-100 pt-3">
-        <FieldRow label="Reserved to open orders">
-          <span className="tabular-nums">{allocated}</span>
-        </FieldRow>
-        <FieldRow label="Max from free stock">
-          <span className="tabular-nums">{onHand - allocated}</span>
-        </FieldRow>
-        <FieldRow label="Quantity that would push">
-          <span className="tabular-nums">
-            {sellable.headline == null ? "—" : sellable.headline}
-            {sellable.expected != null &&
-              sellable.expected !== sellable.headline && (
-                <span className="ml-2 text-xs text-slate-400">
-                  {sellable.expected} once purchases land
-                </span>
-              )}
-          </span>
-        </FieldRow>
-      </div>
 
       <ErrorBanner error={ceilingMutation.error ?? buildableMutation.error} />
     </div>
