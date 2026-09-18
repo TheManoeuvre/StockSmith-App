@@ -142,8 +142,9 @@ export function OrderShippingForm({ order, onSaved }: { order: Order; onSaved: (
         </span>
       </FieldRow>
       {/* Estimate (the profile's cost, frozen at ship) vs. actual (the first marketplace
-          label the sync found). Profit uses the actual when there is one. */}
-      <FieldRow label={firstLabel ? "Postage estimate" : "Postage cost"} align="right">
+          label the sync found). Profit uses the actual when there is one — a bulk-bought
+          label has no per-order amount, so the estimate stays the figure that counts. */}
+      <FieldRow label={firstLabel?.amount != null ? "Postage estimate" : "Postage cost"} align="right">
         <span
           className={`tabular-nums ${order.postage_cost_missing ? "text-amber-700" : "text-slate-600"}`}
         >
@@ -157,9 +158,13 @@ export function OrderShippingForm({ order, onSaved }: { order: Order; onSaved: (
       {firstLabel && (
         <FieldRow label="Postage actual" align="right">
           <span className="tabular-nums text-slate-600" title={firstLabel.description ?? undefined}>
-            −{formatMoney(firstLabel.amount, firstLabel.currency ?? order.currency)}
+            {firstLabel.amount != null
+              ? `−${formatMoney(firstLabel.amount, firstLabel.currency ?? order.currency)}`
+              : "Not itemised"}
             {firstLabel.posted_at && (
-              <span className="ml-1 text-xs text-slate-400">label bought {formatDayMonth(firstLabel.posted_at)}</span>
+              <span className="ml-1 text-xs text-slate-400">
+                {firstLabel.amount != null ? "label" : "bulk label"} bought {formatDayMonth(firstLabel.posted_at)}
+              </span>
             )}
           </span>
         </FieldRow>
@@ -174,8 +179,8 @@ export function OrderShippingForm({ order, onSaved }: { order: Order; onSaved: (
                   Label #{c.sequence}
                   {c.posted_at && <span className="ml-1 text-xs text-slate-400">{formatDayMonth(c.posted_at)}</span>}
                 </span>
-                <span className="flex items-center gap-2 tabular-nums">
-                  −{formatMoney(c.amount, c.currency ?? order.currency)}
+                <span className="flex items-center gap-2 tabular-nums" title={c.description ?? undefined}>
+                  {c.amount != null ? `−${formatMoney(c.amount, c.currency ?? order.currency)}` : "Not itemised"}
                   {c.replacement_parcel_id != null ? (
                     <span className="text-xs text-slate-400">→ replacement parcel</span>
                   ) : (

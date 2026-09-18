@@ -914,7 +914,10 @@ export interface PostageCharge {
   platform: ListingPlatform;
   source: "ebay_shipping_label" | "etsy_ledger";
   external_id: string;
-  amount: string;
+  // null for a bulk marketplace label (eBay books one transaction for a whole batch of
+  // labels, with no per-order share): the label is real but its cost isn't known, so profit
+  // keeps the profile estimate for it. `description` explains.
+  amount: string | null;
   currency: string | null;
   posted_at: string | null;
   description: string | null;

@@ -407,6 +407,53 @@ async def test_label_credits_are_skipped_not_netted(recording, monkeypatch, capl
     assert "05-15000-27050" in caplog.text
 
 
+async def test_bulk_label_purchase_is_kept_without_an_amount(recording, monkeypatch, caplog):
+    """Live shape from order 04-15163-59902: six labels bought in one go came back as a
+    single £21.90 SHIPPING_LABEL with no orderId (buyer "EBAY"), returned by the orderId
+    filter regardless. It's still label #1 for this order — a later per-order label is a
+    resend — but its cost is the whole batch's, so amount is None and the description
+    says why."""
+    recording.response = httpx.Response(
+        200,
+        json={
+            "transactions": [
+                {
+                    "transactionId": "08-15173-14901",
+                    "orderId": "04-15163-59902",
+                    "transactionType": "SHIPPING_LABEL",
+                    "amount": {"value": "3.65", "currency": "GBP"},
+                    "bookingEntry": "DEBIT",
+                    "transactionDate": "2026-09-15T11:25:07.820Z",
+                    "transactionMemo": "Shipping label purchased",
+                },
+                {
+                    "transactionId": "09-15158-06992",
+                    "payoutId": "7729949946",
+                    "buyer": {"username": "EBAY"},
+                    "transactionType": "SHIPPING_LABEL",
+                    "amount": {"value": "21.9", "currency": "GBP"},
+                    "bookingEntry": "DEBIT",
+                    "transactionDate": "2026-09-12T09:18:00.417Z",
+                    "transactionMemo": "Shipping label purchased",
+                },
+                _sale(),
+            ],
+        },
+    )
+    key, _private = _keypair()
+    adapter = _adapter(monkeypatch, key)
+    caplog.set_level(logging.INFO, logger="stocksmith.ebay")
+
+    _fees, _net, _status, labels = await adapter._fetch_transactions(None, _Connection(), "04-15163-59902")
+
+    assert [(c.external_id, c.amount, c.currency) for c in labels] == [
+        ("09-15158-06992", None, "GBP"),
+        ("08-15173-14901", "3.65", "GBP"),
+    ]
+    assert labels[0].description is not None and "21.90 GBP" in labels[0].description
+    assert "bulk purchase" in caplog.text
+
+
 async def test_non_200_is_logged_rather_than_swallowed(recording, monkeypatch, caplog):
     """The exact failure that hid this bug: 403 errorId 215001 on every call, reported
     nowhere."""

@@ -204,6 +204,83 @@ async def test_a_parcel_recorded_by_hand_gets_the_label_instead_of_a_new_parcel(
     assert (await session.execute(select(Notification))).scalar_one_or_none() is None
 
 
+async def test_bulk_label_keeps_the_estimate_but_still_counts_as_label_one(session, connection, use_adapter, pushes):
+    """Order 04-15163-59902 live: the original label was bought in a batch of six, so eBay
+    reports it with the batch total and no per-order amount (ExternalPostageCharge.amount
+    None). Profit must stay on the £3.65 profile estimate rather than charge £21.90, and
+    the later £3.65 label must still be a resend — not promoted to the original."""
+    await _product(session)
+    bulk = _label("BULK", "0")
+    bulk.amount = None
+    bulk.description = "Bulk label purchase of 21.90 GBP across several orders"
+    await _sync(use_adapter, bulk, _label("L2", "3.65", days=3))
+
+    order = await _order(session)
+    read = await _read(session, order.id)
+    first = next(c for c in read.postage_charges if c.sequence == 1)
+    assert (first.external_id, first.amount) == ("BULK", None)
+    assert first.description == bulk.description
+    assert read.postage_cost_actual is None
+    assert read.postage_cost_effective == Decimal("3.65")
+    assert read.postage_cost_missing is False
+    [parcel] = read.replacement_parcels
+    assert parcel.postage_charge is not None and parcel.postage_charge.external_id == "L2"
+    assert parcel.effective_postage == Decimal("3.65")
+    assert read.net_profit == Decimal("20.00") - Decimal("3.65") - Decimal("3.65")
+
+
+async def test_bulk_resend_label_defers_to_the_typed_postage(session, connection, use_adapter, pushes):
+    """A resend bought in bulk links to its parcel like any other label but has no cost of
+    its own, so the parcel's typed postage is what profit uses — and the alert says the
+    cost isn't itemised rather than printing a batch total."""
+    await _product(session)
+    bulk = _label("BULK", "0", days=5)
+    bulk.amount = None
+    await _sync(use_adapter, _label("L1", "3.10"), bulk)
+
+    order = await _order(session)
+    read = await _read(session, order.id)
+    [parcel] = read.replacement_parcels
+    assert parcel.needs_review is True
+    assert parcel.postage_charge is not None and parcel.postage_charge.amount is None
+    assert parcel.effective_postage is None
+    assert read.replacement_postage == Decimal(0)
+    [note] = list((await session.execute(select(Notification))).scalars())
+    assert "not itemised" in note.body
+
+    await update_replacement_parcel(
+        parcel.id,
+        ReplacementParcelUpdate(reason=ReplacementParcelReason.lost_in_transit, postage_cost=Decimal("3.65"), needs_review=False),
+        session=session,
+    )
+    read = await _read(session, order.id)
+    [parcel] = read.replacement_parcels
+    assert parcel.postage_charge is not None and parcel.postage_charge.external_id == "BULK"
+    assert parcel.effective_postage == Decimal("3.65")
+    assert read.net_profit == Decimal("20.00") - Decimal("3.10") - Decimal("3.65")
+
+
+async def test_resync_clears_a_stored_amount_the_marketplace_now_calls_bulk(session, connection, use_adapter, pushes):
+    """Labels recorded before bulk purchases were recognised hold the batch total. The
+    next sync that sees the same label reported as bulk clears it — the one direction a
+    stored amount is ever changed."""
+    await _product(session)
+    await _sync(use_adapter, _label("BULK", "21.90"))
+    read = await _read(session, (await _order(session)).id)
+    assert read.postage_cost_effective == Decimal("21.90")
+
+    bulk = _label("BULK", "0")
+    bulk.amount = None
+    bulk.description = "Bulk label purchase of 21.90 GBP across several orders"
+    await _sync(use_adapter, bulk, last_modified=datetime.now(timezone.utc) + timedelta(minutes=5))
+
+    read = await _read(session, (await _order(session)).id)
+    [charge] = read.postage_charges
+    assert (charge.sequence, charge.amount, charge.description) == (1, None, bulk.description)
+    assert read.postage_cost_actual is None
+    assert read.postage_cost_effective == Decimal("3.65")
+
+
 async def test_unenriched_pass_leaves_labels_alone(session, connection, use_adapter, pushes):
     await _product(session)
     await _sync(use_adapter, _label("L1", "3.10"))

@@ -321,6 +321,31 @@ it("shows replacement figures on the Financials tab and actual vs estimate on Sh
   expect(screen.getByText("Unlinked")).toBeInTheDocument();
 });
 
+it("shows a bulk-bought first label as not itemised and keeps the estimate as the postage cost", async () => {
+  const user = userEvent.setup();
+  await renderOrder({
+    postage_charges: [
+      {
+        ...LABEL_1,
+        amount: null,
+        description: "Bulk label purchase of 21.90 GBP across several orders — eBay doesn't report this order's share",
+      },
+      LABEL_2,
+    ],
+    postage_cost_actual: null,
+    postage_cost_effective: "3.65",
+  });
+
+  await user.click(await screen.findByRole("button", { name: "Shipping" }));
+  // The estimate is what profit charges, so it isn't demoted to "estimate".
+  expect(await screen.findByText("Postage cost")).toBeInTheDocument();
+  expect(screen.queryByText("Postage estimate")).not.toBeInTheDocument();
+  expect(screen.getByText("Postage actual")).toBeInTheDocument();
+  expect(screen.getByText("Not itemised")).toBeInTheDocument();
+  expect(screen.getByText(/bulk label bought/)).toBeInTheDocument();
+  expect(screen.queryByText(/£21\.90/)).not.toBeInTheDocument();
+});
+
 it("deleting a parcel asks first and says what comes back into stock", async () => {
   const user = userEvent.setup();
   await renderOrder({ replacement_parcels: [MANUAL_PARCEL], replacement_postage: "2.50" });

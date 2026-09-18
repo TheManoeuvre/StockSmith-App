@@ -137,6 +137,14 @@ class OrderPostageCharge(Base):
     insert and never renumbered, so a label surfacing late in a widened fetch window can't
     silently reassign which parcel an already-linked charge belongs to.
 
+    `amount` is NULL for a label the marketplace confirms but won't cost per order — an
+    eBay bulk label purchase, which comes back as one batch-total transaction with no
+    orderId (ExternalPostageCharge / EbayAdapter._parse_shipping_labels). It keeps its
+    place in the sequence, but as label #1 it does NOT replace the profile estimate, and
+    linked to a parcel it defers to the user's typed postage_cost. A sync that later
+    learns a stored label is a bulk one clears its amount (apply_postage_charges); the
+    reverse never happens, since eBay never itemises a batch after the fact.
+
     Rows are never deleted by a sync that no longer returns them: a marketplace filter
     window shrinking is not evidence the label was refunded. Voided/refunded labels are
     not yet modelled (see docs/backlog.md)."""
@@ -155,7 +163,7 @@ class OrderPostageCharge(Base):
         portable_enum(PostageChargeSource, name="postage_charge_source"), nullable=False
     )
     external_id: Mapped[str] = mapped_column(String, nullable=False)
-    amount: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
+    amount: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     currency: Mapped[str | None] = mapped_column(String, nullable=True)
     posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     description: Mapped[str | None] = mapped_column(String, nullable=True)

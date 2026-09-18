@@ -140,6 +140,12 @@ Phase 4 of the backlog-burndown plan rejects this configuration at generation ti
 
 ## Replacement parcels & postage labels
 
+### eBay bulk label purchases have no per-order cost
+
+**Problem:** Seller Hub's bulk "buy labels" flow books ONE `SHIPPING_LABEL` transaction for the whole batch (batch total, no `orderId`, `buyer.username: "EBAY"`), and getTransactions returns it for the orderId filter of every order in the batch. Confirmed live on 09-15158-06992 (six £3.65 labels, one £21.90 transaction, only one of the six orders got any label at all). `EbayAdapter._parse_shipping_labels` now stores such a label with `amount NULL` so profit keeps the profile estimate, but the true per-order figure — which Seller Hub's own transaction page does itemise — is never captured, and the *other* five orders in the batch never see a label recorded (they fall back to the estimate too, which happens to be the same number here).
+
+**Ask:** Find where eBay exposes the per-label breakdown (Sell Logistics `getShipment` by the fulfilment's tracking number is the likeliest candidate; the Seller Hub page is not an API) and fill the amount in from there. Also decide whether the other orders in a batch should get a NULL-amount label recorded so a later single label on them is treated as a resend rather than the original.
+
 ### Voided / refunded shipping labels aren't netted off
 
 **Problem:** eBay reports a label refund as a `SHIPPING_LABEL` transaction with `bookingEntry: CREDIT`; Etsy posts a positive-amount ledger entry. Both are currently logged and skipped (`EbayAdapter._parse_shipping_labels`, `EtsyAdapter._extract_postage_charges`), so a label that was bought, voided and re-bought counts twice against the order's postage until someone deletes the spurious replacement parcel by hand. Which of several labels a credit reverses isn't stated by either marketplace, so it can't simply be matched by amount.

@@ -55,9 +55,11 @@ class ReplacementCosts:
     """Per-order aggregate for net profit — see routers/orders._compute_net_profit.
 
     first_label_amount: the marketplace's actual cost for label #1 (the original shipment),
-    None when no label has been synced — profit then falls back to the shipping-profile
-    snapshot. parcel_postage: Σ over replacement parcels of the figure each one actually
-    uses (its linked label's amount, else its typed postage_cost). items_cogs: Σ qty ×
+    None when no label has been synced OR the one synced is a bulk purchase with no
+    per-order amount (OrderPostageCharge.amount NULL) — profit then falls back to the
+    shipping-profile snapshot either way. parcel_postage: Σ over replacement parcels of
+    the figure each one actually uses (its linked label's amount when it has one, else its
+    typed postage_cost). items_cogs: Σ qty ×
     frozen unit cost over every parcel item — None-not-zero when no parcel has items, so a
     caller can render "—" rather than a confident zero."""
 
@@ -81,7 +83,7 @@ _FIRST_LABEL_ROWS_SQL = text(
     """
     SELECT order_id, amount
     FROM order_postage_charges
-    WHERE order_id IN :ids AND sequence = 1
+    WHERE order_id IN :ids AND sequence = 1 AND amount IS NOT NULL
     """
 ).bindparams(bindparam("ids", expanding=True))
 
@@ -424,14 +426,19 @@ async def apply_postage_charges(
 
     Only called when the adapter actually fetched financials (order_sync checks
     financials_enriched) — an empty list on an un-enriched pass means nothing. Rows
-    already stored are matched on (platform, external_id) and left alone; rows the
-    marketplace no longer returns are NOT deleted (a narrower fetch window is not a
+    already stored are matched on (platform, external_id) and left alone, with one
+    exception: a stored amount is cleared when the marketplace now reports the label as
+    a bulk purchase (ExternalPostageCharge.amount None). That's the repair path for
+    labels recorded before bulk purchases were recognised — the stored figure was the
+    batch total, never this order's cost — and it only ever runs in that direction. Rows
+    the marketplace no longer returns are NOT deleted (a narrower fetch window is not a
     refund). New rows are numbered sequence = max + 1 in posted_at order, and that number
     never changes afterwards — see OrderPostageCharge.
 
     For each new label with sequence >= 2: the oldest parcel on the order with no label
     yet (the user recorded the resend before the sync caught up) gets it; otherwise a
-    needs_review parcel is created with the label's cost.
+    needs_review parcel is created with the label's cost (or none, for a bulk label —
+    the user types what it cost when completing the parcel).
 
     Returns the review alerts to raise for the parcels it created, rather than raising
     them itself: dispatch_notification commits, and order_sync's write phase is meant to
@@ -447,19 +454,27 @@ async def apply_postage_charges(
     existing = list(
         (await session.execute(select(OrderPostageCharge).where(OrderPostageCharge.order_id == order.id))).scalars()
     )
-    known_ids = {c.external_id for c in existing}
+    known = {c.external_id: c for c in existing}
     next_sequence = max((c.sequence for c in existing), default=0) + 1
 
-    fresh = [c for c in charges if c.external_id not in known_ids]
+    for ext in charges:
+        stored = known.get(ext.external_id)
+        if stored is not None and ext.amount is None and stored.amount is not None:
+            stored.amount = None
+            stored.description = ext.description
+    fresh = [c for c in charges if c.external_id not in known]
     if not fresh:
         return pending
     # Oldest first; None dates sort last so an undated label never displaces the original.
     fresh.sort(key=lambda c: (c.posted_at is None, c.posted_at or datetime.min.replace(tzinfo=timezone.utc), c.external_id))
 
     for ext in fresh:
-        amount = _parse_amount(ext.amount)
-        if amount is None:
-            continue
+        if ext.amount is None:
+            amount = None
+        else:
+            amount = _parse_amount(ext.amount)
+            if amount is None:
+                continue
         charge = OrderPostageCharge(
             order_id=order.id,
             platform=order.platform,

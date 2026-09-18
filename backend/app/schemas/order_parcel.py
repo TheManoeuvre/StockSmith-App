@@ -74,7 +74,9 @@ class PostageChargeRead(BaseModel):
     platform: ListingPlatform
     source: PostageChargeSource
     external_id: str
-    amount: Decimal
+    # None for a bulk marketplace label whose per-order cost isn't reported (see
+    # OrderPostageCharge.amount) — `description` says so.
+    amount: Decimal | None = None
     currency: str | None = None
     posted_at: datetime | None = None
     description: str | None = None
