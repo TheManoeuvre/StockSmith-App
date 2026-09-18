@@ -848,9 +848,6 @@ function ProductDetail() {
           <section className="flex flex-col gap-6">
             <ProductStoresSettings
               product={product}
-              sellable={sellable}
-              onHand={onHand}
-              allocated={allocated}
               showBuildableToggle={!product.is_bundle}
             />
             {(["etsy", "ebay"] as const).map((platform) => (
