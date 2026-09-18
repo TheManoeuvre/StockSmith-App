@@ -262,3 +262,52 @@ it("keeps a shipped order in the awaiting feed while a replacement parcel needs 
   expect(screen.getByText("Replacement to complete")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Complete" })).toBeInTheDocument();
 });
+
+it("sends the search box to the backend as q, debounced, and resets to page 0", async () => {
+  const user = userEvent.setup();
+  const wanted = order({
+    id: 900,
+    external_order_id: "E-900",
+    lines: [line({ product_name: "Hex Planter" })],
+  });
+  const other = order({
+    id: 901,
+    external_order_id: "E-901",
+    lines: [line({ order_id: 901, product_name: "Ridge Vase" })],
+  });
+  // Matching is the backend's job (see list_orders' q) — the fake just answers a q'd
+  // request with the narrower set so the test can see the list re-render from it.
+  setRoutes([
+    {
+      method: "GET",
+      path: /^\/orders\?.*q=hex/,
+      respond: () => ({ items: [wanted], total: 1 }),
+    },
+    ...routes([wanted, other]),
+  ]);
+  await renderList();
+  expect(await screen.findByText("Ridge Vase")).toBeInTheDocument();
+
+  await user.type(screen.getByRole("textbox", { name: "Search orders" }), "  hex ");
+
+  await waitFor(() => expect(screen.queryByText("Ridge Vase")).not.toBeInTheDocument());
+  expect(screen.getByText("Hex Planter")).toBeInTheDocument();
+  // Trimmed, and only the settled term went over the wire — not one request per keystroke.
+  const searched = calls.filter((c) => c.method === "GET" && /\/orders\?.*q=/.test(c.path));
+  expect(searched.map((c) => new URL(c.path, "http://x").searchParams.get("q"))).toEqual(["hex"]);
+  expect(new URL(searched[0].path, "http://x").searchParams.get("offset")).toBe("0");
+});
+
+it("says what the empty search matched nothing against", async () => {
+  const user = userEvent.setup();
+  setRoutes([
+    { method: "GET", path: /^\/orders\?.*q=/, respond: () => ({ items: [], total: 0 }) },
+    ...routes([order()]),
+  ]);
+  await renderList();
+  expect(await screen.findByText("Hex Planter")).toBeInTheDocument();
+
+  await user.type(screen.getByRole("textbox", { name: "Search orders" }), "zzz");
+
+  expect(await screen.findByText('No orders match "zzz"')).toBeInTheDocument();
+});

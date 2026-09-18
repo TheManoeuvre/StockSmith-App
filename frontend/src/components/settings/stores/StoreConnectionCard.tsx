@@ -15,8 +15,8 @@ import { formatRelative, stateChip, useStoreHealth } from "./useStoreHealth";
 export function StoreConnectionCard({ platform, onOpen }: { platform: ListingPlatform; onOpen: () => void }) {
   const label = PLATFORM_LABELS[platform];
   const queryClient = useQueryClient();
-  const { status, summary, connected, state, failingPushCount } = useStoreHealth(platform);
-  const chip = stateChip(state, failingPushCount);
+  const { status, summary, connected, state, failingPushCount, blockedPushCount } = useStoreHealth(platform);
+  const chip = stateChip(state, failingPushCount, blockedPushCount);
   const iconUrl = useShopIconUrl(platform, status?.has_shop_icon ?? false, status?.connected_at ?? null);
 
   const invalidateStatus = () => {
@@ -65,17 +65,19 @@ export function StoreConnectionCard({ platform, onOpen }: { platform: ListingPla
         ? `Last order sync failed${status?.last_sync_error ? `: ${status.last_sync_error}` : "."}`
         : state === "pushes-failing"
           ? `The latest quantity push to ${failingPushCount === 1 ? "one listing" : `${failingPushCount} listings`} was rejected — stock shown on ${label} may be stale.`
-          : [
-              status?.shop_name ?? (status?.account_id ? `Account ${status.account_id}` : null),
-              status?.auto_sync_enabled
-                ? `auto-sync every ${status.sync_interval_minutes} min`
-                : "manual sync only",
-              summary && summary.api_call_budget > 0
-                ? `${summary.api_calls_today.toLocaleString()} / ${summary.api_call_budget.toLocaleString()} calls today`
-                : null,
-            ]
-              .filter(Boolean)
-              .join(" · ");
+          : state === "pushes-blocked"
+            ? `${blockedPushCount === 1 ? "One listing needs" : `${blockedPushCount} listings need`} a change on ${label} before stock can be pushed — retrying can't fix it.`
+            : [
+                status?.shop_name ?? (status?.account_id ? `Account ${status.account_id}` : null),
+                status?.auto_sync_enabled
+                  ? `auto-sync every ${status.sync_interval_minutes} min`
+                  : "manual sync only",
+                summary && summary.api_call_budget > 0
+                  ? `${summary.api_calls_today.toLocaleString()} / ${summary.api_call_budget.toLocaleString()} calls today`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(" · ");
 
   const primary = !connected
     ? {

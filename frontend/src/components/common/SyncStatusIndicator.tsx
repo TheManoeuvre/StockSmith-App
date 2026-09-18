@@ -30,6 +30,10 @@ function summarise(summaries: PlatformSyncSummary[]) {
   const errored = connected.filter((s) => s.last_sync_status === "error");
   const syncing = connected.some((s) => s.last_sync_status === "running");
   const failingPushes = connected.reduce((total, s) => total + s.failing_push_count, 0);
+  // Kept apart from failingPushes: these aren't waiting on a retry, they're waiting on the
+  // seller. Counting them as a "Sync problem" would light this red for as long as it takes
+  // someone to edit a listing — the badge noise that made these worth separating.
+  const blockedPushes = connected.reduce((total, s) => total + s.blocked_push_count, 0);
   // The most recent successful-or-not sync across platforms — the question the label
   // answers is "how stale is my data", which is governed by whichever synced last.
   // Compared as parsed timestamps rather than raw strings, so this doesn't quietly
@@ -39,7 +43,7 @@ function summarise(summaries: PlatformSyncSummary[]) {
     if (newest === null) return s.last_sync_at;
     return new Date(s.last_sync_at) > new Date(newest) ? s.last_sync_at : newest;
   }, null);
-  return { connected, errored, failingPushes, latest, syncing };
+  return { connected, errored, failingPushes, blockedPushes, latest, syncing };
 }
 
 export function SyncStatusIndicator() {
@@ -54,14 +58,20 @@ export function SyncStatusIndicator() {
   // "never synced" while the first request is still in flight would be actively wrong.
   if (!data) return null;
 
-  const { connected, errored, failingPushes, latest, syncing } = summarise(data);
+  const { connected, errored, failingPushes, blockedPushes, latest, syncing } = summarise(data);
   if (connected.length === 0) return null;
 
   const hasProblem = errored.length > 0 || failingPushes > 0;
+  // Amber, and only when nothing is actually failing: a blocked listing is a job for the
+  // seller, and dressing it as a sync failure would keep the indicator red for however long
+  // it takes them to get to it.
+  const needsAttention = !hasProblem && blockedPushes > 0;
   // Land on the store that has the problem when there is exactly one; the hub otherwise —
   // it shows every store's state side by side, which is the right place to start from when
   // more than one needs attention.
-  const problemStores = connected.filter((s) => s.last_sync_status === "error" || s.failing_push_count > 0);
+  const problemStores = connected.filter(
+    (s) => s.last_sync_status === "error" || s.failing_push_count > 0 || s.blocked_push_count > 0,
+  );
   const target = problemStores.length === 1 ? problemStores[0].platform : undefined;
   const problems = [
     ...errored.map(
@@ -73,6 +83,12 @@ export function SyncStatusIndicator() {
         (s) =>
           `${PLATFORM_LABELS[s.platform]}: ${s.failing_push_count} listing(s) failed to receive a stock update`,
       ),
+    ...connected
+      .filter((s) => s.blocked_push_count > 0)
+      .map(
+        (s) =>
+          `${PLATFORM_LABELS[s.platform]}: ${s.blocked_push_count} listing(s) need a change on ${PLATFORM_LABELS[s.platform]} before stock can be pushed`,
+      ),
   ];
 
   return (
@@ -80,7 +96,7 @@ export function SyncStatusIndicator() {
       to="/settings"
       search={{ page: "stores-sync", ...(target ? { store: target } : {}) }}
       title={
-        hasProblem
+        hasProblem || needsAttention
           ? problems.join("\n")
           : connected
               .map(
@@ -91,19 +107,23 @@ export function SyncStatusIndicator() {
       }
       className="flex w-full items-center gap-2 rounded-md px-[9px] py-[7px] text-[12.5px] hover:bg-slate-100"
     >
-      <span className={hasProblem ? "text-red-600" : "text-green-600"}>
+      <span className={hasProblem ? "text-red-600" : needsAttention ? "text-amber-600" : "text-green-600"}>
         <SyncIcon />
       </span>
       {/* Not colour alone — the label changes too, for anyone who can't distinguish red from
           green; this is the app's only passive failure signal. */}
-      <span className={`flex-1 ${hasProblem ? "font-medium text-red-700" : "text-slate-600"}`}>
+      <span
+        className={`flex-1 ${hasProblem ? "font-medium text-red-700" : needsAttention ? "font-medium text-amber-700" : "text-slate-600"}`}
+      >
         {hasProblem
           ? "Sync problem"
-          : syncing
-            ? "Syncing…"
-            : latest
-              ? `Synced ${formatRelative(latest)}`
-              : "Never synced"}
+          : needsAttention
+            ? "Listings need attention"
+            : syncing
+              ? "Syncing…"
+              : latest
+                ? `Synced ${formatRelative(latest)}`
+                : "Never synced"}
       </span>
     </Link>
   );

@@ -880,15 +880,12 @@ function VariableGroupRow({
 
   const saveMutation = useMutation({
     mutationFn: () =>
-      Promise.all(
-        variants.map((v) =>
-          variantsApi.update(v.id, {
-            sale_price: salePrice || null,
-            shipping_profile_id: shippingProfileId ? Number(shippingProfileId) : null,
-            platform_fee_percent: platformFeePercent || null,
-          })
-        )
-      ),
+      variantsApi.updatePricing({
+        variant_ids: variants.map((v) => v.id),
+        sale_price: salePrice || null,
+        shipping_profile_id: shippingProfileId ? Number(shippingProfileId) : null,
+        platform_fee_percent: platformFeePercent || null,
+      }),
     onSuccess: () => {
       markSaved();
       onSaved();

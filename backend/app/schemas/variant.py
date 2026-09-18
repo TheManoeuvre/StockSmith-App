@@ -30,6 +30,17 @@ class VariantUpdate(BaseModel):
     on_platform_conflict: PlatformConflictResolution = "ask"
 
 
+class VariantPricingBulkUpdate(BaseModel):
+    """One write for every variant in a pricing group. The variable-pricing form used to
+    PATCH each variant on its own, which for a product with hundreds of variants meant
+    hundreds of concurrent requests and an exhausted connection pool."""
+
+    variant_ids: list[int]
+    sale_price: Decimal | None = None
+    shipping_profile_id: int | None = None
+    platform_fee_percent: Decimal | None = None
+
+
 class VariantBomLine(BomLine):
     replaces_material_id: int | None = None
     # How many units this line alone allows from the material's own stock, now and once

@@ -14,6 +14,7 @@ from app.models.variant import ProductVariant
 from app.services import buildability, kitting, platform_api_usage
 from app.services.platforms import get_adapter
 from app.services.platforms.base import ExternalListingRef
+from app.services.platforms.errors import PlatformPushBlockedError
 from app.services.variants import compute_full_sku
 
 logger = logging.getLogger("stocksmith.listing_push")
@@ -236,13 +237,19 @@ async def push_units_now(
             )
         )
         for listing in result.scalars():
-            before = listing.last_synced_at
-            await _push_one(session, listing, qty)
-            # _push_one swallows its exception (it logs to PlatformListingPush instead),
-            # so success is inferred from whether it advanced the watermark.
-            if listing.last_synced_at != before:
+            # _push_one swallows its exception (it logs to PlatformListingPush instead)
+            # and reports what it recorded.
+            status, message = await _push_one(session, listing, qty)
+            if status == ListingPushStatus.success:
                 pushed += 1
-            else:
+            elif status == ListingPushStatus.blocked:
+                # The listing's own configuration is the blocker, so report what it is —
+                # a bare "push failed" would send the user looking for a fault in
+                # StockSmith. This path is also the manual retry for a blocked listing:
+                # the sweep backs those off, but a user who has just fixed the listing on
+                # the marketplace and clicked "Push corrections" gets an answer now.
+                errors.append(f"{listing.platform.value} listing for variant {variant_id}: {message}")
+            elif status == ListingPushStatus.error:
                 errors.append(f"{listing.platform.value} listing for variant {variant_id}: push failed")
     return pushed, errors
 
@@ -359,15 +366,24 @@ async def reconcile_listing(session: AsyncSession, listing: Listing) -> bool:
     return True
 
 
-async def _push_one(session: AsyncSession, listing: Listing, qty: int) -> None:
+async def _push_one(
+    session: AsyncSession, listing: Listing, qty: int
+) -> tuple[ListingPushStatus | None, str | None]:
+    """Pushes one listing and records the attempt.
+
+    Returns (status, message): the status recorded to PlatformListingPush and, for a
+    non-success, the reason — or (None, None) when there was nothing to attempt (no live
+    listing, or the platform isn't connected), neither of which is a failure and neither
+    of which writes a row. Callers read this rather than inferring success from whether
+    the watermark moved."""
     if listing.external_listing_id is None:
-        return  # no known live listing to push to (never checked, or the SKU check found none)
+        return None, None  # no known live listing (never checked, or the SKU check found none)
 
     connection = (
         await session.execute(select(PlatformConnection).where(PlatformConnection.platform == listing.platform))
     ).scalar_one_or_none()
     if connection is None or not connection.is_connected:
-        return  # not connected — nothing to push to, and not a failure worth logging
+        return None, None  # not connected — nothing to push to, and not a failure worth logging
 
     sku = await _resolve_sku(session, listing)
     listing_ref = ExternalListingRef(
@@ -383,6 +399,33 @@ async def _push_one(session: AsyncSession, listing: Listing, qty: int) -> None:
         adapter = await get_adapter(session, listing.platform)
         async with _get_listing_lock(listing.platform, listing.external_listing_id):
             await adapter.push_listing_quantity(session, connection, listing_ref, sku, qty)
+    except PlatformPushBlockedError as e:
+        # Structural: the listing as configured can never accept this push, so it is
+        # recorded as `blocked` rather than `error`. listing_reconcile reads that status
+        # and stops retrying hourly (it re-checks occasionally in case the seller has
+        # fixed the listing), and sync_status reports it as a listing needing attention
+        # rather than as a failure awaiting a retry. The watermark is deliberately not
+        # advanced — nothing was sent, and pretending otherwise would let the
+        # skip-if-unchanged gate hide the problem.
+        logger.warning(
+            "Listing push blocked for product_id=%s variant_id=%s platform=%s: %s",
+            listing.product_id,
+            listing.variant_id,
+            listing.platform.value,
+            e,
+        )
+        session.add(
+            PlatformListingPush(
+                product_id=listing.product_id,
+                variant_id=listing.variant_id,
+                platform=listing.platform,
+                attempted_qty=qty,
+                status=ListingPushStatus.blocked,
+                error_message=str(e)[:2000],
+            )
+        )
+        await session.commit()
+        return ListingPushStatus.blocked, str(e)
     except Exception as e:
         logger.warning(
             "Listing push failed for product_id=%s variant_id=%s platform=%s: %s",
@@ -402,7 +445,7 @@ async def _push_one(session: AsyncSession, listing: Listing, qty: int) -> None:
             )
         )
         await session.commit()
-        return
+        return ListingPushStatus.error, str(e)
 
     now = datetime.now(timezone.utc)
     # last_pushed_* is the authoritative "what we last sent" watermark _push_now and the
@@ -426,3 +469,4 @@ async def _push_one(session: AsyncSession, listing: Listing, qty: int) -> None:
         )
     )
     await session.commit()
+    return ListingPushStatus.success, None

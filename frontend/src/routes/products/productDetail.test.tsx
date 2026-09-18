@@ -212,6 +212,11 @@ function withVariants(
     })),
     {
       method: "PATCH" as const,
+      path: "/variants/pricing",
+      respond: () => undefined,
+    },
+    {
+      method: "PATCH" as const,
       path: /^\/variants\/\d+$/,
       respond: (body: unknown) => body,
     },
@@ -658,6 +663,37 @@ describe("pricing paths", () => {
     expect(
       calls.some((c) => c.method === "PATCH" && c.path === "/products/1"),
     ).toBe(false);
+  });
+
+  it("saves a variable-price group as one request for every variant in it", async () => {
+    // One PATCH per variant used to exhaust the backend's connection pool on a product with
+    // a few hundred variants and fail the save part-way through.
+    const user = userEvent.setup();
+    const reds = Array.from({ length: 3 }, (_, i) =>
+      variant(40 + i, `Red ${i}`, { attribute1_value: "Red" }),
+    );
+    setRoutes(
+      withVariants([...reds, variant(50, "Blue", { attribute1_value: "Blue" })], {
+        ...PRODUCT,
+        pricing_mode: "variable",
+        pricing_variable_attribute: 1,
+        variant_attribute1_name: "Colour",
+      }),
+    );
+    await renderProductPage();
+    await user.click(pricingTab());
+
+    const groupPrice = (await screen.findAllByLabelText("Sale price (£)"))[0];
+    await user.clear(groupPrice);
+    await user.type(groupPrice, "15.00");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() =>
+      expect(calls.filter((c) => c.path === "/variants/pricing")).toHaveLength(1),
+    );
+    const { body } = calls.find((c) => c.path === "/variants/pricing")!;
+    expect(body).toMatchObject({ variant_ids: [40, 41, 42], sale_price: "15.00" });
+    expect(calls.some((c) => /^\/variants\/\d+$/.test(c.path) && c.method === "PATCH")).toBe(false);
   });
 
   it("warns before Show less hides a dirty line-price row", async () => {

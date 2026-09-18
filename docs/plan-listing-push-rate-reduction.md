@@ -20,9 +20,16 @@ still tight in practice. What landed:
   Stage 3b watermark skip covers both.
 - **Stage 4** — `listing_reconcile` loop (hourly, started from lifespan + restore),
   `_MAX_PER_RUN` = 25 per platform, `_STALE_AFTER` = 12h; also drives
-  `platform_api_usage.flush()` and `listing_push.drain_deferred()`. Structural-failure
-  marking (the "quantity must be consistent across all products" rider) is **not** done —
-  still a `docs/backlog.md` entry.
+  `platform_api_usage.flush()` and `listing_push.drain_deferred()`.
+- **Stage 4 rider (structural-failure marking)** — implemented 2026-09-18.
+  `EtsyAdapter.push_listing_quantity` detects the no-`quantity_on_property` multi-variation
+  case off the GET it already does (and classifies the matching 400 as a backstop) and
+  raises `PlatformPushBlockedError`; `_push_one` records it as
+  `ListingPushStatus.blocked`; the sweep backs those off to `_BLOCKED_RECHECK_AFTER` = 7
+  days instead of retrying hourly forever; `sync_status` reports `blocked_push_count`
+  separately from `failing_push_count`, and the UI asks the seller to fix the listing
+  rather than promising a retry. Closes both the "Etsy quantity pushes fail permanently"
+  and "Periodic reconciliation for failed listing pushes" backlog entries.
 
 Original plan follows.
 
