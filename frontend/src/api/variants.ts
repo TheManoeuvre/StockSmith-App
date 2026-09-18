@@ -14,6 +14,14 @@ export const variantsApi = {
       platform_fee_percent?: string | null;
     }
   ) => api.patch<Variant>(`/variants/${id}`, input),
+  // One request for a whole pricing group. Saving a group as one PATCH per variant
+  // exhausted the backend's connection pool on products with hundreds of variants.
+  updatePricing: (input: {
+    variant_ids: number[];
+    sale_price: string | null;
+    shipping_profile_id: number | null;
+    platform_fee_percent: string | null;
+  }) => api.patch<void>(`/variants/pricing`, input),
   remove: (id: number) => api.delete<void>(`/variants/${id}`),
   replaceBomOverrides: (id: number, overrides: VariantBomLine[]) =>
     api.put<Variant>(`/variants/${id}/bom-overrides`, overrides),
