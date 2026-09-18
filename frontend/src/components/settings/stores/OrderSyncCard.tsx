@@ -133,6 +133,7 @@ export function OrderSyncCard({
       setCommitResult(result);
       afterRun();
       queryClient.invalidateQueries({ queryKey: ["orders"] });
+      queryClient.invalidateQueries({ queryKey: ["order-counts"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
     },
   });
