@@ -19,6 +19,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useSyncExternalS
  *   variant-attributes                       Generate variants form
  *   stock/build, stock/adjust                Stock tab's two command forms
  *   assets/${assetType}                      Asset URL import fields
+ *   stores/${platform}/listing-setup         Stores tab's per-platform listing copy + profile
  *   pricing/product                          product-mode price form
  *   pricing/group-${attributeValue}          variable-mode group forms
  *   pricing/line-${variantId}/price          line-mode per-variant forms

@@ -1,0 +1,138 @@
+name: Dev build
+
+# Builds an installer from any branch, on demand, and attaches it to the run as a
+# downloadable artifact. Nothing is tagged, nothing is released, and the installed app's
+# auto-updater never sees the result — this exists so a build of unreleased work can be
+# tried out without spending a version number on it.
+#
+# Deliberately a separate workflow rather than a flag on release.yml: everything that makes
+# a release a release (the version/tag agreement check, the changelog extraction, the draft
+# release, the stale-draft cleanup) is exactly what has to be skipped here, so sharing the
+# file would mean guarding almost every step on the same condition.
+#
+# Windows-only for the same reason as release.yml: the app only ships as a Windows build.
+
+on:
+  workflow_dispatch:
+
+# No `contents: write` — unlike release.yml this job publishes nothing back to the repo.
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # release.yml has no cache: a release is cut rarely and a cold compile there is
+      # acceptable. A dev build is meant to be run casually and repeatedly, so the several
+      # minutes this saves is the difference between a usable loop and one nobody uses.
+      # Same key as the tauri job in tests.yml.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: frontend/src-tauri
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: lts/*
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      # Pinned to a full version, matching release.yml and tests.yml — setup-uv stopped
+      # publishing major tags at v8. Keep all three in step.
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Install frontend dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Install backend dependencies
+        run: uv sync --group build
+        working-directory: backend
+
+      # Same as release.yml: bundled into the exe by stocksmith-backend.spec and read back
+      # at startup. Included here so a dev build behaves like a real one rather than
+      # silently losing Pushover notifications — which would look like a regression in the
+      # change being tested. Read through env rather than interpolated into the script
+      # body, same script-injection reasoning as release.yml. Skipped when the secret is
+      # unset, so the build still succeeds with Pushover simply unavailable.
+      - name: Write packaged Pushover token
+        shell: pwsh
+        env:
+          PUSHOVER_APP_API_TOKEN: ${{ secrets.PUSHOVER_APP_API_TOKEN }}
+        run: |
+          if ($env:PUSHOVER_APP_API_TOKEN) {
+            "PUSHOVER_APP_API_TOKEN=$env:PUSHOVER_APP_API_TOKEN" | Out-File -FilePath backend/.env.packaging -Encoding utf8 -NoNewline
+          }
+
+      - name: Build backend sidecar
+        run: powershell -File backend/build.ps1
+
+      # The signing keypair is needed even though nothing is being released:
+      # tauri.conf.json sets bundle.createUpdaterArtifacts, and the bundler refuses to
+      # produce updater artifacts for a config that names a public key without the matching
+      # private one. The signature it produces is never published or served to anyone.
+      #
+      # Unlike release.yml this runs on branches, so it is worth being explicit about what
+      # that does and does not expose: workflow_dispatch can only be triggered by someone
+      # with write access to this repository, and secrets are not available to workflows
+      # running from forks, so a fork's pull request cannot reach these.
+      - name: Build the installer
+        run: npm run tauri build
+        working-directory: frontend
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      # Every dev build carries whatever version tauri.conf.json currently says, and the app
+      # displays no build identifier anywhere, so two installers built from different commits
+      # are indistinguishable once downloaded. The artifact name and this file are therefore
+      # the only way to tell which commit a given installer came from — worth having before
+      # the second dev build exists, not after.
+      #
+      # The branch name goes through a sanitiser because artifact names cannot contain the
+      # path separator in a branch like `claude/some-work`, and an invalid name fails the
+      # upload after the whole build has already been paid for.
+      - name: Record what this build is
+        id: buildinfo
+        shell: pwsh
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          $shortSha = "${{ github.sha }}".Substring(0, 7)
+          $subject = git log -1 --pretty=%s
+          $bundleDir = "frontend/src-tauri/target/release/bundle/nsis"
+          @(
+            "Branch:  $env:REF_NAME"
+            "Commit:  ${{ github.sha }}"
+            "Subject: $subject"
+            "Built:   $((Get-Date).ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ss')) UTC"
+            "Run:     ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            ""
+            "This is an unreleased development build. It installs over any existing"
+            "StockSmith and shares its %LOCALAPPDATA%\StockSmith\ data folder, so back that"
+            "folder up first if it holds real data."
+          ) | Out-File -FilePath "$bundleDir/BUILD-INFO.txt" -Encoding utf8
+
+          $safeBranch = $env:REF_NAME -replace '[\\/:<>|*?"]', '-'
+          "name=stocksmith-dev-$safeBranch-$shortSha" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      # Only the installer and its build-info file. The bundle directory also holds the
+      # updater artifacts and their signature, which are meaningless outside a release and
+      # would only invite someone to publish one by hand.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.buildinfo.outputs.name }}
+          path: |
+            frontend/src-tauri/target/release/bundle/nsis/*-setup.exe
+            frontend/src-tauri/target/release/bundle/nsis/BUILD-INFO.txt
+          if-no-files-found: error
+          # Shorter than the 90-day default: these are throwaway builds, and the commit they
+          # came from is always still there to rebuild from.
+          retention-days: 30

@@ -9,58 +9,33 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as IndexRouteImport } from './routes/index'
-import { Route as MaterialsRouteRouteImport } from './routes/materials/route'
-import { Route as OrdersRouteRouteImport } from './routes/orders/route'
-import { Route as ProductsRouteRouteImport } from './routes/products/route'
-import { Route as PurchasesRouteRouteImport } from './routes/purchases/route'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as StockTakesRouteRouteImport } from './routes/stock-takes/route'
-import { Route as DevBomPreviewRouteImport } from './routes/dev.bom-preview'
-import { Route as ManufacturersIndexRouteImport } from './routes/manufacturers/index'
-import { Route as MaterialLabelMaterialIdRouteImport } from './routes/material-label.$materialId'
-import { Route as MaterialTypesIndexRouteImport } from './routes/material-types/index'
-import { Route as MaterialsIndexRouteImport } from './routes/materials/index'
-import { Route as MaterialsMaterialIdRouteImport } from './routes/materials/$materialId'
-import { Route as OrdersIndexRouteImport } from './routes/orders/index'
-import { Route as OrdersOrderIdRouteImport } from './routes/orders/$orderId'
-import { Route as OrdersNewRouteImport } from './routes/orders/new'
-import { Route as ProductLabelProductIdRouteImport } from './routes/product-label.$productId'
-import { Route as ProductsIndexRouteImport } from './routes/products/index'
-import { Route as ProductsProductIdRouteImport } from './routes/products/$productId'
-import { Route as PurchasesIndexRouteImport } from './routes/purchases/index'
-import { Route as PurchasesPurchaseIdRouteImport } from './routes/purchases/$purchaseId'
-import { Route as PurchasesNewRouteImport } from './routes/purchases/new'
-import { Route as StockTakesIndexRouteImport } from './routes/stock-takes/index'
-import { Route as StockTakesStockTakeIdRouteImport } from './routes/stock-takes/$stockTakeId'
-import { Route as StockTakesUnresolvedRouteImport } from './routes/stock-takes/unresolved'
+import { Route as PurchasesRouteRouteImport } from './routes/purchases/route'
+import { Route as ProductsRouteRouteImport } from './routes/products/route'
+import { Route as OrdersRouteRouteImport } from './routes/orders/route'
+import { Route as MaterialsRouteRouteImport } from './routes/materials/route'
+import { Route as IndexRouteImport } from './routes/index'
 import { Route as SuppliersIndexRouteImport } from './routes/suppliers/index'
+import { Route as StockTakesIndexRouteImport } from './routes/stock-takes/index'
+import { Route as PurchasesIndexRouteImport } from './routes/purchases/index'
+import { Route as ProductsIndexRouteImport } from './routes/products/index'
+import { Route as OrdersIndexRouteImport } from './routes/orders/index'
+import { Route as MaterialsIndexRouteImport } from './routes/materials/index'
+import { Route as MaterialTypesIndexRouteImport } from './routes/material-types/index'
+import { Route as ManufacturersIndexRouteImport } from './routes/manufacturers/index'
+import { Route as StockTakesUnresolvedRouteImport } from './routes/stock-takes/unresolved'
+import { Route as StockTakesStockTakeIdRouteImport } from './routes/stock-takes/$stockTakeId'
+import { Route as PurchasesNewRouteImport } from './routes/purchases/new'
+import { Route as PurchasesPurchaseIdRouteImport } from './routes/purchases/$purchaseId'
+import { Route as ProductsProductIdRouteImport } from './routes/products/$productId'
+import { Route as ProductLabelProductIdRouteImport } from './routes/product-label.$productId'
+import { Route as OrdersNewRouteImport } from './routes/orders/new'
+import { Route as OrdersOrderIdRouteImport } from './routes/orders/$orderId'
+import { Route as MaterialsMaterialIdRouteImport } from './routes/materials/$materialId'
+import { Route as MaterialLabelMaterialIdRouteImport } from './routes/material-label.$materialId'
+import { Route as DevBomPreviewRouteImport } from './routes/dev.bom-preview'
 
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MaterialsRouteRoute = MaterialsRouteRouteImport.update({
-  id: '/materials',
-  path: '/materials',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const OrdersRouteRoute = OrdersRouteRouteImport.update({
-  id: '/orders',
-  path: '/orders',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ProductsRouteRoute = ProductsRouteRouteImport.update({
-  id: '/products',
-  path: '/products',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const PurchasesRouteRoute = PurchasesRouteRouteImport.update({
-  id: '/purchases',
-  path: '/purchases',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const SettingsRoute = SettingsRouteImport.update({
   id: '/settings',
   path: '/settings',
@@ -71,9 +46,64 @@ const StockTakesRouteRoute = StockTakesRouteRouteImport.update({
   path: '/stock-takes',
   getParentRoute: () => rootRouteImport,
 } as any)
-const DevBomPreviewRoute = DevBomPreviewRouteImport.update({
-  id: '/dev/bom-preview',
-  path: '/dev/bom-preview',
+const PurchasesRouteRoute = PurchasesRouteRouteImport.update({
+  id: '/purchases',
+  path: '/purchases',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ProductsRouteRoute = ProductsRouteRouteImport.update({
+  id: '/products',
+  path: '/products',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OrdersRouteRoute = OrdersRouteRouteImport.update({
+  id: '/orders',
+  path: '/orders',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MaterialsRouteRoute = MaterialsRouteRouteImport.update({
+  id: '/materials',
+  path: '/materials',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SuppliersIndexRoute = SuppliersIndexRouteImport.update({
+  id: '/suppliers/',
+  path: '/suppliers/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const StockTakesIndexRoute = StockTakesIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => StockTakesRouteRoute,
+} as any)
+const PurchasesIndexRoute = PurchasesIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => PurchasesRouteRoute,
+} as any)
+const ProductsIndexRoute = ProductsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ProductsRouteRoute,
+} as any)
+const OrdersIndexRoute = OrdersIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => OrdersRouteRoute,
+} as any)
+const MaterialsIndexRoute = MaterialsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => MaterialsRouteRoute,
+} as any)
+const MaterialTypesIndexRoute = MaterialTypesIndexRouteImport.update({
+  id: '/material-types/',
+  path: '/material-types/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ManufacturersIndexRoute = ManufacturersIndexRouteImport.update({
@@ -81,74 +111,9 @@ const ManufacturersIndexRoute = ManufacturersIndexRouteImport.update({
   path: '/manufacturers/',
   getParentRoute: () => rootRouteImport,
 } as any)
-const MaterialLabelMaterialIdRoute = MaterialLabelMaterialIdRouteImport.update({
-  id: '/material-label/$materialId',
-  path: '/material-label/$materialId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MaterialTypesIndexRoute = MaterialTypesIndexRouteImport.update({
-  id: '/material-types/',
-  path: '/material-types/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const MaterialsIndexRoute = MaterialsIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => MaterialsRouteRoute,
-} as any)
-const MaterialsMaterialIdRoute = MaterialsMaterialIdRouteImport.update({
-  id: '/$materialId',
-  path: '/$materialId',
-  getParentRoute: () => MaterialsRouteRoute,
-} as any)
-const OrdersIndexRoute = OrdersIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => OrdersRouteRoute,
-} as any)
-const OrdersOrderIdRoute = OrdersOrderIdRouteImport.update({
-  id: '/$orderId',
-  path: '/$orderId',
-  getParentRoute: () => OrdersRouteRoute,
-} as any)
-const OrdersNewRoute = OrdersNewRouteImport.update({
-  id: '/new',
-  path: '/new',
-  getParentRoute: () => OrdersRouteRoute,
-} as any)
-const ProductLabelProductIdRoute = ProductLabelProductIdRouteImport.update({
-  id: '/product-label/$productId',
-  path: '/product-label/$productId',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ProductsIndexRoute = ProductsIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => ProductsRouteRoute,
-} as any)
-const ProductsProductIdRoute = ProductsProductIdRouteImport.update({
-  id: '/$productId',
-  path: '/$productId',
-  getParentRoute: () => ProductsRouteRoute,
-} as any)
-const PurchasesIndexRoute = PurchasesIndexRouteImport.update({
-  id: '/',
-  path: '/',
-  getParentRoute: () => PurchasesRouteRoute,
-} as any)
-const PurchasesPurchaseIdRoute = PurchasesPurchaseIdRouteImport.update({
-  id: '/$purchaseId',
-  path: '/$purchaseId',
-  getParentRoute: () => PurchasesRouteRoute,
-} as any)
-const PurchasesNewRoute = PurchasesNewRouteImport.update({
-  id: '/new',
-  path: '/new',
-  getParentRoute: () => PurchasesRouteRoute,
-} as any)
-const StockTakesIndexRoute = StockTakesIndexRouteImport.update({
-  id: '/',
-  path: '/',
+const StockTakesUnresolvedRoute = StockTakesUnresolvedRouteImport.update({
+  id: '/unresolved',
+  path: '/unresolved',
   getParentRoute: () => StockTakesRouteRoute,
 } as any)
 const StockTakesStockTakeIdRoute = StockTakesStockTakeIdRouteImport.update({
@@ -156,14 +121,49 @@ const StockTakesStockTakeIdRoute = StockTakesStockTakeIdRouteImport.update({
   path: '/$stockTakeId',
   getParentRoute: () => StockTakesRouteRoute,
 } as any)
-const StockTakesUnresolvedRoute = StockTakesUnresolvedRouteImport.update({
-  id: '/unresolved',
-  path: '/unresolved',
-  getParentRoute: () => StockTakesRouteRoute,
+const PurchasesNewRoute = PurchasesNewRouteImport.update({
+  id: '/new',
+  path: '/new',
+  getParentRoute: () => PurchasesRouteRoute,
 } as any)
-const SuppliersIndexRoute = SuppliersIndexRouteImport.update({
-  id: '/suppliers/',
-  path: '/suppliers/',
+const PurchasesPurchaseIdRoute = PurchasesPurchaseIdRouteImport.update({
+  id: '/$purchaseId',
+  path: '/$purchaseId',
+  getParentRoute: () => PurchasesRouteRoute,
+} as any)
+const ProductsProductIdRoute = ProductsProductIdRouteImport.update({
+  id: '/$productId',
+  path: '/$productId',
+  getParentRoute: () => ProductsRouteRoute,
+} as any)
+const ProductLabelProductIdRoute = ProductLabelProductIdRouteImport.update({
+  id: '/product-label/$productId',
+  path: '/product-label/$productId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OrdersNewRoute = OrdersNewRouteImport.update({
+  id: '/new',
+  path: '/new',
+  getParentRoute: () => OrdersRouteRoute,
+} as any)
+const OrdersOrderIdRoute = OrdersOrderIdRouteImport.update({
+  id: '/$orderId',
+  path: '/$orderId',
+  getParentRoute: () => OrdersRouteRoute,
+} as any)
+const MaterialsMaterialIdRoute = MaterialsMaterialIdRouteImport.update({
+  id: '/$materialId',
+  path: '/$materialId',
+  getParentRoute: () => MaterialsRouteRoute,
+} as any)
+const MaterialLabelMaterialIdRoute = MaterialLabelMaterialIdRouteImport.update({
+  id: '/material-label/$materialId',
+  path: '/material-label/$materialId',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DevBomPreviewRoute = DevBomPreviewRouteImport.update({
+  id: '/dev/bom-preview',
+  path: '/dev/bom-preview',
   getParentRoute: () => rootRouteImport,
 } as any)
 
@@ -347,41 +347,6 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/materials': {
-      id: '/materials'
-      path: '/materials'
-      fullPath: '/materials'
-      preLoaderRoute: typeof MaterialsRouteRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/orders': {
-      id: '/orders'
-      path: '/orders'
-      fullPath: '/orders'
-      preLoaderRoute: typeof OrdersRouteRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/products': {
-      id: '/products'
-      path: '/products'
-      fullPath: '/products'
-      preLoaderRoute: typeof ProductsRouteRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/purchases': {
-      id: '/purchases'
-      path: '/purchases'
-      fullPath: '/purchases'
-      preLoaderRoute: typeof PurchasesRouteRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/settings': {
       id: '/settings'
       path: '/settings'
@@ -396,11 +361,88 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StockTakesRouteRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/dev/bom-preview': {
-      id: '/dev/bom-preview'
-      path: '/dev/bom-preview'
-      fullPath: '/dev/bom-preview'
-      preLoaderRoute: typeof DevBomPreviewRouteImport
+    '/purchases': {
+      id: '/purchases'
+      path: '/purchases'
+      fullPath: '/purchases'
+      preLoaderRoute: typeof PurchasesRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/products': {
+      id: '/products'
+      path: '/products'
+      fullPath: '/products'
+      preLoaderRoute: typeof ProductsRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/orders': {
+      id: '/orders'
+      path: '/orders'
+      fullPath: '/orders'
+      preLoaderRoute: typeof OrdersRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/materials': {
+      id: '/materials'
+      path: '/materials'
+      fullPath: '/materials'
+      preLoaderRoute: typeof MaterialsRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/suppliers/': {
+      id: '/suppliers/'
+      path: '/suppliers'
+      fullPath: '/suppliers/'
+      preLoaderRoute: typeof SuppliersIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/stock-takes/': {
+      id: '/stock-takes/'
+      path: '/'
+      fullPath: '/stock-takes/'
+      preLoaderRoute: typeof StockTakesIndexRouteImport
+      parentRoute: typeof StockTakesRouteRoute
+    }
+    '/purchases/': {
+      id: '/purchases/'
+      path: '/'
+      fullPath: '/purchases/'
+      preLoaderRoute: typeof PurchasesIndexRouteImport
+      parentRoute: typeof PurchasesRouteRoute
+    }
+    '/products/': {
+      id: '/products/'
+      path: '/'
+      fullPath: '/products/'
+      preLoaderRoute: typeof ProductsIndexRouteImport
+      parentRoute: typeof ProductsRouteRoute
+    }
+    '/orders/': {
+      id: '/orders/'
+      path: '/'
+      fullPath: '/orders/'
+      preLoaderRoute: typeof OrdersIndexRouteImport
+      parentRoute: typeof OrdersRouteRoute
+    }
+    '/materials/': {
+      id: '/materials/'
+      path: '/'
+      fullPath: '/materials/'
+      preLoaderRoute: typeof MaterialsIndexRouteImport
+      parentRoute: typeof MaterialsRouteRoute
+    }
+    '/material-types/': {
+      id: '/material-types/'
+      path: '/material-types'
+      fullPath: '/material-types/'
+      preLoaderRoute: typeof MaterialTypesIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/manufacturers/': {
@@ -410,102 +452,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ManufacturersIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/material-label/$materialId': {
-      id: '/material-label/$materialId'
-      path: '/material-label/$materialId'
-      fullPath: '/material-label/$materialId'
-      preLoaderRoute: typeof MaterialLabelMaterialIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/material-types/': {
-      id: '/material-types/'
-      path: '/material-types'
-      fullPath: '/material-types/'
-      preLoaderRoute: typeof MaterialTypesIndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/materials/': {
-      id: '/materials/'
-      path: '/'
-      fullPath: '/materials/'
-      preLoaderRoute: typeof MaterialsIndexRouteImport
-      parentRoute: typeof MaterialsRouteRoute
-    }
-    '/materials/$materialId': {
-      id: '/materials/$materialId'
-      path: '/$materialId'
-      fullPath: '/materials/$materialId'
-      preLoaderRoute: typeof MaterialsMaterialIdRouteImport
-      parentRoute: typeof MaterialsRouteRoute
-    }
-    '/orders/': {
-      id: '/orders/'
-      path: '/'
-      fullPath: '/orders/'
-      preLoaderRoute: typeof OrdersIndexRouteImport
-      parentRoute: typeof OrdersRouteRoute
-    }
-    '/orders/$orderId': {
-      id: '/orders/$orderId'
-      path: '/$orderId'
-      fullPath: '/orders/$orderId'
-      preLoaderRoute: typeof OrdersOrderIdRouteImport
-      parentRoute: typeof OrdersRouteRoute
-    }
-    '/orders/new': {
-      id: '/orders/new'
-      path: '/new'
-      fullPath: '/orders/new'
-      preLoaderRoute: typeof OrdersNewRouteImport
-      parentRoute: typeof OrdersRouteRoute
-    }
-    '/product-label/$productId': {
-      id: '/product-label/$productId'
-      path: '/product-label/$productId'
-      fullPath: '/product-label/$productId'
-      preLoaderRoute: typeof ProductLabelProductIdRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/products/': {
-      id: '/products/'
-      path: '/'
-      fullPath: '/products/'
-      preLoaderRoute: typeof ProductsIndexRouteImport
-      parentRoute: typeof ProductsRouteRoute
-    }
-    '/products/$productId': {
-      id: '/products/$productId'
-      path: '/$productId'
-      fullPath: '/products/$productId'
-      preLoaderRoute: typeof ProductsProductIdRouteImport
-      parentRoute: typeof ProductsRouteRoute
-    }
-    '/purchases/': {
-      id: '/purchases/'
-      path: '/'
-      fullPath: '/purchases/'
-      preLoaderRoute: typeof PurchasesIndexRouteImport
-      parentRoute: typeof PurchasesRouteRoute
-    }
-    '/purchases/$purchaseId': {
-      id: '/purchases/$purchaseId'
-      path: '/$purchaseId'
-      fullPath: '/purchases/$purchaseId'
-      preLoaderRoute: typeof PurchasesPurchaseIdRouteImport
-      parentRoute: typeof PurchasesRouteRoute
-    }
-    '/purchases/new': {
-      id: '/purchases/new'
-      path: '/new'
-      fullPath: '/purchases/new'
-      preLoaderRoute: typeof PurchasesNewRouteImport
-      parentRoute: typeof PurchasesRouteRoute
-    }
-    '/stock-takes/': {
-      id: '/stock-takes/'
-      path: '/'
-      fullPath: '/stock-takes/'
-      preLoaderRoute: typeof StockTakesIndexRouteImport
+    '/stock-takes/unresolved': {
+      id: '/stock-takes/unresolved'
+      path: '/unresolved'
+      fullPath: '/stock-takes/unresolved'
+      preLoaderRoute: typeof StockTakesUnresolvedRouteImport
       parentRoute: typeof StockTakesRouteRoute
     }
     '/stock-takes/$stockTakeId': {
@@ -515,18 +466,67 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StockTakesStockTakeIdRouteImport
       parentRoute: typeof StockTakesRouteRoute
     }
-    '/stock-takes/unresolved': {
-      id: '/stock-takes/unresolved'
-      path: '/unresolved'
-      fullPath: '/stock-takes/unresolved'
-      preLoaderRoute: typeof StockTakesUnresolvedRouteImport
-      parentRoute: typeof StockTakesRouteRoute
+    '/purchases/new': {
+      id: '/purchases/new'
+      path: '/new'
+      fullPath: '/purchases/new'
+      preLoaderRoute: typeof PurchasesNewRouteImport
+      parentRoute: typeof PurchasesRouteRoute
     }
-    '/suppliers/': {
-      id: '/suppliers/'
-      path: '/suppliers'
-      fullPath: '/suppliers/'
-      preLoaderRoute: typeof SuppliersIndexRouteImport
+    '/purchases/$purchaseId': {
+      id: '/purchases/$purchaseId'
+      path: '/$purchaseId'
+      fullPath: '/purchases/$purchaseId'
+      preLoaderRoute: typeof PurchasesPurchaseIdRouteImport
+      parentRoute: typeof PurchasesRouteRoute
+    }
+    '/products/$productId': {
+      id: '/products/$productId'
+      path: '/$productId'
+      fullPath: '/products/$productId'
+      preLoaderRoute: typeof ProductsProductIdRouteImport
+      parentRoute: typeof ProductsRouteRoute
+    }
+    '/product-label/$productId': {
+      id: '/product-label/$productId'
+      path: '/product-label/$productId'
+      fullPath: '/product-label/$productId'
+      preLoaderRoute: typeof ProductLabelProductIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/orders/new': {
+      id: '/orders/new'
+      path: '/new'
+      fullPath: '/orders/new'
+      preLoaderRoute: typeof OrdersNewRouteImport
+      parentRoute: typeof OrdersRouteRoute
+    }
+    '/orders/$orderId': {
+      id: '/orders/$orderId'
+      path: '/$orderId'
+      fullPath: '/orders/$orderId'
+      preLoaderRoute: typeof OrdersOrderIdRouteImport
+      parentRoute: typeof OrdersRouteRoute
+    }
+    '/materials/$materialId': {
+      id: '/materials/$materialId'
+      path: '/$materialId'
+      fullPath: '/materials/$materialId'
+      preLoaderRoute: typeof MaterialsMaterialIdRouteImport
+      parentRoute: typeof MaterialsRouteRoute
+    }
+    '/material-label/$materialId': {
+      id: '/material-label/$materialId'
+      path: '/material-label/$materialId'
+      fullPath: '/material-label/$materialId'
+      preLoaderRoute: typeof MaterialLabelMaterialIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/dev/bom-preview': {
+      id: '/dev/bom-preview'
+      path: '/dev/bom-preview'
+      fullPath: '/dev/bom-preview'
+      preLoaderRoute: typeof DevBomPreviewRouteImport
       parentRoute: typeof rootRouteImport
     }
   }
