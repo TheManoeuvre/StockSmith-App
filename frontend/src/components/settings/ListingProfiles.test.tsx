@@ -15,7 +15,6 @@ const ETSY_PROFILE = {
   id: 1,
   platform: "etsy",
   name: "3D printed home",
-  is_default: true,
   etsy_taxonomy_id: 1234,
   etsy_who_made: "i_did",
   etsy_when_made: "made_to_order",
@@ -76,10 +75,12 @@ it("says plainly that nothing can be drafted when there are no profiles", async 
   expect(await screen.findByText(/can't be drafted to Etsy until one exists/)).toBeTruthy();
 });
 
-it("marks which profile is the default", async () => {
+it("lists profiles without singling one out as a default", async () => {
+  // There is no default: every product picks its own profile on its listing setup.
   renderPanel();
   expect(await screen.findByText("3D printed home")).toBeTruthy();
-  expect(screen.getByText("Default")).toBeTruthy();
+  expect(screen.queryByText("Default")).toBeNull();
+  expect(screen.queryByLabelText(/by default/)).toBeNull();
 });
 
 it("asks Etsy's questions on Etsy and eBay's on eBay", async () => {
@@ -205,7 +206,7 @@ it("confirms before deleting, and says what happens to the products using it", a
   await userEvent.click(await screen.findByText("Delete"));
 
   const dialog = screen.getByRole("dialog");
-  expect(within(dialog).getByText(/fall back to the default profile/)).toBeTruthy();
+  expect(within(dialog).getByText(/will have no profile until you pick another/)).toBeTruthy();
   // Nothing is sent until the dialog is confirmed.
   expect(calls.filter((c) => c.method === "DELETE")).toHaveLength(0);
 

@@ -15,7 +15,7 @@ from decimal import Decimal
 import pytest
 
 from app.models.listing import ListingPlatform
-from app.models.listing_profile import ListingProfile
+from app.models.listing_profile import ListingProfile, ProductPlatformSettings
 from app.models.product import Product
 from app.models.variant import ProductVariant
 from app.services.draft_listing import build_draft, push_draft
@@ -75,13 +75,12 @@ class RecordingEtsy(EtsyAdapter):
 
 
 async def _setup(session, *, variants, attributes=("Studs", "Colour"), stock=5):
-    session.add(
-        ListingProfile(
-            platform=ETSY, name="Handmade", is_default=True, etsy_taxonomy_id=1234,
-            etsy_who_made="i_did", etsy_when_made="made_to_order", etsy_is_supply=False,
-            etsy_shipping_profile_id=99, etsy_readiness_state_id=7,
-        )
+    profile = ListingProfile(
+        platform=ETSY, name="Handmade", etsy_taxonomy_id=1234,
+        etsy_who_made="i_did", etsy_when_made="made_to_order", etsy_is_supply=False,
+        etsy_shipping_profile_id=99, etsy_readiness_state_id=7,
     )
+    session.add(profile)
     names = list(attributes) + [None] * (3 - len(attributes))
     product = Product(
         name="Brick Pencil Pot", sku="SKU-0037", description="A pot.",
@@ -90,6 +89,8 @@ async def _setup(session, *, variants, attributes=("Studs", "Colour"), stock=5):
         variant_attribute3_name=names[2],
     )
     session.add(product)
+    await session.flush()
+    session.add(ProductPlatformSettings(product_id=product.id, platform=ETSY, listing_profile_id=profile.id))
     await session.commit()
 
     for name, values, price, qty in variants:

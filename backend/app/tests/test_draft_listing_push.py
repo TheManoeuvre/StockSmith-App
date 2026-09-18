@@ -15,7 +15,7 @@ from sqlalchemy import select
 
 from app.models.asset import AssetType, ProductAsset
 from app.models.listing import Listing, ListingPlatform
-from app.models.listing_profile import ListingProfile
+from app.models.listing_profile import ListingProfile, ProductPlatformSettings
 from app.models.product import Product
 from app.models.variant import ProductVariant
 from app.services import draft_listing
@@ -50,7 +50,6 @@ async def _profile(session, **overrides) -> ListingProfile:
     fields = dict(
         platform=ETSY,
         name="Handmade",
-        is_default=True,
         etsy_taxonomy_id=1234,
         etsy_who_made="i_did",
         etsy_when_made="made_to_order",
@@ -76,6 +75,12 @@ async def _product(session, **overrides) -> Product:
     fields.update(overrides)
     product = Product(**fields)
     session.add(product)
+    await session.flush()
+    # Nothing applies a profile to a product by itself — there is no platform default —
+    # so a product here is pointed at the profile the test made, when it made one.
+    profile = (await session.execute(select(ListingProfile).where(ListingProfile.platform == ETSY))).scalars().first()
+    if profile is not None:
+        session.add(ProductPlatformSettings(product_id=product.id, platform=ETSY, listing_profile_id=profile.id))
     await session.commit()
     return product
 

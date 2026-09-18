@@ -5,7 +5,6 @@ from app.models.listing import ListingPlatform
 
 class ListingProfileBase(BaseModel):
     name: str
-    is_default: bool = False
 
     etsy_taxonomy_id: int | None = None
     etsy_who_made: str | None = None
@@ -43,7 +42,6 @@ class ListingProfileUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str | None = None
-    is_default: bool | None = None
 
     etsy_taxonomy_id: int | None = None
     etsy_who_made: str | None = None

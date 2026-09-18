@@ -182,8 +182,8 @@ async def propose_profiles(session: AsyncSession, listings: list[dict]) -> list[
         proposal.product_ids.append(product_id)
         proposal.product_names.append(product.name)
 
-    # Most-used first: the biggest group is the one that should become the default, and
-    # putting it at the top makes that the obvious choice rather than a decision.
+    # Most-used first: the biggest group is the one most worth accepting, and putting it
+    # at the top makes that the obvious choice rather than a decision.
     return sorted(grouped.values(), key=lambda p: (-len(p.product_ids), p.suggested_name))
 
 
@@ -200,9 +200,6 @@ async def apply_proposals(
     it under, so the user can rename a suggestion before accepting it. Re-derived from a
     fresh crawl rather than trusting a previewed payload, for the same reason the value
     backfill does.
-
-    The first profile created becomes the platform default — otherwise every product would
-    report "no listing profile applies" while one plainly exists.
     """
     proposals = await propose_profiles(session, listings)
     created = 0
@@ -217,7 +214,6 @@ async def apply_proposals(
         profile = ListingProfile(
             platform=ListingPlatform.etsy,
             name=name.strip() or proposal.suggested_name,
-            is_default=False,
             etsy_taxonomy_id=signature.taxonomy_id,
             etsy_who_made=signature.who_made,
             etsy_when_made=signature.when_made,
@@ -230,9 +226,6 @@ async def apply_proposals(
         session.add(profile)
         await session.flush()
         created += 1
-
-        if await listing_profiles.get_default_profile(session, ListingPlatform.etsy) is None:
-            await listing_profiles.promote_to_default(session, ListingPlatform.etsy, profile)
 
         if assign_products:
             for product_id in proposal.product_ids:

@@ -27,8 +27,8 @@ async def _product(session, **kwargs) -> Product:
     return product
 
 
-async def _profile(session, platform=ETSY, name="Handmade", is_default=False, **kwargs) -> ListingProfile:
-    profile = ListingProfile(platform=platform, name=name, is_default=is_default, **kwargs)
+async def _profile(session, platform=ETSY, name="Handmade", **kwargs) -> ListingProfile:
+    profile = ListingProfile(platform=platform, name=name, **kwargs)
     session.add(profile)
     await session.commit()
     return profile
@@ -44,16 +44,18 @@ async def test_no_profiles_at_all_resolves_to_none(session):
 
 
 @pytest.mark.asyncio
-async def test_falls_back_to_the_platform_default(session):
+async def test_an_unchosen_profile_is_not_applied(session):
+    """There is no platform default: a profile existing is not the same as it having been
+    picked for this product, and the readiness check turns None into a blocker."""
     product = await _product(session)
-    default = await _profile(session, is_default=True)
-    assert (await listing_profiles.resolve_profile(session, product.id, ETSY)).id == default.id
+    await _profile(session, name="Handmade")
+    assert await listing_profiles.resolve_profile(session, product.id, ETSY) is None
 
 
 @pytest.mark.asyncio
-async def test_a_products_own_profile_beats_the_default(session):
+async def test_a_products_chosen_profile_is_used(session):
     product = await _product(session)
-    await _profile(session, name="Default", is_default=True)
+    await _profile(session, name="Handmade")
     special = await _profile(session, name="Vintage")
     session.add(
         ProductPlatformSettings(product_id=product.id, platform=ETSY, listing_profile_id=special.id)
@@ -66,37 +68,26 @@ async def test_a_products_own_profile_beats_the_default(session):
 @pytest.mark.asyncio
 async def test_profiles_do_not_leak_across_platforms(session):
     product = await _product(session)
-    await _profile(session, platform=ETSY, name="Etsy default", is_default=True)
+    etsy_only = await _profile(session, platform=ETSY, name="Etsy handmade")
+    session.add(
+        ProductPlatformSettings(product_id=product.id, platform=ETSY, listing_profile_id=etsy_only.id)
+    )
+    await session.commit()
     assert await listing_profiles.resolve_profile(session, product.id, EBAY) is None
 
 
 @pytest.mark.asyncio
-async def test_marking_a_new_default_demotes_the_old_one(session):
-    """A partial unique index allows only one default per platform, so this has to be
-    applied as a rule rather than surfaced as a constraint error the user can't act on."""
-    first = await _profile(session, name="First", is_default=True)
-    second = await _profile(session, name="Second")
-
-    await listing_profiles.promote_to_default(session, ETSY, second)
-    await session.commit()
-
-    await session.refresh(first)
-    assert first.is_default is False
-    assert (await listing_profiles.get_default_profile(session, ETSY)).id == second.id
-
-
-@pytest.mark.asyncio
-async def test_default_profile_is_listed_first(session):
+async def test_profiles_are_listed_alphabetically(session):
+    await _profile(session, name="Zzz")
     await _profile(session, name="Aaa")
-    await _profile(session, name="Zzz", is_default=True)
     names = [p.name for p in await listing_profiles.list_profiles(session, ETSY)]
-    assert names == ["Zzz", "Aaa"]
+    assert names == ["Aaa", "Zzz"]
 
 
 @pytest.mark.asyncio
 async def test_deleting_a_profile_leaves_the_products_settings_intact(session):
-    """ON DELETE SET NULL: the product drops back to the platform default rather than
-    losing its listing copy along with the profile."""
+    """ON DELETE SET NULL: the product is left with no profile rather than losing its
+    listing copy along with it."""
     product = await _product(session)
     profile = await _profile(session, name="Doomed")
     session.add(
@@ -184,63 +175,3 @@ def test_missing_description_everywhere_resolves_to_none():
     assert copy.description is None
     assert copy.description_source == "missing"
 
-
-# --- router paths for the default flag ---
-#
-# Driven through the endpoint functions rather than the service, because the ordering bug
-# these cover lived in the router: it set is_default before demoting the incumbent, and
-# the next query autoflushed two defaults into a partial unique index that permits one.
-
-
-@pytest.mark.asyncio
-async def test_first_profile_becomes_the_default_without_being_asked(session):
-    from app.routers.platform_config import create_listing_profile
-    from app.schemas.listing_profile import ListingProfileCreate
-
-    created = await create_listing_profile(ETSY, ListingProfileCreate(name="Handmade"), session)
-    assert created.is_default is True
-
-
-@pytest.mark.asyncio
-async def test_creating_a_second_default_demotes_the_first(session):
-    from app.routers.platform_config import create_listing_profile
-    from app.schemas.listing_profile import ListingProfileCreate
-
-    first = await create_listing_profile(ETSY, ListingProfileCreate(name="Handmade"), session)
-    second = await create_listing_profile(
-        ETSY, ListingProfileCreate(name="Vintage", is_default=True), session
-    )
-
-    await session.refresh(first)
-    assert first.is_default is False
-    assert second.is_default is True
-
-
-@pytest.mark.asyncio
-async def test_promoting_an_existing_profile_via_patch_demotes_the_incumbent(session):
-    from app.routers.platform_config import create_listing_profile, update_listing_profile
-    from app.schemas.listing_profile import ListingProfileCreate, ListingProfileUpdate
-
-    first = await create_listing_profile(ETSY, ListingProfileCreate(name="Handmade"), session)
-    second = await create_listing_profile(ETSY, ListingProfileCreate(name="Vintage"), session)
-
-    updated = await update_listing_profile(
-        ETSY, second.id, ListingProfileUpdate(is_default=True), session
-    )
-
-    await session.refresh(first)
-    assert updated.is_default is True
-    assert first.is_default is False
-
-
-@pytest.mark.asyncio
-async def test_patching_another_field_leaves_the_default_flag_alone(session):
-    from app.routers.platform_config import create_listing_profile, update_listing_profile
-    from app.schemas.listing_profile import ListingProfileCreate, ListingProfileUpdate
-
-    profile = await create_listing_profile(ETSY, ListingProfileCreate(name="Handmade"), session)
-    updated = await update_listing_profile(
-        ETSY, profile.id, ListingProfileUpdate(etsy_taxonomy_id=1234), session
-    )
-    assert updated.is_default is True
-    assert updated.etsy_taxonomy_id == 1234
