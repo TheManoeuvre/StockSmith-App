@@ -20,10 +20,12 @@ export function StockPushesCard({
   platform,
   summary,
   failingPushCount,
+  blockedPushCount,
 }: {
   platform: ListingPlatform;
   summary: PlatformSyncSummary | undefined;
   failingPushCount: number;
+  blockedPushCount: number;
 }) {
   const label = PLATFORM_LABELS[platform];
   const queryClient = useQueryClient();
@@ -35,6 +37,9 @@ export function StockPushesCard({
     refetchInterval: 30_000,
   });
   const recentFailures = pushLog?.items.filter((p) => p.status === "error") ?? [];
+  // Blocked pushes carry the fix in their error_message (the adapter writes it for exactly
+  // this), so the detail list below is the whole of the guidance — there is nothing to add.
+  const recentBlocked = pushLog?.items.filter((p) => p.status === "blocked") ?? [];
 
   const checkAllMutation = useMutation({
     mutationFn: () => platformsApi.checkAllListings(platform),
@@ -89,7 +94,32 @@ export function StockPushesCard({
             be reached at all.
           </p>
         </div>
-      ) : (
+      ) : null}
+
+      {blockedPushCount > 0 && (
+        <div className="rounded border border-amber-200 bg-amber-50 p-2.5 text-sm text-amber-800">
+          <p className="font-medium">
+            {blockedPushCount === 1 ? "One listing can't" : `${blockedPushCount} listings can't`} take a stock
+            push as {blockedPushCount === 1 ? "it's" : "they're"} currently set up on {label}.
+          </p>
+          {recentBlocked.length > 0 && (
+            <ul className="mt-1 list-disc pl-5 text-xs">
+              {recentBlocked.slice(0, 5).map((p) => (
+                <li key={p.id}>
+                  {p.product_name ?? `Product #${p.product_id}`}
+                  {p.variant_name ? ` — ${p.variant_name}` : ""}: {p.error_message ?? "unknown reason"}
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="mt-1 text-xs">
+            Retrying won't help until the listing changes, so StockSmith has stopped trying — it re-checks
+            weekly, or use Push corrections on the product as soon as you've fixed it.
+          </p>
+        </div>
+      )}
+
+      {failingPushCount === 0 && blockedPushCount === 0 && (
         <p className="text-sm text-slate-600">Recent pushes all landed.</p>
       )}
 

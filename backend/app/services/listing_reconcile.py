@@ -8,6 +8,10 @@ was never retried, or a listing whose stock simply never changes. This loop is t
 something: a slow, bounded sweep that re-resolves each listing's target quantity and
 pushes only on a real difference (the adapter GET-then-maybe-PUT does the comparison).
 
+What it deliberately does NOT retry is a push the marketplace can never accept as the
+seller has the listing configured — see _BLOCKED_RECHECK_AFTER. Re-queueing those every
+hour is a standing drain on the daily API budget with no possible outcome.
+
 Modelled on sync_scheduler / backup_scheduler: one asyncio task, module-level state,
 started and stopped from main.py's lifespan (and restart across a restore). It also
 drives services/platform_api_usage.flush() and drains listing_push's budget-deferred
@@ -48,12 +52,34 @@ _STALE_AFTER = timedelta(hours=12)
 # continues.
 _MAX_PER_RUN = 25
 
+# How long a listing whose last attempt was recorded `blocked` is left alone before the
+# sweep tries it once more.
+#
+# A blocked listing is one the marketplace cannot accept a push for as the seller has it
+# configured (services/platforms/errors.PlatformPushBlockedError) — on Etsy, a listing
+# whose quantity isn't attached to a variation, which rejects every per-SKU write with the
+# same 400. Those never advance last_pushed_at, so they are permanently stale and, without
+# this, would be re-picked by every hourly sweep forever: a fixed cost of ~24 GETs a day
+# per blocked listing against the daily API budget, for a call that cannot succeed. Seven
+# days turns that into one call a week while still noticing, unprompted, when the seller
+# has fixed the listing. A user who fixes it and wants the push now doesn't wait: "Push
+# corrections" (listing_push.push_units_now) always attempts, blocked or not.
+_BLOCKED_RECHECK_AFTER = timedelta(days=7)
+
 _task: asyncio.Task | None = None
 
 
-async def _failing_targets(session, platform: ListingPlatform) -> set[tuple[int | None, int | None]]:
-    """(product_id, variant_id) pairs whose most recent push attempt errored — the ones a
-    purely event-driven push path would never retry on its own."""
+async def _latest_attempt_status(
+    session, platform: ListingPlatform
+) -> dict[tuple[int | None, int | None], tuple[ListingPushStatus, datetime | None]]:
+    """The most recent push attempt's (status, attempted_at) per (product_id, variant_id).
+
+    Only the latest attempt matters: an error followed by a success is a listing that is
+    fine now, and a blocked listing that later succeeded is one the seller has fixed. The
+    two non-success statuses lead to opposite behaviour in _listings_to_check — `error` is
+    assumed transient and retried on the next sweep, `blocked` is structural and backed
+    off to _BLOCKED_RECHECK_AFTER — which is the whole reason this returns the status
+    rather than just a set of failures."""
     latest_id = (
         select(func.max(PlatformListingPush.id))
         .where(PlatformListingPush.platform == platform)
@@ -61,18 +87,26 @@ async def _failing_targets(session, platform: ListingPlatform) -> set[tuple[int 
         .scalar_subquery()
     )
     result = await session.execute(
-        select(PlatformListingPush.product_id, PlatformListingPush.variant_id).where(
-            PlatformListingPush.id.in_(latest_id),
-            PlatformListingPush.status == ListingPushStatus.error,
-        )
+        select(
+            PlatformListingPush.product_id,
+            PlatformListingPush.variant_id,
+            PlatformListingPush.status,
+            PlatformListingPush.attempted_at,
+        ).where(PlatformListingPush.id.in_(latest_id))
     )
-    return {(row.product_id, row.variant_id) for row in result}
+    return {(row.product_id, row.variant_id): (row.status, row.attempted_at) for row in result}
 
 
-async def _listings_to_check(session, platform: ListingPlatform, cutoff: datetime) -> list[Listing]:
+async def _listings_to_check(session, platform: ListingPlatform, now: datetime) -> list[Listing]:
     """Listings worth re-checking now: never pushed, pushed long enough ago to re-assert,
-    or whose most recent push attempt errored. Most-stale first, capped at _MAX_PER_RUN."""
-    failing = await _failing_targets(session, platform)
+    or whose most recent push attempt errored. Most-stale first, capped at _MAX_PER_RUN.
+
+    A listing whose last attempt was `blocked` is excluded — even though it is stale, and
+    even though it "failed" — until _BLOCKED_RECHECK_AFTER has passed. Nothing else here
+    would ever stop picking it, because a blocked push never advances last_pushed_at."""
+    latest = await _latest_attempt_status(session, platform)
+    stale_cutoff = now - _STALE_AFTER
+    blocked_cutoff = now - _BLOCKED_RECHECK_AFTER
 
     result = await session.execute(
         select(Listing)
@@ -84,10 +118,18 @@ async def _listings_to_check(session, platform: ListingPlatform, cutoff: datetim
     )
     picked: list[Listing] = []
     for listing in result.scalars():
-        is_stale = listing.last_pushed_at is None or _as_utc(listing.last_pushed_at) < cutoff
-        is_failing = (listing.product_id, listing.variant_id) in failing
-        if is_stale or is_failing:
+        status, attempted_at = latest.get((listing.product_id, listing.variant_id), (None, None))
+
+        if status == ListingPushStatus.blocked:
+            # Due for its occasional re-check, or skipped outright — never merely stale.
+            if attempted_at is not None and _as_utc(attempted_at) > blocked_cutoff:
+                continue
             picked.append(listing)
+        else:
+            is_stale = listing.last_pushed_at is None or _as_utc(listing.last_pushed_at) < stale_cutoff
+            if is_stale or status == ListingPushStatus.error:
+                picked.append(listing)
+
         if len(picked) >= _MAX_PER_RUN:
             break
     return picked
@@ -114,8 +156,7 @@ async def _reconcile_platform(platform: ListingPlatform) -> None:
             )
             return
 
-        cutoff = datetime.now(timezone.utc) - _STALE_AFTER
-        listings = await _listings_to_check(session, platform, cutoff)
+        listings = await _listings_to_check(session, platform, datetime.now(timezone.utc))
         if not listings:
             return
 
