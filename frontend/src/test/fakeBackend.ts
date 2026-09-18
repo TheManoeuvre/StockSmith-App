@@ -26,7 +26,8 @@ export interface FakeRoute {
 export class FakeApiError extends Error {
   constructor(
     public status: number,
-    message: string
+    message: string,
+    public detail: unknown = message
   ) {
     super(message);
   }

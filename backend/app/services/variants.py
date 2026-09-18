@@ -13,7 +13,7 @@ from app.models.material import Material
 from app.models.product import Product, ProductMaterial
 from app.models.sku_alias import SkuAlias
 from app.models.variant import ProductVariant, ProductVariantMaterial
-from app.schemas.product import VariantAttributeSpec
+from app.schemas.product import SharedMaterialResolution, VariantAttributeSpec
 from app.services.validation import validate_lines_against_units
 
 _SLUG_NON_ALNUM = re.compile(r"[^A-Za-z0-9]+")
@@ -111,7 +111,7 @@ async def _validate_attribute_rules(
         for material_id in rule.value_to_material_id.values()
     }
     # Fetched unconditionally, not just when there are material rules: conflict messages
-    # name materials, and a quantity-rule-only collision needs those names just as much.
+    # name materials, and a quantity-rule-only overlap needs those names just as much.
     result = await session.execute(
         select(Material.id, Material.name, Material.material_type_id).where(
             Material.id.in_(candidate_material_ids | base_material_ids)
@@ -146,11 +146,11 @@ async def _validate_attribute_rules(
 class ResolvedOverride:
     """One variant BOM override row, plus which attribute value produced it.
 
-    The provenance fields exist so a conflict can be reported as "Colourway 'Ivory' on
-    Lilac Purple conflicts with…" rather than as bare material ids — by the time a
-    collision is detected the rules that caused it are otherwise long out of scope. Being
-    a plain dataclass rather than a ProductVariantMaterial also makes the resolver
-    testable without a session."""
+    The provenance fields exist so a shared material can be reported as "Primary Colour
+    'Apple' substituting Latte Brown, and Accent Colour 'Apple' substituting Ice Blue"
+    rather than as bare material ids — by the time the overlap is detected the rules that
+    caused it are otherwise long out of scope. Being a plain dataclass rather than a
+    ProductVariantMaterial also makes the resolver testable without a session."""
 
     base_material_id: int
     material_id: int
@@ -178,12 +178,12 @@ def _resolve_line_overrides(
     """Merges every material/quantity rule that fires for this specific attribute-value
     combo into at most one effective (material_id, qty_required) per base BOM line —
     e.g. Colour substituting the material and Size overriding the qty on the SAME base
-    line both land on one row, not two conflicting ones (the override table has a unique
-    constraint on (variant_id, material_id)).
+    line both land on one row, not two conflicting ones (the override table is unique on
+    (variant_id, material_id, replaces_material_id)).
 
     Note that merging per BASE line does not guarantee one row per EFFECTIVE material:
-    two base lines can resolve onto the same target. That's what _collision_messages is
-    for — this function deliberately reports what the rules say rather than silently
+    two base lines can resolve onto the same target. That's what _shared_material_messages
+    is for — this function deliberately reports what the rules say rather than silently
     dropping one of them."""
     # base_material_id -> [effective_material_id, effective_qty | None, material_source, qty_source]
     effective: dict[int, list] = {}
@@ -222,7 +222,7 @@ def _resolve_line_overrides(
 
 async def _product_base_material_ids(session: AsyncSession, product_id: int) -> set[int]:
     """Every material on the product's build BOM — the whole BOM, not just the lines rules
-    reference, since Rule 2 asks whether a substitution *target* is already on it."""
+    reference, since a substitution *target* may be a base line no rule touches."""
     result = await session.execute(
         select(ProductMaterial.material_id).where(ProductMaterial.product_id == product_id)
     )
@@ -237,89 +237,52 @@ def _source_phrase(source: tuple[str, str] | None) -> str | None:
     return f"{source[0]} '{source[1]}'" if source else None
 
 
-def _collision_messages(
+def _line_phrase(row: ResolvedOverride, name_by_material_id: dict[int, str]) -> str:
+    base = _name(name_by_material_id, row.base_material_id)
+    if row.replaces_material_id is not None:
+        source = _source_phrase(row.material_source)
+        return f"{source} substituting {base}" if source else f"the {base} line substituted"
+    source = _source_phrase(row.qty_source)
+    return f"the product's own {base} line" + (f" ({source})" if source else "")
+
+
+def _shared_material_messages(
     rows: list[ResolvedOverride],
     base_material_ids: set[int],
     name_by_material_id: dict[int, str],
     variant_name: str,
 ) -> list[str]:
-    """Every way one variant's override rows can be invalid, checked before any write.
+    """One message per material that this variant would draw on from more than one BOM
+    line — checked before any write, and before the caller decides what to do about it.
 
-    Rule 1 — two rows landing on the same effective material. This is what the database's
-    uq_product_variant_materials_variant_material rejects, today as a raw IntegrityError
-    that reaches the user as a bare "Internal server error" with no indication of which
-    rule caused it.
+    Not an error any more. The override table used to be unique on (variant_id,
+    material_id), so two base lines landing on one material was a constraint violation
+    (or, when the second line was the product's own untouched base line, a silent
+    buildability overstatement). Now the table allows it and buildability sums per
+    material, so a two-tone product's Apple/Apple combination is a legitimate variant. It
+    is still worth surfacing: the user has to choose whether such combinations are wanted
+    at all (see generate_variants' on_shared_material), and the message tells them exactly
+    which rules produced each one.
 
-    Rule 2 — a substitution onto a material that is itself a base BOM line which nothing
-    substitutes away. This violates no constraint, which is why it has gone unnoticed:
-    no override row exists for the untouched base line, so there is nothing to collide
-    with. But buildability._RESOLVED_VARIANT_BOM_SQL then emits that material twice (once
-    from product_materials, once from the substitution row), and
-    compute_variant_buildability takes min() of per-line bottlenecks against the same
-    current_qty rather than summing consumption — so the variant consumes the material
-    twice while being constrained as if it used it once, and max_buildable overstates.
+    Counts the product's own base line as a user of its material whenever no row replaces
+    it or overrides it, since buildability._RESOLVED_VARIANT_BOM_SQL will emit it."""
+    substituted_away = {row.replaces_material_id for row in rows if row.replaces_material_id is not None}
+    overridden = {row.material_id for row in rows if row.replaces_material_id is None}
 
-    Shared with the bulk-amend path, which runs the same rules against a variant's
-    resulting rows rather than freshly-resolved ones."""
-    messages: list[str] = []
-
-    by_material: dict[int, list[ResolvedOverride]] = {}
+    users: dict[int, list[str]] = {}
     for row in rows:
-        by_material.setdefault(row.material_id, []).append(row)
+        users.setdefault(row.material_id, []).append(_line_phrase(row, name_by_material_id))
+    for material_id in list(users):
+        if material_id in base_material_ids and material_id not in substituted_away and material_id not in overridden:
+            users[material_id].append(f"the product's own {_name(name_by_material_id, material_id)} line")
 
-    for material_id, colliding in by_material.items():
-        if len(colliding) < 2:
+    messages: list[str] = []
+    for material_id, phrases in users.items():
+        if len(phrases) < 2:
             continue
         material = _name(name_by_material_id, material_id)
-        # The most common shape, and the one worth phrasing specifically: something is
-        # being substituted onto a base line that already has its own override row.
-        own_line = next((r for r in colliding if r.replaces_material_id is None), None)
-        substitutions = [r for r in colliding if r.replaces_material_id is not None]
-        if own_line is not None and substitutions:
-            sub = substitutions[0]
-            source = _source_phrase(sub.material_source) or "a rule"
-            messages.append(
-                f"{source} on {_name(name_by_material_id, sub.base_material_id)} conflicts with the existing "
-                f"{material} BOM line — variant '{variant_name}' would need two {material} lines. "
-                f"Remove the rule on the {material} line, or substitute "
-                f"{_name(name_by_material_id, sub.base_material_id)} with a material that isn't already on "
-                "this product's BOM."
-            )
-            continue
-        if len(substitutions) >= 2:
-            first, second = substitutions[0], substitutions[1]
-            first_source = _source_phrase(first.material_source) or "one rule"
-            second_source = _source_phrase(second.material_source) or "another rule"
-            messages.append(
-                f"Variant '{variant_name}': {first_source} puts the "
-                f"{_name(name_by_material_id, first.base_material_id)} line on {material} and {second_source} "
-                f"puts the {_name(name_by_material_id, second.base_material_id)} line on {material} — a variant "
-                "can only have one BOM line per material. Adjust one of the substitutions."
-            )
-            continue
-        messages.append(
-            f"Variant '{variant_name}' would end up with two {material} BOM lines. "
-            "A variant can only have one line per material."
-        )
-
-    # Rule 2. Only substitutions can trigger it, and only onto a base line that no rule
-    # moves out of the way.
-    substituted_away = {row.replaces_material_id for row in rows if row.replaces_material_id is not None}
-    for row in rows:
-        if row.replaces_material_id is None:
-            continue
-        if row.material_id in by_material and len(by_material[row.material_id]) > 1:
-            continue  # already reported as a Rule 1 collision
-        if row.material_id in base_material_ids and row.material_id not in substituted_away:
-            material = _name(name_by_material_id, row.material_id)
-            source = _source_phrase(row.material_source) or "This substitution"
-            messages.append(
-                f"Variant '{variant_name}': {source} substituting "
-                f"{_name(name_by_material_id, row.base_material_id)} with {material} would leave two {material} "
-                f"lines on the variant — the substituted one plus this product's own {material} BOM line — "
-                f"which would understate how much {material} the variant uses. Merge them into one line, or "
-                "substitute to a material that isn't already on the BOM."
-            )
+        listed = ", ".join(phrases[:-1]) + f", and {phrases[-1]}"
+        messages.append(f"Variant '{variant_name}': {material} would be used by {len(phrases)} BOM lines — {listed}.")
     return messages
 
 
@@ -381,8 +344,14 @@ def _describe(kind: str, outcome, name_by_material_id: dict[int, str]) -> str:
     return _name(name_by_material_id, outcome) if kind == "material" else str(outcome)
 
 
+SHARED_MATERIAL_VARIANTS = "shared_material_variants"
+
+
 async def generate_variants(
-    session: AsyncSession, product_id: int, attributes: list[VariantAttributeSpec]
+    session: AsyncSession,
+    product_id: int,
+    attributes: list[VariantAttributeSpec],
+    on_shared_material: SharedMaterialResolution = "ask",
 ) -> list[ProductVariant]:
     """Persists up to 3 attribute names onto the product, computes the cartesian product
     of their values, and creates any combinations that don't already exist — existing
@@ -393,7 +362,15 @@ async def generate_variants(
     auto-write the matching ProductVariantMaterial override rows for each newly-created
     variant — see _resolve_line_overrides for how multiple rules targeting the same base
     BOM line are merged. Rules are only ever applied to variants created in this call;
-    an already-existing (skipped) combo's overrides are never touched here."""
+    an already-existing (skipped) combo's overrides are never touched here.
+
+    Some combinations resolve two base lines onto one material — a two-tone product's
+    Primary Colour 'Apple' / Accent Colour 'Apple'. Whether those are wanted is the
+    user's call, so with on_shared_material="ask" (the default) nothing is written and a
+    409 lists every such combination; the client re-submits with "skip" to create the
+    rest without them, or "keep" to create them too, each line keeping its own quantity.
+    Detail is structured (code SHARED_MATERIAL_VARIANTS) so the client can offer that
+    choice rather than show an error."""
     if not attributes or len(attributes) > 3:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Provide between 1 and 3 attributes")
 
@@ -426,19 +403,39 @@ async def generate_variants(
         if tuple(list(combo) + [None] * (3 - len(combo))) not in existing_combos
     ]
 
-    # Resolve and validate every new combo up front. Enumerating rather than reasoning
-    # about the rules analytically because a collision depends on the JOINT choice across
+    # Resolve every new combo up front. Enumerating rather than reasoning about the rules
+    # analytically because a shared material depends on the JOINT choice across
     # attributes, and this is the same cartesian product the creation loop below walks —
     # doing it in memory with no database access is strictly cheaper than the flush-per-
     # combo that follows.
     base_material_ids = await _product_base_material_ids(session, product_id)
     resolved_by_combo: list[tuple[tuple[str, ...], list[ResolvedOverride]]] = []
+    shared: list[dict[str, str]] = []
     for combo in combos_to_create:
         rows = _resolve_line_overrides(combo, attributes, base_lines_by_material_id)
-        messages = _collision_messages(rows, base_material_ids, name_by_material_id, " / ".join(combo))
+        variant_name = " / ".join(combo)
+        messages = _shared_material_messages(rows, base_material_ids, name_by_material_id, variant_name)
         if messages:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=messages[0])
+            if on_shared_material == "skip":
+                continue
+            if on_shared_material == "ask":
+                shared.append({"variant_name": variant_name, "message": " ".join(messages)})
+                continue
         resolved_by_combo.append((combo, rows))
+    if shared:
+        noun = "variant" if len(combos_to_create) == 1 else "variants"
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": SHARED_MATERIAL_VARIANTS,
+                "message": (
+                    f"{len(shared)} of {len(combos_to_create)} new {noun} would use the same material on more "
+                    "than one BOM line."
+                ),
+                "variants": shared,
+                "new_variant_count": len(combos_to_create),
+            },
+        )
 
     # The per-variant editor has always validated quantities against each material's unit
     # (routers/variants.replace_bom_overrides); generation never did, so a fractional
@@ -618,23 +615,9 @@ async def amend_attribute_bom_overrides(
     for variant in targets:
         existing = existing_by_variant.get(variant.id, [])
         changes, replaced_rows, new_rows = _plan_amend(variant, existing, lines, base_lines, name_by_material_id)
-
-        # Validate the variant's RESULTING full row set, not just the new rows — the
-        # amend can collide with an override this variant already had from a different
-        # attribute, which neither set would reveal alone.
-        surviving = [r for r in existing if r not in replaced_rows]
-        resulting = [
-            ResolvedOverride(
-                base_material_id=r.replaces_material_id or r.material_id,
-                material_id=r.material_id,
-                replaces_material_id=r.replaces_material_id,
-                qty_required=Decimal(r.qty_required),
-            )
-            for r in surviving
-        ] + new_rows
-        messages = _collision_messages(resulting, set(base_lines), name_by_material_id, variant.variant_name)
-        if messages:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=messages[0])
+        # An amend that lands a line on a material another of this variant's lines already
+        # uses is legitimate (each keeps its own quantity, buildability sums them) — and
+        # the preview shows the resulting material per line, so it isn't silent either.
 
         unit_validation.extend((row.material_id, row.qty_required) for row in new_rows)
         units.append((variant, changes, replaced_rows, new_rows))
@@ -646,8 +629,8 @@ async def amend_attribute_bom_overrides(
             for row in replaced_rows:
                 await session.delete(row)
         # Flush the deletes before inserting: a replacement reuses the same
-        # (variant_id, material_id), and in a single flush SQLAlchemy orders the INSERT
-        # before the DELETE, tripping the unique constraint.
+        # (variant_id, material_id, replaces_material_id), and in a single flush SQLAlchemy
+        # orders the INSERT before the DELETE, tripping the unique index.
         await session.flush()
         for variant, _changes, _replaced_rows, new_rows in units:
             for row in new_rows:

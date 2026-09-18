@@ -14,7 +14,14 @@ export async function platformFetch(url: string, init?: RequestInit): Promise<Re
 export class ApiError extends Error {
   constructor(
     public status: number,
-    message: string
+    message: string,
+    /**
+     * The response's `detail` as sent. Usually a string (and then equal to `message`), but
+     * a few endpoints answer with an object the client is meant to act on rather than
+     * display — variant generation's shared-material 409, which lists the affected
+     * combinations so the user can be offered a choice.
+     */
+    public detail: unknown = message
   ) {
     super(message);
   }
@@ -47,7 +54,9 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
         return undefined;
       }
     })();
-    throw new ApiError(response.status, detail || body || response.statusText);
+    const message =
+      typeof detail === "string" ? detail : (detail?.message as string | undefined) || body || response.statusText;
+    throw new ApiError(response.status, message, detail ?? message);
   }
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;

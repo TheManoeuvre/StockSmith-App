@@ -762,7 +762,7 @@ async def list_stock_history(product_id: int, session: AsyncSession = Depends(ge
 async def generate_product_variants(
     product_id: int, payload: GenerateVariantsRequest, session: AsyncSession = Depends(get_db)
 ) -> list[VariantRead]:
-    created = await generate_variants(session, product_id, payload.attributes)
+    created = await generate_variants(session, product_id, payload.attributes, payload.on_shared_material)
     if not created:
         return []
     product = await session.get(Product, product_id)

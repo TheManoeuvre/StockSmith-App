@@ -15,6 +15,7 @@ import type {
   ProductPage,
   ProductPriceSnapshot,
   ProductStockEvent,
+  SharedMaterialResolution,
   StockAdjustment,
   Variant,
   VariantAttributeSpec,
@@ -75,8 +76,8 @@ export const productsApi = {
   listVariants: (id: number) => api.get<Variant[]>(`/products/${id}/variants`),
   createVariant: (id: number, input: { variant_name: string; sku_suffix?: string | null }) =>
     api.post<Variant>(`/products/${id}/variants`, input),
-  generateVariants: (id: number, attributes: VariantAttributeSpec[]) =>
-    api.post<Variant[]>(`/products/${id}/variants/generate`, { attributes }),
+  generateVariants: (id: number, attributes: VariantAttributeSpec[], onSharedMaterial: SharedMaterialResolution = "ask") =>
+    api.post<Variant[]>(`/products/${id}/variants/generate`, { attributes, on_shared_material: onSharedMaterial }),
   // Defaults to a preview server-side — pass apply: true only after the user has seen it.
   amendVariantBomOverrides: (id: number, payload: BulkBomAmendRequest) =>
     api.post<BulkBomAmendResult>(`/products/${id}/variants/bom-overrides/amend`, payload),

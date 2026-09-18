@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -182,8 +183,16 @@ class VariantAttributeSpec(BaseModel):
     quantity_rules: list[AttributeQuantityRule] = []
 
 
+# What generation does with a combination whose rules put two base BOM lines on the same
+# material (Primary Colour 'Apple' + Accent Colour 'Apple'): "ask" refuses with a 409
+# listing them so the client can offer the choice, "skip" creates every other combination,
+# "keep" creates them too — each line with its own quantity.
+SharedMaterialResolution = Literal["ask", "skip", "keep"]
+
+
 class GenerateVariantsRequest(BaseModel):
     attributes: list[VariantAttributeSpec]
+    on_shared_material: SharedMaterialResolution = "ask"
 
 
 class BulkBomAmendLine(BaseModel):
