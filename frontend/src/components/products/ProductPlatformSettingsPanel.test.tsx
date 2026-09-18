@@ -7,9 +7,18 @@ vi.mock("../../api/client", async () => (await import("../../test/fakeBackend"))
 vi.mock("../../lib/tauri", () => ({
   getSettings: () => Promise.resolve({ backendUrl: "http://127.0.0.1:8000", sharedPassword: "x" }),
 }));
+// useBlocker needs a live router; everything else in the guard chain stays real.
+vi.mock("@tanstack/react-router", () => ({
+  useBlocker: () => ({ status: "idle", proceed: () => {}, reset: () => {} }),
+}));
 
 const { setRoutes, calls } = await import("../../test/fakeBackend");
 const { ProductPlatformSettingsPanel } = await import("./ProductPlatformSettingsPanel");
+const { DirtyRegistryProvider, SlideOverManagedContext, useAnyDirty, useDirtyRegistryApi } = await import(
+  "../../hooks/useDirtyRegistry"
+);
+const { GuardProvider, useUnsavedChangesGuard } = await import("../../hooks/useUnsavedChangesGuard");
+const { UnsavedChangesDialog } = await import("../common/UnsavedChangesDialog");
 
 const SETTINGS = {
   product_id: 37,
@@ -177,4 +186,81 @@ it("saves the chosen profile and the listing copy together", async () => {
     expect(body.listing_profile_id).toBe(2);
     expect(body.listing_title).toBe("Etsy title");
   });
+});
+
+/**
+ * The panel as the product slide-over mounts it: registry, guard, dialog and a footer that
+ * commits through the registry, so these tests exercise the real wiring rather than a stub.
+ */
+function Harness({ managed }: { managed: boolean }) {
+  const guard = useUnsavedChangesGuard();
+  const registry = useDirtyRegistryApi();
+  const { isDirty, labels } = useAnyDirty();
+  return (
+    <GuardProvider guard={guard}>
+      <SlideOverManagedContext.Provider value={managed}>
+        <ProductPlatformSettingsPanel productId={37} platform="etsy" />
+      </SlideOverManagedContext.Provider>
+      <div data-testid="footer">{isDirty ? `Unsaved: ${labels.join(", ")}` : "No changes"}</div>
+      <button onClick={() => registry.commitDirtyUnder("")}>Footer save</button>
+      <UnsavedChangesDialog {...guard.dialogProps} />
+    </GuardProvider>
+  );
+}
+
+function renderGuarded(managed = true) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={client}>
+      <DirtyRegistryProvider>
+        <Harness managed={managed} />
+      </DirtyRegistryProvider>
+    </QueryClientProvider>
+  );
+}
+
+it("reports its edits as unsaved and lets the slide-over footer save them", async () => {
+  renderGuarded();
+  await userEvent.click(await screen.findByText("Show"));
+  const title = await screen.findByRole("textbox", { name: /listing title/i });
+  expect(screen.getByTestId("footer").textContent).toBe("No changes");
+
+  await userEvent.type(title, "Etsy title");
+  expect(screen.getByTestId("footer").textContent).toBe("Unsaved: Etsy listing setup");
+  // Inside the slide-over the panel defers to the footer rather than offering its own Save.
+  expect(screen.queryByRole("button", { name: "Save" })).toBeNull();
+
+  await userEvent.click(screen.getByText("Footer save"));
+  await waitFor(() => {
+    const put = calls.find((c) => c.method === "PUT");
+    expect((put?.body as Record<string, unknown>).listing_title).toBe("Etsy title");
+  });
+  await waitFor(() => expect(screen.getByTestId("footer").textContent).toBe("No changes"));
+});
+
+it("asks before collapsing over unsaved edits, and discards them only on confirmation", async () => {
+  renderGuarded();
+  await userEvent.click(await screen.findByText("Show"));
+  await userEvent.type(await screen.findByRole("textbox", { name: /listing title/i }), "Half typed");
+
+  await userEvent.click(screen.getByText("Hide"));
+  expect(await screen.findByText("Discard changes")).toBeTruthy();
+  await userEvent.click(screen.getByText("Keep editing"));
+  // Still open, edits intact.
+  expect((screen.getByRole("textbox", { name: /listing title/i }) as HTMLInputElement).value).toBe("Half typed");
+
+  await userEvent.click(screen.getByText("Hide"));
+  await userEvent.click(await screen.findByText("Discard changes"));
+  expect(screen.queryByRole("textbox", { name: /listing title/i })).toBeNull();
+  // Hidden dirty state would keep the footer nagging about something nobody can see.
+  expect(screen.getByTestId("footer").textContent).toBe("No changes");
+});
+
+it("keeps its own Save button when mounted outside a managed slide-over", async () => {
+  renderGuarded(false);
+  await userEvent.click(await screen.findByText("Show"));
+  const save = await screen.findByRole("button", { name: "Save" });
+  expect((save as HTMLButtonElement).disabled).toBe(true);
+  await userEvent.type(await screen.findByRole("textbox", { name: /listing title/i }), "x");
+  expect((save as HTMLButtonElement).disabled).toBe(false);
 });
