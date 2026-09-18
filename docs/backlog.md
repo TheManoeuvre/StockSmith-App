@@ -5,7 +5,7 @@ Informal list of improvements not yet scheduled into a plan doc.
 **Upkeep:** at release prep, cross-reference every entry against the release branch and
 delete the ones that release completed (or rescope the partly-done ones). A stale backlog
 costs a whole review pass re-discovering what already shipped — which is what happened by
-0.10.0.
+0.10.0. Last reconciled against 0.17.0 on 2026-09-18, alongside `roadmap.md`.
 
 Grouped by feature area; within each group, roughly most-valuable first.
 
@@ -31,15 +31,9 @@ StockSmith treats this like any other push error: a WARNING, a `PlatformListingP
 
 Live on this shop: 7 failing pushes across two listings, both with several variants mapped to one listing id and an identical `external_quantity` on all of them (`listings` rows for products 12 and 15) — the signature of exactly this configuration.
 
-This matters more once the periodic reconciliation sweep below exists: a sweep that re-pushes every errored listing would retry these forever, burning quota on a call that cannot succeed.
+**This is no longer hypothetical.** The reconciliation sweep this entry warned about shipped in 0.12.1 (`backend/app/services/listing_reconcile.py`), and `_failing_targets` re-queues every listing whose most recent push errored, with no notion of a permanent failure. These seven pushes are therefore retried hourly, forever, against the daily Etsy budget — which makes detection the fix for two problems now, not one.
 
 **Ask:** Detect the condition rather than discovering it in a 400. The GET that `push_listing_quantity` already performs carries everything needed — an empty `quantity_on_property` alongside more than one non-deleted product means no per-SKU push is possible. Fail fast with a message naming the fix ("this Etsy listing's quantity doesn't vary by variation — enable it on the listing, or the variants can't be stocked independently"), and mark the failure as permanent/structural so it's distinguishable from a transient one: the badge can direct the user to the listing that needs changing, and any future retry sweep can skip it instead of hammering it.
-
-### Periodic reconciliation for failed listing pushes
-
-**Problem:** `listing_push` is entirely event-driven with a 5-second debounce and no retry, so a push that fails permanently (network blip, expired token, marketplace 5xx) is never retried until unrelated stock movement happens to trigger one. The menu-bar badge added in Phase 2 now counts exactly these listings, which means the app points at a problem it has no way to resolve on its own.
-
-**Ask:** A periodic sweep that re-pushes listings whose latest `PlatformListingPush` errored, bounded by the existing semaphore and with a backoff so a persistently broken listing isn't retried every cycle. Deliberately kept separate from the tray work — see `docs/plan-background-sync.md` §4 for why a marketplace-write behaviour change shouldn't ride along inside a "keep the app running" feature. Depends on the Etsy structural-failure detection above so the sweep can skip the pushes that can never succeed.
 
 ### Crash-recovery watchdog for the tray
 
@@ -95,14 +89,6 @@ The trigger is narrow and not fully isolated: a UNIQUE violation on a session th
 ---
 
 ## Variant BOM correctness
-
-### Audit existing substitutions onto un-ruled base lines
-
-**Problem:** Found while planning the variant conflict-detection work. If a variant substitutes base line A onto material M, and M is *itself* a base BOM line that nothing substitutes away, no unique-constraint violation occurs (there's no override row for M to collide with) — but `_RESOLVED_VARIANT_BOM_SQL` (`backend/app/services/buildability.py:76-98`) then emits M twice via `UNION ALL`, and `compute_variant_buildability` takes `min()` of per-line bottlenecks against the same `current_qty` rather than summing consumption (`:304-312`). With `current_qty=10` and both lines at qty 1, it reports 10 buildable when the true answer is 5. (`cost_per_unit` sums, so cost is unaffected.)
-
-Phase 4 of the backlog-burndown plan rejects this configuration at generation time going forward, but says nothing about rows already in the database.
-
-**Ask:** Audit existing `product_variant_materials` for substitutions targeting an un-ruled base BOM line, and decide whether `_RESOLVED_VARIANT_BOM_SQL` should sum duplicate materials rather than emit them twice — which would fix any such rows already stored, rather than only preventing new ones.
 
 ### Provenance column for overrides
 

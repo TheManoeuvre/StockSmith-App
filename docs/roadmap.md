@@ -12,11 +12,13 @@ goes stale. The conventions this repo already uses:
   deliberately unordered.
 - This file — the ordering between themes, and what "1.0" is supposed to mean.
 
-Written 2026-08-15, against 0.6.3.
+Written 2026-08-15 against 0.6.3; **fully reconciled against 0.17.0 on 2026-09-18**. The
+reconcile is recorded in "What changed since 0.6.3" below, so the gap between the original
+reading and the current one stays visible rather than being quietly overwritten.
 
 ---
 
-## Where things stand
+## Where things stand (at 0.17.0)
 
 | Theme | State | Source of truth |
 |---|---|---|
@@ -24,35 +26,76 @@ Written 2026-08-15, against 0.6.3.
 | Orders, allocation, kitting, returns | Shipped | `plan-marketplace-integrations.md` §4 |
 | Etsy + eBay sync, quantity push, cross-platform stock | Shipped — all 11 build-order steps ✅ | `plan-marketplace-integrations.md` |
 | Desktop packaging, updater, backup/restore | Shipped | `README.md`, `CHANGELOG.md` |
-| Draft listing creation (new product → marketplace) | **In flight** — PR #22 (stages 4, 5, 7) | PR #22 |
+| Draft listing creation (new product → marketplace) | **Shipped** — PR #22 merged 16 Aug; variations followed | `CHANGELOG.md` 0.16–0.17 |
 | Stock take & ABC classification | Shipped — both phases, plus grouped count sheets and made-to-order exclusion | `plan-stock-take.md` |
 | Receiving by line | Shipped — deliveries are their own records, dated and costed individually | `CHANGELOG.md` |
-| Backlog quick wins (CI, line endings, Build-now link) | **In flight** — PR #23 | `backlog.md` |
-| Always-on sync | **Next up** — tray chosen as first step; `plan-background-sync.md` now carries the build plan and the Windows 11 uptime design | `plan-background-sync.md` §6-8, `plan-always-on-sync.md` |
+| Listing-push rate reduction | Shipped — stages 1–4 (0.12.1); 5–7 pending on the usage numbers | `plan-listing-push-rate-reduction.md` |
+| Notifications (in-app, Windows toast, Pushover) | Shipped 0.13.0, refined through 0.15.0 | `CHANGELOG.md` |
+| Fallback materials & order-line substitution | Shipped 0.14.1–0.16.0 | `CHANGELOG.md` |
+| Shipping-profile ↔ marketplace linking | Shipped 0.16.0 | `plan-shipping-profile-marketplace-link.md` |
+| Replacement parcels & postage labels | Shipped 0.17.0 — Etsy label detection still best-effort | `CHANGELOG.md`, `backlog.md` |
+| Always-on sync — tray | Shipped — tier 1 (steps 1–6 ✅); watchdog (tier 2) still unbuilt | `plan-background-sync.md` §6 |
+| Always-on sync — webhooks | **Next up** — recommended, not started; no webhook code exists | `plan-always-on-sync.md` §4 |
 | **New-user onboarding** | **Unplanned — this document is where it enters** | below |
 | Print-queue management | Never started, never planned | `plan-phase0-phase1.md` names it as a later phase |
 | Shipping automation | Parked deliberately, not deferred | `plan-marketplace-integrations.md` §2 |
+
+Nothing is in flight against `main` beyond two open feature PRs (#124 variable-pricing
+groups, #125 Etsy variation defaults) and two dependency bumps.
+
+---
+
+## What changed since 0.6.3
+
+The original reading of this document is eleven releases old. What it got wrong, and what
+it could not have known:
+
+- **"In flight: PR #22 and PR #23" is gone.** Both merged in August. The draft-listing
+  feature they carried is not only shipped but has been extended twice since — variation
+  drafts, and shipping-profile-driven postage on the draft.
+- **The three-parallel-workstreams ceiling no longer binds.** The order-of-work rule that
+  nothing new should start against `platforms/`, `listing_*` or the products/materials
+  schemas was written to protect those two PRs. It has been overtaken; a great deal has
+  landed in all three areas since.
+- **Always-on sync split in two, and half of it shipped.** The tray's whole tier 1 is
+  built and released (PID reaping, single-instance, tray + hide-on-close, sidecar
+  supervision, autostart, sync-health visibility). The webhook relay — the option
+  `plan-always-on-sync.md` rates best — has not been started. No webhook endpoint,
+  registration or signature-verification code exists anywhere in the backend.
+- **Push reconciliation shipped early, out of the backlog.** `services/listing_reconcile`
+  (0.12.1) is `plan-background-sync.md`'s step 8 and the backlog's own entry, delivered as
+  part of the rate-reduction work instead. Both have been struck off.
+- **Seven themes arrived that this document never named**, because they weren't planned
+  when it was written: notifications, fallback materials, order-line substitution,
+  shipping-profile linking, replacement parcels and marketplace label capture, the
+  listing-push rate reduction, and two rounds of redesign. They are in the table above now.
+- **The backlog did not empty; it turned over.** Twenty-seven entries at the last count,
+  two of which this reconcile deleted as done. Its correctness items are still the thing
+  standing between here and 1.0's condition 3.
 
 ---
 
 ## Order of work
 
-**1. Land what's in flight.** Three parallel workstreams is already the ceiling. Nothing
-new should start against `platforms/`, `listing_*`, the products/materials schemas or the
-dashboard schema until PR #22 and PR #23 are merged. The stock-take branch has landed,
-along with per-line receiving, which rewrote how material stock and cost are derived —
-anything touching `costing.py`'s replay or the on-order arithmetic should start from
-`services/purchase_sql.py` rather than reinventing a copy of it.
+**1. Webhook relay.** The one clear next step, and the only always-on work with a
+recommendation already attached (`plan-always-on-sync.md` §4.2): it collapses the
+sale-to-sync gap from 15 minutes to seconds, extends a component that exists for another
+reason, costs nothing, and holds no token. The tray it sits on top of is done.
 
-**2. Always-on sync.** The one shipped-but-hollow capability: auto-sync exists and only
-runs while the window is open. `plan-background-sync.md` specifies the tray; the new
-`plan-always-on-sync.md` sits above it and asks whether the tray is the right shape at
-all, now that both marketplaces expose webhooks. Read the second before building the
-first — it changes step ordering, though not the tray's own design.
+**2. Correctness backlog.** `backlog.md`'s first two groups are the ones that cost real
+money or real trust today, and one of them has got worse since it was written:
 
-**3. Correctness backlog.** Whatever `backlog.md` still holds after PR #23. The eBay
-real-listing-id entry specifically must wait for PR #22, which rewrites the surrounding
-invariant.
+- The **Etsy structural push failure** is now retried *hourly* by the reconciliation sweep
+  that shipped in 0.12.1, which has no concept of a permanent failure. Seven pushes that
+  cannot ever succeed are burning daily Etsy budget on a loop. This is the single
+  highest-value backlog entry and it was not urgent when this document was last written.
+- **Disconnect silently disabling auto-sync** (`platforms.py:674`) is still live, still
+  invisible, and still the first thing anyone tries when a platform looks stuck.
+- **eBay refunds are never recorded** — `refunded_amount` appears nowhere in the eBay
+  adapter, so partially refunded eBay orders still count returned money as profit.
+
+**3. The eBay real-listing-id change.** Unblocked: it was waiting on PR #22, which merged
+in August. It stays its own commit for the reason the backlog gives.
 
 **4. New-user onboarding.** Scoped below. Target: the release that becomes 1.0.
 
@@ -72,6 +115,10 @@ notification endpoint and re-declaring. That's a strategy decision, not a task.
 
 **Target: 1.0. Not yet planned — this section is the scoping pass, not the plan.**
 
+**Re-checked at 0.17.0:** every finding below still holds. Nothing in eleven releases has
+added a guided path, a checklist, sample data or a first-run tour, and no CSV route for
+BOM lines or variants has appeared. Two findings moved slightly and are marked inline.
+
 ### Why it sits at 1.0
 
 Onboarding is the one feature whose scope is defined by everything else in the product.
@@ -80,6 +127,10 @@ and every capability added is another dependency ordering a new user cannot gues
 early, it is rewritten by each subsequent release; built at 1.0, it captures the finished
 shape once. That is the argument for the placement, and it holds as long as the release
 before 1.0 is genuinely feature-complete — see "what would move it earlier".
+
+The eleven releases since this was written are the argument's own evidence: notifications,
+fallbacks, substitutions, shipping-profile linking and replacement parcels each added
+settings and dependencies a first-run path would have had to be rewritten for.
 
 ### What a new install actually faces today
 
@@ -104,9 +155,10 @@ Findings from reading the code, not from assumption:
    materials before a BOM; a BOM before buildability means anything; a kitting BOM before
    packaging capacity is right; `sync_start_date` before the first sync or you import
    years of history; connect *then* adopt listings (`docs/listing-adoption.md`) to link an
-   existing catalogue; listing profiles before any product can be drafted — PR #22 notes
-   its own feature is inert until one exists ("every product reports 'no listing profile
-   applies' and the draft button stays disabled").
+   existing catalogue; listing profiles before any product can be drafted. *Since 0.16.0
+   this ordering got one step longer, not shorter: a product's shipping profile now has to
+   be linked to an Etsy shipping profile or eBay postage policy before a draft ships
+   correctly.*
 
 5. **The marketplace setup is developer-grade, and this is the actual wall.** Each user
    must, today, register their own developer app on Etsy (client ID/secret, plus a
@@ -119,15 +171,17 @@ Findings from reading the code, not from assumption:
    wizard fixes it — see "the decision this forces".
 
 6. **Bulk import stops short of the hard part.** `csv_io.py` exports and imports materials
-   and products. There is no CSV path for BOM lines, variants, variant overrides or
-   kitting BOMs — which is precisely the data a shop with an existing catalogue has the
-   most of, and the part that is most tedious to key in by hand.
+   and products (and exports orders, purchases and stock takes). There is still no CSV
+   path for BOM lines, variants, variant overrides or kitting BOMs — which is precisely
+   the data a shop with an existing catalogue has the most of, and the part that is most
+   tedious to key in by hand.
 
 7. **The good tools exist but are buried.** "Suggest profiles from Etsy"
-   (`listing_profile_backfill.py`, which groups a catalogue's listings into a handful of
-   real profile combinations) and the Etsy description/price/photo backfill
+   (`listing_profile_backfill.py`) and the Etsy description/price/photo backfill
    (`etsy_backfill.py`) are two of the strongest onboarding assets in the codebase, and
-   both live inside Settings → Integrations where a new user has no reason to look.
+   both live inside Settings → Stores & sync where a new user has no reason to look.
+   *0.16.0 made the first of them stronger still — it now proposes shipping profiles too —
+   and 0.17.0 moved it behind one more click, onto a per-store page.*
 
 8. **A second machine is not an onboarding path.** The backend binds to `127.0.0.1`
    (README, "Known limitation"), so moving to a new PC means restore-from-backup, which
@@ -160,6 +214,10 @@ level rather than to one shop. That is a strategic choice with legal and operati
 weight, it is the single biggest determinant of what onboarding even means, and it wants
 deciding well before 1.0 rather than during it.
 
+**Still undecided at 0.17.0**, and now on the critical path for two themes rather than
+one: the webhook relay in step 1 above is the cheap version of the same question about
+where StockSmith's trust boundary sits.
+
 ### What would move it earlier
 
 Any of: a second person needing to run StockSmith; a decision to distribute it publicly;
@@ -170,11 +228,16 @@ sharpest edge off finding 5 and make an earlier, smaller onboarding pass worthwh
 
 ## Proposed definition of 1.0
 
-Offered for confirmation, not settled:
+Offered for confirmation, not settled. Re-checked at 0.17.0:
 
-1. Everything in flight merged and released.
+1. ~~Everything in flight merged and released.~~ **Met** — PRs #22 and #23 merged in
+   August and have shipped in several releases since.
 2. Always-on sync working, in whatever shape `plan-always-on-sync.md` settles on.
-3. `backlog.md` empty of correctness items (nice-to-haves may survive).
-4. A decision recorded on shared vs. per-user marketplace app credentials.
-5. Onboarding built against the finished feature set.
-6. A print-queue decision — in scope, or explicitly post-1.0.
+   **Half met** — the tray is shipped; the webhook relay it recommends is not started.
+3. `backlog.md` empty of correctness items (nice-to-haves may survive). **Not met** —
+   the correctness items in its first two groups are the gating set, led by the Etsy
+   structural push failure now looping hourly.
+4. A decision recorded on shared vs. per-user marketplace app credentials. **Not met** —
+   no decision record exists in `docs/`.
+5. Onboarding built against the finished feature set. **Not started.**
+6. A print-queue decision — in scope, or explicitly post-1.0. **Not made.**

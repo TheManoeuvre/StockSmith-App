@@ -450,7 +450,13 @@ beside work that doesn't depend on it.
 
 **Separate, unchanged.**
 
-8. **Push reconciliation** (§4) — its own change, its own decision, as argued above.
+8. ✅ **Push reconciliation** (§4) — shipped in 0.12.1 as `services/listing_reconcile`,
+   out of the rate-reduction work (`plan-listing-push-rate-reduction.md` stage 4) rather
+   than from here, which is exactly the separate change this step argued for. It re-checks
+   listing quantities hourly and retries any listing whose most recent push errored. One
+   gap it inherits: it has no concept of a *permanent* failure, so a structurally
+   impossible push is retried forever — see `backlog.md`, "Etsy quantity pushes fail
+   permanently".
 
 Steps 1 and 2 are worth landing even if the tray work is dropped.
 

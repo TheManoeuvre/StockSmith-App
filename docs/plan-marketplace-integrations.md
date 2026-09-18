@@ -2,6 +2,12 @@
 
 ## Status
 
+**Superseded by delivery (checked 2026-09-18).** All 11 build-order steps below are ✅ and
+shipped; the document is kept as the design record and is still the source of truth for
+§2 (shipping automation, deliberately closed off) and §4 (orders, allocation, kitting,
+returns). The paragraph that follows describes the state of the code when the plan was
+*written*, not today.
+
 Planning only — nothing in this document has been implemented. Written after reading the
 current backend (`app/services/platforms/*`, `app/services/order_sync.py`,
 `app/services/allocation.py`, `app/services/kitting.py`, `app/models/*`), the frontend
