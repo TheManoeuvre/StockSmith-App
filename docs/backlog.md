@@ -383,15 +383,15 @@ verifying Tauri actually exposes a reliable on-quit hook before promising this �
 also designed to keep running in the background/tray (see `BackgroundSyncSettings`), which
 may make "on quit" a rarer event than the mockup assumes.
 
-### Deep-linking into a specific Settings page/panel
+### Deep-linking into a specific Settings panel
 
 **Problem:** The mockup's product slide-over has a "Stores" tab with an "Open listing
 profiles" link that jumps straight to Settings → Stores & sync → Etsy → the listing-profiles
-panel. Today's Settings route only carries the top-level page in the URL
-(`?page=stores-sync`); there's no param for which platform's accordion should be expanded
-or scrolled to.
+panel. Since 0.17.0 the Settings route carries the store in the URL
+(`?page=stores-sync&store=etsy`) and the sidebar's "Sync problem" link uses it, but there's
+still no param for which panel on the store page should be expanded or scrolled to.
 
-**Ask:** Extend `validateSearch` with optional `platform`/`panel` params and have
-`StoresSyncPage` honour them on load (set the segmented control, expand the right
-accordion). Small, self-contained routing work — worth scoping on its own rather than
-bundling into a future settings change.
+**Ask:** Extend `validateSearch` with an optional `panel` param and have the store page
+honour it on load (open the right Disclosure row, scroll it into view). Small,
+self-contained routing work — worth scoping on its own rather than bundling into a future
+settings change.
