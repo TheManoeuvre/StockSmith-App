@@ -11,6 +11,16 @@ from app.models.listing import ListingPlatform
 class ListingPushStatus(str, enum.Enum):
     success = "success"
     error = "error"
+    # The marketplace cannot accept this push as the seller currently has the listing
+    # configured, and no retry will change that (services/platforms/errors.py
+    # PlatformPushBlockedError). Split out from `error` so the two consumers of "latest
+    # attempt per listing" can treat it differently: services/listing_reconcile stops
+    # re-queueing it every hour against the daily API budget, and the menu-bar badge
+    # reports it as something to go and fix rather than as a failure awaiting a retry.
+    #
+    # Seven characters, exactly like "success" — portable_enum sizes the column to the
+    # longest member, so this needs no migration. A longer value in future would.
+    blocked = "blocked"
 
 
 class PlatformListingPush(Base):

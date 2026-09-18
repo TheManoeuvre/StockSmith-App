@@ -39,6 +39,15 @@ _LABELS = {
     LimitField.quantity_max: "Maximum quantity",
 }
 
+# Shown as a tooltip beside the label, only where the shipped number is *not* the
+# marketplace's own headline figure and the gap would otherwise look like a mistake.
+_HELP: dict[tuple[ListingPlatform, LimitField], str] = {
+    (ListingPlatform.etsy, LimitField.variation_max_count): (
+        "Etsy allows up to 4,900 option combinations, but SKUs can only be set for up to "
+        "400 of them, which StockSmith requires."
+    ),
+}
+
 
 def _require_supported(platform: ListingPlatform) -> None:
     if platform not in platform_limits.supported_platforms():
@@ -77,6 +86,7 @@ async def list_platform_limits(
             PlatformFieldLimitRead(
                 field=field,
                 label=_LABELS[field],
+                help=_HELP.get((platform, field)),
                 kind="int" if isinstance(default.value, int) else "text",
                 default_value=str(default.value),
                 override_value=None if override_value is None else str(override_value),
@@ -145,6 +155,7 @@ async def set_platform_limit(
     return PlatformFieldLimitRead(
         field=field,
         label=_LABELS[field],
+        help=_HELP.get((platform, field)),
         kind="int" if isinstance(default.value, int) else "text",
         default_value=str(default.value),
         override_value=str(value),

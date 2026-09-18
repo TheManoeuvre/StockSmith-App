@@ -60,15 +60,24 @@ async def _latest_commit_runs(session: AsyncSession) -> dict[ListingPlatform, Pl
     return {run.platform: run for run in result.scalars()}
 
 
-async def _failing_push_counts(session: AsyncSession) -> dict[ListingPlatform, int]:
-    """How many listings are currently failing to receive quantity updates, per platform.
+async def _push_problem_counts(
+    session: AsyncSession,
+) -> tuple[dict[ListingPlatform, int], dict[ListingPlatform, int]]:
+    """How many listings are currently failing to receive quantity updates, per platform,
+    split into (failing, blocked).
 
     "Currently" means the most recent attempt for that listing errored — not "errored at
-    some point", and not a time window. That distinction matters because listing_push has
-    no periodic reconciliation: a push that fails is never retried until something else
-    changes that product's stock, so a failure from last week can still be the live state
-    of the listing. A time-boxed count would quietly drop exactly the failures that have
-    gone stale, which are the ones worth surfacing.
+    some point", and not a time window. That distinction matters because a push that fails
+    is only retried on the reconcile sweep's cadence, so a failure from last week can still
+    be the live state of the listing. A time-boxed count would quietly drop exactly the
+    failures that have gone stale, which are the ones worth surfacing.
+
+    The split is between failures StockSmith is still working on and failures it isn't.
+    A `blocked` listing is one the marketplace cannot accept a push for as the seller has
+    it configured (services/platforms/errors.PlatformPushBlockedError): the sweep has
+    deliberately stood down on it, so counting it alongside the retrying ones would
+    promise a recovery that is never coming. It needs the seller to go and change
+    something, which is a different message and a different call to action.
     """
     ranked = select(
         PlatformListingPush.platform.label("platform"),
@@ -86,11 +95,19 @@ async def _failing_push_counts(session: AsyncSession) -> dict[ListingPlatform, i
     ).subquery()
 
     result = await session.execute(
-        select(ranked.c.platform, func.count())
-        .where(ranked.c.rn == 1, ranked.c.status == ListingPushStatus.error)
-        .group_by(ranked.c.platform)
+        select(ranked.c.platform, ranked.c.status, func.count())
+        .where(
+            ranked.c.rn == 1,
+            ranked.c.status.in_((ListingPushStatus.error, ListingPushStatus.blocked)),
+        )
+        .group_by(ranked.c.platform, ranked.c.status)
     )
-    return {platform: count for platform, count in result.all()}
+    failing: dict[ListingPlatform, int] = {}
+    blocked: dict[ListingPlatform, int] = {}
+    for platform, status, count in result.all():
+        target = blocked if status == ListingPushStatus.blocked else failing
+        target[platform] = count
+    return failing, blocked
 
 
 # A gap only counts as downtime once it is wider than this many sync intervals. One missed
@@ -207,7 +224,7 @@ async def get_sync_summary(session: AsyncSession) -> list[PlatformSyncSummary]:
         for c in (await session.execute(select(PlatformConnection))).scalars()
     }
     latest_runs = await _latest_commit_runs(session)
-    failing_pushes = await _failing_push_counts(session)
+    failing_pushes, blocked_pushes = await _push_problem_counts(session)
 
     summaries = []
     for platform in _SUMMARISED_PLATFORMS:
@@ -234,6 +251,7 @@ async def get_sync_summary(session: AsyncSession) -> list[PlatformSyncSummary]:
                     run.error_message if run is not None and run.status == SyncRunStatus.error else None
                 ),
                 failing_push_count=failing_pushes.get(platform, 0),
+                blocked_push_count=blocked_pushes.get(platform, 0),
                 api_calls_today=api_calls_today,
                 api_call_budget=platform_api_usage.daily_budget(platform),
             )

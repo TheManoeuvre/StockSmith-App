@@ -11,7 +11,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useState, type MouseEvent } from "react";
+import { useEffect, useState, type MouseEvent } from "react";
 import { ordersApi } from "../../api/orders";
 import type { Order, OrderStatus } from "../../api/types";
 import { CopyButton } from "../../components/common/CopyButton";
@@ -114,10 +114,24 @@ function OrdersListContent() {
   const queryClient = useQueryClient();
   const [tab, setTab] = useState<OrderTab>("awaiting");
   const [page, setPage] = useState(0);
+  const [searchInput, setSearchInput] = useState("");
+  const [q, setQ] = useState("");
+
+  // Debounce the search box into the query key so a keystroke isn't a request, same as the
+  // products list. A change to the effective term sends us back to page 0 — a later page of
+  // the wider list is usually past the end of the narrower one.
+  useEffect(() => {
+    const trimmed = searchInput.trim();
+    const t = setTimeout(() => {
+      setQ(trimmed);
+      setPage(0);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["orders", tab, page],
-    queryFn: () => ordersApi.list(ORDERS_PAGE_SIZE, page * ORDERS_PAGE_SIZE, tab),
+    queryKey: ["orders", tab, page, q],
+    queryFn: () => ordersApi.list(ORDERS_PAGE_SIZE, page * ORDERS_PAGE_SIZE, tab, q),
     placeholderData: keepPreviousData,
   });
 
@@ -198,11 +212,20 @@ function OrdersListContent() {
         </div>
       </div>
 
-      <FilterTabs
-        tabs={STATUS_TABS.map((t) => ({ id: t.id, label: t.label, count: countFor(t.id) }))}
-        active={tab}
-        onChange={changeTab}
-      />
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+        <FilterTabs
+          tabs={STATUS_TABS.map((t) => ({ id: t.id, label: t.label, count: countFor(t.id) }))}
+          active={tab}
+          onChange={changeTab}
+        />
+        <input
+          className="w-64 rounded border border-slate-300 px-2.5 py-1.5 text-sm"
+          placeholder="Search order no., item, SKU, notes…"
+          aria-label="Search orders"
+          value={searchInput}
+          onChange={(e) => setSearchInput(e.target.value)}
+        />
+      </div>
 
       <table className="w-full border-collapse overflow-hidden rounded-lg bg-white text-left text-[12.5px] shadow-sm">
         <thead>
@@ -221,7 +244,7 @@ function OrdersListContent() {
           {rows.length === 0 ? (
             <tr>
               <td colSpan={8} className="p-6 text-center text-slate-500">
-                No orders
+                {q ? `No orders match "${q}"` : "No orders"}
               </td>
             </tr>
           ) : (

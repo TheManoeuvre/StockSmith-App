@@ -87,9 +87,10 @@ async def test_overrides_feed_strictest_wins_resolution(session):
 
 
 @pytest.mark.asyncio
-async def test_third_variation_becomes_allowed_by_data_not_code(session):
-    """The first real use of this table: Etsy's third variation ships capped at 2 and is
-    raised once the shop is enrolled, with no release involved."""
+async def test_third_variation_can_be_withdrawn_by_data_not_code(session):
+    """Etsy's third variation ships enabled (cap 3) since its September 2026 release. A
+    shop not yet enrolled can cap it back to 2 with no release involved — the inverse of
+    this table's original purpose, exercised the same way."""
     product = Product(
         name="Brick Pencil Pot",
         sku="SKU-0037",
@@ -101,10 +102,10 @@ async def test_third_variation_becomes_allowed_by_data_not_code(session):
     session.add(product)
     await session.commit()
 
-    assert (await scan_catalogue(session, ETSY)).blocked_count == 1
-
-    await _override(session, ETSY, LimitField.variation_attribute_max_count, int_value=3)
     assert (await scan_catalogue(session, ETSY)).products == []
+
+    await _override(session, ETSY, LimitField.variation_attribute_max_count, int_value=2)
+    assert (await scan_catalogue(session, ETSY)).blocked_count == 1
 
 
 @pytest.mark.asyncio

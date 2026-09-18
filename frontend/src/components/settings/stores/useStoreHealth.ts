@@ -9,7 +9,8 @@ import type { ListingPlatform } from "../../../api/types";
 const STATUS_POLL_MS = 30_000;
 const SUMMARY_POLL_MS = 60_000;
 
-export type StoreState = "not-connected" | "reconnect" | "sync-failed" | "pushes-failing" | "syncing" | "ok";
+export type StoreState =
+  "not-connected" | "reconnect" | "sync-failed" | "pushes-failing" | "pushes-blocked" | "syncing" | "ok";
 
 export interface StoreHealth {
   status: PlatformStatus | undefined;
@@ -18,6 +19,10 @@ export interface StoreHealth {
   /** The one thing the card's chip should say. Worst problem wins. */
   state: StoreState;
   failingPushCount: number;
+  /** Listings the marketplace won't accept a push for as they're set up — see the backend's
+   *  blocked_push_count. Ranked below failingPushCount because it isn't going to resolve
+   *  itself: it's a job for the seller, not a retry. */
+  blockedPushCount: number;
 }
 
 export function useStoreHealth(platform: ListingPlatform): StoreHealth {
@@ -35,6 +40,7 @@ export function useStoreHealth(platform: ListingPlatform): StoreHealth {
   const summary = summaries?.find((s) => s.platform === platform);
   const connected = status?.connected ?? false;
   const failingPushCount = summary?.failing_push_count ?? 0;
+  const blockedPushCount = summary?.blocked_push_count ?? 0;
 
   const state: StoreState = !connected
     ? "not-connected"
@@ -44,11 +50,13 @@ export function useStoreHealth(platform: ListingPlatform): StoreHealth {
         ? "sync-failed"
         : failingPushCount > 0
           ? "pushes-failing"
-          : status?.last_sync_status === "running"
-            ? "syncing"
-            : "ok";
+          : blockedPushCount > 0
+            ? "pushes-blocked"
+            : status?.last_sync_status === "running"
+              ? "syncing"
+              : "ok";
 
-  return { status, summary, connected, state, failingPushCount };
+  return { status, summary, connected, state, failingPushCount, blockedPushCount };
 }
 
 /** "4m ago" / "3h ago" / "2d ago", the absolute date past a week. */
@@ -65,7 +73,11 @@ export function formatRelative(iso: string): string {
 }
 
 /** Chip label + colour for a store's state. Shared by the hub card and the store page header. */
-export function stateChip(state: StoreState, failingPushCount: number): { label: string; className: string } {
+export function stateChip(
+  state: StoreState,
+  failingPushCount: number,
+  blockedPushCount = 0,
+): { label: string; className: string } {
   switch (state) {
     case "not-connected":
       return {
@@ -83,6 +95,13 @@ export function stateChip(state: StoreState, failingPushCount: number): { label:
       return {
         label: `${failingPushCount} ${failingPushCount === 1 ? "listing" : "listings"} not updating`,
         className: "bg-red-100 text-red-800",
+      };
+    case "pushes-blocked":
+      // Amber, not red: stock pushes to every other listing are landing. This one needs a
+      // change on the marketplace, which is a task rather than a fault.
+      return {
+        label: `${blockedPushCount} ${blockedPushCount === 1 ? "listing needs" : "listings need"} attention`,
+        className: "bg-amber-100 text-amber-800",
       };
     case "syncing":
       return { label: "Syncing…", className: "bg-blue-50 text-blue-700" };

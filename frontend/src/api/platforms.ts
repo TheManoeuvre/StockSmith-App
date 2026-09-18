@@ -51,7 +51,7 @@ export interface ListingPushRead {
   variant_name: string | null;
   platform: ListingPlatform;
   attempted_qty: number;
-  status: "success" | "error";
+  status: "success" | "error" | "blocked";
   error_message: string | null;
   attempted_at: string;
 }
@@ -130,6 +130,10 @@ export interface PlatformSyncSummary {
   // Listings whose most recent outbound quantity push failed and was never retried —
   // separate from last_sync_error, which only covers inbound order sync.
   failing_push_count: number;
+  // Listings the marketplace can't accept a stock push for as they're currently set up.
+  // Counted apart from failing_push_count because retrying can't clear it — the seller has
+  // to change something on the marketplace before a push can land.
+  blocked_push_count: number;
   // Marketplace API calls made to this platform so far today (UTC) and the daily budget
   // they count against. As usage nears the budget, automatic quantity pushes stand down
   // so order sync keeps its headroom.

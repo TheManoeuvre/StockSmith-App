@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db, require_auth
@@ -9,7 +9,7 @@ from app.models.material_category import MaterialCategory
 from app.models.product import Product, ProductMaterial
 from app.models.variant import ProductVariant, ProductVariantMaterial
 from app.schemas.kitting import VariantKittingBomLine
-from app.schemas.variant import VariantBomLine, VariantRead, VariantUpdate
+from app.schemas.variant import VariantBomLine, VariantPricingBulkUpdate, VariantRead, VariantUpdate
 from app.services import listing_push, platform_fees
 from app.services.buildability import buildable_fields, compute_variant_buildability
 from app.services.kitting import compute_max_sellable, kitting_cost_per_unit_from_bom, sync_listing_ceiling_qty
@@ -128,6 +128,30 @@ async def get_variant(variant_id: int, session: AsyncSession = Depends(get_db)) 
     await sync_listing_ceiling_qty(session, variant.product_id, variant.id, read.expected_max_sellable)
     await session.commit()
     return read
+
+
+@router.patch("/pricing", status_code=status.HTTP_204_NO_CONTENT)
+async def update_variant_pricing(payload: VariantPricingBulkUpdate, session: AsyncSession = Depends(get_db)) -> None:
+    """Sets the same pricing on every listed variant in one transaction.
+
+    Registered ahead of ``/{variant_id}`` so the literal path wins. Every field is written,
+    including nulls: the group form always sends all three, and clearing a value is a valid
+    edit. Unknown ids are ignored rather than 404'd — the form's list came from the same
+    product moments earlier, and a variant deleted in between is not worth failing the rest
+    of the group over.
+    """
+    if not payload.variant_ids:
+        return
+    await session.execute(
+        update(ProductVariant)
+        .where(ProductVariant.id.in_(payload.variant_ids))
+        .values(
+            sale_price=payload.sale_price,
+            shipping_profile_id=payload.shipping_profile_id,
+            platform_fee_percent=payload.platform_fee_percent,
+        )
+    )
+    await session.commit()
 
 
 @router.patch("/{variant_id}", response_model=VariantRead)
