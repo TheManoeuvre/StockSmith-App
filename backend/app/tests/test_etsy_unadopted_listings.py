@@ -204,6 +204,20 @@ def _inventory(products: list[dict]) -> dict:
     }
 
 
+async def test_write_echoes_readiness_state_on_property():
+    """updateListingInventory takes four *_on_property arrays, not three. A listing whose
+    variations carry different processing profiles has readiness_state_on_property set,
+    and a write that omits it declares "one profile for all" while the echoed offerings
+    still disagree — which Etsy rejects."""
+    inventory = _inventory([_raw_product("A", "Black")])
+    inventory["readiness_state_on_property"] = [200]
+    adapter = _RecordingAdapter(inventory)
+
+    await adapter.update_listing_skus(None, None, "1", {0: "NEW-A"})
+
+    assert adapter.put_body["readiness_state_on_property"] == [200]
+
+
 async def test_write_sets_only_the_targeted_sku():
     inventory = _inventory([_raw_product("OLD-A", "Black"), _raw_product("OLD-B", "White")])
     adapter = _RecordingAdapter(inventory)
@@ -330,32 +344,69 @@ async def test_write_respects_etsy_quantity_floor_of_one():
 
 
 class _PagingAdapter(EtsyAdapter):
-    """fetch_all_listings duplicates build_listing_sku_index's pagination loop rather
-    than sharing it (the hot path keeps its single pass). A hand-copied loop is exactly
-    the kind of thing that silently stops after page one, so it gets its own coverage."""
+    """Answers the shop-listings crawl from scripted pages keyed by `state`. Etsy's
+    getListingsByShop defaults `state` to `active` when it's omitted, so the crawl has to
+    ask once per state — a request without one is answered with an empty page here, the
+    way a real shop with everything sitting in `inactive` would look to such a request."""
 
-    def __init__(self, pages: list[dict]):
+    def __init__(self, pages_by_state: dict[str, list[dict]]):
         super().__init__("id", "secret")
-        self._pages = pages
-        self.offsets: list[int] = []
+        self._pages_by_state = pages_by_state
+        self.requests: list[tuple[str | None, int]] = []
 
     async def _authed_request(self, session, connection, method, path, **kwargs):
         params = kwargs.get("params") or {}
-        self.offsets.append(int(params.get("offset", 0)))
-        return _FakeResponse(self._pages[len(self.offsets) - 1])
+        state = params.get("state")
+        offset = int(params.get("offset", 0))
+        self.requests.append((state, offset))
+        pages = self._pages_by_state.get(state, [])
+        page_no = sum(1 for s, _ in self.requests if s == state) - 1
+        return _FakeResponse(pages[page_no] if page_no < len(pages) else {"count": 0, "results": []})
 
 
-async def test_fetch_all_listings_paginates():
+async def test_fetch_all_listings_paginates_within_a_state():
     from types import SimpleNamespace
 
     page1 = {"count": 3, "results": [_raw_listing(1, "A", []), _raw_listing(2, "B", [])]}
     page2 = {"count": 3, "results": [_raw_listing(3, "C", [])]}
-    adapter = _PagingAdapter([page1, page2])
+    adapter = _PagingAdapter({"active": [page1, page2]})
 
     listings = await adapter.fetch_all_listings(None, SimpleNamespace(external_account_id="shop"))
 
     assert [listing["listing_id"] for listing in listings] == [1, 2, 3]
-    assert adapter.offsets == [0, 2]  # advanced by the number actually returned
+    assert [o for s, o in adapter.requests if s == "active"] == [0, 2]  # advanced by the number returned
+
+
+async def test_crawl_asks_for_every_state_not_just_the_default():
+    """A sold-out or deactivated listing is still a listing StockSmith is linked to. When
+    the crawl relied on Etsy's default it never saw one, and the next sync check reported
+    it 'not found' and dropped the link — after which no stock push ever reached it."""
+    from types import SimpleNamespace
+
+    adapter = _PagingAdapter(
+        {
+            "active": [{"count": 1, "results": [_raw_listing(1, "Live", [_raw_product("A", "x")])]}],
+            "sold_out": [{"count": 1, "results": [_raw_listing(2, "Gone", [_raw_product("B", "x")])]}],
+            "draft": [{"count": 1, "results": [_raw_listing(3, "New", [_raw_product("C", "x")])]}],
+        }
+    )
+
+    index = await adapter.build_listing_sku_index(None, SimpleNamespace(external_account_id="shop"))
+
+    assert {s for s, _ in adapter.requests} == {"active", "inactive", "sold_out", "draft", "expired"}
+    assert None not in {s for s, _ in adapter.requests}
+    assert {sku: ref.external_listing_id for sku, ref in index.items()} == {"A": "1", "B": "2", "C": "3"}
+
+
+async def test_crawl_never_returns_the_same_listing_twice():
+    from types import SimpleNamespace
+
+    same = {"count": 1, "results": [_raw_listing(7, "Twice", [])]}
+    adapter = _PagingAdapter({"active": [same], "inactive": [same]})
+
+    listings = await adapter.fetch_all_listings(None, SimpleNamespace(external_account_id="shop"))
+
+    assert [listing["listing_id"] for listing in listings] == [7]
 
 
 async def test_fetch_all_listings_requires_a_shop_id():

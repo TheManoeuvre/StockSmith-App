@@ -12,6 +12,24 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **"One listing isn't receiving stock updates" on a product whose Stores tab showed
+  everything synced.** A product linked to its listing *before* it was given variants
+  kept that old product-level link. It was never shown again, but the hourly check kept
+  pushing the parent SKU to a listing that only carries the variant SKUs, failing every
+  time and lighting the sidebar warning. Links for units a product no longer sells as
+  (the bare product once it has variants, a variant once it's deactivated) are now
+  ignored by every stock push, cleared by the next Test Sync, and never counted as
+  failing. Also applies to eBay.
+- **Etsy sync checks only saw active listings.** A listing that had sold out, been
+  deactivated, expired, or was created by StockSmith as a draft came back as "Not found"
+  on Test Etsy Sync — which quietly unlinked it, so stock pushes stopped reaching it once
+  it was restocked or relisted. The check now looks at every listing state, and reports
+  such listings as "listing not active" instead. Unlinked listings in Tools sees them too.
+- **Etsy stock pushes to a listing with per-variation processing profiles.** The write
+  now sends the listing's processing-profile-by-variation setting back exactly as read,
+  instead of dropping it.
+
 ## [0.18.1] - 2026-09-19
 
 ### Fixed
