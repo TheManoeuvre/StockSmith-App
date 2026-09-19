@@ -12,6 +12,27 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-09-19
+
+### Fixed
+- **eBay order sync stopped dead on a bulk label purchase.** When several labels are
+  bought in one go, eBay reports that single purchase against every order in the batch.
+  The sync recorded it on the first order and then failed with a database error on the
+  next one — and because a failed sync never moves on, it failed the same way on every
+  run after that. The other orders in the batch are now skipped for that label (with a
+  note in the log) and the sync carries on. If your eBay sync has shown "Last order sync
+  failed: UNIQUE constraint failed" since 19 September, this is the fix.
+- **Deleting a replacement parcel no longer un-spends its shipping label.** The label
+  the sync had matched to the parcel stayed on the order but silently dropped out of net
+  profit. Resend labels that aren't attached to a parcel now count under "Replacement
+  postage" until you attach them to one.
+- **Etsy shipping labels can no longer be charged to the wrong order.** A ledger entry
+  that only named the label itself (not the receipt) was being claimed by every order
+  shipped in the following month. Such an entry is now left alone; only entries that
+  reference the receipt or one of its transactions are recorded.
+- **Deleting an order that still has replacement parcels is refused** until the parcels
+  are deleted first, so the stock those parcels took is put back rather than lost.
+
 ## [0.18.0] - 2026-09-18
 
 ### Added
