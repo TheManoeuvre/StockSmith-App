@@ -131,6 +131,13 @@ _SCOPES: dict[ListingPlatform, list[str]] = {
         "https://api.ebay.com/oauth/api_scope/sell.finances",
         "https://api.ebay.com/oauth/api_scope/sell.inventory.readonly",
         "https://api.ebay.com/oauth/api_scope/sell.inventory",
+        # Required for EbayAdapter.fetch_fulfillment_policies (GET
+        # /sell/account/v1/fulfillment_policy), which backs the shipping-profile ↔ postage
+        # policy link picker. Without it eBay 403s the call and the picker's "reconnect to
+        # grant the permission" hint sends the user round in circles, because a reconnect
+        # only grants what is asked for here. Read-only is enough: StockSmith never edits
+        # business policies. A connection made before this was added must reconnect.
+        "https://api.ebay.com/oauth/api_scope/sell.account.readonly",
         # Required for EbayAdapter.fetch_account_id's call to the Identity API
         # (commerce/identity/v1/user/) — confirmed missing after a live Sandbox connect
         # attempt 403'd with "Insufficient permissions to fulfill the request." Every
