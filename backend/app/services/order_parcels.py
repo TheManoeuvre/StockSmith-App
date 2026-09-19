@@ -15,6 +15,7 @@ Neither path touches OrderLine, the kitting ledger or allocation state — see
 models/order_parcel.py for why a replacement is deliberately not sale demand.
 """
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -47,6 +48,8 @@ from app.services.notification_alerts import PendingReviewAlert, raise_replaceme
 from app.services.notifications import resolve_alerts
 from app.services.order_costs import compute_line_cost_snapshot
 from app.services.platforms.base import ExternalPostageCharge
+
+logger = logging.getLogger(__name__)
 from app.services.stock_events import record_stock_event
 
 
@@ -59,7 +62,9 @@ class ReplacementCosts:
     per-order amount (OrderPostageCharge.amount NULL) — profit then falls back to the
     shipping-profile snapshot either way. parcel_postage: Σ over replacement parcels of
     the figure each one actually uses (its linked label's amount when it has one, else its
-    typed postage_cost). items_cogs: Σ qty ×
+    typed postage_cost), PLUS every resend label (sequence >= 2) not linked to any parcel
+    — the marketplace charged for it whether or not the user has said what went out, and
+    deleting a sync placeholder must not un-spend it. items_cogs: Σ qty ×
     frozen unit cost over every parcel item — None-not-zero when no parcel has items, so a
     caller can render "—" rather than a confident zero."""
 
@@ -76,6 +81,10 @@ _PARCEL_POSTAGE_ROWS_SQL = text(
     FROM order_replacement_parcels p
     LEFT JOIN order_postage_charges c ON c.replacement_parcel_id = p.id
     WHERE p.order_id IN :ids
+    UNION ALL
+    SELECT c.order_id, NULL AS manual_postage, c.amount AS charge_amount
+    FROM order_postage_charges c
+    WHERE c.order_id IN :ids AND c.sequence >= 2 AND c.replacement_parcel_id IS NULL AND c.amount IS NOT NULL
     """
 ).bindparams(bindparam("ids", expanding=True))
 
@@ -339,8 +348,9 @@ async def delete_parcel(session: AsyncSession, parcel: OrderReplacementParcel) -
     current_stock (with its own reversal event in the Stock history), every material item
     is re-added by a positive adjustment. The linked label, if any, is only unlinked —
     the charge row is marketplace truth and keeps counting against the order's postage
-    (a sync-created parcel with no items therefore has nothing to restock; deleting it
-    just hides the prompt while the money stays accounted for)."""
+    as an unlinked resend label (get_replacement_costs_by_order), so a sync-created
+    parcel with no items has nothing to restock and deleting it just hides the prompt
+    while the money stays accounted for."""
     order_id = parcel.order_id
     for item in list(parcel.items):
         if item.material_id is not None:
@@ -432,7 +442,11 @@ async def apply_postage_charges(
     labels recorded before bulk purchases were recognised — the stored figure was the
     batch total, never this order's cost — and it only ever runs in that direction. Rows
     the marketplace no longer returns are NOT deleted (a narrower fetch window is not a
-    refund). New rows are numbered sequence = max + 1 in posted_at order, and that number
+    refund). A label already stored against a DIFFERENT order is skipped: eBay returns a
+    bulk purchase's single transaction for every order in the batch, so the same
+    transactionId reaches several orders and (platform, external_id) is unique — the
+    first order to sync keeps it and the rest log and move on rather than fail the whole
+    sync. New rows are numbered sequence = max + 1 in posted_at order, and that number
     never changes afterwards — see OrderPostageCharge.
 
     For each new label with sequence >= 2: the oldest parcel on the order with no label
@@ -463,6 +477,27 @@ async def apply_postage_charges(
             stored.amount = None
             stored.description = ext.description
     fresh = [c for c in charges if c.external_id not in known]
+    if fresh:
+        elsewhere = set(
+            (
+                await session.execute(
+                    select(OrderPostageCharge.external_id).where(
+                        OrderPostageCharge.platform == order.platform,
+                        OrderPostageCharge.order_id != order.id,
+                        OrderPostageCharge.external_id.in_([c.external_id for c in fresh]),
+                    )
+                )
+            ).scalars()
+        )
+        for ext in fresh:
+            if ext.external_id in elsewhere:
+                logger.info(
+                    "%s shipping label %s reported for order %s is already recorded against another order — skipping",
+                    order.platform.value,
+                    ext.external_id,
+                    order.id,
+                )
+        fresh = [c for c in fresh if c.external_id not in elsewhere]
     if not fresh:
         return pending
     # Oldest first; None dates sort last so an undated label never displaces the original.

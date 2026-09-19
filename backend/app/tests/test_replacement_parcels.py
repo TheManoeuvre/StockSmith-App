@@ -283,8 +283,9 @@ async def test_deleting_a_parcel_restocks_everything_and_keeps_the_label(session
     await session.refresh(second)
     assert second.replacement_parcel_id is None
     assert len(read.postage_charges) == 2
-    assert read.replacement_postage is None
-    assert read.net_profit == Decimal("14.90")
+    assert read.replacement_postage == Decimal("3.10")
+    # 20 - 3.10 (first label) - 2.00 (postage charged) - 3.10 (the unlinked resend label)
+    assert read.net_profit == Decimal("11.80")
 
 
 async def test_first_label_cannot_be_linked_to_a_parcel(session):
