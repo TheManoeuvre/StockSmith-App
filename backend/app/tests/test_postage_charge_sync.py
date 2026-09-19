@@ -281,6 +281,28 @@ async def test_resync_clears_a_stored_amount_the_marketplace_now_calls_bulk(sess
     assert read.postage_cost_effective == Decimal("3.65")
 
 
+async def test_a_label_already_on_another_order_is_skipped_not_duplicated(session, connection, use_adapter, pushes):
+    """Live failure on 09-15158-06992: eBay returns a bulk purchase's single transaction for
+    every order in the batch, so two orders report the same transactionId. The unique key
+    is (platform, external_id), so the second order must skip it — not blow up the sync."""
+    await _product(session)
+    use_adapter(
+        [
+            make_order("R-1", sku="WID", qty=1, is_shipped=True, postage_charges=[_label("BULK", "21.90")]),
+            make_order("R-2", sku="WID", qty=1, is_shipped=True, postage_charges=[_label("BULK", "21.90")]),
+        ]
+    )
+    await order_sync.commit_sync(ListingPlatform.etsy)
+
+    charges = list((await session.execute(select(OrderPostageCharge))).scalars())
+    [charge] = charges
+    assert charge.external_id == "BULK"
+    orders = list((await session.execute(select(Order).order_by(Order.id))).scalars())
+    assert len(orders) == 2
+    # Exactly one of the two orders holds the label; the other carries none.
+    assert sorted(o.id == charge.order_id for o in orders) == [False, True]
+
+
 async def test_unenriched_pass_leaves_labels_alone(session, connection, use_adapter, pushes):
     await _product(session)
     await _sync(use_adapter, _label("L1", "3.10"))
@@ -303,7 +325,8 @@ async def test_deleting_a_sync_parcel_clears_its_alert_but_keeps_the_charge(
     assert read.replacement_parcels == []
     assert [c.external_id for c in read.postage_charges] == ["L1", "L2"]
     # Still the seller's money: a hidden prompt doesn't un-spend it.
-    assert read.net_profit == Decimal("20.00") - Decimal("3.10")
+    assert read.replacement_postage == Decimal("3.40")
+    assert read.net_profit == Decimal("20.00") - Decimal("3.10") - Decimal("3.40")
     note = (await session.execute(select(Notification))).scalar_one()
     assert note.read_at is not None
 

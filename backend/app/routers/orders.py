@@ -409,7 +409,13 @@ def _serialize_order(
         postage_cost_missing=_postage_cost_missing(order, replacement),
         postage_cost_actual=replacement.first_label_amount if replacement is not None else None,
         postage_cost_effective=_effective_postage_cost(order, replacement),
-        replacement_postage=(replacement.parcel_postage if replacement is not None and replacement_parcels else None),
+        # Shown whenever there is something to show: a parcel (even one with no postage
+        # yet), or an unlinked resend label the user hasn't attached to a parcel.
+        replacement_postage=(
+            replacement.parcel_postage
+            if replacement is not None and (replacement_parcels or replacement.parcel_postage)
+            else None
+        ),
         replacement_cogs=replacement.items_cogs if replacement is not None else None,
         replacement_parcels_need_review=any(p.needs_review for p in replacement_parcels),
         postage_charges=[PostageChargeRead.model_validate(c) for c in order.postage_charges],
@@ -733,6 +739,13 @@ async def delete_order(order_id: int, session: AsyncSession = Depends(get_db)) -
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Cannot delete an order with allocated or shipped units — cancel it first",
             )
+    # Parcels took stock the moment they were recorded; the cascade would erase the
+    # record of that without putting anything back (order_parcels.delete_parcel does).
+    if order.replacement_parcels:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Cannot delete an order with replacement parcels — delete the parcels first",
+        )
     await session.delete(order)
     await session.commit()
 

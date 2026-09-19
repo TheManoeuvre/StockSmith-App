@@ -857,11 +857,15 @@ class EtsyAdapter:
         entry qualifies when it's a debit (amount < 0), its ledger_type or description
         mentions a label (_LABEL_MARKERS), it isn't the shipping_transaction FEE on the
         buyer's postage (that's in _FEE_LEDGER_TYPES already), and it points at this
-        receipt: reference_type "receipt" with this receipt_id, "transaction" with one of
-        its transaction ids, or a reference_type that itself names a shipping label. A
-        miss costs a label going unrecorded (the profile estimate stands); a false match
-        would charge someone else's label to this order — so the marker match is
-        required, not just the reference.
+        receipt: reference_type "receipt" with this receipt_id, or "transaction" with one
+        of its transaction ids. An entry that only references the label itself (a
+        "shipping_label" reference_type with the label's own id) is NOT taken: the crawl
+        window is 30 days from the receipt's creation, so such an entry would be claimed
+        by every receipt shipped in that window — the first one synced would keep it
+        (order_postage_charges is unique on external_id) and every later one would carry
+        a spurious resend. A miss costs a label going unrecorded (the profile estimate
+        stands); a false match charges someone else's label to this order — so both the
+        marker and a reference to this receipt are required.
 
         Every entry that references this receipt but that neither this nor the fee
         classification recognises is logged at INFO with its (ledger_type,
@@ -882,10 +886,8 @@ class EtsyAdapter:
             is_label = ledger_type != "shipping_transaction" and any(
                 marker in ledger_type or marker in description for marker in cls._LABEL_MARKERS
             )
-            references_this = (
-                (reference_type == "receipt" and str(reference_id) == receipt_key)
-                or (reference_type == "transaction" and str(reference_id) in transaction_ids)
-                or "shipping_label" in reference_type
+            references_this = (reference_type == "receipt" and str(reference_id) == receipt_key) or (
+                reference_type == "transaction" and str(reference_id) in transaction_ids
             )
             if not references_this:
                 continue

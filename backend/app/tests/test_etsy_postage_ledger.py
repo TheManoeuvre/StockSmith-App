@@ -45,13 +45,15 @@ def test_labels_referencing_the_receipt_are_extracted_oldest_first():
     assert charges[0].posted_at is not None and charges[0].posted_at < charges[1].posted_at
 
 
-def test_a_label_keyed_on_a_transaction_or_its_own_reference_type_still_matches():
+def test_a_label_keyed_on_a_transaction_matches_but_one_keyed_only_on_itself_does_not():
+    """An entry whose only reference is the label's own id can't be tied to a receipt —
+    the 30-day crawl window would hand it to every receipt shipped in that window."""
     entries = [
         _entry(1, "shipping_label", "transaction", _TX, -310),
         _entry(2, "shipping_label_purchase", "shipping_label", "77", -420),
     ]
     charges = EtsyAdapter._extract_postage_charges(entries, _RECEIPT, {_TX})
-    assert sorted(c.amount for c in charges) == ["3.10", "4.20"]
+    assert [c.amount for c in charges] == ["3.10"]
 
 
 def test_unrecognised_entries_on_the_receipt_are_logged_for_confirmation(caplog):
