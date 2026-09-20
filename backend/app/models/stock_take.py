@@ -141,6 +141,15 @@ class StockTakeLine(Base):
     # rather than read live so the sheet, the CSV and the review all describe one moment.
     allocated_qty_at_start: Mapped[float | None] = mapped_column(Numeric(14, 4), nullable=True)
     counted_qty: Mapped[float | None] = mapped_column(Numeric(14, 4), nullable=True)
+    # The date this item was last counted, set only when nothing has moved it since — no
+    # adjustment, no delivery, no build, no order. A line carrying it is low risk: the
+    # system is not aware of anything having happened to it, so checking it should be
+    # quick and is expected to confirm the figure rather than change it.
+    #
+    # Snapshotted at creation for the same reason expected_qty is. It describes the shelf
+    # as it was when the sheet was printed, and a highlight that came and went while
+    # someone was walking the shelves would contradict the paper in their hand.
+    unmoved_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notes: Mapped[str | None] = mapped_column(String, nullable=True)
 
     status: Mapped[StockTakeLineStatus] = mapped_column(

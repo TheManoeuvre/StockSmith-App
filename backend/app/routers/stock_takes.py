@@ -115,6 +115,7 @@ def _to_line_read(grouped: stock_takes.GroupedLine) -> StockTakeLineRead:
             None if line.allocated_qty_at_start is None else Decimal(line.allocated_qty_at_start)
         ),
         counted_qty=None if line.counted_qty is None else Decimal(line.counted_qty),
+        unmoved_since=line.unmoved_since,
         notes=line.notes,
         status=line.status,
         system_qty_at_approval=(

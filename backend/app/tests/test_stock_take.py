@@ -8,6 +8,7 @@ door. Everything else here is ordinary lifecycle cover; that one is guarding aga
 invisible data loss.
 """
 
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import pytest
@@ -18,12 +19,14 @@ from app.models.general_settings import GeneralSettings
 from app.models.material import Material, MaterialAdjustment, MaterialUnit
 from app.models.material_category import MaterialCategory
 from app.models.product import Product, ProductBundleItem
+from app.models.product_stock_event import ProductStockEvent, ProductStockEventType
 from app.models.stock_take import StockTake, StockTakeLine, StockTakeLineStatus, StockTakeStatus
 from app.models.variant import ProductVariant
 from app.schemas.stock_take import BulkLineCount, StockTakeScope
 from app.services import stock_takes
 from app.services.material_categories import legacy_value_for
 from app.services.abc import compute_due_for_count
+from app.tests.conftest import received_purchase
 
 MATERIALS_ONLY = StockTakeScope(include_materials=True)
 PRODUCTS_ONLY = StockTakeScope(include_products=True)
@@ -219,6 +222,123 @@ async def test_a_second_open_take_on_the_identical_scope_is_refused(session):
     await session.commit()
     again, _ = await stock_takes.create_stock_take(session, MATERIALS_ONLY)
     assert again.id != first.id
+
+
+# --- the unmoved (low risk) mark --------------------------------------------------------
+#
+# A line marked unmoved is one the ledgers say nothing has happened to since it was last
+# counted. It should already be at the figure on the sheet, so it is a quick confirmation
+# rather than a real count, and the sheet highlights it as such.
+
+
+WEEK_AGO = datetime.now(timezone.utc) - timedelta(days=7)
+
+
+async def test_an_item_with_a_quiet_ledger_is_marked_unmoved(session):
+    await _settings(session)
+    material = await _material(session, qty=Decimal(7))
+    # The opening adjustment _material writes predates the count, so it is not movement
+    # since — which is the whole comparison being made here.
+    material.last_stock_take_at = datetime.now(timezone.utc)
+    await session.commit()
+
+    take, _ = await stock_takes.create_stock_take(session, MATERIALS_ONLY)
+
+    line = (await _lines(session, take.id))[0]
+    assert line.unmoved_since is not None
+
+
+async def test_an_item_that_has_never_been_counted_is_not_marked(session):
+    await _settings(session)
+    await _material(session, qty=Decimal(7))
+    await session.commit()
+
+    take, _ = await stock_takes.create_stock_take(session, MATERIALS_ONLY)
+
+    # Never counted is the opposite of low risk, however quiet the ledger.
+    assert (await _lines(session, take.id))[0].unmoved_since is None
+
+
+async def test_an_adjustment_since_the_last_count_clears_the_mark(session):
+    await _settings(session)
+    material = await _material(session, qty=Decimal(7))
+    material.last_stock_take_at = WEEK_AGO
+    session.add(MaterialAdjustment(material_id=material.id, mode="adjust", qty_delta=Decimal(-2), reason="breakage"))
+    await session.commit()
+
+    take, _ = await stock_takes.create_stock_take(session, MATERIALS_ONLY)
+
+    assert (await _lines(session, take.id))[0].unmoved_since is None
+
+
+async def test_a_delivery_since_the_last_count_clears_the_mark(session):
+    await _settings(session)
+    material = await _material(session, qty=Decimal(7))
+    material.last_stock_take_at = WEEK_AGO
+    await received_purchase(session, material.id, qty=Decimal(4), total_cost=Decimal(10))
+    await session.commit()
+
+    take, _ = await stock_takes.create_stock_take(session, MATERIALS_ONLY)
+
+    assert (await _lines(session, take.id))[0].unmoved_since is None
+
+
+async def test_a_set_adjustment_is_a_count_not_a_movement(session):
+    """A "set" restarts the counting clock, so its own row must not then read as movement
+    past that clock — otherwise every item would lose the mark the moment it was counted."""
+    await _settings(session)
+    # No opening qty, so the set adjustment below is the only row in this material's ledger.
+    material = await _material(session)
+    material.last_stock_take_at = WEEK_AGO
+    session.add(MaterialAdjustment(material_id=material.id, mode="set", qty_delta=Decimal(8), target_qty=Decimal(8), reason="count"))
+    await session.commit()
+
+    take, _ = await stock_takes.create_stock_take(session, MATERIALS_ONLY)
+
+    assert (await _lines(session, take.id))[0].unmoved_since is not None
+
+
+async def test_movement_is_read_per_variant_not_per_product(session):
+    await _settings(session)
+    product = await _product(session)
+    red = ProductVariant(product_id=product.id, variant_name="Red", current_stock=3, last_stock_take_at=WEEK_AGO)
+    blue = ProductVariant(product_id=product.id, variant_name="Blue", current_stock=4, last_stock_take_at=WEEK_AGO)
+    session.add_all([red, blue])
+    await session.flush()
+    session.add(
+        ProductStockEvent(
+            product_id=product.id,
+            variant_id=red.id,
+            event_type=ProductStockEventType.order_fulfillment,
+            qty_delta=-1,
+            running_balance=3,
+        )
+    )
+    await session.commit()
+
+    take, _ = await stock_takes.create_stock_take(session, PRODUCTS_ONLY)
+
+    marks = {line.variant_id: line.unmoved_since for line in await _lines(session, take.id)}
+    assert marks[red.id] is None
+    assert marks[blue.id] is not None
+
+
+async def test_counting_an_item_leaves_it_unmoved_for_the_next_take(session, pushes):
+    """The round trip: approving a take dates the items it counted and writes the set
+    adjustments behind those counts, and neither may read as movement afterwards."""
+    await _settings(session)
+    await _material(session, qty=Decimal(7))
+    await _product(session, stock=5)
+    await session.commit()
+
+    first, _ = await stock_takes.create_stock_take(session, EVERYTHING)
+    for line in await _lines(session, first.id):
+        await _count(session, first.id, line.id, Decimal(line.expected_qty))
+    await stock_takes.approve_stock_take(session, first.id)
+
+    second, _ = await stock_takes.create_stock_take(session, EVERYTHING)
+
+    assert all(line.unmoved_since is not None for line in await _lines(session, second.id))
 
 
 # --- approve ---------------------------------------------------------------------------

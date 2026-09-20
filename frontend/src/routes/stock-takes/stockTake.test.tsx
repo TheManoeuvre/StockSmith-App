@@ -45,6 +45,7 @@ function line(overrides: Record<string, unknown> = {}) {
     expected_qty: "10.0000",
     allocated_qty_at_start: null,
     counted_qty: null,
+    unmoved_since: null,
     notes: null,
     status: "pending",
     system_qty_at_approval: null,
@@ -187,6 +188,21 @@ describe("count sheet", () => {
     await renderAt("/stock-takes/1");
 
     expect(screen.getByText(/5 picked for orders/)).toBeInTheDocument();
+  });
+
+  it("marks lines nothing has moved since they were last counted", async () => {
+    // These should already be at the figure on the sheet, so they're the quick ones —
+    // worth saying so, otherwise every line looks equally demanding.
+    setRoutes(baseRoutes(take([line({ unmoved_since: "2026-05-12T09:00:00Z" })])));
+    await renderAt("/stock-takes/1");
+
+    expect(screen.getByText(/no movement since/)).toBeInTheDocument();
+  });
+
+  it("says nothing about a line that has moved since its last count", async () => {
+    await renderAt("/stock-takes/1");
+
+    expect(screen.queryByText(/no movement since/)).not.toBeInTheDocument();
   });
 });
 

@@ -25,20 +25,23 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 from fastapi import HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import async_session_factory
-from app.models.material import LegacyMaterialCategory, Material, MaterialAdjustmentMode
+from app.models.material import LegacyMaterialCategory, Material, MaterialAdjustment, MaterialAdjustmentMode
 from app.models.material_category import MaterialCategory
 from app.models.product import Product
 from app.models.product_category import ProductCategory
-from app.models.stock_adjustment import StockAdjustmentMode
+from app.models.product_stock_event import ProductStockEvent
+from app.models.purchase import MaterialPurchase, MaterialPurchaseReceipt
+from app.models.stock_adjustment import StockAdjustment, StockAdjustmentMode
 from app.models.stock_take import StockTake, StockTakeLine, StockTakeLineStatus, StockTakeStatus
 from app.models.variant import ProductVariant
 from app.schemas.stock_take import ScopePreview, ScopeWarning, StockTakeScope
 from app.services import abc
 from app.services.costing import create_adjustment
+from app.services.platforms.base import ensure_utc
 from app.services.stock_adjustments import create_stock_adjustment
 
 _REASON = "Stock take #{take_id}"
@@ -55,6 +58,9 @@ class _Candidate:
     unit: str
     expected_qty: Decimal
     allocated_qty: Decimal | None
+    # When this row was last counted, or None if it never has been. Read here rather than
+    # looked up again later so the unmoved check costs no extra queries.
+    last_stock_take_at: datetime | None = None
 
     @property
     def key(self) -> tuple:
@@ -78,6 +84,7 @@ async def _material_candidates(session: AsyncSession, scope: StockTakeScope, due
                 unit=m.unit.value,
                 expected_qty=Decimal(m.current_qty),
                 allocated_qty=None,
+                last_stock_take_at=m.last_stock_take_at,
             )
         )
     return out
@@ -122,11 +129,14 @@ async def _product_candidates(session: AsyncSession, scope: StockTakeScope, due_
     for p in products:
         variants = sorted(variants_by_product.get(p.id, []), key=lambda v: v.variant_name)
         owners = (
-            [(v.id, f"{p.name} — {v.variant_name}", v.current_stock, v.allocated_qty) for v in variants]
+            [
+                (v.id, f"{p.name} — {v.variant_name}", v.current_stock, v.allocated_qty, v.last_stock_take_at)
+                for v in variants
+            ]
             if variants
-            else [(None, p.name, p.current_stock, p.allocated_qty)]
+            else [(None, p.name, p.current_stock, p.allocated_qty, p.last_stock_take_at)]
         )
-        for variant_id, name, current_stock, allocated in owners:
+        for variant_id, name, current_stock, allocated, last_take_at in owners:
             if due_keys is not None and (None, p.id, variant_id) not in due_keys:
                 continue
             out.append(
@@ -138,6 +148,7 @@ async def _product_candidates(session: AsyncSession, scope: StockTakeScope, due_
                     unit="each",
                     expected_qty=Decimal(current_stock),
                     allocated_qty=Decimal(allocated),
+                    last_stock_take_at=last_take_at,
                 )
             )
     return out
@@ -231,6 +242,102 @@ async def _open_take_warnings(session: AsyncSession, candidates: list[_Candidate
     return warnings
 
 
+async def resolve_unmoved(session: AsyncSession, candidates: list[_Candidate]) -> dict[tuple, datetime]:
+    """For each candidate, the date it was last counted — but only if nothing has moved it since.
+
+    An item the ledgers have nothing to say about since its last count should already be
+    sitting at the figure on the sheet, so checking it is a quick confirmation rather than
+    a real count. That is worth marking, because a sheet where every line looks equally
+    demanding is a sheet people rush.
+
+    What counts as movement is deliberately every ledger row, not a net change in quantity:
+    two movements that cancel out leave the number looking untouched while the shelf has
+    been opened twice, and that is not low risk.
+
+        Materials   adjustments (which is also how builds, kitting, returns and
+                    replacements record their consumption) and purchase receipts
+        Products    the stock event ledger, which already unifies builds, order
+                    fulfilment, adjustments and replacement parcels
+
+    "Set" adjustments are excluded on both sides because a set *is* a count — it restarts
+    the item's counting clock (services/costing.py, services/stock_adjustments.py), so the
+    date and the quantity it left behind already agree. Counting it as movement would make
+    every freshly counted item look like it had moved a moment later.
+
+    An item that has never been counted gets nothing back: there is no date to be unmoved
+    since, and an item nobody has ever verified is the opposite of low risk however quiet
+    its ledger.
+
+    Four grouped queries for the whole sheet rather than a lookup per line — a take can
+    carry a couple of hundred candidates.
+    """
+    dated = {c.key: ensure_utc(c.last_stock_take_at) for c in candidates if c.last_stock_take_at is not None}
+    if not dated:
+        return {}
+
+    material_ids = [key[0] for key in dated if key[0] is not None]
+    product_ids = [key[1] for key in dated if key[1] is not None]
+    # Latest movement per row. Absent means nothing has ever touched it.
+    moved_at: dict[tuple, datetime] = {}
+
+    def _note(key: tuple, at: datetime | None) -> None:
+        at = ensure_utc(at)
+        if at is None:
+            return
+        current = moved_at.get(key)
+        if current is None or at > current:
+            moved_at[key] = at
+
+    if material_ids:
+        rows = await session.execute(
+            select(MaterialAdjustment.material_id, func.max(MaterialAdjustment.created_at))
+            .where(
+                MaterialAdjustment.material_id.in_(material_ids),
+                MaterialAdjustment.mode != MaterialAdjustmentMode.set,
+            )
+            .group_by(MaterialAdjustment.material_id)
+        )
+        for material_id, at in rows:
+            _note((material_id, None, None), at)
+
+        rows = await session.execute(
+            select(MaterialPurchase.material_id, func.max(MaterialPurchaseReceipt.received_at))
+            .join(MaterialPurchaseReceipt, MaterialPurchaseReceipt.purchase_line_id == MaterialPurchase.id)
+            .where(MaterialPurchase.material_id.in_(material_ids))
+            .group_by(MaterialPurchase.material_id)
+        )
+        for material_id, at in rows:
+            _note((material_id, None, None), at)
+
+    if product_ids:
+        rows = await session.execute(
+            select(
+                ProductStockEvent.product_id,
+                ProductStockEvent.variant_id,
+                func.max(ProductStockEvent.created_at),
+            )
+            .outerjoin(StockAdjustment, StockAdjustment.id == ProductStockEvent.source_adjustment_id)
+            .where(
+                ProductStockEvent.product_id.in_(product_ids),
+                or_(
+                    ProductStockEvent.source_adjustment_id.is_(None),
+                    StockAdjustment.mode != StockAdjustmentMode.set,
+                ),
+            )
+            .group_by(ProductStockEvent.product_id, ProductStockEvent.variant_id)
+        )
+        for product_id, variant_id, at in rows:
+            _note((None, product_id, variant_id), at)
+
+    # Strictly after: a first delivery stamps the count date with the receipt's own time
+    # (services/purchase_receipts.py), and that delivery is the count, not a movement past it.
+    return {
+        key: last_at
+        for key, last_at in dated.items()
+        if last_at is not None and not (moved_at.get(key) is not None and moved_at[key] > last_at)
+    }
+
+
 async def preview_scope(session: AsyncSession, scope: StockTakeScope) -> ScopePreview:
     candidates = await resolve_candidates(session, scope)
     return ScopePreview(
@@ -286,6 +393,7 @@ async def create_stock_take(session: AsyncSession, scope: StockTakeScope) -> tup
     session.add(take)
     await session.flush()
 
+    unmoved = await resolve_unmoved(session, candidates)
     for c in candidates:
         session.add(
             StockTakeLine(
@@ -295,6 +403,7 @@ async def create_stock_take(session: AsyncSession, scope: StockTakeScope) -> tup
                 variant_id=c.variant_id,
                 expected_qty=c.expected_qty,
                 allocated_qty_at_start=c.allocated_qty,
+                unmoved_since=unmoved.get(c.key),
                 status=StockTakeLineStatus.pending,
             )
         )
@@ -868,6 +977,7 @@ __all__ = [
     "line_display_name",
     "preview_scope",
     "resolve_line",
+    "resolve_unmoved",
     "set_line_count",
     "set_line_counts",
     "unresolved_variances",

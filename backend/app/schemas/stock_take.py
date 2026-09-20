@@ -76,6 +76,11 @@ class StockTakeLineRead(BaseModel):
     # probably boxed rather than on the shelf.
     allocated_qty_at_start: Decimal | None
     counted_qty: Decimal | None
+    # The date this item was last counted, present only when nothing has moved it since —
+    # no adjustment, no delivery, no build, no order. The sheet marks these lines as low
+    # risk: they are expected to confirm the figure rather than change it. None means
+    # either that something has moved, or that the item has never been counted at all.
+    unmoved_since: datetime | None
     notes: str | None
     status: StockTakeLineStatus
     system_qty_at_approval: Decimal | None

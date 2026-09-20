@@ -171,6 +171,39 @@ describe("material detail", () => {
     await waitFor(() => expect(record).toBeEnabled());
   });
 
+  it("calls the exact-amount mode a stock count, in the form and in the history", async () => {
+    // The mode's whole meaning is that it IS a count: it dates the item, stops it showing
+    // as due, and is what the count sheet's no-movement mark is measured from. "Set to"
+    // said none of that.
+    const user = userEvent.setup();
+    setRoutes([
+      {
+        method: "GET" as const,
+        path: /^\/materials\/7\/stock-history/,
+        respond: () => [
+          {
+            kind: "adjustment",
+            id: 1,
+            at: "2026-05-12T09:00:00Z",
+            qty: "2.0000",
+            mode: "set",
+            target_qty: "53.0000",
+            reason: "Stock take #4",
+          },
+        ],
+      },
+      ...materialRoutes(),
+    ]);
+    await renderMaterialPage();
+
+    await user.click(await screen.findByRole("button", { name: "Stock" }, { timeout: 5000 }));
+    const mode = await screen.findByLabelText("Mode", {}, { timeout: 5000 });
+    await user.selectOptions(mode, "set");
+
+    expect(screen.getByLabelText("Counted")).toBeInTheDocument();
+    expect(screen.getByText(/Counted 53/)).toBeInTheDocument();
+  });
+
   it("warns about a half-typed stock adjustment", async () => {
     const user = userEvent.setup();
     const router = await renderMaterialPage();
