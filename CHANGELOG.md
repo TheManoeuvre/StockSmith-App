@@ -12,6 +12,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Stock take sheets now mark the quick ones.** A line is highlighted when nothing has
+  moved that item since the last time you counted it — no adjustment, no delivery, no
+  build, no order — so it should already be at the figure on the sheet and only needs a
+  glance to confirm. Items that have moved, and items never counted before, are left
+  plain: those are the ones worth your time. Two movements that cancel out still count as
+  movement, and existing open takes won't show the marks — start a new take to see them.
+
 ## [0.18.1] - 2026-09-19
 
 ### Fixed
