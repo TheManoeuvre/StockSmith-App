@@ -202,9 +202,46 @@ async def check_product_sku_sync(
             )
         )
 
+    await _unlink_stale_unit_rows(session, product_id, platform, {variant_id for variant_id, _, _ in checks}, now)
+
     await session.commit()
     status = rollup_product_status([u.status for u in units])
     return ProductListingSyncSummary(product_id=product_id, product_status=status, units=units)
+
+
+async def _unlink_stale_unit_rows(
+    session: AsyncSession, product_id: int, platform: ListingPlatform, checked_unit_ids: set[int | None], now: datetime
+) -> None:
+    """Forget the marketplace link on any row for a unit this check no longer covers.
+
+    The rows exist because a product's shape can change after it was linked: a product
+    checked as itself and then given variants keeps its product-level row; a variant that
+    is deactivated keeps its row. Neither is ever rendered or re-checked (both come off
+    _unit_checks, which excludes them), so nothing would otherwise ever clear an
+    external_listing_id that is now wrong — and services/listing_units keeps the push
+    paths off such rows precisely because it *is* wrong: the parent SKU is not what the
+    listing carries once its variants are. Clearing the link here makes the stored state
+    say what the push paths already assume, so live_platforms and the reconcile sweep
+    stop seeing a listing that isn't there.
+
+    published_sku is deliberately left alone, same as a miss on a current unit — the
+    marketplace did acknowledge that SKU once, and sku_generation still needs to know."""
+    result = await session.execute(
+        select(Listing).where(
+            Listing.product_id == product_id,
+            Listing.platform == platform,
+            Listing.external_listing_id.is_not(None),
+        )
+    )
+    for listing in result.scalars():
+        if listing.variant_id in checked_unit_ids:
+            continue
+        listing.external_listing_id = None
+        listing.external_title = None
+        listing.external_variation = None
+        listing.external_state = None
+        listing.external_quantity = None
+        listing.last_checked_at = now
 
 
 async def check_all_products_sku_sync(

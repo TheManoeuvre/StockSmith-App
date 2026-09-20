@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest_asyncio
 
-from app.models.listing import ListingPlatform
+from app.models.listing import Listing, ListingPlatform
 from app.models.platform_connection import PlatformConnection
 from app.models.platform_listing_push import ListingPushStatus, PlatformListingPush
 from app.models.platform_sync_run import PlatformSyncRun, SyncRunMode, SyncRunStatus
@@ -25,14 +25,32 @@ _NOW = datetime(2026, 8, 4, 12, 0, tzinfo=timezone.utc)
 @pytest_asyncio.fixture
 async def push_targets(session):
     """Real products/variants for the push rows to point at — the test engine enforces
-    foreign keys (see conftest), so the ids can't be invented."""
-    products = [Product(id=1, name="Widget", sku="SKU-1"), Product(id=2, name="Gadget", sku="SKU-2")]
+    foreign keys (see conftest), so the ids can't be invented — each with a linked Listing
+    row on both platforms, because only a unit StockSmith is still pushing to counts
+    (see test_listing_stale_unit_rows for the other side of that rule). Products 1 and 2
+    sell as themselves; product 3 sells as variants 10 and 11."""
+    products = [
+        Product(id=1, name="Widget", sku="SKU-1"),
+        Product(id=2, name="Gadget", sku="SKU-2"),
+        Product(id=3, name="Gizmo", sku="SKU-3"),
+    ]
     session.add_all(products)
     await session.flush()
     session.add_all([
-        ProductVariant(id=10, product_id=1, variant_name="Small"),
-        ProductVariant(id=11, product_id=1, variant_name="Large"),
+        ProductVariant(id=10, product_id=3, variant_name="Small"),
+        ProductVariant(id=11, product_id=3, variant_name="Large"),
     ])
+    await session.flush()
+    for platform in (ListingPlatform.etsy, ListingPlatform.ebay):
+        for product_id, variant_id in ((1, None), (2, None), (3, 10), (3, 11)):
+            session.add(
+                Listing(
+                    product_id=product_id,
+                    variant_id=variant_id,
+                    platform=platform,
+                    external_listing_id=f"L{product_id}-{variant_id}",
+                )
+            )
     await session.commit()
 
 
@@ -180,8 +198,8 @@ async def test_failing_pushes_are_counted_per_variant_not_per_product(session, p
     """Two variants of one product are two separate listings — collapsing them would
     under-report how much of the catalogue is stale."""
     session.add_all([
-        _push(ListingPlatform.ebay, ListingPushStatus.error, product_id=1, variant_id=10, error="a"),
-        _push(ListingPlatform.ebay, ListingPushStatus.error, product_id=1, variant_id=11, error="b"),
+        _push(ListingPlatform.ebay, ListingPushStatus.error, product_id=3, variant_id=10, error="a"),
+        _push(ListingPlatform.ebay, ListingPushStatus.error, product_id=3, variant_id=11, error="b"),
     ])
     await session.commit()
 

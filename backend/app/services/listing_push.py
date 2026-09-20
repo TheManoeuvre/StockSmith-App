@@ -12,6 +12,7 @@ from app.models.platform_listing_push import ListingPushStatus, PlatformListingP
 from app.models.product import Product
 from app.models.variant import ProductVariant
 from app.services import buildability, kitting, platform_api_usage
+from app.services.listing_units import current_unit_filter
 from app.services.platforms import get_adapter
 from app.services.platforms.base import ExternalListingRef
 from app.services.platforms.errors import PlatformPushBlockedError
@@ -233,7 +234,10 @@ async def push_units_now(
         variant_filter = Listing.variant_id.is_(None) if variant_id is None else Listing.variant_id == variant_id
         result = await session.execute(
             select(Listing).where(
-                Listing.product_id == product_id, variant_filter, Listing.platform.in_(_PUSH_ENABLED_PLATFORMS)
+                Listing.product_id == product_id,
+                variant_filter,
+                Listing.platform.in_(_PUSH_ENABLED_PLATFORMS),
+                current_unit_filter(),
             )
         )
         for listing in result.scalars():
@@ -313,9 +317,17 @@ async def _push_now(session: AsyncSession, product_id: int, variant_id: int | No
         return
 
     variant_filter = Listing.variant_id.is_(None) if variant_id is None else Listing.variant_id == variant_id
+    # current_unit_filter: a product-level row is skipped once the product has variants,
+    # and a variant row once the variant is deactivated. Both are reachable here — a
+    # product-level stock change on a variant product still enqueues (product_id, None),
+    # and the row it finds may be a link made before the variants existed (see
+    # services/listing_units). Pushing it sends the wrong SKU to the marketplace.
     result = await session.execute(
         select(Listing).where(
-            Listing.product_id == product_id, variant_filter, Listing.platform.in_(_PUSH_ENABLED_PLATFORMS)
+            Listing.product_id == product_id,
+            variant_filter,
+            Listing.platform.in_(_PUSH_ENABLED_PLATFORMS),
+            current_unit_filter(),
         )
     )
     for listing in result.scalars():
