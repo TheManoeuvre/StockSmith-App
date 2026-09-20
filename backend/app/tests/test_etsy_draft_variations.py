@@ -199,6 +199,48 @@ async def test_out_of_stock_is_off_sale_rather_than_quantity_zero(session):
 
 
 @pytest.mark.asyncio
+async def test_the_listing_level_quantity_never_exceeds_etsys_scalar_cap(session):
+    """createDraftListing takes one scalar quantity capped at 999, but the cap is per
+    offering: a big variation matrix whose *sum* passes 999 is legal once the inventory
+    write spreads it across offerings. Summing the units into the scalar was rejecting the
+    whole create for a 392-variant listing before anything existed on Etsy."""
+    product = await _setup(
+        session,
+        variants=[
+            (f"{studs} {colour}", (studs, colour), Decimal("12.50"), 15)
+            for studs in ("4 Stud", "6 Stud", "8 Stud", "10 Stud")
+            for colour in ("Teal", "Red", "Blue", "Green", "Black", "White", "Pink", "Grey",
+                           "Lime", "Navy", "Sand", "Plum", "Coral", "Mint", "Gold", "Rust", "Ivory")
+        ],
+        stock=15 * 68,
+    )
+    adapter = RecordingEtsy()
+    await push_draft(session, adapter, FakeConnection(), product.id, ETSY)
+
+    form = next(kw["data"] for m, p, kw in adapter.requests if m == "POST" and p.endswith("/listings"))
+    assert form["quantity"] == 999
+
+    offerings = [p["offerings"][0]["quantity"] for p in adapter.inventory_body()["products"]]
+    assert offerings == [15] * 68
+    assert sum(offerings) > 999
+
+
+@pytest.mark.asyncio
+async def test_a_single_offering_is_capped_at_the_per_offering_limit(session):
+    """The same cap does apply to each offering on its own — one variant with more than
+    999 on the shelf goes up as 999 rather than 400ing the matrix."""
+    product = await _setup(
+        session,
+        variants=[("4 Stud Teal", ("4 Stud", "Teal"), Decimal("12.50"), 1500)],
+        stock=1500,
+    )
+    adapter = RecordingEtsy()
+    await push_draft(session, adapter, FakeConnection(), product.id, ETSY)
+
+    assert adapter.inventory_body()["products"][0]["offerings"][0]["quantity"] == 999
+
+
+@pytest.mark.asyncio
 async def test_every_property_is_declared_as_varying(session):
     """Etsy validates the supplied values against these arrays and rejects a mismatch.
     SKU, price and quantity are all per-unit here, so understating them is what produces a
