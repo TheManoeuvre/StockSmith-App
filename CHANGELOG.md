@@ -12,6 +12,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-09-20
+
 ### Added
 - **Stock take sheets now mark the quick ones.** A line is highlighted when nothing has
   moved that item since the last time you counted it — no adjustment, no delivery, no
@@ -29,6 +31,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   physical count, dated the item and stopped it showing as due — but the old wording made
   it sound like a database edit rather than the count it is. It is also what decides
   whether a stock take line shows as low risk, which is worth being able to see.
+
+### Fixed
+- **The eBay postage policy picker no longer sends you round in circles.** Linking a
+  shipping profile to an eBay postage policy asked you to reconnect eBay to grant the
+  permission, but reconnecting never granted it, because StockSmith wasn't asking eBay for
+  it. It now does. **Existing eBay connections need reconnecting once** (Settings →
+  Stores & sync) before the picker will list your policies; order sync and listing pushes
+  are unaffected until you do.
 
 ## [0.18.1] - 2026-09-19
 
