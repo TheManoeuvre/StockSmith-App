@@ -19,6 +19,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   glance to confirm. Items that have moved, and items never counted before, are left
   plain: those are the ones worth your time. Two movements that cancel out still count as
   movement, and existing open takes won't show the marks — start a new take to see them.
+  The exported CSV carries the same information in a `no_movement_since` column, so a
+  printed sheet shows it too.
+
+### Changed
+- **"Set exact amount" is now called "Stock count".** On both the material and product
+  stock forms, and in their history, where a set now reads "Counted 53" rather than "Set
+  to 53". Nothing about it has changed — entering an exact figure has always recorded a
+  physical count, dated the item and stopped it showing as due — but the old wording made
+  it sound like a database edit rather than the count it is. It is also what decides
+  whether a stock take line shows as low risk, which is worth being able to see.
 
 ## [0.18.1] - 2026-09-19
 

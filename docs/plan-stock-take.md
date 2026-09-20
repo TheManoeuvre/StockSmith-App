@@ -713,8 +713,19 @@ the instant it was counted — including the one the take itself just wrote.
 **Never counted is not unmoved.** An item nobody has ever verified gets no mark however
 quiet its ledger, because there is no date for it to be unmoved since.
 
+The exported CSV carries it as `no_movement_since` (a date, blank when the line has moved
+or has never been counted), read-only like `allocated_qty` and ignored on import: the sheet
+is what gets walked round the shelves, so dropping the mark from it would leave the person
+holding it with no idea which rows are a two-second confirmation.
+
 Snapshotted at creation, for the same reason `expected_qty` is: the mark describes the
 shelf as it was when the sheet was printed, and a highlight appearing and disappearing
 while someone is walking the shelves would contradict the paper in their hand. Existing
 lines keep NULL on upgrade — the ledgers say what has happened since, but not what the
 answer would have been on the day a past take was started.
+
+Because a "set" adjustment is what keeps an item unmoved, the forms and histories that
+write one now call it a stock count rather than "set exact amount" / "Set to 53". The
+stored mode is still `set` — it is in two tables, both CSV contracts and the API, and
+renaming it would buy nothing — but nothing user-facing says "set" any more, so the rule
+behind the mark is legible from the screen that creates it.

@@ -274,7 +274,10 @@ export function StockSection({
       case "build_failed":
         return `${e.build_qty_failed} failed`;
       case "adjustment":
-        return e.adjustment_mode === "set" ? `Set to ${e.adjustment_target_qty}` : e.reason;
+        // "Counted", not "Set to": this mode is a physical count, and the history is where
+        // that shows — it is what dates the item and what the count sheet's no-movement mark
+        // is measured from.
+        return e.adjustment_mode === "set" ? `Counted ${e.adjustment_target_qty}` : e.reason;
       case "order_fulfillment":
         return e.order_id != null ? (
           <Link
@@ -445,11 +448,11 @@ export function StockSection({
               onChange={(e) => setAdjMode(e.target.value as "adjust" | "set")}
             >
               <option value="adjust">Adjust (+/-)</option>
-              <option value="set">Set exact amount</option>
+              <option value="set">Stock count (set exact amount)</option>
             </select>
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-sm">{adjMode === "set" ? "Set to" : "Adjust by"}</span>
+            <span className="text-sm">{adjMode === "set" ? "Counted" : "Adjust by"}</span>
             <input
               required
               type="number"
@@ -503,8 +506,9 @@ export function StockSection({
         )}
         {adjMode === "set" && (
           <p className="text-xs text-slate-500">
-            Setting an exact amount records a physical count, so this stops showing as due and its
-            count date moves to today. Adjusting by an amount doesn't — a known change isn't a count.
+            This is a stock count: the figure you enter is what you counted, so the item stops
+            showing as due, its count date moves to today, and nothing it has done since counts
+            as movement. Adjusting by an amount doesn't — a known change isn't a count.
           </p>
         )}
         <ErrorBanner error={adjustMutation.error} />
