@@ -6,6 +6,7 @@ refused file leaves the sheet exactly as it was. Half-applying a count sheet is 
 rejecting it, because the half that landed looks indistinguishable from a real count.
 """
 
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
@@ -125,6 +126,22 @@ async def test_export_shows_allocated_stock_on_the_sheet(session):
 
     assert Decimal(row["expected_qty"]) == Decimal(12)
     assert Decimal(row["allocated_qty"]) == Decimal(5)
+
+
+async def test_export_marks_the_lines_nothing_has_moved(session):
+    """The sheet is what gets walked round the shelves, so the mark the screen shows has to
+    be on it too — otherwise the person holding it has no idea which rows are a two-second
+    confirmation."""
+    session.add(GeneralSettings(id=1))
+    counted = Product(name="Quiet", sku="Q-1", current_stock=3, last_stock_take_at=datetime.now(timezone.utc))
+    session.add_all([counted, Product(name="Never counted", sku="N-1", current_stock=3)])
+    await session.commit()
+    take, _ = await stock_takes.create_stock_take(session, StockTakeScope(include_products=True))
+
+    rows = {r["name"]: r for r in _rows(await export_stock_take_csv(session, take.id))}
+
+    assert rows["Quiet"]["no_movement_since"] == datetime.now(timezone.utc).date().isoformat()
+    assert rows["Never counted"]["no_movement_since"] == ""
 
 
 async def test_export_round_trips_counting_already_under_way(session):

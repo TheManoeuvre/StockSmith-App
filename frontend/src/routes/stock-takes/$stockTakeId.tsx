@@ -32,6 +32,12 @@ export const Route = createFileRoute("/stock-takes/$stockTakeId")({
  * a cleared count, which is a different thing from "0". */
 type CountForm = Record<number, string>;
 
+/** Local-format date for the no-movement badge — a count date can be months old, so the
+ * day-and-month form used elsewhere would be ambiguous here. */
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString();
+}
+
 function toForm(take: StockTakeDetail | undefined): CountForm | undefined {
   if (!take) return undefined;
   return Object.fromEntries(
@@ -354,12 +360,30 @@ function StockTakeDetailPage() {
                               typed === ""
                                 ? null
                                 : Number(typed) - Number(line.expected_qty);
+                            // Nothing has touched this item since it was last counted, so
+                            // it should already be at the figure on the sheet. Tinted rather
+                            // than hidden or reordered: it is still a line to count, just a
+                            // quick one, and someone walking a shelf in the server's order
+                            // shouldn't have the order changed under them.
+                            const unmoved = line.unmoved_since;
                             return (
                               <tr
                                 key={line.id}
-                                className="border-b border-slate-100 last:border-0"
+                                className={`border-b border-slate-100 last:border-0 ${
+                                  unmoved ? "bg-emerald-50/60" : ""
+                                }`}
                               >
-                                <td className="p-2 pl-6">{line.name}</td>
+                                <td className="p-2 pl-6">
+                                  {line.name}
+                                  {unmoved && (
+                                    <span
+                                      className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[11px] text-emerald-800"
+                                      title="Nothing has moved this since it was last counted — no adjustment, delivery, build or order. Expect it to confirm the figure rather than change it."
+                                    >
+                                      no movement since {formatDate(unmoved)}
+                                    </span>
+                                  )}
+                                </td>
                                 <td className="p-2 text-right tabular-nums">
                                   {roundQty(line.expected_qty)} {line.unit}
                                   {/* A real variance vs. a shelf that only looks short —

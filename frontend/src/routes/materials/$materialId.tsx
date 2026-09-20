@@ -980,12 +980,12 @@ function MaterialDetail() {
                   }
                 >
                   <option value="adjust">Adjust (+/-)</option>
-                  <option value="set">Set exact amount</option>
+                  <option value="set">Stock count (set exact amount)</option>
                 </select>
               </label>
               <label className="flex flex-col gap-1">
                 <span className="text-sm">
-                  {adjustMode === "set" ? "Set to" : "Adjust by"}
+                  {adjustMode === "set" ? "Counted" : "Adjust by"}
                 </span>
                 <input
                   required
@@ -1052,9 +1052,11 @@ function MaterialDetail() {
             )}
             {adjustMode === "set" && (
               <p className="text-xs text-slate-500">
-                Setting an exact amount records a physical count, so this stops
-                showing as due and its count date moves to today. Adjusting by
-                an amount doesn't — a known change isn't a count.
+                This is a stock count: the figure you enter is what you
+                counted, so the material stops showing as due, its count date
+                moves to today, and nothing it has done since counts as
+                movement. Adjusting by an amount doesn't — a known change isn't
+                a count.
               </p>
             )}
             <ErrorBanner error={adjustStockMutation.error} />
@@ -1167,14 +1169,15 @@ function HistoryTypeBadge({ kind }: { kind: MaterialStockHistoryEntry["kind"] })
 }
 
 /** The qty column, renamed "Delta": unit-suffixed and coloured by direction. The `set`-mode
- * adjustment keeps its "Set to X (Δ ±Y)" form — the delta alone doesn't say what the count
- * actually landed on. */
+ * adjustment keeps its "Counted X (Δ ±Y)" form — the delta alone doesn't say what the count
+ * actually landed on, and "Counted" is what that mode means: the row that dates the item
+ * and that the count sheet's no-movement mark is measured from. */
 function HistoryDelta({ h, unit }: { h: MaterialStockHistoryEntry; unit: MaterialUnit }) {
   const suffix = unit === "each" ? "" : ` ${unit}`;
   if (h.kind === "adjustment" && h.mode === "set") {
     return (
       <>
-        Set to {roundQty(h.target_qty ?? "0")}
+        Counted {roundQty(h.target_qty ?? "0")}
         {suffix}{" "}
         <span className="text-xs text-slate-400">
           (Δ {Number(h.qty) > 0 ? "+" : ""}

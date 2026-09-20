@@ -90,6 +90,7 @@ STOCK_TAKE_CSV_FIELDS = [
     "unit",
     "expected_qty",
     "allocated_qty",
+    "no_movement_since",
     "counted_qty",
     "notes",
 ]
@@ -477,6 +478,13 @@ async def export_stock_take_csv(session: AsyncSession, stock_take_id: int) -> st
     where nobody would otherwise know that five of the twelve are picked and boxed by the
     door rather than on the shelf — which is the difference between a real variance and a
     count that only looks short.
+
+    no_movement_since is the same read-only kind of thing, and the same argument: the
+    screen tints these lines, and a sheet that dropped the mark would send someone round
+    the shelves with no idea which rows are a two-second confirmation. Dated rather than a
+    bare yes, because "nothing since 12 May" and "nothing since yesterday" are different
+    amounts of reassurance. Blank means either something has moved it or it has never been
+    counted. Ignored on import, like every other read-only column.
     """
     from app.models.stock_take import StockTakeLine
     from app.services.stock_takes import group_lines
@@ -512,6 +520,7 @@ async def export_stock_take_csv(session: AsyncSession, stock_take_id: int) -> st
                 "unit": grouped.unit,
                 "expected_qty": str(line.expected_qty),
                 "allocated_qty": "" if line.allocated_qty_at_start is None else str(line.allocated_qty_at_start),
+                "no_movement_since": "" if line.unmoved_since is None else line.unmoved_since.date().isoformat(),
                 "counted_qty": "" if line.counted_qty is None else str(line.counted_qty),
                 "notes": line.notes or "",
             }

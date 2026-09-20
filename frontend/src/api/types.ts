@@ -205,6 +205,13 @@ export interface StockTakeLine {
   allocated_qty_at_start: string | null;
   /** Null means not counted, which is a different thing from a count of zero. */
   counted_qty: string | null;
+  /**
+   * The date this item was last counted, set only when nothing has moved it since — no
+   * adjustment, no delivery, no build, no order. Lines carrying it are low risk and the
+   * sheet marks them as such: they should confirm the figure rather than change it. Null
+   * means either something has moved, or the item has never been counted at all.
+   */
+  unmoved_since: string | null;
   notes: string | null;
   status: StockTakeLineStatus;
   system_qty_at_approval: string | null;

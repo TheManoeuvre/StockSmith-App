@@ -190,7 +190,7 @@ class MaterialAdjustment(Base):
 
     mode/target_qty exist purely for audit display: a "set" adjustment (a physical
     stock count) is still stored as the plain delta needed to reach that count, but
-    target_qty remembers the count itself so history can show "Set to 53" instead of
+    target_qty remembers the count itself so history can show "Counted 53" instead of
     a bare "+12". A "set" adjustment confirming the count already matches produces a
     zero delta, which is why the nonzero constraint is relaxed for mode='set'.
     """

@@ -687,3 +687,45 @@ takes the stamp back off, when nothing else could have set it.
 honest display. It no longer holds for materials bought in after the upgrade: their first
 delivery dates them, so the never-counted list drains as stock arrives rather than needing
 a counting session to clear it.
+
+### The unmoved (low risk) mark
+
+A count sheet that treats every line the same is a sheet people rush. Where the ledgers
+show nothing at all has happened to an item since it was last counted — no adjustment, no
+delivery, no build, no order — that line should already be sitting at the figure printed
+next to it, so it is a quick confirmation rather than a real count. `stock_take_lines`
+carries `unmoved_since`, the item's last count date, set only for those lines; the sheet
+tints them and says "no movement since <date>".
+
+Three rules hold it together:
+
+**Movement means a ledger row, not a net change.** Two movements that cancel out leave the
+quantity looking untouched while the shelf has been opened twice, and that is not low risk.
+Materials are read from their adjustments (which is also how builds, kitting, returns and
+replacements record consumption) and their purchase receipts; products from the stock event
+ledger, which already unifies builds, order fulfilment, adjustments and replacement parcels.
+
+**A "set" adjustment is a count, not a movement.** It restarts the counting clock
+(`services/costing.py`, `services/stock_adjustments.py`), so the date and the quantity it
+leaves behind already agree. Counting it as movement would strip the mark off every item
+the instant it was counted — including the one the take itself just wrote.
+
+**Never counted is not unmoved.** An item nobody has ever verified gets no mark however
+quiet its ledger, because there is no date for it to be unmoved since.
+
+The exported CSV carries it as `no_movement_since` (a date, blank when the line has moved
+or has never been counted), read-only like `allocated_qty` and ignored on import: the sheet
+is what gets walked round the shelves, so dropping the mark from it would leave the person
+holding it with no idea which rows are a two-second confirmation.
+
+Snapshotted at creation, for the same reason `expected_qty` is: the mark describes the
+shelf as it was when the sheet was printed, and a highlight appearing and disappearing
+while someone is walking the shelves would contradict the paper in their hand. Existing
+lines keep NULL on upgrade — the ledgers say what has happened since, but not what the
+answer would have been on the day a past take was started.
+
+Because a "set" adjustment is what keeps an item unmoved, the forms and histories that
+write one now call it a stock count rather than "set exact amount" / "Set to 53". The
+stored mode is still `set` — it is in two tables, both CSV contracts and the API, and
+renaming it would buy nothing — but nothing user-facing says "set" any more, so the rule
+behind the mark is legible from the screen that creates it.
