@@ -12,6 +12,30 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Rename and merge variant attribute values.** The Variants tab has a new "Attribute
+  values" panel listing each attribute's values. Rename one ("4 Stud Standard" → "4 Stud
+  Std") and every variant carrying it is respelled, disabled ones included; no SKU
+  changes, and the value keeps its SKU code so later generates stay in step. Merge one
+  into another ("4 Stud Standard" → "4 Stud") and each variant is folded into the one
+  that differs only by that value: stock is moved with a pair of stock adjustments so
+  both histories reconcile, open order lines follow (as substitutions, so each can be
+  undone), and the merged-away variant is disabled with its SKU remembered so a
+  marketplace order still quoting it lands on the survivor. Where the two variants'
+  BOM or kitting overrides differ, both are shown and you pick which survives. A
+  variant that is live on Etsy or eBay asks first, then has its variation set to 0.
+  Attribute *names* can now be renamed after variants exist, too.
+- **Merge two variants directly.** "Merge into…" on any variant row does the same for
+  a pair that isn't an attribute-value duplicate — one created twice by hand, say.
+- **Merge two materials.** "Merge into…" on a material's Details tab folds a duplicate
+  (a CSV import spelling "Brick 2x4 Red" and "2x4 Brick Red") into one: every BOM,
+  kitting list, purchase, adjustment, substitute rule and stock-take line is repointed,
+  and where a product already had a line for both the quantities are added together.
+  Stock and average cost come out of replaying both purchase histories, so the cost is
+  a true weighted average rather than a guess. Renaming a material to a name that's
+  taken now offers the merge instead of failing. Materials on an open stock take, or
+  counted in different units, can't be merged until that's resolved.
+
 ### Fixed
 - **"One listing isn't receiving stock updates" on a product whose Stores tab showed
   everything synced.** A product linked to its listing *before* it was given variants

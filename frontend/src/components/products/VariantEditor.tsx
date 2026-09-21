@@ -14,6 +14,7 @@ import { DirtyPath, useManagedSave } from "../../hooks/useDirtyRegistry";
 import { useGuard } from "../../hooks/useUnsavedChangesGuard";
 import { PlatformConflictDialog, platformConflictDetail } from "./PlatformConflictDialog";
 import { PlatformSyncBadge } from "./PlatformSyncBadge";
+import { VariantMergeModal } from "./VariantMergeModal";
 import { BomOverrideEditor } from "./BomOverrideEditor";
 import { inclFallbacksNote, sellableSummary } from "../../lib/format";
 import { formatUnitCost } from "../../lib/money";
@@ -90,6 +91,7 @@ export function VariantEditor({ productId }: { productId: number }) {
         <DirtyPath key={variant.id} segment={`variant-${variant.id}`}>
         <VariantRow
           variant={variant}
+          siblings={(variants ?? []).filter((v) => v.id !== variant.id && v.is_active)}
           baseBom={baseBom ?? []}
           baseKittingBom={baseKittingBom ?? []}
           productId={productId}
@@ -171,6 +173,7 @@ function attributeBadges(variant: Variant): string[] {
 
 function VariantRow({
   variant,
+  siblings,
   baseBom,
   baseKittingBom,
   productId,
@@ -180,6 +183,8 @@ function VariantRow({
   pushBuildableCapacity,
 }: {
   variant: Variant;
+  /** The other active variants — what this one could be merged into. */
+  siblings: Variant[];
   baseBom: BomLineRead[];
   baseKittingBom: KittingBomLineRead[];
   productId: number;
@@ -242,6 +247,7 @@ function VariantRow({
     onSuccess: invalidateVariants,
   });
   const togglePlatformConflict = platformConflictDetail(toggleActiveMutation.error);
+  const [merging, setMerging] = useState(false);
 
   const badges = attributeBadges(variant);
   const renameStatus = useSaveStatus(renameMutation.status);
@@ -346,7 +352,25 @@ function VariantRow({
             >
               {variant.is_active ? "Disable" : "Reactivate"}
             </button>
+            {variant.is_active && siblings.length > 0 && (
+              <button
+                // Merging disables this row too, so the same unsaved-edit check applies.
+                onClick={() => guard.attempt(() => setMerging(true), { prefix: `variant-${variant.id}/` })}
+                className="rounded border border-slate-300 px-3 py-1.5 text-sm"
+                title="Fold this variant's stock, open orders and SKU into another variant of this product"
+              >
+                Merge into…
+              </button>
+            )}
           </div>
+          {merging && (
+            <VariantMergeModal
+              loser={variant}
+              siblings={siblings}
+              onClose={() => setMerging(false)}
+              onMerged={() => undefined}
+            />
+          )}
           <ErrorBanner error={renameMutation.error ?? (togglePlatformConflict ? null : toggleActiveMutation.error)} />
           {togglePlatformConflict && (
             <PlatformConflictDialog

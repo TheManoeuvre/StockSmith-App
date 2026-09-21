@@ -10,6 +10,7 @@ import { ProductStoresSettings } from "../../components/products/ProductStoresSe
 import { SyncLog } from "../../components/products/SyncLog";
 import { VariantEditor } from "../../components/products/VariantEditor";
 import { VariantAttributesEditor } from "../../components/products/VariantAttributesEditor";
+import { AttributeValuesPanel } from "../../components/products/AttributeValuesPanel";
 import { BulkBomAmendModal } from "../../components/products/BulkBomAmendModal";
 import { AssetUploader } from "../../components/products/AssetUploader";
 import { StockSection } from "../../components/products/StockSection";
@@ -838,6 +839,9 @@ function ProductDetail() {
         {activeTab === "variants" && !product.is_bundle && (
           <section>
             <VariantAttributesEditor product={product} />
+            <div className="mt-3">
+              <AttributeValuesPanel product={product} />
+            </div>
             <div className="mt-3">
               <VariantEditor productId={id} />
             </div>

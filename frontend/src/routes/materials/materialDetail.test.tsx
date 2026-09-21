@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../api/client", async () => (await import("../../test/fakeBackend")).clientMock());
 
-const { setRoutes, calls } = await import("../../test/fakeBackend");
+const { setRoutes, calls, FakeApiError } = await import("../../test/fakeBackend");
 const { routeTree } = await import("../../routeTree.gen");
 
 const MATERIAL = {
@@ -90,6 +90,79 @@ async function renderMaterialPage(path = "/materials/7") {
   );
   return router;
 }
+
+const OTHER = { ...MATERIAL, id: 8, name: "PLA Plus Filament" };
+
+describe("material merge", () => {
+  const plan = {
+    source_id: 7,
+    source_name: "PLA+ Filament",
+    target_id: 8,
+    target_name: "PLA Plus Filament",
+    effects: [{ label: "product BOM lines", repointed: 1, summed: 2 }],
+    combined_qty: "5000",
+    blockers: [],
+  };
+
+  beforeEach(() =>
+    setRoutes([
+      { method: "GET", path: "/materials", respond: () => [MATERIAL, OTHER] },
+      { method: "POST", path: "/materials/7/merge/preview", respond: () => plan },
+      { method: "POST", path: "/materials/7/merge", respond: () => OTHER },
+      { method: "GET", path: "/materials/8", respond: () => OTHER },
+      ...materialRoutes(),
+    ])
+  );
+
+  it("previews the merge, applies it and lands on the survivor", async () => {
+    const user = userEvent.setup();
+    const router = await renderMaterialPage();
+
+    await user.click(await screen.findByRole("button", { name: "Merge into…" }, { timeout: 5000 }));
+    await user.selectOptions(await screen.findByLabelText("Survivor"), "8");
+
+    expect(await screen.findByText(/2 product BOM lines already had/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Merge" }));
+
+    await waitFor(() =>
+      expect(calls.find((c) => c.path === "/materials/7/merge")).toEqual({
+        method: "POST",
+        path: "/materials/7/merge",
+        body: { target_id: 8 },
+      })
+    );
+    await waitFor(() => expect(router.state.location.pathname).toBe("/materials/8"));
+  });
+
+  it("offers the merge when a rename collides", async () => {
+    setRoutes([
+      { method: "GET", path: "/materials", respond: () => [MATERIAL, OTHER] },
+      { method: "POST", path: "/materials/7/merge/preview", respond: () => plan },
+      {
+        method: "PATCH",
+        path: "/materials/7",
+        respond: () => {
+          throw new FakeApiError(409, 'Another material is already called "PLA Plus Filament".');
+        },
+      },
+      ...materialRoutes(),
+    ]);
+    const user = userEvent.setup();
+    await renderMaterialPage();
+
+    await user.click(await screen.findByRole("button", { name: "Details" }, { timeout: 5000 }));
+    const nameInput = await screen.findByDisplayValue("PLA+ Filament", {}, { timeout: 5000 });
+    await user.clear(nameInput);
+    await user.type(nameInput, "PLA Plus Filament");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await user.click(await screen.findByRole("button", { name: "Merge this one into it" }));
+    // The modal opens with the clashing material preselected, so the preview fires at once.
+    await waitFor(() =>
+      expect(calls.find((c) => c.path === "/materials/7/merge/preview")?.body).toEqual({ target_id: 8 })
+    );
+  });
+});
 
 describe("material detail", () => {
   beforeEach(() => setRoutes(materialRoutes()));

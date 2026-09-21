@@ -76,6 +76,18 @@ The trigger is narrow and not fully isolated: a UNIQUE violation on a session th
 
 ---
 
+## Catalogue tidy-up
+
+### Merge two products
+
+**Problem:** Attribute values, variants and materials can now be renamed and merged (0.20.0). The remaining duplicate shape is two *products* that should have been one product with a variant axis — "Pencil Pot Red" and "Pencil Pot Blue" created before variants existed. Considered alongside the other merges and deferred: it is effectively "convert product B into a variant of A", which means giving A an attribute, generating a variant from B's identity, and then running the variant merge against a variant that doesn't exist yet. The listing side is harder still — each product has its own marketplace listing, and folding one into the other's variation set is a listing rewrite, not a stock push.
+
+**Ask:** Only worth doing if it comes up in practice. If it does, build it as "convert to variant of…" on the product page, reusing `services/variant_merge` for the stock/order/SKU-alias half and refusing while B has a live listing.
+
+### Split an attribute value
+
+**Problem:** The inverse of a value merge — "4 Stud" turns out to hide two sizes. Deferred with product merge: generating the new value's variants is already possible, and moving stock between them is a pair of adjustments, so there is a manual path and no one has asked.
+
 ## Variant BOM correctness
 
 ### Audit existing substitutions onto un-ruled base lines

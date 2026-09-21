@@ -30,7 +30,15 @@ async def create_stock_adjustment(
     mode: StockAdjustmentMode,
     value: int,
     reason: str,
+    *,
+    commit: bool = True,
 ) -> StockAdjustment:
+    """Applies one adjustment and writes its audit rows.
+
+    `commit=False` is for callers composing several stock moves into one transaction —
+    a variant merge takes stock off one variant and puts it on another, and half of that
+    committed on its own would be a phantom loss. Such a caller commits itself; the
+    adjustment row is flushed either way, so its id is usable immediately."""
     owner = await _get_owner(session, product_id, variant_id)
 
     if mode == StockAdjustmentMode.set:
@@ -77,6 +85,7 @@ async def create_stock_adjustment(
         reason=reason,
         source_adjustment_id=adjustment.id,
     )
-    await session.commit()
-    await session.refresh(adjustment)
+    if commit:
+        await session.commit()
+        await session.refresh(adjustment)
     return adjustment

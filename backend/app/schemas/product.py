@@ -51,6 +51,14 @@ class ProductUpdate(BaseModel):
     product_category_id: int | None = None
     abc_class: ABCClass | None = None
     stock_take_interval_days: int | None = Field(default=None, gt=0)
+    # The variant attribute names ("Size", "Colour"). Editable here so a label can be
+    # corrected after variants exist — generation writes them, but only when it runs.
+    # Renaming is all this allows: the slots are positional (variants hold values by slot,
+    # pricing_variable_attribute is a slot number), so a slot cannot be reordered or, once
+    # it holds values, cleared. See routers/products.update_product.
+    variant_attribute1_name: str | None = None
+    variant_attribute2_name: str | None = None
+    variant_attribute3_name: str | None = None
 
 
 class ProductRead(ProductBase):
@@ -263,3 +271,56 @@ class ProductPriceSnapshotRead(BaseModel):
     sale_price: Decimal | None
     margin_percent: Decimal | None
     recorded_at: datetime
+
+
+class AttributeValueRenameRequest(BaseModel):
+    """Respell one value of one variant attribute across every variant that has it."""
+
+    slot: int = Field(ge=1, le=3)  # which of variant_attribute{1,2,3}_name
+    old_value: str
+    new_value: str
+
+
+class AttributeValueRenameResult(BaseModel):
+    variants_updated: int
+    # Platforms holding a confirmed listing for this product. Their variation labels keep
+    # the old spelling until the listing is next pushed — the rename is local.
+    live_platforms: list[str]
+
+
+class AttributeValueMergePreviewRequest(BaseModel):
+    slot: int = Field(ge=1, le=3)
+    loser_value: str
+    survivor_value: str
+
+
+class AttributeValueMergeRequest(AttributeValueMergePreviewRequest):
+    # Applied to every pair alike; the preview says which pairs actually differ.
+    bom: Literal["keep_survivor", "take_loser"] = "keep_survivor"
+    kitting: Literal["keep_survivor", "take_loser"] = "keep_survivor"
+    on_live_listing: Literal["ask", "proceed"] = "ask"
+
+
+class AttributeValueRelabel(BaseModel):
+    """A loser-value variant with no counterpart: it just takes the survivor value."""
+
+    variant_id: int
+    variant_name: str
+
+
+class AttributeValueMergePlan(BaseModel):
+    # One full variant-merge plan per matched pair (schemas/variant.VariantMergePlan);
+    # typed loosely here to keep this module free of a variant-schema import.
+    pairs: list[dict]
+    relabel_only: list[AttributeValueRelabel]
+    bom_differs: bool  # any pair
+    kitting_differs: bool  # any pair
+    blockers: list[str]
+
+
+class AttributeValueMergeResult(BaseModel):
+    pairs_merged: int
+    relabelled: int
+    stock_moved: int
+    open_lines_moved: int
+    warnings: list[str]

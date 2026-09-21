@@ -1,5 +1,13 @@
 import { api } from "./client";
-import type { PlatformConflictResolution, Variant, VariantBomLine, VariantKittingBomLine } from "./types";
+import type {
+  PlatformConflictResolution,
+  Variant,
+  VariantBomLine,
+  VariantKittingBomLine,
+  VariantMergePlan,
+  VariantMergeRequest,
+  VariantMergeResult,
+} from "./types";
 
 export const variantsApi = {
   get: (id: number) => api.get<Variant>(`/variants/${id}`),
@@ -28,4 +36,9 @@ export const variantsApi = {
     api.put<Variant>(`/variants/${id}/bom-overrides`, overrides),
   replaceKittingBomOverrides: (id: number, overrides: VariantKittingBomLine[]) =>
     api.put<Variant>(`/variants/${id}/kitting-bom-overrides`, overrides),
+  // Read-only: what merging `id` into target would do.
+  previewMerge: (id: number, targetId: number) =>
+    api.post<VariantMergePlan>(`/variants/${id}/merge/preview`, { target_id: targetId }),
+  // 409 with code "live_listing_conflicts" until on_live_listing is "proceed".
+  merge: (id: number, payload: VariantMergeRequest) => api.post<VariantMergeResult>(`/variants/${id}/merge`, payload),
 };

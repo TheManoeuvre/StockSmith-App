@@ -1,6 +1,12 @@
 import { api, downloadCsv, uploadCsv, type CsvImportResult } from "./client";
 import type {
   ABCClass,
+  AttributeValueMergePlan,
+  AttributeValueMergePreviewRequest,
+  AttributeValueMergeRequest,
+  AttributeValueMergeResult,
+  AttributeValueRenameRequest,
+  AttributeValueRenameResult,
   BomLine,
   BomLineRead,
   Build,
@@ -41,6 +47,10 @@ export interface ProductInput {
    * shop-wide default (services/abc.py). */
   abc_class?: ABCClass | null;
   stock_take_interval_days?: number | null;
+  /** Rename only — slots are positional and one holding values cannot be cleared (400). */
+  variant_attribute1_name?: string | null;
+  variant_attribute2_name?: string | null;
+  variant_attribute3_name?: string | null;
 }
 
 // Several pickers (bundle items, manual order lines, unmapped-SKU mapping) need the
@@ -93,6 +103,14 @@ export const productsApi = {
   // Defaults to a preview server-side — pass apply: true only after the user has seen it.
   amendVariantBomOverrides: (id: number, payload: BulkBomAmendRequest) =>
     api.post<BulkBomAmendResult>(`/products/${id}/variants/bom-overrides/amend`, payload),
+  // 409 (plain-string detail) when new_value already exists in that slot — offer a merge.
+  renameAttributeValue: (id: number, payload: AttributeValueRenameRequest) =>
+    api.post<AttributeValueRenameResult>(`/products/${id}/attribute-values/rename`, payload),
+  previewAttributeValueMerge: (id: number, payload: AttributeValueMergePreviewRequest) =>
+    api.post<AttributeValueMergePlan>(`/products/${id}/attribute-values/merge/preview`, payload),
+  // 409 with code "live_listing_conflicts" until on_live_listing is "proceed".
+  mergeAttributeValue: (id: number, payload: AttributeValueMergeRequest) =>
+    api.post<AttributeValueMergeResult>(`/products/${id}/attribute-values/merge`, payload),
   listBuilds: (id: number) => api.get<Build[]>(`/products/${id}/builds`),
   listStockAdjustments: (id: number) => api.get<StockAdjustment[]>(`/products/${id}/stock-adjustments`),
   listStockHistory: (id: number) => api.get<ProductStockEvent[]>(`/products/${id}/stock-history`),

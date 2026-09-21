@@ -22,6 +22,13 @@ from app.schemas.stock_adjustment import StockAdjustmentRead
 from app.schemas.stock_event import ProductStockEventRead
 from app.models.pricing import ProductPriceSnapshot
 from app.schemas.product import (
+    AttributeValueMergePlan,
+    AttributeValueMergePreviewRequest,
+    AttributeValueMergeRequest,
+    AttributeValueMergeResult,
+    AttributeValueRelabel,
+    AttributeValueRenameRequest,
+    AttributeValueRenameResult,
     BomLine,
     BomLineRead,
     BulkBomAmendChange,
@@ -49,7 +56,7 @@ from app.services.buildability import (
     get_buildable_by_product,
     get_ready_to_ship_by_bundle,
 )
-from app.services import abc, listing_push, platform_fees, variant_platform_conflicts
+from app.services import abc, attribute_values, listing_push, platform_fees, variant_merge, variant_platform_conflicts
 from app.services.csv_io import export_products_csv, import_products_csv
 from app.services.kitting import (
     _clamp_value_to_ceiling,
@@ -458,12 +465,54 @@ async def get_product(product_id: int, session: AsyncSession = Depends(get_db)) 
 _PRICING_FIELDS = {"sale_price", "shipping_profile_id", "platform_fee_percent"}
 
 
+_ATTRIBUTE_NAME_FIELDS = frozenset({"variant_attribute1_name", "variant_attribute2_name", "variant_attribute3_name"})
+
+
+async def _validate_attribute_names(session: AsyncSession, product: Product, payload: ProductUpdate) -> None:
+    """A slot's name can be respelled, never removed from under its values.
+
+    The slot is positional: variants hold their values in attribute{1,2,3}_value by slot
+    number, and pricing_variable_attribute is a slot number too. So clearing a slot that
+    has values would orphan them, and two slots with one name would make the variation
+    labels sent to a marketplace ambiguous. Whitespace-only counts as empty."""
+    fields = payload.model_dump(exclude_unset=True)
+    proposed = [
+        (fields.get(f, getattr(product, f)) or "").strip() or None
+        for f in ("variant_attribute1_name", "variant_attribute2_name", "variant_attribute3_name")
+    ]
+    for slot, name in enumerate(proposed, start=1):
+        field = f"variant_attribute{slot}_name"
+        if field not in fields:
+            continue
+        # Normalise what gets stored so " Size " and "Size" are one name.
+        setattr(payload, field, name)
+        if name is None:
+            column = getattr(ProductVariant, f"attribute{slot}_value")
+            in_use = (
+                await session.execute(
+                    select(func.count()).where(ProductVariant.product_id == product.id, column.is_not(None))
+                )
+            ).scalar_one()
+            if in_use:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Attribute {slot} still has values on {in_use} variants and cannot be cleared.",
+                )
+    named = [n.casefold() for n in proposed if n]
+    if len(named) != len(set(named)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Each variant attribute needs a different name."
+        )
+
+
 @router.patch("/{product_id}", response_model=ProductRead)
 async def update_product(product_id: int, payload: ProductUpdate, session: AsyncSession = Depends(get_db)) -> Product:
     product = await session.get(Product, product_id)
     if product is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
     changed_fields = set(payload.model_dump(exclude_unset=True).keys())
+    if changed_fields & _ATTRIBUTE_NAME_FIELDS:
+        await _validate_attribute_names(session, product, payload)
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(product, field, value)
 
@@ -822,6 +871,82 @@ async def amend_variant_bom_overrides(
             )
             for variant, changes, _replaced, _new in units
         ],
+    )
+
+
+@router.post("/{product_id}/attribute-values/rename", response_model=AttributeValueRenameResult)
+async def rename_attribute_value(
+    product_id: int, payload: AttributeValueRenameRequest, session: AsyncSession = Depends(get_db)
+) -> AttributeValueRenameResult:
+    """Respells one attribute value on every variant of the product that carries it.
+
+    409 when the new spelling is already a value in that slot — the two are then the same
+    thing spelled twice, which is a merge (attribute-values/merge), not a rename. The
+    detail is a plain string, as for the reference-data routers: the client already holds
+    the value list and can offer the merge itself."""
+    try:
+        result = await attribute_values.rename_value(
+            session, product_id, payload.slot, payload.old_value, payload.new_value
+        )
+    except attribute_values.ValueConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except attribute_values.AttributeValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return AttributeValueRenameResult(
+        variants_updated=result.variants_updated,
+        live_platforms=[p.value for p in result.live_platforms],
+    )
+
+
+@router.post("/{product_id}/attribute-values/merge/preview", response_model=AttributeValueMergePlan)
+async def preview_attribute_value_merge(
+    product_id: int, payload: AttributeValueMergePreviewRequest, session: AsyncSession = Depends(get_db)
+) -> AttributeValueMergePlan:
+    """What merging one attribute value into another would do: a variant-merge plan for
+    every pair of variants that differ only in that value, plus the variants that will
+    simply be relabelled because they have no counterpart. Nothing is written."""
+    try:
+        match = await attribute_values.match_value_merge(
+            session, product_id, payload.slot, payload.loser_value, payload.survivor_value
+        )
+        plans = [await variant_merge.plan_merge(session, p.loser.id, p.survivor.id) for p in match.pairs]
+    except (attribute_values.AttributeValueError, variant_merge.VariantMergeError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return AttributeValueMergePlan(
+        pairs=[plan.model_dump() for plan in plans],
+        relabel_only=[AttributeValueRelabel(variant_id=v.id, variant_name=v.variant_name) for v in match.relabel_only],
+        bom_differs=any(p.bom_differs for p in plans),
+        kitting_differs=any(p.kitting_differs for p in plans),
+        blockers=sorted({b for plan in plans for b in plan.blockers}),
+    )
+
+
+@router.post("/{product_id}/attribute-values/merge", response_model=AttributeValueMergeResult)
+async def merge_attribute_value(
+    product_id: int, payload: AttributeValueMergeRequest, session: AsyncSession = Depends(get_db)
+) -> AttributeValueMergeResult:
+    """Folds every variant carrying `loser_value` into its `survivor_value` counterpart.
+    409 with code "live_listing_conflicts" until the client confirms, as for a single
+    variant merge."""
+    try:
+        match, outcomes = await attribute_values.apply_value_merge(
+            session,
+            product_id,
+            payload.slot,
+            payload.loser_value,
+            payload.survivor_value,
+            bom=payload.bom,
+            kitting=payload.kitting,
+            on_live_listing=payload.on_live_listing,
+        )
+    except (attribute_values.AttributeValueError, variant_merge.VariantMergeError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return AttributeValueMergeResult(
+        pairs_merged=len(match.pairs),
+        relabelled=len(match.relabel_only),
+        stock_moved=sum(o.stock_moved for o in outcomes),
+        open_lines_moved=sum(o.open_lines_moved for o in outcomes),
+        warnings=[w for o in outcomes for w in o.warnings],
     )
 
 

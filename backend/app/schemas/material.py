@@ -131,3 +131,26 @@ class MaterialAdjustmentCreate(BaseModel):
     mode: MaterialAdjustmentMode = MaterialAdjustmentMode.adjust
     value: Decimal
     reason: str
+
+
+class MaterialMergeRequest(BaseModel):
+    target_id: int
+
+
+class MaterialMergeEffect(BaseModel):
+    label: str  # "product BOM lines"
+    repointed: int  # rows that will simply point at the target instead
+    summed: int  # rows folded into a row the target already had, quantities added
+
+
+class MaterialMergePlan(BaseModel):
+    """What merging one material into another would touch, before it does."""
+
+    source_id: int
+    source_name: str
+    target_id: int
+    target_name: str
+    effects: list[MaterialMergeEffect]
+    combined_qty: Decimal
+    # Non-empty means the merge endpoint will refuse with these messages.
+    blockers: list[str]

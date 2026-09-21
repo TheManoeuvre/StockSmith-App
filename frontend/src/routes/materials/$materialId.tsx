@@ -11,6 +11,8 @@ import { useMaterialCategories } from "../../hooks/useMaterialCategories";
 import { useMaterialImageUrl } from "../../hooks/useMaterialImageUrl";
 import { ConfirmDialog } from "../../components/common/ConfirmDialog";
 import { MaterialSubstitutesSection } from "../../components/materials/MaterialSubstitutesSection";
+import { MaterialMergeModal } from "../../components/materials/MaterialMergeModal";
+import { ApiError } from "../../api/client";
 import { DetailPanel } from "../../components/common/DetailPanel";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { CreatableSelect } from "../../components/common/CreatableSelect";
@@ -369,6 +371,16 @@ function MaterialDetail() {
     },
   });
 
+  // null = closed; 0 = open with no survivor chosen; otherwise the preselected survivor.
+  const [mergeTargetId, setMergeTargetId] = useState<number | null>(null);
+  const { data: allMaterials } = useQuery({ queryKey: ["materials"], queryFn: materialsApi.list });
+  // A rename that collides is a duplicate to merge, not an error to retype. The server's
+  // 409 is a plain string; the clashing row is looked up locally by name.
+  const nameClash =
+    saveDetailsMutation.error instanceof ApiError && saveDetailsMutation.error.status === 409
+      ? { id: allMaterials?.find((m) => m.name === name.trim() && m.id !== id)?.id }
+      : null;
+
   // Command form (records an adjustment), not an editor of stored state — it diffs against
   // its own defaults, so an abandoned half-typed adjustment still warns on navigate-away.
   const {
@@ -573,6 +585,14 @@ function MaterialDetail() {
                 Open supplier page
               </a>
             )}
+            <button
+              type="button"
+              onClick={() => setMergeTargetId(0)}
+              className="rounded border border-slate-300 bg-white px-4 py-1.5 text-sm shadow-sm"
+              title="Fold this material's stock, history and every BOM line into another material"
+            >
+              Merge into…
+            </button>
             {material.is_active ? (
               <button
                 type="button"
@@ -594,6 +614,17 @@ function MaterialDetail() {
             )}
           </div>
         )}
+        {mergeTargetId != null && (
+          <MaterialMergeModal
+            source={material}
+            initialTargetId={mergeTargetId || undefined}
+            onClose={() => setMergeTargetId(null)}
+            onMerged={(target) => {
+              setMergeTargetId(null);
+              navigate({ to: "/materials/$materialId", params: { materialId: String(target.id) } });
+            }}
+          />
+        )}
         {activeTab === "details" && (
           <>
             <ErrorBanner error={toggleActiveMutation.error} />
@@ -611,7 +642,18 @@ function MaterialDetail() {
 
         {(activeTab === "details" || activeTab === "supplier") && (
           <section>
-            <ErrorBanner error={saveDetailsMutation.error} />
+            {nameClash ? (
+              <p className="mb-2 flex flex-wrap items-center gap-2 rounded bg-amber-50 p-2 text-sm text-amber-900">
+                <span>Another material is already called "{name.trim()}".</span>
+                {nameClash.id != null && (
+                  <button type="button" className="underline" onClick={() => setMergeTargetId(nameClash.id ?? 0)}>
+                    Merge this one into it
+                  </button>
+                )}
+              </p>
+            ) : (
+              <ErrorBanner error={saveDetailsMutation.error} />
+            )}
             <form
               className="flex flex-col gap-3 rounded bg-white p-4 shadow-sm"
               onSubmit={(e) => {
