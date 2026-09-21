@@ -186,3 +186,46 @@ class TestRouter:
         )
         assert result.variants_updated == 2
         assert result.live_platforms == []
+
+
+class TestSlotRename:
+    """PATCH /products/{id} with variant_attribute{n}_name — a label change, never a
+    structural one."""
+
+    async def _patch(self, session, **fields):
+        from app.routers.products import update_product
+        from app.schemas.product import ProductUpdate
+
+        return await update_product(1, ProductUpdate(**fields), session)
+
+    async def test_renames_a_slot(self, session, pencil_pot):
+        updated = await self._patch(session, variant_attribute1_name="Stud size")
+        assert updated.variant_attribute1_name == "Stud size"
+        assert updated.variant_attribute2_name == "Colour"
+
+    async def test_strips_whitespace(self, session, pencil_pot):
+        updated = await self._patch(session, variant_attribute1_name="  Stud size ")
+        assert updated.variant_attribute1_name == "Stud size"
+
+    async def test_refuses_clearing_a_slot_with_values(self, session, pencil_pot):
+        with pytest.raises(HTTPException) as exc:
+            await self._patch(session, variant_attribute2_name="")
+        assert exc.value.status_code == 400
+        assert "cannot be cleared" in exc.value.detail
+
+    async def test_allows_clearing_an_empty_slot(self, session, pencil_pot):
+        product = await session.get(Product, 1)
+        product.variant_attribute3_name = "Unused"
+        await session.commit()
+        updated = await self._patch(session, variant_attribute3_name=None)
+        assert updated.variant_attribute3_name is None
+
+    async def test_refuses_duplicate_names(self, session, pencil_pot):
+        with pytest.raises(HTTPException) as exc:
+            await self._patch(session, variant_attribute1_name="colour")
+        assert exc.value.status_code == 400
+        assert "different name" in exc.value.detail
+
+    async def test_untouched_slots_are_left_alone(self, session, pencil_pot):
+        updated = await self._patch(session, name="Brick Pot")
+        assert updated.variant_attribute1_name == "Size"

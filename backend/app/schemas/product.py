@@ -51,6 +51,14 @@ class ProductUpdate(BaseModel):
     product_category_id: int | None = None
     abc_class: ABCClass | None = None
     stock_take_interval_days: int | None = Field(default=None, gt=0)
+    # The variant attribute names ("Size", "Colour"). Editable here so a label can be
+    # corrected after variants exist — generation writes them, but only when it runs.
+    # Renaming is all this allows: the slots are positional (variants hold values by slot,
+    # pricing_variable_attribute is a slot number), so a slot cannot be reordered or, once
+    # it holds values, cleared. See routers/products.update_product.
+    variant_attribute1_name: str | None = None
+    variant_attribute2_name: str | None = None
+    variant_attribute3_name: str | None = None
 
 
 class ProductRead(ProductBase):

@@ -58,7 +58,26 @@ beforeEach(() => {
   setRoutes([
     { method: "GET", path: "/products/7/variants", respond: () => VARIANTS },
     { method: "POST", path: "/products/7/attribute-values/rename", respond: () => renameResponse() },
+    { method: "PATCH", path: "/products/7", respond: (body) => ({ ...(PRODUCT as object), ...(body as object) }) },
   ]);
+});
+
+it("renames an attribute through the product PATCH, naming only that slot", async () => {
+  const user = userEvent.setup();
+  renderPanel();
+
+  await user.click(await screen.findByRole("button", { name: "Rename attribute Size" }));
+  const input = screen.getByLabelText("New name for attribute Size");
+  await user.clear(input);
+  await user.type(input, "Stud size{Enter}");
+
+  await waitFor(() =>
+    expect(calls.find((c) => c.method === "PATCH")).toEqual({
+      method: "PATCH",
+      path: "/products/7",
+      body: { variant_attribute1_name: "Stud size" },
+    })
+  );
 });
 
 it("lists each attribute's distinct values, including those only on disabled variants", async () => {

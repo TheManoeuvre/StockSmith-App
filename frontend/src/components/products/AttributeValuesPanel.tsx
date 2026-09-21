@@ -57,13 +57,13 @@ export function AttributeValuesPanel({ product }: { product: Product }) {
       <div>
         <h3 className="text-sm font-medium">Attribute values</h3>
         <p className="text-xs text-slate-500">
-          Rename a value everywhere it appears. SKUs are never changed; marketplace listings show the new name
-          when next pushed.
+          Rename an attribute or one of its values everywhere it appears. SKUs are never changed; marketplace
+          listings show the new name when next pushed.
         </p>
       </div>
       {slots.map((slot) => (
         <div key={slot.slot} className="flex flex-col gap-1">
-          <p className="text-xs font-medium text-slate-600">{slot.name}</p>
+          <SlotHeading product={product} slot={slot.slot} name={slot.name} />
           <ul className="flex flex-col gap-1">
             {slot.values.map((value) => (
               <ValueRow key={value} product={product} slot={slot.slot} value={value} siblings={slot.values} />
@@ -71,6 +71,84 @@ export function AttributeValuesPanel({ product }: { product: Product }) {
           </ul>
         </div>
       ))}
+    </div>
+  );
+}
+
+/**
+ * The attribute's own name, renamable in place. Only a respelling: the slot stays where it
+ * is, because variants hold their values by slot number and the server refuses to clear
+ * a slot that has any.
+ */
+function SlotHeading({ product, slot, name }: { product: Product; slot: Slot; name: string }) {
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(name);
+
+  const renameMutation = useMutation({
+    mutationFn: (newName: string) => productsApi.update(product.id, { [`variant_attribute${slot}_name`]: newName }),
+    onSuccess: () => {
+      setEditing(false);
+      queryClient.invalidateQueries({ queryKey: ["products", product.id] });
+      queryClient.invalidateQueries({ queryKey: ["products"] });
+    },
+  });
+
+  const trimmed = draft.trim();
+  const cancel = () => {
+    setEditing(false);
+    setDraft(name);
+    renameMutation.reset();
+  };
+
+  if (!editing) {
+    return (
+      <div className="flex items-center gap-2">
+        <p className="text-xs font-medium text-slate-600">{name}</p>
+        <button
+          type="button"
+          onClick={() => setEditing(true)}
+          className="text-xs text-slate-500 underline"
+          aria-label={`Rename attribute ${name}`}
+        >
+          Rename
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <form
+        className="flex flex-wrap items-center gap-2 text-sm"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!trimmed || trimmed === name) cancel();
+          else renameMutation.mutate(trimmed);
+        }}
+      >
+        <input
+          autoFocus
+          aria-label={`New name for attribute ${name}`}
+          className="rounded border border-slate-300 px-2 py-0.5 text-xs"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") cancel();
+          }}
+        />
+        <button
+          type="submit"
+          disabled={renameMutation.isPending || !trimmed}
+          className="rounded bg-slate-900 px-2 py-0.5 text-xs text-white disabled:opacity-50"
+        >
+          Save
+        </button>
+        <button type="button" onClick={cancel} className="text-xs text-slate-600 underline">
+          Cancel
+        </button>
+      </form>
+      <ErrorBanner error={renameMutation.error} />
     </div>
   );
 }

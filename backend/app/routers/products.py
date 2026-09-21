@@ -460,12 +460,54 @@ async def get_product(product_id: int, session: AsyncSession = Depends(get_db)) 
 _PRICING_FIELDS = {"sale_price", "shipping_profile_id", "platform_fee_percent"}
 
 
+_ATTRIBUTE_NAME_FIELDS = frozenset({"variant_attribute1_name", "variant_attribute2_name", "variant_attribute3_name"})
+
+
+async def _validate_attribute_names(session: AsyncSession, product: Product, payload: ProductUpdate) -> None:
+    """A slot's name can be respelled, never removed from under its values.
+
+    The slot is positional: variants hold their values in attribute{1,2,3}_value by slot
+    number, and pricing_variable_attribute is a slot number too. So clearing a slot that
+    has values would orphan them, and two slots with one name would make the variation
+    labels sent to a marketplace ambiguous. Whitespace-only counts as empty."""
+    fields = payload.model_dump(exclude_unset=True)
+    proposed = [
+        (fields.get(f, getattr(product, f)) or "").strip() or None
+        for f in ("variant_attribute1_name", "variant_attribute2_name", "variant_attribute3_name")
+    ]
+    for slot, name in enumerate(proposed, start=1):
+        field = f"variant_attribute{slot}_name"
+        if field not in fields:
+            continue
+        # Normalise what gets stored so " Size " and "Size" are one name.
+        setattr(payload, field, name)
+        if name is None:
+            column = getattr(ProductVariant, f"attribute{slot}_value")
+            in_use = (
+                await session.execute(
+                    select(func.count()).where(ProductVariant.product_id == product.id, column.is_not(None))
+                )
+            ).scalar_one()
+            if in_use:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Attribute {slot} still has values on {in_use} variants and cannot be cleared.",
+                )
+    named = [n.casefold() for n in proposed if n]
+    if len(named) != len(set(named)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Each variant attribute needs a different name."
+        )
+
+
 @router.patch("/{product_id}", response_model=ProductRead)
 async def update_product(product_id: int, payload: ProductUpdate, session: AsyncSession = Depends(get_db)) -> Product:
     product = await session.get(Product, product_id)
     if product is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
     changed_fields = set(payload.model_dump(exclude_unset=True).keys())
+    if changed_fields & _ATTRIBUTE_NAME_FIELDS:
+        await _validate_attribute_names(session, product, payload)
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(product, field, value)
 

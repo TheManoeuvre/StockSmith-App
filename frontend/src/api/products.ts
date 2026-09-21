@@ -43,6 +43,10 @@ export interface ProductInput {
    * shop-wide default (services/abc.py). */
   abc_class?: ABCClass | null;
   stock_take_interval_days?: number | null;
+  /** Rename only — slots are positional and one holding values cannot be cleared (400). */
+  variant_attribute1_name?: string | null;
+  variant_attribute2_name?: string | null;
+  variant_attribute3_name?: string | null;
 }
 
 // Several pickers (bundle items, manual order lines, unmapped-SKU mapping) need the
