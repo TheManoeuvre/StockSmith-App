@@ -8,11 +8,20 @@ from sqlalchemy.orm import selectinload
 from app.deps import get_db, require_auth
 from app.models.colour import Colour
 from app.models.material import Material
-from app.schemas.material import MaterialAdjustmentCreate, MaterialCreate, MaterialRead, MaterialUpdate
+from app.schemas.material import (
+    MaterialAdjustmentCreate,
+    MaterialCreate,
+    MaterialMergeEffect,
+    MaterialMergePlan,
+    MaterialMergeRequest,
+    MaterialRead,
+    MaterialUpdate,
+)
 from app.services.colours import resolve_updates as resolve_colour_updates
 from app.services.material_categories import resolve_updates as resolve_category_updates
 from app.schemas.purchase import MaterialStockHistoryRead
-from app.services import abc
+from app.services import abc, material_merge
+from app.services.reference_data import InUseError, ReferenceDataError
 from app.services.costing import create_adjustment, get_on_order_qty_by_material
 from app.services.csv_io import export_materials_csv, import_materials_csv
 from app.services.file_storage import delete_asset_file, resolve_asset_path, save_material_image, thumbnail_path_for
@@ -280,10 +289,60 @@ async def update_material(
         validate_qty_for_unit(updates["reorder_threshold"], effective_unit, "reorder_threshold")
     if "typical_reorder_qty" in updates and updates["typical_reorder_qty"] is not None:
         validate_qty_for_unit(updates["typical_reorder_qty"], effective_unit, "typical_reorder_qty")
+    if "name" in updates and updates["name"] != material.name:
+        # A plain-string 409, as the reference-data routers answer, so the detail panel can
+        # offer a merge instead of showing a unique-constraint failure.
+        clash = (
+            await session.execute(select(Material.id).where(Material.name == updates["name"], Material.id != material_id))
+        ).scalar_one_or_none()
+        if clash is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT, detail=f'Another material is already called "{updates["name"]}".'
+            )
     for field, value in updates.items():
         setattr(material, field, value)
     await session.commit()
     return await _get_material_with_manufacturer(session, material_id)
+
+
+def _merge_http_error(exc: ReferenceDataError) -> HTTPException:
+    if isinstance(exc, InUseError):
+        return HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+@router.post("/{material_id}/merge/preview", response_model=MaterialMergePlan)
+async def preview_material_merge(
+    material_id: int, payload: MaterialMergeRequest, session: AsyncSession = Depends(get_db)
+) -> MaterialMergePlan:
+    """What merging this material into `target_id` would touch — nothing is written."""
+    try:
+        plan = await material_merge.plan_merge(session, material_id, payload.target_id)
+    except ReferenceDataError as exc:
+        raise _merge_http_error(exc) from exc
+    return MaterialMergePlan(
+        source_id=plan.source.id,
+        source_name=plan.source.name,
+        target_id=plan.target.id,
+        target_name=plan.target.name,
+        effects=[MaterialMergeEffect(label=e.label, repointed=e.repointed, summed=e.summed) for e in plan.effects],
+        combined_qty=plan.combined_qty,
+        blockers=plan.blockers,
+    )
+
+
+@router.post("/{material_id}/merge", response_model=MaterialRead)
+async def merge_material(
+    material_id: int, payload: MaterialMergeRequest, session: AsyncSession = Depends(get_db)
+) -> Material:
+    """Folds this material into `target_id` and deletes it. See services/material_merge
+    for the per-table rules; the target's stock and average cost come out of replaying
+    both histories together."""
+    try:
+        target = await material_merge.merge(session, material_id, payload.target_id)
+    except ReferenceDataError as exc:
+        raise _merge_http_error(exc) from exc
+    return await _get_material_with_manufacturer(session, target.id)
 
 
 @router.delete("/{material_id}", status_code=status.HTTP_204_NO_CONTENT)

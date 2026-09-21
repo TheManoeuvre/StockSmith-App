@@ -4,6 +4,26 @@ export type AssetType = "main_image" | "listing_image" | "step" | "threemf" | "g
  *  caller asked for every material (the materials list/detail), not on the dashboard. */
 export type StockoutStatus = "critical" | "warning" | "insufficient_data" | "ok";
 
+export interface MaterialMergeEffect {
+  label: string;
+  /** Rows that will simply point at the target instead. */
+  repointed: number;
+  /** Rows folded into a row the target already had (quantities added), or dropped as
+   *  now self-referential. */
+  summed: number;
+}
+
+export interface MaterialMergePlan {
+  source_id: number;
+  source_name: string;
+  target_id: number;
+  target_name: string;
+  effects: MaterialMergeEffect[];
+  combined_qty: string;
+  /** Non-empty means the merge will be refused with these messages. */
+  blockers: string[];
+}
+
 export interface Material {
   id: number;
   name: string;

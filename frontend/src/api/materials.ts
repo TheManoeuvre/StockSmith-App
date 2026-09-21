@@ -1,6 +1,6 @@
 import { api, downloadCsv, materialImageUploadUrl, uploadCsv, type CsvImportResult } from "./client";
 import { getSettings, uploadFile } from "../lib/tauri";
-import type { ABCClass, Material, MaterialStockHistoryEntry, MaterialUnit } from "./types";
+import type { ABCClass, Material, MaterialMergePlan, MaterialStockHistoryEntry, MaterialUnit } from "./types";
 
 export interface MaterialInput {
   name: string;
@@ -28,6 +28,12 @@ export const materialsApi = {
   update: (id: number, input: Partial<MaterialInput> & { is_active?: boolean }) =>
     api.patch<Material>(`/materials/${id}`, input),
   remove: (id: number) => api.delete<void>(`/materials/${id}`),
+  // Read-only: what merging `id` into target would touch.
+  previewMerge: (id: number, targetId: number) =>
+    api.post<MaterialMergePlan>(`/materials/${id}/merge/preview`, { target_id: targetId }),
+  // Repoints every reference, folds the stock/cost histories together, deletes `id`.
+  // Returns the target. 409 (plain string) while a blocker stands.
+  merge: (id: number, targetId: number) => api.post<Material>(`/materials/${id}/merge`, { target_id: targetId }),
   listColours: () => api.get<string[]>("/materials/colours"),
   listByType: (materialTypeId: number) => api.get<Material[]>(`/materials?material_type_id=${materialTypeId}`),
   getStockHistory: (id: number, limit?: number) =>
