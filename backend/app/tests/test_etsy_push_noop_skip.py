@@ -109,3 +109,31 @@ async def test_quantity_push_echoes_readiness_state_on_property():
     await adapter.push_listing_quantity(None, None, _REF, "SKU-1", 4)
 
     assert bodies and bodies[0]["readiness_state_on_property"] == [513]
+
+
+async def test_a_quantity_above_etsys_cap_is_written_as_the_cap():
+    # Etsy 400s on more than 999 per offering. The listing shows 999 and the sync check
+    # reports the mismatch, rather than every push retry failing the same way.
+    adapter = _RecordingEtsy(current_qty=7)
+    body: dict = {}
+
+    async def _authed_request(session, connection, method, path, **kwargs):
+        adapter.calls.append((method, path))
+        if method == "GET":
+            return _FakeResponse(200, _inventory("SKU-1", 7))
+        body.update(kwargs["json"])
+        return _FakeResponse(200, {})
+
+    adapter._authed_request = _authed_request
+
+    await adapter.push_listing_quantity(None, None, _REF, "SKU-1", 1500)
+
+    assert body["products"][0]["offerings"][0]["quantity"] == 999
+
+
+async def test_a_listing_already_at_the_cap_is_not_rewritten_for_a_larger_expected():
+    adapter = _RecordingEtsy(current_qty=999)
+
+    await adapter.push_listing_quantity(None, None, _REF, "SKU-1", 1500)
+
+    assert adapter.calls == [("GET", "/listings/L1/inventory")], "GET only, no PUT"

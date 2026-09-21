@@ -135,6 +135,14 @@ _CUSTOM_PROPERTY_IDS = (513, 514, 516)
 # otherwise 409 on a quantity push to a listing someone gave a third variation on Etsy.
 _INVENTORY_WRITE_PARAMS = {"max_variations_supported": 3}
 
+# Etsy's cap on a single offering's quantity, and on the scalar `quantity` that
+# createDraftListing takes. It is per offering: a listing's total is the sum of its
+# offerings and may exceed this, so a 400-variant listing at 15 each is fine while a
+# single variant at 1000 is not. Kept as an API fact here rather than read from the
+# user-overridable platform_limits table — that table produces readiness warnings,
+# this is what the wire will accept.
+_MAX_OFFERING_QUANTITY = 999
+
 _TAXONOMY_CACHE: list[dict] | None = None
 
 _MAX_LISTING_CONFLICT_RETRIES = 3
@@ -991,8 +999,11 @@ class EtsyAdapter:
                 )
             inventory = response.json()
 
-            # What the target SKU's offering should read after this push.
-            desired_qty = 1 if qty <= 0 else qty
+            # What the target SKU's offering should read after this push. Above the
+            # per-offering cap Etsy 400s, so the listing shows the cap instead; the
+            # sync-check then reports a visible mismatch against the larger expected
+            # figure rather than the push failing silently on every retry.
+            desired_qty = 1 if qty <= 0 else min(qty, _MAX_OFFERING_QUANTITY)
             desired_enabled = qty > 0
 
             matched = False
@@ -1399,12 +1410,16 @@ class EtsyAdapter:
             raise PlatformSyncError("Etsy connection has no shop id — reconnect required")
 
         # Etsy takes the listing-level price as "the minimum possible price"; per-unit
-        # prices arrive with the inventory call once variations are supported.
+        # prices arrive with the inventory call once variations are supported. The
+        # listing-level quantity is likewise a placeholder the inventory write replaces
+        # with per-offering figures, so it is clamped to what the scalar field accepts
+        # rather than failing the whole create on a big variation matrix whose sum is
+        # perfectly legal once spread across offerings.
         prices = [float(u.price) for u in draft.units if u.price]
         quantity = sum(max(u.quantity, 0) for u in draft.units)
 
         form = {
-            "quantity": max(quantity, 1),
+            "quantity": min(max(quantity, 1), _MAX_OFFERING_QUANTITY),
             "title": draft.title,
             "description": draft.description,
             "price": min(prices) if prices else 0,
@@ -1520,7 +1535,7 @@ class EtsyAdapter:
 
         products_payload = []
         for unit in draft.units:
-            quantity = unit.quantity
+            quantity = min(unit.quantity, _MAX_OFFERING_QUANTITY)
             is_enabled = True
             if quantity <= 0:
                 # Etsy refuses a literal 0 ("One offering must have quantity greater than
