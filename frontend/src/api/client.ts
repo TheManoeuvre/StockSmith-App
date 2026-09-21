@@ -159,7 +159,7 @@ export async function uploadCsv(path: string, fileBytes: Uint8Array, filename: s
   const url = `${await baseUrl()}/api/v1${path}`;
   const headers = await authHeaders();
   const formData = new FormData();
-  formData.append("file", new Blob([fileBytes], { type: "text/csv" }), filename);
+  formData.append("file", new Blob([fileBytes as BlobPart], { type: "text/csv" }), filename);
   const response = await platformFetch(url, { method: "POST", headers, body: formData });
   if (!response.ok) {
     const body = await response.text().catch(() => "");
