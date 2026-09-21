@@ -665,8 +665,10 @@ export interface PlatformLimitConflictsDetail {
 
 export interface BulkBomAmendLine {
   base_material_id: number;
-  material_id?: number | null; // substitution target; null keeps the base material
-  qty_required?: string | null; // null keeps the base BOM quantity
+  // null leaves that side of each variant's line as it is (existing override or base);
+  // send the base material id / base quantity explicitly to reset to base.
+  material_id?: number | null;
+  qty_required?: string | null;
 }
 
 export interface BulkBomAmendRequest {

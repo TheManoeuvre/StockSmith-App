@@ -211,8 +211,11 @@ class BulkBomAmendLine(BaseModel):
     they already have a mental model for."""
 
     base_material_id: int
-    material_id: int | None = None  # substitution target; None keeps the base material
-    qty_required: Decimal | None = None  # None keeps the base BOM quantity
+    # None leaves that side of each variant's line untouched (its existing override if it
+    # has one, else the base BOM). Send the base material id / base quantity explicitly to
+    # reset to base.
+    material_id: int | None = None
+    qty_required: Decimal | None = None
 
 
 class BulkBomAmendRequest(BaseModel):
