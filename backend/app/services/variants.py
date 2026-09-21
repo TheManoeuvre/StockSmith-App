@@ -552,7 +552,9 @@ async def amend_attribute_bom_overrides(
     written and the units describe what would change.
 
     Merge semantics are deliberately narrow: for each named base line, any existing
-    quantity-override or substitution row for that line is replaced, and every other row
+    quantity-override or substitution row for that line is replaced — with a blank
+    material or quantity carrying that side over from the row being replaced, so a
+    material change keeps per-variant quantities and vice versa — and every other row
     on the variant — including hand-added additive lines — is left alone. It cannot do
     better than that, because ProductVariantMaterial has no provenance column: a
     rule-generated row and a hand-edited one are indistinguishable. The preview is the
@@ -691,8 +693,20 @@ def _plan_amend(
         before_material = current.material_id if current is not None else None
         before_qty = Decimal(current.qty_required) if current is not None else None
 
-        target_material = line.material_id if line.material_id is not None else base_id
-        target_qty = line.qty_required if line.qty_required is not None else base_qty
+        # A blank field leaves that side of *this variant's* line as it is, not as the base
+        # BOM has it. Overrides on a product are usually keyed by different attributes —
+        # a colour substitution and a size quantity on the same line — so "change the
+        # material for every White variant" must keep each size's quantity, and vice
+        # versa. Resetting to base is still expressible: send the base material id or
+        # the base quantity explicitly.
+        if line.material_id is not None:
+            target_material = line.material_id
+        else:
+            target_material = current.material_id if current is not None else base_id
+        if line.qty_required is not None:
+            target_qty = line.qty_required
+        else:
+            target_qty = before_qty if before_qty is not None else base_qty
 
         # Same skip rule the generator uses: a result identical to the base BOM needs no
         # row at all, so the amend deletes the old one and writes nothing.
