@@ -8,10 +8,10 @@ import { ErrorBanner } from "../common/ErrorBanner";
 
 /**
  * Curates a material's ranked, human-picked fallbacks — e.g. a bigger box as a fallback for
- * a smaller one that's run out, or a close-proxy filament colour. Suggestions-only: nothing
- * here ever substitutes automatically, it only feeds the ranked options shown wherever a
- * shortage is already detected (build blockers, pack-time kitting shortfalls — see
- * SubstituteSuggestions).
+ * a smaller one that's run out, or a close-proxy filament colour. Nothing here ever
+ * substitutes automatically: it feeds the options offered wherever a shortage is detected —
+ * the build form (which draws from the chosen fallback after confirmation) and pack-time
+ * kitting shortfalls on the dashboard (see SubstituteSuggestions).
  *
  * There's no delete endpoint by design (keeps history) — "removing" a fallback deactivates
  * it (PATCH is_active=false) rather than dropping the row, and reorder is done by swapping
