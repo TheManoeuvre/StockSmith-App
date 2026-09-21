@@ -4,6 +4,7 @@ import { ApiError } from "../../api/client";
 import { productsApi } from "../../api/products";
 import type { Product, Variant } from "../../api/types";
 import { ErrorBanner } from "../common/ErrorBanner";
+import { AttributeValueMergeModal } from "./AttributeValueMergeModal";
 
 type Slot = 1 | 2 | 3;
 
@@ -57,8 +58,8 @@ export function AttributeValuesPanel({ product }: { product: Product }) {
       <div>
         <h3 className="text-sm font-medium">Attribute values</h3>
         <p className="text-xs text-slate-500">
-          Rename an attribute or one of its values everywhere it appears. SKUs are never changed; marketplace
-          listings show the new name when next pushed.
+          Rename an attribute or one of its values everywhere it appears, or merge two values that mean the same
+          thing. SKUs are never changed; marketplace listings show the new name when next pushed.
         </p>
       </div>
       {slots.map((slot) => (
@@ -66,7 +67,14 @@ export function AttributeValuesPanel({ product }: { product: Product }) {
           <SlotHeading product={product} slot={slot.slot} name={slot.name} />
           <ul className="flex flex-col gap-1">
             {slot.values.map((value) => (
-              <ValueRow key={value} product={product} slot={slot.slot} value={value} siblings={slot.values} />
+              <ValueRow
+                key={value}
+                product={product}
+                slot={slot.slot}
+                attributeName={slot.name}
+                value={value}
+                siblings={slot.values}
+              />
             ))}
           </ul>
         </div>
@@ -156,11 +164,13 @@ function SlotHeading({ product, slot, name }: { product: Product; slot: Slot; na
 function ValueRow({
   product,
   slot,
+  attributeName,
   value,
   siblings,
 }: {
   product: Product;
   slot: Slot;
+  attributeName: string;
   value: string;
   siblings: string[];
 }) {
@@ -168,6 +178,9 @@ function ValueRow({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const [notice, setNotice] = useState<string | null>(null);
+  // null = closed; a string = open with that survivor preselected ("" = none yet).
+  const [mergeInto, setMergeInto] = useState<string | null>(null);
+  const others = siblings.filter((s) => s !== value);
 
   const renameMutation = useMutation({
     mutationFn: (newValue: string) =>
@@ -209,6 +222,21 @@ function ValueRow({
     renameMutation.mutate(trimmed);
   };
 
+  const mergeModal = mergeInto != null && (
+    <AttributeValueMergeModal
+      productId={product.id}
+      slot={slot}
+      attributeName={attributeName}
+      loserValue={value}
+      candidates={others}
+      initialSurvivor={mergeInto || undefined}
+      onClose={() => {
+        setMergeInto(null);
+        cancel();
+      }}
+    />
+  );
+
   if (!editing) {
     return (
       <li className="flex flex-wrap items-center gap-2 text-sm">
@@ -224,13 +252,25 @@ function ValueRow({
         >
           Rename
         </button>
+        {others.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setMergeInto("")}
+            className="text-xs text-slate-600 underline"
+            aria-label={`Merge ${value} into another value`}
+          >
+            Merge into…
+          </button>
+        )}
         {notice && <span className="text-xs text-amber-800">{notice}</span>}
+        {mergeModal}
       </li>
     );
   }
 
   return (
     <li className="flex flex-col gap-1">
+      {mergeModal}
       <form
         className="flex flex-wrap items-center gap-2 text-sm"
         onSubmit={(e) => {
@@ -263,8 +303,11 @@ function ValueRow({
         </button>
       </form>
       {conflictValue ? (
-        <p className="rounded bg-amber-50 p-2 text-xs text-amber-900">
-          "{conflictValue}" is already a value of this attribute. To combine the two, merge "{value}" into it instead.
+        <p className="flex flex-wrap items-center gap-2 rounded bg-amber-50 p-2 text-xs text-amber-900">
+          <span>"{conflictValue}" is already a value of this attribute.</span>
+          <button type="button" onClick={() => setMergeInto(conflictValue)} className="underline">
+            Merge "{value}" into it
+          </button>
         </p>
       ) : (
         <ErrorBanner error={renameMutation.error} />

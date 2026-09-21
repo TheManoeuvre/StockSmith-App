@@ -22,6 +22,11 @@ from app.schemas.stock_adjustment import StockAdjustmentRead
 from app.schemas.stock_event import ProductStockEventRead
 from app.models.pricing import ProductPriceSnapshot
 from app.schemas.product import (
+    AttributeValueMergePlan,
+    AttributeValueMergePreviewRequest,
+    AttributeValueMergeRequest,
+    AttributeValueMergeResult,
+    AttributeValueRelabel,
     AttributeValueRenameRequest,
     AttributeValueRenameResult,
     BomLine,
@@ -51,7 +56,7 @@ from app.services.buildability import (
     get_buildable_by_product,
     get_ready_to_ship_by_bundle,
 )
-from app.services import abc, attribute_values, listing_push, platform_fees, variant_platform_conflicts
+from app.services import abc, attribute_values, listing_push, platform_fees, variant_merge, variant_platform_conflicts
 from app.services.csv_io import export_products_csv, import_products_csv
 from app.services.kitting import (
     _clamp_value_to_ceiling,
@@ -890,6 +895,58 @@ async def rename_attribute_value(
     return AttributeValueRenameResult(
         variants_updated=result.variants_updated,
         live_platforms=[p.value for p in result.live_platforms],
+    )
+
+
+@router.post("/{product_id}/attribute-values/merge/preview", response_model=AttributeValueMergePlan)
+async def preview_attribute_value_merge(
+    product_id: int, payload: AttributeValueMergePreviewRequest, session: AsyncSession = Depends(get_db)
+) -> AttributeValueMergePlan:
+    """What merging one attribute value into another would do: a variant-merge plan for
+    every pair of variants that differ only in that value, plus the variants that will
+    simply be relabelled because they have no counterpart. Nothing is written."""
+    try:
+        match = await attribute_values.match_value_merge(
+            session, product_id, payload.slot, payload.loser_value, payload.survivor_value
+        )
+        plans = [await variant_merge.plan_merge(session, p.loser.id, p.survivor.id) for p in match.pairs]
+    except (attribute_values.AttributeValueError, variant_merge.VariantMergeError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return AttributeValueMergePlan(
+        pairs=[plan.model_dump() for plan in plans],
+        relabel_only=[AttributeValueRelabel(variant_id=v.id, variant_name=v.variant_name) for v in match.relabel_only],
+        bom_differs=any(p.bom_differs for p in plans),
+        kitting_differs=any(p.kitting_differs for p in plans),
+        blockers=sorted({b for plan in plans for b in plan.blockers}),
+    )
+
+
+@router.post("/{product_id}/attribute-values/merge", response_model=AttributeValueMergeResult)
+async def merge_attribute_value(
+    product_id: int, payload: AttributeValueMergeRequest, session: AsyncSession = Depends(get_db)
+) -> AttributeValueMergeResult:
+    """Folds every variant carrying `loser_value` into its `survivor_value` counterpart.
+    409 with code "live_listing_conflicts" until the client confirms, as for a single
+    variant merge."""
+    try:
+        match, outcomes = await attribute_values.apply_value_merge(
+            session,
+            product_id,
+            payload.slot,
+            payload.loser_value,
+            payload.survivor_value,
+            bom=payload.bom,
+            kitting=payload.kitting,
+            on_live_listing=payload.on_live_listing,
+        )
+    except (attribute_values.AttributeValueError, variant_merge.VariantMergeError) as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return AttributeValueMergeResult(
+        pairs_merged=len(match.pairs),
+        relabelled=len(match.relabel_only),
+        stock_moved=sum(o.stock_moved for o in outcomes),
+        open_lines_moved=sum(o.open_lines_moved for o in outcomes),
+        warnings=[w for o in outcomes for w in o.warnings],
     )
 
 

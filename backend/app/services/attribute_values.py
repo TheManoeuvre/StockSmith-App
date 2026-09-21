@@ -165,3 +165,121 @@ async def rename_value(
     platforms = await live_platforms(session, product_id)
     await session.commit()
     return RenameResult(variants_updated=len(variants), live_platforms=platforms)
+
+
+# ---------------------------------------------------------------------------------------
+# Merging two values
+# ---------------------------------------------------------------------------------------
+
+
+@dataclass
+class ValuePair:
+    """A loser-value variant and the survivor-value variant with the same other attributes."""
+
+    loser: ProductVariant
+    survivor: ProductVariant
+
+
+@dataclass
+class ValueMergeMatch:
+    pairs: list[ValuePair]
+    # Loser-value variants with no counterpart: they keep their row and simply take the
+    # survivor value (a relabel, exactly as rename_value does).
+    relabel_only: list[ProductVariant]
+
+
+def _other_values(variant: ProductVariant, slot: int) -> tuple[str | None, ...]:
+    return tuple(v for i, v in enumerate(_values_of(variant), start=1) if i != slot)
+
+
+async def match_value_merge(
+    session: AsyncSession, product_id: int, slot: int, loser_value: str, survivor_value: str
+) -> ValueMergeMatch:
+    """Which variants a value merge would touch, and how.
+
+    Pairing is by the other two slots, exactly: "4 Stud Standard / Red" pairs with
+    "4 Stud / Red". Disabled variants can be losers (they are relabelled or merged like
+    any other, so the value really does disappear) but not survivors — a disabled
+    counterpart is treated as absent and the loser is relabelled instead, which leaves
+    both rows carrying the survivor value until one is reactivated and the pair merged.
+    That collides with the combo unique constraint, so such a pair is refused up front.
+    """
+    await get_product_or_error(session, product_id)
+    survivor_value = survivor_value.strip()
+    if loser_value == survivor_value:
+        raise AttributeValueError("Cannot merge a value into itself.")
+    losers = await variants_with_value(session, product_id, slot, loser_value)
+    if not losers:
+        raise AttributeValueError(f'No variant of this product has "{loser_value}" in that attribute.')
+    survivors = await variants_with_value(session, product_id, slot, survivor_value)
+    if not survivors:
+        raise AttributeValueError(f'No variant of this product has "{survivor_value}" in that attribute.')
+
+    by_others = {_other_values(v, slot): v for v in survivors}
+    pairs: list[ValuePair] = []
+    relabel_only: list[ProductVariant] = []
+    for loser in losers:
+        counterpart = by_others.get(_other_values(loser, slot))
+        if counterpart is None:
+            relabel_only.append(loser)
+        elif not counterpart.is_active:
+            raise AttributeValueError(
+                f'"{counterpart.variant_name}" is disabled — reactivate it (or disable "{loser.variant_name}" '
+                "too) before merging these values."
+            )
+        else:
+            pairs.append(ValuePair(loser=loser, survivor=counterpart))
+    return ValueMergeMatch(pairs=pairs, relabel_only=relabel_only)
+
+
+async def apply_value_merge(
+    session: AsyncSession,
+    product_id: int,
+    slot: int,
+    loser_value: str,
+    survivor_value: str,
+    *,
+    bom: str = "keep_survivor",
+    kitting: str = "keep_survivor",
+    on_live_listing: str = "ask",
+):
+    """Folds every loser-value variant into its survivor-value counterpart (or relabels it
+    when it has none), in one transaction.
+
+    The live-listing question is answered for all pairs at once: the 409 lists every
+    pair's listings, and "proceed" covers them all. The loser value's code row is left
+    in place — it is retired, and a retired code is never reused (see
+    ProductAttributeValueCode).
+    """
+    # Imported here: variant_merge imports nothing from this module, but keeping the
+    # dependency one-way at module level costs nothing and avoids a cycle later.
+    from app.services import variant_merge
+
+    match = await match_value_merge(session, product_id, slot, loser_value, survivor_value)
+    survivor_value = survivor_value.strip()
+
+    # Every check before any write, so a refusal on the third pair leaves nothing half done.
+    plans = [await variant_merge.plan_merge(session, p.loser.id, p.survivor.id) for p in match.pairs]
+    blockers = sorted({b for plan in plans for b in plan.blockers})
+    if blockers:
+        raise AttributeValueError(" ".join(blockers))
+    variant_merge.require_no_live_listing_conflicts(plans, on_live_listing)  # type: ignore[arg-type]
+
+    outcomes = []
+    for pair in match.pairs:
+        outcomes.append(
+            await variant_merge.apply_merge(
+                session,
+                pair.loser.id,
+                pair.survivor.id,
+                bom=bom,  # type: ignore[arg-type]
+                kitting=kitting,  # type: ignore[arg-type]
+                on_live_listing="proceed",  # already answered above, for all pairs
+                commit=False,
+            )
+        )
+    for variant in match.relabel_only:
+        relabel_variant(variant, slot, survivor_value)
+
+    await session.commit()
+    return match, outcomes

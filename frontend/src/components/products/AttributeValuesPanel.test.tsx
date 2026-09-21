@@ -59,6 +59,11 @@ beforeEach(() => {
     { method: "GET", path: "/products/7/variants", respond: () => VARIANTS },
     { method: "POST", path: "/products/7/attribute-values/rename", respond: () => renameResponse() },
     { method: "PATCH", path: "/products/7", respond: (body) => ({ ...(PRODUCT as object), ...(body as object) }) },
+    {
+      method: "POST",
+      path: "/products/7/attribute-values/merge/preview",
+      respond: () => ({ pairs: [], relabel_only: [], bom_differs: false, kitting_differs: false, blockers: [] }),
+    },
   ]);
 });
 
@@ -133,7 +138,29 @@ it("explains a 409 as a merge rather than a rename", async () => {
   await user.clear(input);
   await user.type(input, "4 Stud{Enter}");
 
-  expect(await screen.findByText(/merge "4 Stud Standard" into it instead/)).toBeInTheDocument();
+  expect(await screen.findByText(/is already a value of this attribute/)).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: 'Merge "4 Stud Standard" into it' }));
+
+  // The merge modal opens with the clashing value already chosen as the survivor.
+  await waitFor(() =>
+    expect(calls.find((c) => c.path === "/products/7/attribute-values/merge/preview")?.body).toEqual({
+      slot: 1,
+      loser_value: "4 Stud Standard",
+      survivor_value: "4 Stud",
+    })
+  );
+});
+
+it("opens the merge modal from a value's own button", async () => {
+  const user = userEvent.setup();
+  renderPanel();
+
+  await user.click(await screen.findByRole("button", { name: "Merge 4 Stud Standard into another value" }));
+
+  expect(await screen.findByRole("dialog", { name: 'Merge Size "4 Stud Standard" into…' })).toBeInTheDocument();
+  // Only the other Size values are offered.
+  const options = screen.getAllByRole("option").map((o) => o.textContent);
+  expect(options).toEqual(["Choose…", "4 Stud", "6 Stud Standard"]);
 });
 
 it("renders nothing for a product without attributes", async () => {

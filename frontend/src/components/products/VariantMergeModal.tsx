@@ -232,7 +232,7 @@ function BomChoice({
   );
 }
 
-function BomList({ lines }: { lines: MergeBomLine[] }) {
+export function BomList({ lines }: { lines: MergeBomLine[] }) {
   if (lines.length === 0) return <p className="text-xs text-slate-500">No materials.</p>;
   return (
     <ul className="text-xs text-slate-700">

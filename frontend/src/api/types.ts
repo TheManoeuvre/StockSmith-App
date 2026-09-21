@@ -798,6 +798,39 @@ export interface LiveListingConflictsDetail {
   conflicts: LiveListingConflict[];
 }
 
+export interface AttributeValueMergePreviewRequest {
+  slot: 1 | 2 | 3;
+  loser_value: string;
+  survivor_value: string;
+}
+
+export interface AttributeValueMergeRequest extends AttributeValueMergePreviewRequest {
+  bom?: MergeBomChoice;
+  kitting?: MergeBomChoice;
+  on_live_listing?: LiveListingResolution;
+}
+
+export interface AttributeValueRelabel {
+  variant_id: number;
+  variant_name: string;
+}
+
+export interface AttributeValueMergePlan {
+  pairs: VariantMergePlan[];
+  relabel_only: AttributeValueRelabel[];
+  bom_differs: boolean;
+  kitting_differs: boolean;
+  blockers: string[];
+}
+
+export interface AttributeValueMergeResult {
+  pairs_merged: number;
+  relabelled: number;
+  stock_moved: number;
+  open_lines_moved: number;
+  warnings: string[];
+}
+
 export interface Variant {
   id: number;
   product_id: number;

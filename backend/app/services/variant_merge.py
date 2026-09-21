@@ -215,10 +215,11 @@ async def plan_merge(session: AsyncSession, loser_id: int, survivor_id: int) -> 
     )
 
 
-def require_no_live_listing_conflicts(plan: VariantMergePlan, resolution: LiveListingResolution) -> None:
+def require_no_live_listing_conflicts(plans: list[VariantMergePlan], resolution: LiveListingResolution) -> None:
     """The confirmable refusal. Same detail shape as variant_platform_conflicts so the
-    client renders it with the dialog it already has."""
-    if resolution == "proceed" or not plan.live_listings:
+    client renders it with the dialog it already has. Takes a list because an attribute
+    value merge asks once for every pair it will touch."""
+    if resolution == "proceed":
         return
     conflicts = [
         {
@@ -231,13 +232,16 @@ def require_no_live_listing_conflicts(plan: VariantMergePlan, resolution: LiveLi
                 + ". Merging sets that variation's quantity to 0; remove it on the marketplace afterwards."
             ),
         }
+        for plan in plans
         for l in plan.live_listings
     ]
+    if not conflicts:
+        return
     raise HTTPException(
         status_code=status.HTTP_409_CONFLICT,
         detail={
             "code": "live_listing_conflicts",
-            "message": f"This variant is live on {len(conflicts)} marketplace listing(s). Nothing has been changed.",
+            "message": f"Live on {len(conflicts)} marketplace listing(s). Nothing has been changed.",
             "conflicts": conflicts,
         },
     )
@@ -287,7 +291,7 @@ async def apply_merge(
     plan = await plan_merge(session, loser_id, survivor_id)
     if plan.blockers:
         raise VariantMergeError(" ".join(plan.blockers))
-    require_no_live_listing_conflicts(plan, on_live_listing)
+    require_no_live_listing_conflicts([plan], on_live_listing)
 
     loser = await session.get(ProductVariant, loser_id)
     survivor = await session.get(ProductVariant, survivor_id)

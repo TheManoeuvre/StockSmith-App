@@ -286,3 +286,41 @@ class AttributeValueRenameResult(BaseModel):
     # Platforms holding a confirmed listing for this product. Their variation labels keep
     # the old spelling until the listing is next pushed — the rename is local.
     live_platforms: list[str]
+
+
+class AttributeValueMergePreviewRequest(BaseModel):
+    slot: int = Field(ge=1, le=3)
+    loser_value: str
+    survivor_value: str
+
+
+class AttributeValueMergeRequest(AttributeValueMergePreviewRequest):
+    # Applied to every pair alike; the preview says which pairs actually differ.
+    bom: Literal["keep_survivor", "take_loser"] = "keep_survivor"
+    kitting: Literal["keep_survivor", "take_loser"] = "keep_survivor"
+    on_live_listing: Literal["ask", "proceed"] = "ask"
+
+
+class AttributeValueRelabel(BaseModel):
+    """A loser-value variant with no counterpart: it just takes the survivor value."""
+
+    variant_id: int
+    variant_name: str
+
+
+class AttributeValueMergePlan(BaseModel):
+    # One full variant-merge plan per matched pair (schemas/variant.VariantMergePlan);
+    # typed loosely here to keep this module free of a variant-schema import.
+    pairs: list[dict]
+    relabel_only: list[AttributeValueRelabel]
+    bom_differs: bool  # any pair
+    kitting_differs: bool  # any pair
+    blockers: list[str]
+
+
+class AttributeValueMergeResult(BaseModel):
+    pairs_merged: int
+    relabelled: int
+    stock_moved: int
+    open_lines_moved: int
+    warnings: list[str]

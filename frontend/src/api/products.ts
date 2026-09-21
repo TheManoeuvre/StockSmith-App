@@ -1,6 +1,10 @@
 import { api, downloadCsv, uploadCsv, type CsvImportResult } from "./client";
 import type {
   ABCClass,
+  AttributeValueMergePlan,
+  AttributeValueMergePreviewRequest,
+  AttributeValueMergeRequest,
+  AttributeValueMergeResult,
   AttributeValueRenameRequest,
   AttributeValueRenameResult,
   BomLine,
@@ -102,6 +106,11 @@ export const productsApi = {
   // 409 (plain-string detail) when new_value already exists in that slot — offer a merge.
   renameAttributeValue: (id: number, payload: AttributeValueRenameRequest) =>
     api.post<AttributeValueRenameResult>(`/products/${id}/attribute-values/rename`, payload),
+  previewAttributeValueMerge: (id: number, payload: AttributeValueMergePreviewRequest) =>
+    api.post<AttributeValueMergePlan>(`/products/${id}/attribute-values/merge/preview`, payload),
+  // 409 with code "live_listing_conflicts" until on_live_listing is "proceed".
+  mergeAttributeValue: (id: number, payload: AttributeValueMergeRequest) =>
+    api.post<AttributeValueMergeResult>(`/products/${id}/attribute-values/merge`, payload),
   listBuilds: (id: number) => api.get<Build[]>(`/products/${id}/builds`),
   listStockAdjustments: (id: number) => api.get<StockAdjustment[]>(`/products/${id}/stock-adjustments`),
   listStockHistory: (id: number) => api.get<ProductStockEvent[]>(`/products/${id}/stock-history`),

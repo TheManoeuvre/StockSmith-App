@@ -229,3 +229,128 @@ class TestSlotRename:
     async def test_untouched_slots_are_left_alone(self, session, pencil_pot):
         updated = await self._patch(session, name="Brick Pot")
         assert updated.variant_attribute1_name == "Size"
+
+
+class TestValueMerge:
+    """Brick Pencil Pot: "4 Stud Standard" folds into "4 Stud" — a pair per colour where
+    both exist, a relabel where only Standard does."""
+
+    async def _stocked(self, session, pencil_pot):
+        combos = await _by_combo(session)
+        combos[("4 Stud Standard", "Red")].current_stock = 3
+        combos[("4 Stud", "Red")].current_stock = 5
+        combos[("4 Stud Standard", "Blue")].is_active = True
+        combos[("4 Stud Standard", "Blue")].current_stock = 2
+        # Green exists only as Standard — no counterpart, so it will be relabelled.
+        session.add(
+            ProductVariant(
+                product_id=1, variant_name="4 Stud Standard / Green", sku_suffix="02-03",
+                attribute1_value="4 Stud Standard", attribute2_value="Green", current_stock=7,
+            )
+        )
+        await session.commit()
+
+    async def test_match_pairs_and_relabels(self, session, pencil_pot, pushes):
+        await self._stocked(session, pencil_pot)
+
+        match = await attribute_values.match_value_merge(session, 1, 1, "4 Stud Standard", "4 Stud")
+
+        assert sorted((p.loser.attribute2_value, p.survivor.attribute2_value) for p in match.pairs) == [
+            ("Blue", "Blue"), ("Red", "Red"),
+        ]
+        assert [v.attribute2_value for v in match.relabel_only] == ["Green"]
+
+    async def test_apply_merges_pairs_and_relabels_the_rest(self, session, pencil_pot, pushes):
+        await self._stocked(session, pencil_pot)
+        skus_before = {k: v.sku_suffix for k, v in (await _by_combo(session)).items()}
+
+        match, outcomes = await attribute_values.apply_value_merge(session, 1, 1, "4 Stud Standard", "4 Stud")
+
+        assert len(match.pairs) == 2 and len(outcomes) == 2
+        combos = await _by_combo(session)
+        # The value is gone from every active variant.
+        assert not any(k[0] == "4 Stud Standard" and v.is_active for k, v in combos.items())
+        # Stock summed into the survivors; losers closed and disabled.
+        assert combos[("4 Stud", "Red")].current_stock == 8
+        assert combos[("4 Stud", "Blue")].current_stock == 2
+        assert combos[("4 Stud Standard", "Red")].is_active is False
+        assert combos[("4 Stud Standard", "Red")].current_stock == 0
+        # Green relabelled in place with its SKU intact.
+        green = combos[("4 Stud", "Green")]
+        assert green.current_stock == 7 and green.variant_name == "4 Stud / Green"
+        assert green.sku_suffix == skus_before[("4 Stud Standard", "Green")]
+        # No survivor's SKU changed either.
+        assert combos[("4 Stud", "Red")].sku_suffix == skus_before[("4 Stud", "Red")]
+
+    async def test_loser_code_row_is_retired_not_reused(self, session, pencil_pot, pushes):
+        await self._stocked(session, pencil_pot)
+        codes_before = await _codes(session, 1)
+
+        await attribute_values.apply_value_merge(session, 1, 1, "4 Stud Standard", "4 Stud")
+
+        assert await _codes(session, 1) == codes_before
+        created = await generate_variants(
+            session, 1,
+            [VariantAttributeSpec(name="Size", values=["8 Stud"]), VariantAttributeSpec(name="Colour", values=["Red"])],
+        )
+        assert int(created[0].sku_suffix.split("-")[0]) > max(codes_before.values())
+
+    async def test_disabled_counterpart_is_refused(self, session, pencil_pot, pushes):
+        # Standard/Blue is active here but 4 Stud/Blue gets disabled: merging would leave
+        # two rows with the same combo.
+        combos = await _by_combo(session)
+        combos[("4 Stud Standard", "Blue")].is_active = True
+        combos[("4 Stud", "Blue")].is_active = False
+        await session.commit()
+        with pytest.raises(AttributeValueError, match="disabled"):
+            await attribute_values.match_value_merge(session, 1, 1, "4 Stud Standard", "4 Stud")
+
+    async def test_refuses_unknown_and_self(self, session, pencil_pot, pushes):
+        with pytest.raises(AttributeValueError, match="itself"):
+            await attribute_values.match_value_merge(session, 1, 1, "4 Stud", "4 Stud")
+        with pytest.raises(AttributeValueError, match="No variant"):
+            await attribute_values.match_value_merge(session, 1, 1, "4 Stud", "9 Stud")
+
+    async def test_live_listing_on_any_pair_asks_once_for_all(self, session, pencil_pot, pushes, monkeypatch):
+        await self._stocked(session, pencil_pot)
+        combos = await _by_combo(session)
+        session.add(Listing(product_id=1, variant_id=combos[("4 Stud Standard", "Red")].id,
+                            platform=ListingPlatform.etsy, external_listing_id="1"))
+        session.add(Listing(product_id=1, variant_id=combos[("4 Stud Standard", "Blue")].id,
+                            platform=ListingPlatform.ebay, external_listing_id="2"))
+        await session.commit()
+
+        with pytest.raises(HTTPException) as exc:
+            await attribute_values.apply_value_merge(session, 1, 1, "4 Stud Standard", "4 Stud")
+        assert exc.value.status_code == 409
+        assert sorted(c["platform"] for c in exc.value.detail["conflicts"]) == ["ebay", "etsy"]
+        # Nothing moved.
+        assert (await _by_combo(session))[("4 Stud Standard", "Red")].is_active is True
+
+        from app.models.platform_listing_push import ListingPushStatus
+        from app.services import listing_push
+
+        pushed = []
+
+        async def fake_push_one(s, listing, qty):
+            pushed.append((listing.platform, qty))
+            return ListingPushStatus.success, None
+
+        monkeypatch.setattr(listing_push, "_push_one", fake_push_one)
+        await attribute_values.apply_value_merge(session, 1, 1, "4 Stud Standard", "4 Stud", on_live_listing="proceed")
+        assert sorted(pushed) == [(ListingPlatform.ebay, 0), (ListingPlatform.etsy, 0)]
+
+    async def test_router_preview_and_apply(self, session, pencil_pot, pushes):
+        from app.schemas.product import AttributeValueMergePreviewRequest, AttributeValueMergeRequest
+
+        await self._stocked(session, pencil_pot)
+        plan = await products_router.preview_attribute_value_merge(
+            1, AttributeValueMergePreviewRequest(slot=1, loser_value="4 Stud Standard", survivor_value="4 Stud"), session
+        )
+        assert len(plan.pairs) == 2 and [r.variant_name for r in plan.relabel_only] == ["4 Stud Standard / Green"]
+        assert plan.blockers == []
+
+        result = await products_router.merge_attribute_value(
+            1, AttributeValueMergeRequest(slot=1, loser_value="4 Stud Standard", survivor_value="4 Stud"), session
+        )
+        assert (result.pairs_merged, result.relabelled, result.stock_moved) == (2, 1, 5)
