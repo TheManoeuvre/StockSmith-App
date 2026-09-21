@@ -24,6 +24,7 @@ from app.services.platforms.base import (
 )
 from app.services.platforms.errors import (
     PlatformAuthError,
+    PlatformError,
     PlatformPushBlockedError,
     PlatformRateLimitError,
     PlatformSyncError,
@@ -87,8 +88,19 @@ _REFRESH_SKEW = timedelta(minutes=5)
 _MAX_PAGES = 20
 
 # Same idea for build_listing_sku_index — bounds a single "check sync" click to at most
-# a few thousand listings' worth of API calls.
+# a few thousand listings' worth of API calls, per state crawled.
 _MAX_LISTING_PAGES = 20
+
+# getListingsByShop filters by a single `state`, and when the parameter is omitted the
+# filter is NOT "everything" — Etsy's OpenAPI spec (verified 2026-09-19) gives it a
+# default of `active`. The crawl used to omit it and so only ever saw active listings,
+# while its callers believed they had the whole catalogue: a listing that sold out on
+# Etsy, was deactivated, expired, or was created by StockSmith as a draft came back as
+# "not found" on the next sync check — which *cleared its external_listing_id* and
+# quietly stopped every future stock push to it. `listing_not_active` was unreachable.
+# One crawl per state fixes that; `removed` is left out because a removed listing is
+# gone for good and nothing here should ever link to one.
+_LISTING_STATES = ("active", "inactive", "sold_out", "draft", "expired")
 
 # Retries for a 429 before giving up and surfacing PlatformRateLimitError to the caller.
 # Etsy's QPS window is one second, so a couple of short backoffs is usually enough to
@@ -1072,6 +1084,12 @@ class EtsyAdapter:
                 "price_on_property": inventory.get("price_on_property", []),
                 "quantity_on_property": inventory.get("quantity_on_property", []),
                 "sku_on_property": inventory.get("sku_on_property", []),
+                # The fourth *_on_property array (updateListingInventory schema, verified
+                # 2026-09-19). Omitting it reads as [] — "one processing profile for the
+                # whole listing" — so a listing whose variations carry different
+                # profiles would have every offering's readiness_state_id (echoed above)
+                # contradict it and the write rejected. Echoed like the other three.
+                "readiness_state_on_property": inventory.get("readiness_state_on_property", []),
             }
             put_response = await self._authed_request(
                 session, connection, "PUT", f"/listings/{listing_id}/inventory", json=put_body, params=_INVENTORY_WRITE_PARAMS
@@ -1136,41 +1154,61 @@ class EtsyAdapter:
         enrich_skus: set[str] | None = None,
     ) -> dict[str, ExternalListingRef]:
         """Etsy's API has no "find listing by SKU" endpoint — the only way to resolve a
-        SKU is to page through the shop's entire listing catalog (all states, via
+        SKU is to page through the shop's entire listing catalog (every state in
+        _LISTING_STATES, one crawl each — see that constant for why it can't be one — via
         includes=Inventory so each listing's per-product SKUs come back in the same
         call) and index every SKU found. Since this costs the same whether checking one
         product or the whole catalog, callers should build this once and reuse it across
         every product/variant being checked in a given "test sync" run.
 
-        enrich/enrich_skus are accepted and ignored: that single crawl already returns
+        enrich/enrich_skus are accepted and ignored: that crawl already returns
         title, state, quantity and variation for every SKU, so there is no cheaper mode to
         offer and no extra per-SKU call to skip. Honouring them by returning less would
         only lose information the call already paid for.
         """
+        index: dict[str, ExternalListingRef] = {}
+        for listing in await self._crawl_shop_listings(session, connection, includes="Inventory"):
+            self._index_listing_skus(listing, index)
+        return index
+
+    async def _crawl_shop_listings(self, session, connection: PlatformConnection, *, includes: str) -> list[dict]:
+        """Every listing in the shop, across every state in _LISTING_STATES, in state
+        order. The API takes one `state` per request, so this is one paginated crawl per
+        state; for a small shop that is one call per state. A listing can only be in one
+        state so the crawls never overlap, but the result is deduplicated by listing_id
+        anyway — a listing changing state between two of the crawls must not be counted
+        twice, and a fake that answers every state with the same page must not either."""
         if connection.external_account_id is None:
             raise PlatformSyncError("Etsy connection has no shop id — reconnect required")
 
-        params: dict[str, str | int] = {"limit": 100, "offset": 0, "includes": "Inventory"}
-        index: dict[str, ExternalListingRef] = {}
+        listings: list[dict] = []
+        seen: set[str] = set()
+        for state in _LISTING_STATES:
+            params: dict[str, str | int] = {"limit": 100, "offset": 0, "includes": includes, "state": state}
+            for _ in range(_MAX_LISTING_PAGES):
+                response = await self._authed_request(
+                    session, connection, "GET", f"/shops/{connection.external_account_id}/listings", params=params
+                )
+                if response.status_code != 200:
+                    raise PlatformSyncError(
+                        f"Failed to fetch Etsy listings: {response.status_code} {response.text}"
+                    )
 
-        for _ in range(_MAX_LISTING_PAGES):
-            response = await self._authed_request(
-                session, connection, "GET", f"/shops/{connection.external_account_id}/listings", params=params
-            )
-            if response.status_code != 200:
-                raise PlatformSyncError(f"Failed to fetch Etsy listings: {response.status_code} {response.text}")
+                body = response.json()
+                results = body.get("results", [])
+                for listing in results:
+                    key = str(listing.get("listing_id"))
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    listings.append(listing)
 
-            body = response.json()
-            results = body.get("results", [])
-            for listing in results:
-                self._index_listing_skus(listing, index)
+                total = body.get("count", len(results))
+                params["offset"] = int(params["offset"]) + len(results)
+                if not results or int(params["offset"]) >= total:
+                    break
 
-            total = body.get("count", len(results))
-            params["offset"] = int(params["offset"]) + len(results)
-            if not results or int(params["offset"]) >= total:
-                break
-
-        return index
+        return listings
 
     async def fetch_all_listings(
         self, session, connection: PlatformConnection, *, with_images: bool = False
@@ -1180,38 +1218,15 @@ class EtsyAdapter:
 
         Needed because the unadopted-listing report cares about listings that have *no*
         matching SKU — which by definition never appear as keys in that index, so the
-        index alone cannot answer the question. Kept as a sibling rather than having
-        build_listing_sku_index call this and re-index, so the hot path (sync checking)
-        keeps its single-pass behaviour with no extra allocation.
+        index alone cannot answer the question. Both share _crawl_shop_listings so the
+        two can never disagree about which listings exist.
 
         with_images adds Etsy's Images association, which carries url_fullxfull for every
         listing image. Off by default because the callers that only need SKUs and state
         shouldn't pay for a heavier response on every sync — the backfill flow is the one
         place that wants it."""
-        if connection.external_account_id is None:
-            raise PlatformSyncError("Etsy connection has no shop id — reconnect required")
-
         includes = "Images,Inventory" if with_images else "Inventory"
-        params: dict[str, str | int] = {"limit": 100, "offset": 0, "includes": includes}
-        listings: list[dict] = []
-
-        for _ in range(_MAX_LISTING_PAGES):
-            response = await self._authed_request(
-                session, connection, "GET", f"/shops/{connection.external_account_id}/listings", params=params
-            )
-            if response.status_code != 200:
-                raise PlatformSyncError(f"Failed to fetch Etsy listings: {response.status_code} {response.text}")
-
-            body = response.json()
-            results = body.get("results", [])
-            listings.extend(results)
-
-            total = body.get("count", len(results))
-            params["offset"] = int(params["offset"]) + len(results)
-            if not results or int(params["offset"]) >= total:
-                break
-
-        return listings
+        return await self._crawl_shop_listings(session, connection, includes=includes)
 
     @staticmethod
     def parse_listing_products(listing: dict) -> UnadoptedListingCandidate:
@@ -1336,6 +1351,7 @@ class EtsyAdapter:
             "price_on_property": inventory.get("price_on_property", []),
             "quantity_on_property": inventory.get("quantity_on_property", []),
             "sku_on_property": self._sku_on_property_for(products_payload),
+            "readiness_state_on_property": inventory.get("readiness_state_on_property", []),
         }
         put_response = await self._authed_request(
             session, connection, "PUT", f"/listings/{listing_id}/inventory", json=put_body, params=_INVENTORY_WRITE_PARAMS

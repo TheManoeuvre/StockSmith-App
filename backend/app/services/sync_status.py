@@ -14,12 +14,13 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.listing import ListingPlatform
+from app.models.listing import Listing, ListingPlatform
 from app.models.platform_connection import PlatformConnection
 from app.models.platform_listing_push import ListingPushStatus, PlatformListingPush
 from app.models.platform_sync_run import PlatformSyncRun, SyncRunMode, SyncRunStatus
 from app.schemas.platform import PlatformSyncSummary, SyncGap, SyncHealth
 from app.services import platform_api_usage
+from app.services.listing_units import current_unit_filter
 from app.services.platforms.base import ensure_utc
 
 # Mirrors the frontend's CONNECTABLE_PLATFORMS — platforms with a real adapter. Shopify is
@@ -81,6 +82,8 @@ async def _push_problem_counts(
     """
     ranked = select(
         PlatformListingPush.platform.label("platform"),
+        PlatformListingPush.product_id.label("product_id"),
+        PlatformListingPush.variant_id.label("variant_id"),
         PlatformListingPush.status.label("status"),
         func.row_number()
         .over(
@@ -94,8 +97,26 @@ async def _push_problem_counts(
         .label("rn"),
     ).subquery()
 
+    # Only units StockSmith is still pushing to. A failed attempt stays the latest one
+    # forever once nothing retries it — which is exactly what happens when the listing
+    # has since been unlinked (a sync check found no SKU) or the unit itself has been
+    # superseded (a product-level row on a product that now has variants, see
+    # services/listing_units). Counting those would promise "the next stock change
+    # retries automatically" for a listing no push path will ever touch again.
+    live = (
+        select(Listing.platform, Listing.product_id, Listing.variant_id)
+        .where(Listing.external_listing_id.is_not(None), current_unit_filter())
+        .subquery()
+    )
+
     result = await session.execute(
         select(ranked.c.platform, ranked.c.status, func.count())
+        .join(
+            live,
+            (ranked.c.platform == live.c.platform)
+            & (ranked.c.product_id == live.c.product_id)
+            & (func.coalesce(ranked.c.variant_id, -1) == func.coalesce(live.c.variant_id, -1)),
+        )
         .where(
             ranked.c.rn == 1,
             ranked.c.status.in_((ListingPushStatus.error, ListingPushStatus.blocked)),

@@ -29,6 +29,7 @@ from app.models.listing import Listing, ListingPlatform
 from app.models.platform_connection import PlatformConnection
 from app.models.platform_listing_push import ListingPushStatus, PlatformListingPush
 from app.services import listing_push, platform_api_usage
+from app.services.listing_units import current_unit_filter
 
 logger = logging.getLogger("stocksmith.listing_reconcile")
 
@@ -113,6 +114,10 @@ async def _listings_to_check(session, platform: ListingPlatform, now: datetime) 
         .where(
             Listing.platform == platform,
             Listing.external_listing_id.is_not(None),
+            # A row for a unit the product no longer sells as (services/listing_units)
+            # is not a listing StockSmith should be talking to. Without this, one such
+            # row costs a guaranteed-failing GET every single sweep, forever.
+            current_unit_filter(),
         )
         .order_by(Listing.last_pushed_at.is_(None).desc(), Listing.last_pushed_at.asc(), Listing.id.asc())
     )

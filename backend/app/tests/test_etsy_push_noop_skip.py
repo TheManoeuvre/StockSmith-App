@@ -89,6 +89,28 @@ async def test_writes_when_only_the_enabled_flag_differs():
     assert ("PUT", "/listings/L1/inventory") in adapter.calls
 
 
+async def test_quantity_push_echoes_readiness_state_on_property():
+    """The GET returns four *_on_property arrays; the PUT has to send all four back.
+    Dropping readiness_state_on_property declares a single processing profile for the
+    whole listing, which contradicts the per-offering readiness_state_id values echoed
+    alongside it on any listing that varies its profile by variation."""
+    adapter = _RecordingEtsy(current_qty=7)
+    bodies: list[dict] = []
+
+    async def _authed_request(session, connection, method, path, **kwargs):
+        adapter.calls.append((method, path))
+        if method == "GET":
+            return _FakeResponse(200, {**_inventory("SKU-1", 7), "readiness_state_on_property": [513]})
+        bodies.append(kwargs["json"])
+        return _FakeResponse(200, {})
+
+    adapter._authed_request = _authed_request
+
+    await adapter.push_listing_quantity(None, None, _REF, "SKU-1", 4)
+
+    assert bodies and bodies[0]["readiness_state_on_property"] == [513]
+
+
 async def test_a_quantity_above_etsys_cap_is_written_as_the_cap():
     # Etsy 400s on more than 999 per offering. The listing shows 999 and the sync check
     # reports the mismatch, rather than every push retry failing the same way.
