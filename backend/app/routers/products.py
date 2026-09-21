@@ -22,6 +22,8 @@ from app.schemas.stock_adjustment import StockAdjustmentRead
 from app.schemas.stock_event import ProductStockEventRead
 from app.models.pricing import ProductPriceSnapshot
 from app.schemas.product import (
+    AttributeValueRenameRequest,
+    AttributeValueRenameResult,
     BomLine,
     BomLineRead,
     BulkBomAmendChange,
@@ -49,7 +51,7 @@ from app.services.buildability import (
     get_buildable_by_product,
     get_ready_to_ship_by_bundle,
 )
-from app.services import abc, listing_push, platform_fees, variant_platform_conflicts
+from app.services import abc, attribute_values, listing_push, platform_fees, variant_platform_conflicts
 from app.services.csv_io import export_products_csv, import_products_csv
 from app.services.kitting import (
     _clamp_value_to_ceiling,
@@ -822,6 +824,30 @@ async def amend_variant_bom_overrides(
             )
             for variant, changes, _replaced, _new in units
         ],
+    )
+
+
+@router.post("/{product_id}/attribute-values/rename", response_model=AttributeValueRenameResult)
+async def rename_attribute_value(
+    product_id: int, payload: AttributeValueRenameRequest, session: AsyncSession = Depends(get_db)
+) -> AttributeValueRenameResult:
+    """Respells one attribute value on every variant of the product that carries it.
+
+    409 when the new spelling is already a value in that slot — the two are then the same
+    thing spelled twice, which is a merge (attribute-values/merge), not a rename. The
+    detail is a plain string, as for the reference-data routers: the client already holds
+    the value list and can offer the merge itself."""
+    try:
+        result = await attribute_values.rename_value(
+            session, product_id, payload.slot, payload.old_value, payload.new_value
+        )
+    except attribute_values.ValueConflictError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except attribute_values.AttributeValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return AttributeValueRenameResult(
+        variants_updated=result.variants_updated,
+        live_platforms=[p.value for p in result.live_platforms],
     )
 
 

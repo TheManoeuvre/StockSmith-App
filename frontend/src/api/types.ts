@@ -703,6 +703,19 @@ export interface BulkBomAmendResult {
   units: BulkBomAmendUnit[];
 }
 
+export interface AttributeValueRenameRequest {
+  slot: 1 | 2 | 3;
+  old_value: string;
+  new_value: string;
+}
+
+export interface AttributeValueRenameResult {
+  variants_updated: number;
+  // Platforms with a confirmed listing for the product; their variation labels keep the
+  // old spelling until the listing is next pushed.
+  live_platforms: string[];
+}
+
 export interface Variant {
   id: number;
   product_id: number;

@@ -263,3 +263,18 @@ class ProductPriceSnapshotRead(BaseModel):
     sale_price: Decimal | None
     margin_percent: Decimal | None
     recorded_at: datetime
+
+
+class AttributeValueRenameRequest(BaseModel):
+    """Respell one value of one variant attribute across every variant that has it."""
+
+    slot: int = Field(ge=1, le=3)  # which of variant_attribute{1,2,3}_name
+    old_value: str
+    new_value: str
+
+
+class AttributeValueRenameResult(BaseModel):
+    variants_updated: int
+    # Platforms holding a confirmed listing for this product. Their variation labels keep
+    # the old spelling until the listing is next pushed — the rename is local.
+    live_platforms: list[str]

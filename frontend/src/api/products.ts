@@ -1,6 +1,8 @@
 import { api, downloadCsv, uploadCsv, type CsvImportResult } from "./client";
 import type {
   ABCClass,
+  AttributeValueRenameRequest,
+  AttributeValueRenameResult,
   BomLine,
   BomLineRead,
   Build,
@@ -93,6 +95,9 @@ export const productsApi = {
   // Defaults to a preview server-side — pass apply: true only after the user has seen it.
   amendVariantBomOverrides: (id: number, payload: BulkBomAmendRequest) =>
     api.post<BulkBomAmendResult>(`/products/${id}/variants/bom-overrides/amend`, payload),
+  // 409 (plain-string detail) when new_value already exists in that slot — offer a merge.
+  renameAttributeValue: (id: number, payload: AttributeValueRenameRequest) =>
+    api.post<AttributeValueRenameResult>(`/products/${id}/attribute-values/rename`, payload),
   listBuilds: (id: number) => api.get<Build[]>(`/products/${id}/builds`),
   listStockAdjustments: (id: number) => api.get<StockAdjustment[]>(`/products/${id}/stock-adjustments`),
   listStockHistory: (id: number) => api.get<ProductStockEvent[]>(`/products/${id}/stock-history`),
