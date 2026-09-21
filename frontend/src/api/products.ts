@@ -112,6 +112,9 @@ export const buildsApi = {
     qty_built: number;
     qty_failed?: number;
     failed_consumption?: Record<number, boolean> | null;
+    /** material_id -> substitute_material_id: BOM lines to draw from a curated fallback
+     *  instead. Only ever sent after the person has confirmed the swap. */
+    substitutions?: Record<number, number> | null;
     notes?: string | null;
   }) => api.post<Build>("/builds", input),
 };

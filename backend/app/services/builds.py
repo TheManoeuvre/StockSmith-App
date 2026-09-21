@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.build import Build, BuildFailedConsumption
 from app.models.material import Material, MaterialAdjustment
+from app.models.material_substitute import MaterialSubstitute, MaterialSubstituteUsage
 from app.models.product import Product, ProductMaterial
 from app.models.product_stock_event import ProductStockEventType
 from app.models.variant import ProductVariant
@@ -27,15 +28,25 @@ async def create_build(
     notes: str | None,
     qty_failed: int = 0,
     failed_consumption: dict[int, bool] | None = None,
+    substitutions: dict[int, int] | None = None,
 ) -> Build:
     """Records a build event: qty_built units successfully produced, plus qty_failed
     units attempted but not (e.g. a print that failed partway).
 
     failed_consumption maps material_id -> whether that BOM line was actually consumed
     for the failed qty (a failed print may not have burned through the whole BOM). When
-    not given and qty_failed > 0, defaults to "filament consumed, everything else not" —
+    not given and qty_failed > 0, defaults to "filament consumed, everything else not" â€”
     the common case for a 3D-print failure, still overridable by passing an explicit map.
     Ignored entirely when qty_failed is 0.
+
+    substitutions maps material_id -> substitute_material_id for BOM lines that should
+    draw their stock from a curated fallback instead (the pooled *_incl_fallbacks
+    capacity already assumes this can happen; this is the flow that actually does it).
+    Each target must be an active MaterialSubstitute for that material — the server never
+    picks one itself. The stock movement lands on the substitute like any other build
+    consumption, plus a MaterialSubstituteUsage row so the swap is traceable later.
+    failed_consumption stays keyed by the ORIGINAL material id — it's a per-line decision
+    ("did the failed print reach the filament?"), whichever spool that turned out to be.
     """
     if qty_built < 0 or qty_failed < 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="qty_built/qty_failed cannot be negative")
@@ -46,7 +57,7 @@ async def create_build(
     if product is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
 
-    # Only *active* variants count — a product whose variants have all been disabled is
+    # Only *active* variants count â€” a product whose variants have all been disabled is
     # treated the same as a product with no variants at all: build against the base
     # product's own SKU/BOM/stock rather than forcing a (disabled) variant to be picked.
     has_active_variants = (
@@ -59,11 +70,11 @@ async def create_build(
 
     if has_active_variants and variant_id is None:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="This product has variants — specify a variant_id"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="This product has variants â€” specify a variant_id"
         )
     if not has_active_variants and variant_id is not None:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="This product has no active variants — omit variant_id"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="This product has no active variants â€” omit variant_id"
         )
 
     variant: ProductVariant | None = None
@@ -84,10 +95,40 @@ async def create_build(
     if not bom:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Product has no BOM defined")
 
+    substitutions = substitutions or {}
+    bom_material_ids = {line.material_id for line in bom}
+    for material_id, substitute_id in substitutions.items():
+        if material_id not in bom_material_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Material #{material_id} is not on this BOM, so it can't be substituted",
+            )
+        is_curated = (
+            await session.execute(
+                select(MaterialSubstitute.id).where(
+                    MaterialSubstitute.material_id == material_id,
+                    MaterialSubstitute.substitute_material_id == substitute_id,
+                    MaterialSubstitute.is_active.is_(True),
+                )
+            )
+        ).scalar_one_or_none() is not None
+        if not is_curated:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Material #{substitute_id} is not an active fallback for material #{material_id}",
+            )
+
+    def consumed_material_id(material_id: int) -> int:
+        return substitutions.get(material_id, material_id)
+
     materials_by_id = {
         m.id: m
         for m in (
-            await session.execute(select(Material).where(Material.id.in_([line.material_id for line in bom])))
+            await session.execute(
+                select(Material).where(
+                    Material.id.in_(bom_material_ids | {consumed_material_id(mid) for mid in bom_material_ids})
+                )
+            )
         ).scalars()
     }
 
@@ -104,45 +145,70 @@ async def create_build(
     session.add(build)
     await session.flush()
 
+    # Tallied per ORIGINAL material so the usage row can say how much of the fallback the
+    # whole build drew (built + failed-but-consumed), across every line on that material.
+    substituted_qty: dict[int, Decimal] = {}
+
+    def substitution_note(material_id: int) -> str:
+        if material_id not in substitutions:
+            return ""
+        return f" (in place of {materials_by_id[material_id].name})"
+
     for line in bom:
         qty_delta = -(Decimal(qty_built) * line.qty_required)
         if qty_delta != 0:
             session.add(
                 MaterialAdjustment(
-                    material_id=line.material_id,
+                    material_id=consumed_material_id(line.material_id),
                     qty_delta=qty_delta,
-                    reason=f"Build #{build.id}",
+                    reason=f"Build #{build.id}{substitution_note(line.material_id)}",
                     product_id=product_id,
                     variant_id=variant_id,
                 )
             )
+            if line.material_id in substitutions:
+                substituted_qty[line.material_id] = substituted_qty.get(line.material_id, Decimal(0)) - qty_delta
 
     if qty_failed > 0:
         for line in bom:
             was_consumed = failed_consumption.get(line.material_id, False) if failed_consumption else False
-            material = materials_by_id[line.material_id]
+            # The material actually burned — the fallback when one was chosen — so the
+            # cost snapshot prices what really left the shelf.
+            material = materials_by_id[consumed_material_id(line.material_id)]
             qty_consumed = Decimal(qty_failed) * line.qty_required if was_consumed else Decimal(0)
             if was_consumed and qty_consumed != 0:
                 session.add(
                     MaterialAdjustment(
-                        material_id=line.material_id,
+                        material_id=material.id,
                         qty_delta=-qty_consumed,
-                        reason=f"Build #{build.id} (failed units)",
+                        reason=f"Build #{build.id} (failed units){substitution_note(line.material_id)}",
                         product_id=product_id,
                         variant_id=variant_id,
                     )
                 )
+                if line.material_id in substitutions:
+                    substituted_qty[line.material_id] = substituted_qty.get(line.material_id, Decimal(0)) + qty_consumed
             session.add(
                 BuildFailedConsumption(
                     build_id=build.id,
-                    material_id=line.material_id,
+                    material_id=material.id,
                     was_consumed=was_consumed,
                     qty_consumed=qty_consumed,
                     unit_cost_snapshot=Decimal(material.avg_unit_cost),
                 )
             )
 
-    material_ids = {line.material_id for line in bom}
+    for material_id, substitute_id in substitutions.items():
+        session.add(
+            MaterialSubstituteUsage(
+                material_id=material_id,
+                substitute_material_id=substitute_id,
+                qty=substituted_qty.get(material_id, Decimal(0)),
+                build_id=build.id,
+            )
+        )
+
+    material_ids = {consumed_material_id(line.material_id) for line in bom}
     try:
         await recompute_materials(session, material_ids)
     except IntegrityError:
@@ -167,8 +233,8 @@ async def create_build(
         )
 
     if qty_failed > 0:
-        # A failed build never touches current_stock — material was consumed but no
-        # usable unit resulted — so qty_delta is 0 and running_balance is unchanged.
+        # A failed build never touches current_stock â€” material was consumed but no
+        # usable unit resulted â€” so qty_delta is 0 and running_balance is unchanged.
         # Still gets its own row so the failure (and the material burned on it) shows up
         # in the same timeline as everything else touching this product.
         record_stock_event(

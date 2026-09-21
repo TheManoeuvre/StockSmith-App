@@ -1,13 +1,15 @@
 import { Link } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useMaterialCategories } from "../../hooks/useMaterialCategories";
 import { buildsApi, productsApi, stockAdjustmentsApi } from "../../api/products";
 import { materialsApi } from "../../api/materials";
+import { materialSubstitutesApi } from "../../api/materialSubstitutes";
 import { variantsApi } from "../../api/variants";
 import type { ProductStockEvent } from "../../api/types";
+import { ConfirmDialog } from "../common/ConfirmDialog";
 import { ErrorBanner } from "../common/ErrorBanner";
-import { formatDayMonth, inclFallbacksNote, sellableSummary } from "../../lib/format";
+import { formatDayMonth, inclFallbacksNote, qtyWithUnit, sellableSummary } from "../../lib/format";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 
 interface BuildForm {
@@ -16,10 +18,20 @@ interface BuildForm {
   qtyFailed: string;
   notes: string;
   consumption: Record<number, boolean>;
+  /** material_id -> substitute_material_id, for BOM lines the build can't cover from the
+   *  material's own shelf. Only entries for materials still short at submit time are sent. */
+  substitutions: Record<number, number>;
 }
 
 // qtyBuilt starts at "1", not "": recording a single build should be one click.
-const EMPTY_BUILD_FORM: BuildForm = { variantId: "", qtyBuilt: "1", qtyFailed: "0", notes: "", consumption: {} };
+const EMPTY_BUILD_FORM: BuildForm = {
+  variantId: "",
+  qtyBuilt: "1",
+  qtyFailed: "0",
+  notes: "",
+  consumption: {},
+  substitutions: {},
+};
 
 interface AdjustForm {
   adjVariantId: number | "";
@@ -133,7 +145,7 @@ export function StockSection({
     seed: buildSeed,
     seedKey: "const",
   });
-  const { variantId, qtyBuilt, qtyFailed, notes, consumption } = buildForm;
+  const { variantId, qtyBuilt, qtyFailed, notes, consumption, substitutions } = buildForm;
   const setBuildField = <K extends keyof BuildForm>(field: K, next: BuildForm[K]) =>
     setBuildForm((prev) => ({ ...prev, [field]: next }));
   const setVariantId = (next: number | "") => setBuildField("variantId", next);
@@ -142,6 +154,14 @@ export function StockSection({
   const setNotes = (next: string) => setBuildField("notes", next);
   const setConsumption = (updater: (prev: Record<number, boolean>) => Record<number, boolean>) =>
     setBuildForm((prev) => ({ ...prev, consumption: updater(prev.consumption) }));
+  const setSubstitution = (materialId: number, substituteId: number | null) =>
+    setBuildForm((prev) => {
+      const next = { ...prev.substitutions };
+      if (substituteId == null) delete next[materialId];
+      else next[materialId] = substituteId;
+      return { ...prev, substitutions: next };
+    });
+  const [substitutionConfirmOpen, setSubstitutionConfirmOpen] = useState(false);
 
   // listVariants doesn't carry effective_bom — only the single-get does — so without this the
   // "which materials were scrapped?" checkboxes never had rows to show for a variant build.
@@ -175,20 +195,77 @@ export function StockSection({
   // filament there stopped being true the moment the flag became editable.
   const consumedByDefault = categories.filter((c) => c.consumed_on_failed_build).map((c) => c.name);
 
+  // What this build would draw from each material versus what's on the shelf — the same
+  // arithmetic the server applies when it writes the adjustments (built units always, failed
+  // units only where the scrap checkbox says the run reached that material). A line that
+  // comes up short is where a curated fallback can step in; the fallback-pooled capacity
+  // figures up top already assume one will, so this is what makes that true in practice.
+  const qtyBuiltNum = Number(qtyBuilt) || 0;
+  const qtyPerUnitByMaterial = new Map<number, number>();
+  for (const line of resolvedBomLines) {
+    qtyPerUnitByMaterial.set(
+      line.material_id,
+      (qtyPerUnitByMaterial.get(line.material_id) ?? 0) + Number(line.qty_required),
+    );
+  }
+  // Until a variant is picked, resolvedBomLines is the base BOM — not what will be built.
+  const bomIsSettled = !hasActiveVariants || (variantId !== "" && fullSelectedVariant != null);
+  const shortLines = [...qtyPerUnitByMaterial.entries()].flatMap(([materialId, qtyPerUnit]) => {
+    const material = materialById.get(materialId);
+    if (!material || !bomIsSettled) return [];
+    const units = qtyBuiltNum + (consumptionFor(materialId) ? qtyFailedNum : 0);
+    const needed = qtyPerUnit * units;
+    const onHand = Number(material.current_qty);
+    return needed > onHand ? [{ material, needed, onHand }] : [];
+  });
+
+  // Curated fallbacks, fetched only for the lines actually short. Availability comes from
+  // the materials list already loaded rather than a second lookup per fallback.
+  const substituteQueries = useQueries({
+    queries: shortLines.map(({ material }) => ({
+      queryKey: ["materials", material.id, "substitutes"],
+      queryFn: () => materialSubstitutesApi.list(material.id),
+    })),
+  });
+  // null while the lookup is still in flight, so a line doesn't flash "no fallbacks" before
+  // its options arrive.
+  const fallbacksFor = (materialId: number) => {
+    const index = shortLines.findIndex((s) => s.material.id === materialId);
+    const rows = index === -1 ? undefined : substituteQueries[index]?.data;
+    if (rows === undefined) return null;
+    return rows
+      .filter((s) => s.is_active)
+      .sort((a, b) => a.rank - b.rank || a.id - b.id)
+      .map((s) => ({ substitute: s, material: materialById.get(s.substitute_material_id) ?? null }));
+  };
+
+  // Only swaps for materials still short count: a substitution picked for a line that
+  // later stopped being short (qty lowered, stock received) must not silently go through.
+  const activeSubstitutions = shortLines.flatMap(({ material, needed }) => {
+    const substituteId = substitutions[material.id];
+    const substitute = substituteId == null ? null : materialById.get(substituteId);
+    return substitute ? [{ material, substitute, needed }] : [];
+  });
+
   const buildMutation = useMutation({
     mutationFn: () =>
       buildsApi.create({
         product_id: productId,
         variant_id: hasActiveVariants ? Number(variantId) : null,
-        qty_built: Number(qtyBuilt) || 0,
+        qty_built: qtyBuiltNum,
         qty_failed: qtyFailedNum,
         failed_consumption:
           qtyFailedNum > 0
             ? Object.fromEntries(resolvedBom.map((line) => [line.material_id, consumptionFor(line.material_id)]))
             : null,
+        substitutions:
+          activeSubstitutions.length > 0
+            ? Object.fromEntries(activeSubstitutions.map((s) => [s.material.id, s.substitute.id]))
+            : null,
         notes: notes || null,
       }),
     onSuccess: () => {
+      setSubstitutionConfirmOpen(false);
       queryClient.invalidateQueries({ queryKey: ["products", productId] });
       queryClient.invalidateQueries({ queryKey: ["products", productId, "variants"] });
       queryClient.invalidateQueries({ queryKey: ["products", productId, "stock-history"] });
@@ -198,6 +275,9 @@ export function StockSection({
       // unsaved, so navigating away must not prompt.
       markBuildDone(EMPTY_BUILD_FORM);
     },
+    // The ErrorBanner sits under the form, behind an open dialog — close it so the failure
+    // (say, the fallback itself running short) is actually readable.
+    onError: () => setSubstitutionConfirmOpen(false),
   });
 
   const {
@@ -327,7 +407,10 @@ export function StockSection({
           className="flex flex-wrap items-end gap-2 rounded bg-white p-4 shadow-sm"
           onSubmit={(e) => {
             e.preventDefault();
-            buildMutation.mutate();
+            // A swap draws down a different material than the BOM names, so it never goes
+            // through on the Record click alone — the dialog spells out exactly what will move.
+            if (activeSubstitutions.length > 0) setSubstitutionConfirmOpen(true);
+            else buildMutation.mutate();
           }}
         >
           {hasActiveVariants && (
@@ -408,8 +491,81 @@ export function StockSection({
             </div>
           </div>
         )}
+        {shortLines.length > 0 && (
+          <div className="flex flex-col gap-2 rounded border border-amber-200 bg-amber-50 p-4 text-sm">
+            <p className="font-medium text-amber-900">Not enough material for this build</p>
+            {shortLines.map(({ material, needed, onHand }) => {
+              const fallbacks = fallbacksFor(material.id);
+              const chosen = substitutions[material.id];
+              return (
+                <div key={material.id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <span>
+                    <span className="font-medium">{material.name}</span>{" "}
+                    <span className="text-slate-600">
+                      — need {qtyWithUnit(needed, material.unit)}, have {qtyWithUnit(onHand, material.unit)}
+                    </span>
+                  </span>
+                  {fallbacks === null ? null : fallbacks.length > 0 ? (
+                    <label className="flex items-center gap-1.5">
+                      <span className="text-slate-600">Use instead:</span>
+                      <select
+                        aria-label={`Substitute for ${material.name}`}
+                        className="rounded border border-slate-300 bg-white px-2 py-1"
+                        value={chosen ?? ""}
+                        onChange={(e) =>
+                          setSubstitution(material.id, e.target.value === "" ? null : Number(e.target.value))
+                        }
+                      >
+                        <option value="">No substitute</option>
+                        {fallbacks.map(({ substitute, material: fallback }) => (
+                          <option key={substitute.id} value={substitute.substitute_material_id}>
+                            {fallback?.name ?? substitute.substitute_material_name ?? `Material #${substitute.substitute_material_id}`}
+                            {fallback ? ` (${qtyWithUnit(fallback.current_qty, fallback.unit)} on hand)` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : (
+                    <span className="text-slate-500">
+                      No fallbacks set up —{" "}
+                      <Link to="/materials/$materialId" params={{ materialId: String(material.id) }} className="underline">
+                        add one on the material
+                      </Link>
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
         <ErrorBanner error={buildMutation.error} />
       </div>
+
+      <ConfirmDialog
+        open={substitutionConfirmOpen}
+        title="Build with substitute materials?"
+        tone="default"
+        confirmLabel="Record build"
+        busy={buildMutation.isPending}
+        onCancel={() => setSubstitutionConfirmOpen(false)}
+        onConfirm={() => buildMutation.mutate()}
+        body={
+          <>
+            <p>This build will draw from the fallback material instead of what the BOM names:</p>
+            <ul className="list-disc pl-5">
+              {activeSubstitutions.map(({ material, substitute, needed }) => (
+                <li key={material.id}>
+                  <span className="font-medium">{qtyWithUnit(needed, substitute.unit)}</span> of{" "}
+                  <span className="font-medium">{substitute.name}</span> in place of {material.name}
+                </li>
+              ))}
+            </ul>
+            <p className="text-slate-500">
+              The BOM itself is unchanged; the swap is logged against this build.
+            </p>
+          </>
+        }
+      />
 
       <div className="flex flex-col gap-3">
         <h3 className="text-md font-semibold">Adjust built stock</h3>
