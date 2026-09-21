@@ -4,6 +4,12 @@ import { materialsApi } from "../../api/materials";
 import type { Material } from "../../api/types";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { Modal } from "../common/Modal";
+import { qtyWithUnit } from "../../lib/format";
+
+// The server's labels are plural ("product BOM lines"); knock the s off for a count of one.
+function singular(label: string, count: number): string {
+  return count === 1 && label.endsWith("s") ? label.slice(0, -1) : label;
+}
 
 /**
  * Merge this material into another: pick the survivor, see every table that will be
@@ -123,8 +129,8 @@ export function MaterialMergeModal({
             ))}
             <div className="rounded border border-slate-200 bg-slate-50 p-2">
               <p>
-                Stock becomes <strong>{plan.combined_qty}</strong> {unitLabel}, with the unit cost re-averaged across
-                both purchase histories.
+                Stock becomes <strong>{qtyWithUnit(plan.combined_qty, source.unit)}</strong>, with the unit cost
+                re-averaged across both purchase histories.
               </p>
               {plan.effects.length === 0 ? (
                 <p className="mt-1 text-slate-600">Nothing else refers to "{plan.source_name}".</p>
@@ -134,13 +140,14 @@ export function MaterialMergeModal({
                     <li key={e.label}>
                       {e.repointed > 0 && (
                         <>
-                          {e.repointed} {e.label} will point at "{plan.target_name}"
+                          {e.repointed} {singular(e.label, e.repointed)} will point at "{plan.target_name}"
                         </>
                       )}
                       {e.repointed > 0 && e.summed > 0 && "; "}
                       {e.summed > 0 && (
                         <span className="text-amber-800">
-                          {e.summed} {e.label} already had "{plan.target_name}" — quantities will be added together
+                          {e.summed} {singular(e.label, e.summed)} already had "{plan.target_name}" — quantities will
+                          be added together
                         </span>
                       )}
                     </li>
