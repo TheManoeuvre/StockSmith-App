@@ -9,7 +9,7 @@ import { variantsApi } from "../../api/variants";
 import type { ProductStockEvent } from "../../api/types";
 import { ConfirmDialog } from "../common/ConfirmDialog";
 import { ErrorBanner } from "../common/ErrorBanner";
-import { formatDayMonth, inclFallbacksNote, qtyWithUnit, sellableSummary } from "../../lib/format";
+import { formatDayMonth, qtyWithUnit } from "../../lib/format";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 
 interface BuildForm {
@@ -327,21 +327,10 @@ export function StockSection({
   const canAdjust =
     adjValue.trim() !== "" && effectiveAdjReason !== "" && (!hasActiveVariants || adjVariantId !== "");
 
-  // The read-only figure block at the top of the tab — all client-derived, same inputs the
-  // product header uses. Free stock is on-hand less what open orders have already claimed;
-  // "once purchases land" only shows when inbound POs actually raise the ceiling.
+  // Client-derived from the same inputs the product header uses; drives the adjust preview.
   const onHand = hasActiveVariants
     ? activeVariants.reduce((sum, v) => sum + v.current_stock, 0)
     : product?.current_stock ?? 0;
-  const allocated = hasActiveVariants
-    ? activeVariants.reduce((sum, v) => sum + v.allocated_qty, 0)
-    : product?.allocated_qty ?? 0;
-  const sellable = product
-    ? sellableSummary(product, {
-        pushBuildableCapacity: product.push_buildable_capacity,
-        platformCeilingQty: product.platform_ceiling_qty,
-      })
-    : null;
 
   const variantName = (id: number | null) => variants?.find((v) => v.id === id)?.variant_name ?? "—";
 
@@ -382,25 +371,6 @@ export function StockSection({
 
   return (
     <div className="flex flex-col gap-6">
-      {sellable && (
-        <div className="flex flex-col gap-2 rounded bg-white p-4 text-sm shadow-sm">
-          <FigureRow
-            label="Free stock"
-            sub="on hand less what open orders have claimed"
-            value={onHand - allocated}
-          />
-          <FigureRow label="Reserved to orders" value={allocated} />
-          <FigureRow
-            label="Buildable from materials"
-            sub={inclFallbacksNote(sellable) ?? undefined}
-            value={sellable.buildable == null ? "—" : sellable.buildable}
-          />
-          {sellable.expected != null && sellable.expected !== sellable.headline && (
-            <FigureRow label="Once purchases land" value={sellable.expected} />
-          )}
-        </div>
-      )}
-
       <div className="flex flex-col gap-3">
         <h3 className="text-md font-semibold">Record a build</h3>
         <form
@@ -719,28 +689,6 @@ export function StockSection({
           </button>
         )}
       </div>
-    </div>
-  );
-}
-
-/** One line in the top figures block: wide left title (with an optional sub-line),
- *  right-aligned value. */
-function FigureRow({
-  label,
-  sub,
-  value,
-}: {
-  label: string;
-  sub?: string;
-  value: string | number;
-}) {
-  return (
-    <div className="flex items-baseline justify-between gap-4">
-      <span className="text-slate-600">
-        {label}
-        {sub && <span className="ml-2 text-xs text-slate-400">{sub}</span>}
-      </span>
-      <span className="shrink-0 text-right tabular-nums font-medium">{value}</span>
     </div>
   );
 }

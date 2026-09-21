@@ -13,8 +13,8 @@ import { Modal } from "../common/Modal";
 type BomSource = "build" | "kitting";
 
 interface SelectedLine {
-  qty: string; // "" means inherit the base BOM quantity
-  substituteId: number | null; // null means keep the base material
+  qty: string; // "" leaves each variant's current quantity alone
+  substituteId: number | null; // null leaves each variant's current material alone
 }
 
 /**
@@ -81,36 +81,11 @@ export function BulkBomAmendModal({
   );
 
   const baseLines = bomSource === "kitting" ? (kittingBom ?? []) : (bom ?? []);
-  const effectiveKey =
-    bomSource === "kitting" ? "effective_kitting_bom" : "effective_bom";
-
-  // For the chosen attribute value, find an existing override (substitution or quantity
-  // change) already sitting on one of the matching variants — so ticking a line that's
-  // already been corrected for some variants shows what it's already set to, rather than
-  // making the user go check a variant row to find out. Different matching variants can in
-  // principle disagree (a hand edit on just one of them); the first one found wins, which
-  // is the same "pick something reasonable, let the preview reveal the rest" tradeoff the
-  // preview step already exists to cover.
-  const findExistingOverride = (baseMaterialId: number, baseQty: string): SelectedLine | null => {
-    for (const v of variants ?? []) {
-      if (!v.is_active) continue;
-      const val = [v.attribute1_value, v.attribute2_value, v.attribute3_value][
-        attributeSlot
-      ];
-      if (val !== attributeValue) continue;
-      const lines = v[effectiveKey];
-      const sub = lines.find((l) => l.replaces_material_id === baseMaterialId);
-      if (sub) return { substituteId: sub.material_id, qty: sub.qty_required };
-      const qtyLine = lines.find(
-        (l) => l.material_id === baseMaterialId && l.replaces_material_id == null,
-      );
-      if (qtyLine && qtyLine.qty_required !== baseQty) {
-        return { substituteId: null, qty: qtyLine.qty_required };
-      }
-    }
-    return null;
-  };
-
+  // Blank inputs are deliberately not prefilled from a matching variant's existing
+  // override. Overrides on one line are usually keyed by different attributes (a colour
+  // substitution, a size quantity), so copying the first White variant's "28" into the
+  // quantity box would turn it into an explicit value pushed onto every size. Blank means
+  // "leave that side alone per variant", and the preview shows what each one has.
   const [selectedLines, setSelectedLines] = useState<Record<number, SelectedLine>>({});
   const [preview, setPreview] = useState<BulkBomAmendResult | null>(null);
 
@@ -119,18 +94,14 @@ export function BulkBomAmendModal({
     setPreview(null);
   };
 
-  const toggleLine = (baseMaterialId: number, baseQty: string) => {
+  const toggleLine = (baseMaterialId: number) => {
     setPreview(null);
     setSelectedLines((prev) => {
       if (baseMaterialId in prev) {
         const { [baseMaterialId]: _removed, ...rest } = prev;
         return rest;
       }
-      const existing = findExistingOverride(baseMaterialId, baseQty);
-      return {
-        ...prev,
-        [baseMaterialId]: existing ?? { qty: "", substituteId: null },
-      };
+      return { ...prev, [baseMaterialId]: { qty: "", substituteId: null } };
     });
   };
 
@@ -332,7 +303,7 @@ export function BulkBomAmendModal({
                     <input
                       type="checkbox"
                       checked={checked}
-                      onChange={() => toggleLine(base.material_id, base.qty_required)}
+                      onChange={() => toggleLine(base.material_id)}
                     />
                     <span
                       className="w-36 shrink-0 truncate text-sm"
@@ -344,7 +315,8 @@ export function BulkBomAmendModal({
                       <>
                         <input
                           className="w-24 shrink-0 rounded-md border border-slate-300 px-2 py-1 text-sm"
-                          placeholder={`base ${base.qty_required}`}
+                          placeholder={`keep (base ${base.qty_required})`}
+                          title="Blank keeps each variant's current quantity. Enter the base quantity to reset."
                           value={selected.qty}
                           onChange={(e) => updateQty(base.material_id, e.target.value)}
                         />
@@ -358,7 +330,10 @@ export function BulkBomAmendModal({
                             )
                           }
                         >
-                          <option value="">Keep the base material</option>
+                          <option value="">Keep each variant's current material</option>
+                          <option value={base.material_id}>
+                            Reset to base: {material?.name ?? base.material_id}
+                          </option>
                           {substituteOptionsFor(base.material_id).map((m) => (
                             <option key={m.id} value={m.id}>
                               {m.name}
