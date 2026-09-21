@@ -1,4 +1,5 @@
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -93,3 +94,83 @@ class VariantRead(VariantBase):
     effective_bom: list[VariantBomLine] = []
     effective_kitting_bom: list[VariantKittingBomLine] = []
     full_sku: str | None = None
+
+
+# Which variant's BOM (or kitting) overrides the merged variant keeps when the two differ.
+# There is no third option: a merge cannot combine two recipes, only pick one.
+MergeBomChoice = Literal["keep_survivor", "take_loser"]
+
+# What a merge does when the variant being merged away is live on a marketplace: "ask"
+# refuses with a 409 listing the listings so the client can confirm, "proceed" pushes a
+# zero quantity to each and carries on.
+LiveListingResolution = Literal["ask", "proceed"]
+
+
+class VariantMergePreviewRequest(BaseModel):
+    target_id: int  # the survivor
+
+
+class VariantMergeRequest(VariantMergePreviewRequest):
+    bom: MergeBomChoice = "keep_survivor"
+    kitting: MergeBomChoice = "keep_survivor"
+    on_live_listing: LiveListingResolution = "ask"
+
+
+class MergeBomLine(BaseModel):
+    """One line of an effective BOM, named for display — a preview shows two of these side
+    by side so the user can see what "take loser's" would actually change."""
+
+    material_id: int
+    material_name: str
+    qty_required: Decimal
+    replaces_material_id: int | None = None
+    replaces_material_name: str | None = None
+
+
+class MergeOpenLine(BaseModel):
+    order_id: int
+    order_reference: str | None
+    qty: int  # units not yet shipped — what will move to the survivor
+
+
+class MergeLiveListing(BaseModel):
+    platform: str
+    published_sku: str | None
+    external_listing_id: str
+
+
+class VariantMergeUnit(BaseModel):
+    id: int
+    variant_name: str
+    full_sku: str | None
+    is_active: bool
+    current_stock: int
+    allocated_qty: int
+
+
+class VariantMergePlan(BaseModel):
+    """Everything a merge would do, computed without doing it."""
+
+    loser: VariantMergeUnit
+    survivor: VariantMergeUnit
+    stock_to_move: int
+    open_lines: list[MergeOpenLine]
+    bom_differs: bool
+    kitting_differs: bool
+    loser_bom: list[MergeBomLine]
+    survivor_bom: list[MergeBomLine]
+    loser_kitting: list[MergeBomLine]
+    survivor_kitting: list[MergeBomLine]
+    live_listings: list[MergeLiveListing]
+    # Conditions that stop the merge outright, in user-facing words. Non-empty means the
+    # apply endpoint will refuse with the same message.
+    blockers: list[str]
+
+
+class VariantMergeResult(BaseModel):
+    survivor: VariantRead
+    stock_moved: int
+    open_lines_moved: int
+    # Push failures are reported, not fatal: the merge has happened, the marketplace side
+    # needs a hand.
+    warnings: list[str]

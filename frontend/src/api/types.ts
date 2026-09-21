@@ -716,6 +716,88 @@ export interface AttributeValueRenameResult {
   live_platforms: string[];
 }
 
+/** Which variant's BOM (or kitting) overrides a merged variant keeps when they differ. */
+export type MergeBomChoice = "keep_survivor" | "take_loser";
+
+/**
+ * What a variant merge does when the variant being merged away is live on a marketplace.
+ * "ask" is the default: the server answers 409 with a LiveListingConflictsDetail and
+ * nothing is changed until the user picks "proceed".
+ */
+export type LiveListingResolution = "ask" | "proceed";
+
+export interface MergeBomLine {
+  material_id: number;
+  material_name: string;
+  qty_required: string;
+  replaces_material_id: number | null;
+  replaces_material_name: string | null;
+}
+
+export interface MergeOpenLine {
+  order_id: number;
+  order_reference: string | null;
+  qty: number;
+}
+
+export interface MergeLiveListing {
+  platform: string;
+  published_sku: string | null;
+  external_listing_id: string;
+}
+
+export interface VariantMergeUnit {
+  id: number;
+  variant_name: string;
+  full_sku: string | null;
+  is_active: boolean;
+  current_stock: number;
+  allocated_qty: number;
+}
+
+export interface VariantMergePlan {
+  loser: VariantMergeUnit;
+  survivor: VariantMergeUnit;
+  stock_to_move: number;
+  open_lines: MergeOpenLine[];
+  bom_differs: boolean;
+  kitting_differs: boolean;
+  loser_bom: MergeBomLine[];
+  survivor_bom: MergeBomLine[];
+  loser_kitting: MergeBomLine[];
+  survivor_kitting: MergeBomLine[];
+  live_listings: MergeLiveListing[];
+  /** Non-empty means the merge will be refused with these messages. */
+  blockers: string[];
+}
+
+export interface VariantMergeRequest {
+  target_id: number;
+  bom?: MergeBomChoice;
+  kitting?: MergeBomChoice;
+  on_live_listing?: LiveListingResolution;
+}
+
+export interface VariantMergeResult {
+  survivor: Variant;
+  stock_moved: number;
+  open_lines_moved: number;
+  warnings: string[];
+}
+
+export interface LiveListingConflict {
+  platform: string;
+  published_sku: string | null;
+  external_listing_id: string;
+  message: string;
+}
+
+export interface LiveListingConflictsDetail {
+  code: "live_listing_conflicts";
+  message: string;
+  conflicts: LiveListingConflict[];
+}
+
 export interface Variant {
   id: number;
   product_id: number;

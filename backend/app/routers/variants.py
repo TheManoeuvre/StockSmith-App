@@ -9,8 +9,17 @@ from app.models.material_category import MaterialCategory
 from app.models.product import Product, ProductMaterial
 from app.models.variant import ProductVariant, ProductVariantMaterial
 from app.schemas.kitting import VariantKittingBomLine
-from app.schemas.variant import VariantBomLine, VariantPricingBulkUpdate, VariantRead, VariantUpdate
-from app.services import listing_push, platform_fees, variant_platform_conflicts
+from app.schemas.variant import (
+    VariantBomLine,
+    VariantMergePlan,
+    VariantMergePreviewRequest,
+    VariantMergeRequest,
+    VariantMergeResult,
+    VariantPricingBulkUpdate,
+    VariantRead,
+    VariantUpdate,
+)
+from app.services import listing_push, platform_fees, variant_merge, variant_platform_conflicts
 from app.services.buildability import buildable_fields, compute_variant_buildability
 from app.services.kitting import compute_max_sellable, kitting_cost_per_unit_from_bom, sync_listing_ceiling_qty
 from app.services.shipping_profiles import get_shipping_profiles_by_id, resolve_variant_shipping_profile
@@ -188,6 +197,43 @@ async def delete_variant(variant_id: int, session: AsyncSession = Depends(get_db
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Variant not found")
     variant.is_active = False
     await session.commit()
+
+
+@router.post("/{variant_id}/merge/preview", response_model=VariantMergePlan)
+async def preview_variant_merge(
+    variant_id: int, payload: VariantMergePreviewRequest, session: AsyncSession = Depends(get_db)
+) -> VariantMergePlan:
+    """What merging this variant into `target_id` would do — nothing is written."""
+    try:
+        return await variant_merge.plan_merge(session, variant_id, payload.target_id)
+    except variant_merge.VariantMergeError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+
+@router.post("/{variant_id}/merge", response_model=VariantMergeResult)
+async def merge_variant(
+    variant_id: int, payload: VariantMergeRequest, session: AsyncSession = Depends(get_db)
+) -> VariantMergeResult:
+    """Folds this variant into `target_id` and disables it. See services/variant_merge for
+    the steps; 409 with code "live_listing_conflicts" until the client confirms a
+    marketplace-live variant may be zeroed."""
+    try:
+        outcome = await variant_merge.apply_merge(
+            session,
+            variant_id,
+            payload.target_id,
+            bom=payload.bom,
+            kitting=payload.kitting,
+            on_live_listing=payload.on_live_listing,
+        )
+    except variant_merge.VariantMergeError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return VariantMergeResult(
+        survivor=await _to_variant_read(session, outcome.survivor),
+        stock_moved=outcome.stock_moved,
+        open_lines_moved=outcome.open_lines_moved,
+        warnings=outcome.warnings,
+    )
 
 
 @router.put("/{variant_id}/bom-overrides", response_model=VariantRead)
