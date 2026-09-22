@@ -12,6 +12,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-09-22
+
 ### Added
 - **Rename and merge variant attribute values.** The Variants tab has a new "Attribute
   values" panel listing each attribute's values. Rename one ("4 Stud Standard" → "4 Stud
@@ -35,6 +37,28 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a true weighted average rather than a guess. Renaming a material to a name that's
   taken now offers the merge instead of failing. Materials on an open stock take, or
   counted in different units, can't be merged until that's resolved.
+- **A build can draw a short line from a fallback material.** Recording a build used to
+  fail with "Insufficient material stock" even when a substitute was sitting on the shelf
+  — the pooled capacity figures counted that substitute as sellable, but nothing in the
+  build path could actually use it. The Record-a-build form now works out what each line
+  will draw against what's on hand and offers that material's active fallbacks for any
+  line that comes up short. Picking one doesn't go through on Record alone: a confirmation
+  spells out "28 g of PLA Ivory in place of PETG White" first, and the adjustment, the
+  cost and the build history all name the material that actually left the shelf.
+
+### Changed
+- **Bulk BOM amend leaves blank fields alone.** Amending the BOM across a set of variants
+  — "change the material for every White variant" — used to read a blank quantity or
+  material as "back to the base BOM", so it flattened each size's own quantity override on
+  the way past. A blank side now keeps whatever that variant already had. Going back to
+  base is still available, as an explicit "Reset to base" choice rather than a side
+  effect, and the modal no longer prefills from the first matching variant.
+- **The fallback chip on the BOM override editor is gone.** It recorded that a substitute
+  had been used without moving any stock, which was the only thing you could do about a
+  short line until the build form learned to draw from a fallback properly. The
+  dashboard's pack-time kitting shortfalls still suggest substitutes.
+- **The product Stock tab no longer repeats itself.** Its Free stock / Reserved /
+  Buildable rows said the same thing as the cards already shown above the tabs.
 
 ### Fixed
 - **A retired material showed up as a second colour of the same name.** The colour picker
@@ -59,6 +83,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Etsy stock pushes to a listing with per-variation processing profiles.** The write
   now sends the listing's processing-profile-by-variation setting back exactly as read,
   instead of dropping it.
+- **Creating an Etsy draft listing for a product with many variants failed outright.** The
+  draft's placeholder quantity was the sum of every variant's stock, and Etsy caps a
+  quantity at 999 per offering — so a 392-variant product holding 15 each was refused
+  before anything existed on Etsy. Quantities are now clamped to that cap on draft
+  creation and on every later stock push, so a single variant with more than 999 on the
+  shelf can't trip the same error later on.
 
 ## [0.19.0] - 2026-09-20
 
