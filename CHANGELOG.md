@@ -37,6 +37,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   counted in different units, can't be merged until that's resolved.
 
 ### Fixed
+- **A retired material showed up as a second colour of the same name.** The colour picker
+  on a product's Variants tab listed every material of that type, deactivated ones
+  included — so a PETG product offered "White" twice, once for the spool still in use and
+  once for one long since retired, with no way to tell them apart. Retired materials are
+  no longer offered; one already chosen by an existing rule still is, so nothing set up
+  earlier changes.
 - **"One listing isn't receiving stock updates" on a product whose Stores tab showed
   everything synced.** A product linked to its listing *before* it was given variants
   kept that old product-level link. It was never shown again, but the hourly check kept

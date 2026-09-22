@@ -78,6 +78,26 @@ The trigger is narrow and not fully isolated: a UNIQUE violation on a session th
 
 ## Catalogue tidy-up
 
+### Surface duplicate colours where the variant picker has to choose between them
+
+**Problem:** The colour picker on the Variants tab (`VariantAttributesEditor`'s
+`MaterialRulePanel`) lists every material of the base material's type and labels each by its
+colour alone, so two materials sharing a colour render as two identical checkboxes. Hit live
+on PETG: `Bambu Lab | PETG Basic | White` and `Sunlu | PETG | Matte White` both said "White".
+That instance is fixed by hiding retired materials from the list (0.20.x), which is the right
+default but only covers the case where one of the pair is already deactivated. Two *active*
+spools of the same colour — a second brand bought because the first was out of stock, or two
+CSV imports spelling one spool differently — still produce the same indistinguishable pair,
+and nothing tells the user which one a tick will drive the BOM onto.
+
+**Ask:** Two halves, either useful alone. (1) Disambiguate in the picker: when a colour label
+appears more than once within a type, fall back to the full material name (or append the
+manufacturer) so the choice is legible — it is a real choice in that case, not a duplicate.
+(2) Detect the duplicate at the source: flag same-colour-same-type pairs on the Materials page
+and offer `services/material_merge` from there, so genuine duplicates get combined rather than
+silently deactivated. The merge itself already exists and already handles stock and weighted
+cost; what is missing is anything that points the user at it.
+
 ### Merge two products
 
 **Problem:** Attribute values, variants and materials can now be renamed and merged (0.20.0). The remaining duplicate shape is two *products* that should have been one product with a variant axis — "Pencil Pot Red" and "Pencil Pot Blue" created before variants existed. Considered alongside the other merges and deferred: it is effectively "convert product B into a variant of A", which means giving A an attribute, generating a variant from B's identity, and then running the variant merge against a variant that doesn't exist yet. The listing side is harder still — each product has its own marketplace listing, and folding one into the other's variation set is a listing rewrite, not a stock push.

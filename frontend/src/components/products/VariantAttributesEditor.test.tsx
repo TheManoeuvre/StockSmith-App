@@ -221,3 +221,28 @@ it("shows any other generate failure as a plain error", async () => {
   await screen.findByText("Attribute 'Primary' needs at least one value");
   expect(screen.queryByRole("dialog")).toBeNull();
 });
+
+it("offers only active colours of the type, keeping the original", async () => {
+  // Two whites of one type: the live Sunlu spool and a retired Bambu one. Only the live
+  // one may become a variant option — a retired spool would otherwise show up as a second
+  // "White" beside the original.
+  const petg = { material_type_id: 3, is_active: true };
+  const sunluWhite = { id: 9, name: "Sunlu | PETG | Matte White", colour: "White", ...petg };
+  const black = { id: 17, name: "Bambu Lab | PETG HF | Black", colour: "Black", ...petg };
+  const retiredWhite = { id: 56, name: "Bambu Lab | PETG Basic | White", colour: "White", ...petg, is_active: false };
+  setRoutes([
+    { method: "GET", path: "/products/48/bom", respond: () => [{ id: 1, product_id: 48, material_id: 9, qty_required: "10" }] },
+    { method: "GET", path: "/products/48/variants", respond: () => [] },
+    { method: "GET", path: "/materials", respond: () => [sunluWhite, black, retiredWhite] },
+    { method: "GET", path: "/materials?material_type_id=3", respond: () => [retiredWhite, black, sunluWhite] },
+    { method: "GET", path: "/materials/colours", respond: () => [] },
+  ]);
+  renderEditor();
+  await userEvent.type(await screen.findByPlaceholderText("Size, Colour…"), "Colour");
+  await userEvent.click(screen.getByLabelText("Material driven by this attribute"));
+
+  await screen.findByLabelText("Black");
+  expect(screen.getByLabelText("White (original)")).toBeChecked();
+  expect(screen.queryByLabelText("White")).toBeNull();
+  expect(screen.getAllByRole("checkbox")).toHaveLength(4); // rule toggle, 2 colours, quantity toggle
+});
