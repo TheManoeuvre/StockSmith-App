@@ -388,13 +388,19 @@ function MaterialRulePanel({
   onChangeRule: (next: MaterialRuleState) => void;
   onDeriveValues: (valuesText: string) => void;
 }) {
+  const referencedIds = useMemo(() => new Set(Object.values(rule.valueToMaterialId)), [rule.valueToMaterialId]);
   const { data: siblings } = useQuery({
     queryKey: ["materials", "by-type", baseMaterial.material_type_id],
     queryFn: () => materialsApi.listByType(baseMaterial.material_type_id as number),
     enabled: baseMaterial.material_type_id != null,
-    // The server returns siblings in material-name order, but the UI shows the colour
-    // name, so sort by what is actually displayed.
-    select: (list) => [...list].sort((a, b) => colourLabel(a).localeCompare(colourLabel(b))),
+    // The server returns every material of the type, retired ones included, in material-name
+    // order. Retired colours are dropped (a deactivated spool must not resurface as a variant
+    // option) unless this rule already points at one; the UI shows the colour name, so sort by
+    // what is actually displayed.
+    select: (list) =>
+      list
+        .filter((m) => m.is_active || m.id === baseMaterial.id || referencedIds.has(m.id))
+        .sort((a, b) => colourLabel(a).localeCompare(colourLabel(b))),
   });
 
   if (baseMaterial.material_type_id == null) {
