@@ -2,6 +2,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.general_settings import CurrencyCode, GeneralSettings
 
+# Display-only symbol for each supported currency — matches frontend/src/lib/money.ts's
+# formatMoney mapping, since the two must agree on what a figure in that currency looks
+# like.
+CURRENCY_SYMBOLS: dict[CurrencyCode, str] = {
+    CurrencyCode.GBP: "£",
+    CurrencyCode.EUR: "€",
+    CurrencyCode.USD: "$",
+}
+
 
 async def get_general_settings(session: AsyncSession) -> GeneralSettings:
     settings = await session.get(GeneralSettings, 1)
@@ -12,6 +21,11 @@ async def get_general_settings(session: AsyncSession) -> GeneralSettings:
         session.add(settings)
         await session.commit()
     return settings
+
+
+async def get_default_currency_symbol(session: AsyncSession) -> str:
+    settings = await get_general_settings(session)
+    return CURRENCY_SYMBOLS[settings.default_currency]
 
 
 async def set_default_currency(session: AsyncSession, default_currency: CurrencyCode) -> GeneralSettings:

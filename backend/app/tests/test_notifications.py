@@ -881,11 +881,11 @@ class TestSummaryAggregation:
         summary = result.scalar_one()
 
         assert "2 orders shipped, 3 items" in summary.body
-        # revenue = (50+5) + (30+4) = 89.00
-        assert "Revenue: 89.00" in summary.body
+        # revenue = (50+5) + (30+4) = 89.00; default currency is GBP (see seed), so £.
+        assert "Revenue: £89.00" in summary.body
         # clean order profit = 50+5-3-2-(10*2) = 30.00; pending order has no cost snapshot, so
         # _compute_net_profit treats its materials cost as £0: 30+4-2-1.5-0 = 30.50. Total: 60.50.
-        assert "Net profit: 60.50" in summary.body
+        assert "Net profit: £60.50" in summary.body
         assert "1 order" in summary.body and "pending cost sync" in summary.body
 
         refreshed_settings = await notifications.get_notification_settings(session)
@@ -905,6 +905,110 @@ class TestSummaryAggregation:
 
         result = await session.execute(select(Notification).where(Notification.category == NotificationCategory.daily_summary))
         assert result.scalar_one_or_none() is None
+
+    async def test_a_new_summary_marks_the_previous_one_read(self, session, monkeypatch):
+        product = Product(name="Widget")
+        session.add(product)
+        await session.flush()
+
+        settings = await notifications.get_notification_settings(session)
+        settings.daily_summary_enabled = True
+        settings.daily_summary_hour_local = 12
+        settings.daily_summary_last_fired_at = datetime(2026, 8, 8, 12, 0, 0, tzinfo=timezone.utc)
+        settings.pushover_enabled = False
+        await session.commit()
+
+        monkeypatch.setattr(notification_summary, "get_kitting_cogs_by_order", _no_kitting_cogs)
+
+        first_shipped = datetime(2026, 8, 9, 11, 0, 0, tzinfo=timezone.utc)
+        session.add(
+            self._order(
+                product_id=product.id,
+                shipped_at=first_shipped,
+                subtotal=Decimal("10.00"),
+                shipping_charged=Decimal("0"),
+                payment_fees=Decimal("0"),
+                shipping_cost_snapshot=Decimal("0"),
+                shipped_qty=1,
+                cost_per_unit_snapshot=Decimal("0"),
+            )
+        )
+        await session.commit()
+
+        first_now = datetime(2026, 8, 9, 12, 0, 0, tzinfo=timezone.utc)
+        monkeypatch.setattr(notification_summary, "datetime", _FixedDatetime(now=first_now, utcnow=first_now))
+        await notification_summary.maybe_fire_order_summary(session, settings)
+
+        result = await session.execute(select(Notification).where(Notification.category == NotificationCategory.daily_summary))
+        first_summary = result.scalar_one()
+        assert first_summary.read_at is None
+
+        second_shipped = datetime(2026, 8, 10, 11, 0, 0, tzinfo=timezone.utc)
+        session.add(
+            self._order(
+                product_id=product.id,
+                shipped_at=second_shipped,
+                subtotal=Decimal("20.00"),
+                shipping_charged=Decimal("0"),
+                payment_fees=Decimal("0"),
+                shipping_cost_snapshot=Decimal("0"),
+                shipped_qty=1,
+                cost_per_unit_snapshot=Decimal("0"),
+            )
+        )
+        await session.commit()
+
+        second_now = datetime(2026, 8, 10, 12, 0, 0, tzinfo=timezone.utc)
+        monkeypatch.setattr(notification_summary, "datetime", _FixedDatetime(now=second_now, utcnow=second_now))
+        await notification_summary.maybe_fire_order_summary(session, settings)
+
+        result = await session.execute(
+            select(Notification).where(Notification.category == NotificationCategory.daily_summary).order_by(Notification.id)
+        )
+        summaries = result.scalars().all()
+        assert len(summaries) == 2
+        await session.refresh(summaries[0])
+        assert summaries[0].read_at is not None  # superseded by the new one
+        assert summaries[1].read_at is None
+
+
+class TestNotificationHistoryWindow:
+    """The in-app notification window (list_notifications with unread_only=False, what
+    NotificationCenter polls) only shows a rolling window of history — a read notification
+    older than NOTIFICATION_HISTORY_DAYS drops off, but an unread one never ages out."""
+
+    async def _add(self, session, *, created_at: datetime, read: bool, title: str) -> Notification:
+        notification = Notification(
+            category=NotificationCategory.pending_order_threshold,
+            urgency=NotificationUrgency.digest,
+            delivery_mode=NotificationDeliveryMode.digest,
+            title=title,
+            body="body",
+            created_at=created_at,
+            read_at=created_at if read else None,
+        )
+        session.add(notification)
+        await session.commit()
+        return notification
+
+    async def test_old_read_notification_drops_out_of_the_window(self, session):
+        now = datetime.now(timezone.utc)
+        await self._add(session, created_at=now - timedelta(days=3), read=True, title="old read")
+        await self._add(session, created_at=now - timedelta(hours=1), read=True, title="recent read")
+
+        items, total = await notifications.list_notifications(session)
+        titles = [n.title for n in items]
+        assert "old read" not in titles
+        assert "recent read" in titles
+        assert total == 1
+
+    async def test_old_unread_notification_never_ages_out(self, session):
+        now = datetime.now(timezone.utc)
+        await self._add(session, created_at=now - timedelta(days=30), read=False, title="old unread")
+
+        items, total = await notifications.list_notifications(session)
+        assert [n.title for n in items] == ["old unread"]
+        assert total == 1
 
 
 async def _no_kitting_cogs(session, order_ids):
