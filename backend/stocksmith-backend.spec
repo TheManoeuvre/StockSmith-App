@@ -50,6 +50,11 @@ a = Analysis(
         # `import aiosqlite` anywhere in app code.
         "aiosqlite",
         "sqlalchemy.dialects.sqlite",
+        # python-slugify (used for product/material folder names) resolves its
+        # transliteration backend with importlib.import_module('unidecode' /
+        # 'text_unidecode') at call time, not a static import — PyInstaller's scan
+        # misses it, which crashed asset-from-URL import with ModuleNotFoundError.
+        "text_unidecode",
     ],
     hookspath=[],
     hooksconfig={},
