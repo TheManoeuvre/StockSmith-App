@@ -17,9 +17,10 @@ from sqlalchemy.orm import selectinload
 
 from app.models.notification import NotificationCategory, NotificationDeliveryMode, NotificationSettings, NotificationUrgency, SummaryFrequency
 from app.models.order import Order
+from app.services.general_settings import get_default_currency_symbol
 from app.services.kitting import get_kitting_cogs_by_order
 from app.services.order_parcels import get_replacement_costs_by_order
-from app.services.notifications import dispatch_notification, start_of_local_day
+from app.services.notifications import dispatch_notification, resolve_alerts, start_of_local_day
 
 
 def _is_due(now: datetime, settings: NotificationSettings) -> bool:
@@ -91,11 +92,12 @@ async def maybe_fire_order_summary(session: AsyncSession, settings: Notification
         if profit is not None:
             net_profit_total += float(profit)
 
+    currency_symbol = await get_default_currency_symbol(session)
     order_count = len(orders)
     body_lines = [
         f"{order_count} order{'s' if order_count != 1 else ''} shipped, {items_shipped} item{'s' if items_shipped != 1 else ''}.",
-        f"Revenue: {total_revenue:.2f}",
-        f"Net profit: {net_profit_total:.2f}",
+        f"Revenue: {currency_symbol}{total_revenue:.2f}",
+        f"Net profit: {currency_symbol}{net_profit_total:.2f}",
     ]
     if flagged_order_ids:
         # _compute_net_profit treats a missing materials/kitting cost as £0 rather than
@@ -106,6 +108,10 @@ async def maybe_fire_order_summary(session: AsyncSession, settings: Notification
         body_lines.append(
             f"Net profit may be understated: {n} order{'s' if n != 1 else ''} pending cost sync."
         )
+
+    # A new summary supersedes whatever the last one said — leaving the previous one unread
+    # would just double-count itself in the unread badge for a period that's now stale.
+    await resolve_alerts(session, category=NotificationCategory.daily_summary)
 
     period = "Weekly" if settings.daily_summary_frequency == SummaryFrequency.weekly else "Daily"
     await dispatch_notification(

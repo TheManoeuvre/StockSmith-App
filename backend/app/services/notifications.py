@@ -9,10 +9,10 @@ of that log, not a replacement for it.
 """
 
 import logging
-from datetime import datetime, time, timezone
+from datetime import datetime, time, timedelta, timezone
 
 import httpx
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings as app_settings
@@ -32,6 +32,11 @@ logger = logging.getLogger("stocksmith.notifications")
 
 _PUSHOVER_URL = "https://api.pushover.net/1/messages.json"
 _DIGEST_BODY_LINE_CAP = 10
+
+# How far back the in-app notification window (list_notifications, unread_only=False) shows
+# read notifications. An unread one never ages out regardless of how old it is — this is a
+# rolling window on history, not a retention policy, so the underlying rows are never deleted.
+NOTIFICATION_HISTORY_DAYS = 2
 
 
 async def get_notification_settings(session: AsyncSession) -> NotificationSettings:
@@ -398,6 +403,13 @@ async def list_notifications(
     if unread_only:
         query = query.where(Notification.read_at.is_(None))
         count_query = count_query.where(Notification.read_at.is_(None))
+    else:
+        # unread_only already implies this window trivially — every row it returns is
+        # unread — so only apply it when the caller isn't already filtering to unread.
+        cutoff = datetime.now(timezone.utc) - timedelta(days=NOTIFICATION_HISTORY_DAYS)
+        history_window = or_(Notification.read_at.is_(None), Notification.created_at >= cutoff)
+        query = query.where(history_window)
+        count_query = count_query.where(history_window)
 
     total = (await session.execute(count_query)).scalar_one()
     query = query.order_by(Notification.created_at.desc()).limit(limit).offset(offset)
