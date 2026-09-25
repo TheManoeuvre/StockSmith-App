@@ -32,6 +32,7 @@ const ALERT_TYPE_ORDER: NotificationCategory[] = [
   "order_blocked",
   "pending_order_threshold",
   "replacement_parcel_review",
+  "order_cancellation_pending",
   "backup_failed",
   "secondary_backup_unreachable",
 ];
@@ -49,6 +50,7 @@ const ALERT_TYPE_LABELS: Record<NotificationCategory, string> = {
   order_blocked: "Order blocked — no BOM defined",
   pending_order_threshold: "Pending orders over threshold",
   replacement_parcel_review: "Replacement parcel detected — needs completing",
+  order_cancellation_pending: "Marketplace reports an order cancelled — needs review",
   backup_failed: "Backup failed",
   secondary_backup_unreachable: "Secondary backup location unreachable",
   daily_summary: "Order summary",

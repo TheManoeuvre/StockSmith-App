@@ -54,6 +54,15 @@ class NotificationCategory(str, enum.Enum):
     # or deletes the parcel. Immediate by default: the user just sent that parcel, so
     # what went in it is freshest now.
     replacement_parcel_review = "replacement_parcel_review"
+    # Fires the moment a sync first sets Order.pending_marketplace_cancellation — a
+    # marketplace reports an order cancelled (or its payment reversed), but nothing local
+    # changes automatically: the stock reservation stays in place until a human picks a
+    # scrap/return-to-stock disposition (see services/returns.process_cancellation). Without
+    # this, a cancelled-on-the-marketplace order looks identical to any other pending order
+    # everywhere except the order detail page, including to the low-stock forecast, which
+    # keeps counting its reservation. Resolved when that disposition is made, or self-resolved
+    # if a later sync finds the flag no longer applies.
+    order_cancellation_pending = "order_cancellation_pending"
     daily_summary = "daily_summary"
 
 
@@ -74,6 +83,7 @@ ALERT_TYPES: tuple[NotificationCategory, ...] = (
     NotificationCategory.shipping_price_changed,
     NotificationCategory.shipping_profile_missing,
     NotificationCategory.replacement_parcel_review,
+    NotificationCategory.order_cancellation_pending,
 )
 
 # Seed defaults: the alert types that most directly need a human's attention right away
@@ -91,6 +101,7 @@ DEFAULT_IMMEDIATE_ALERT_TYPES: frozenset[NotificationCategory] = frozenset(
         NotificationCategory.marketplace_api_hard_limit,
         NotificationCategory.shipping_profile_missing,
         NotificationCategory.replacement_parcel_review,
+        NotificationCategory.order_cancellation_pending,
     }
 )
 

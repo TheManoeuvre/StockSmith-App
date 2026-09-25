@@ -1,4 +1,5 @@
 import logging
+from dataclasses import dataclass
 from datetime import datetime, time, timedelta, timezone
 from decimal import Decimal, InvalidOperation
 
@@ -16,7 +17,12 @@ from app.models.product import Product
 from app.models.variant import ProductVariant
 from app.schemas.platform import SyncCommitResult, SyncPreviewLine, SyncPreviewOrder, SyncPreviewResult
 from app.services import allocation, order_parcels
-from app.services.notification_alerts import PendingReviewAlert
+from app.services.notification_alerts import (
+    PendingCancellationAlert,
+    PendingReviewAlert,
+    raise_pending_cancellation_alerts,
+    resolve_order_cancellation_pending_alert,
+)
 from app.services.order_costs import default_order_shipping_profile
 from app.services.platforms import get_adapter
 from app.services.platforms.base import ExternalOrder, PaymentState, ensure_utc
@@ -360,6 +366,8 @@ async def commit_sync(platform: ListingPlatform) -> SyncCommitResult:
             shipped_count = 0
             order_ids: list[int] = []
             pending_review_alerts: list[PendingReviewAlert] = []
+            pending_cancellation_alerts: list[PendingCancellationAlert] = []
+            resolved_cancellation_order_ids: list[int] = []
 
             for ext_order in external_orders:
                 order, is_new = await _upsert_order(session, platform, ext_order)
@@ -372,9 +380,13 @@ async def commit_sync(platform: ListingPlatform) -> SyncCommitResult:
                 needs_mapping_count += line_needs_mapping
                 await session.flush()
 
-                just_shipped = await _reconcile_status(session, order, ext_order, is_new)
-                if just_shipped:
+                outcome = await _reconcile_status(session, order, ext_order, is_new)
+                if outcome.just_shipped:
                     shipped_count += 1
+                if outcome.new_cancellation_alert is not None:
+                    pending_cancellation_alerts.append(outcome.new_cancellation_alert)
+                if outcome.cancellation_resolved:
+                    resolved_cancellation_order_ids.append(order.id)
                 # Same gate as the payment trio in _apply_financials: an un-enriched pass
                 # didn't fetch labels, so its empty list says nothing.
                 if ext_order.financials_enriched:
@@ -418,6 +430,9 @@ async def commit_sync(platform: ListingPlatform) -> SyncCommitResult:
             # After the commit: each dispatch commits on its own, and a parcel whose
             # alert went out must already be on disk when the user clicks through.
             await order_parcels.raise_pending_review_alerts(session, pending_review_alerts)
+            await raise_pending_cancellation_alerts(session, pending_cancellation_alerts)
+            for resolved_order_id in resolved_cancellation_order_ids:
+                await resolve_order_cancellation_pending_alert(session, resolved_order_id)
 
             return SyncCommitResult(
                 fetched_count=len(external_orders),
@@ -556,10 +571,25 @@ async def _upsert_lines(session: AsyncSession, order: Order, ext_order: External
     return needs_mapping_count
 
 
-async def _reconcile_status(session: AsyncSession, order: Order, ext_order: ExternalOrder, is_new: bool) -> bool:
-    """Returns True if this call just marked the order shipped — lets commit_sync report
-    a shipped_count so it's visible that already-imported orders are actually being kept
-    in sync, not just newly-placed ones."""
+@dataclass
+class ReconcileOutcome:
+    """What _reconcile_status did, for commit_sync to act on after its own commit (the alert
+    dispatch/resolve below both write to the notifications table and must not happen mid-
+    transaction — see PendingReviewAlert for why)."""
+
+    just_shipped: bool = False
+    # Set the moment pending_marketplace_cancellation first flips True this call — not on
+    # every call where it's already True, so a still-unresolved cancellation doesn't
+    # re-alert on every later sync tick.
+    new_cancellation_alert: PendingCancellationAlert | None = None
+    # Set the moment pending_marketplace_cancellation is cleared by the self-heal below —
+    # commit_sync uses this to mark any standing alert for the order read.
+    cancellation_resolved: bool = False
+
+
+async def _reconcile_status(session: AsyncSession, order: Order, ext_order: ExternalOrder, is_new: bool) -> ReconcileOutcome:
+    """just_shipped=True lets commit_sync report a shipped_count so it's visible that
+    already-imported orders are actually being kept in sync, not just newly-placed ones."""
     # This function is shared across every platform (order_sync itself is
     # platform-agnostic) — order.platform is always set correctly by _upsert_order by the
     # time this runs, so it's the source of truth for any platform-specific wording below,
@@ -584,8 +614,18 @@ async def _reconcile_status(session: AsyncSession, order: Order, ext_order: Exte
         # flow marketplace -> StockSmith; there's nothing to push back even if we wanted
         # to auto-apply it. See docs/plan-marketplace-integrations.md Section 4.
         if order.status != OrderStatus.cancelled:
+            was_pending = order.pending_marketplace_cancellation
             order.pending_marketplace_cancellation = True
-        return False
+            if not was_pending:
+                return ReconcileOutcome(
+                    new_cancellation_alert=PendingCancellationAlert(
+                        order_id=order.id,
+                        external_order_id=order.external_order_id,
+                        platform=platform,
+                        reason="cancelled",
+                    )
+                )
+        return ReconcileOutcome()
 
     if ext_order.payment_state is not PaymentState.settled:
         # Two distinct situations land here, both wanting the same outcome — the order
@@ -606,12 +646,22 @@ async def _reconcile_status(session: AsyncSession, order: Order, ext_order: Exte
         # lives in sync_issue's wording so the user reads "payment reversed" rather than a
         # misleading "cancelled on Etsy".
         if order.status != OrderStatus.cancelled:
+            was_pending = order.pending_marketplace_cancellation
             order.pending_marketplace_cancellation = True
             order.sync_issue = (
                 f"{_PLATFORM_LABELS[platform]} reports this order's payment as "
                 f"{ext_order.payment_state.value} — review and cancel/return it."
             )
-        return False
+            if not was_pending:
+                return ReconcileOutcome(
+                    new_cancellation_alert=PendingCancellationAlert(
+                        order_id=order.id,
+                        external_order_id=order.external_order_id,
+                        platform=platform,
+                        reason=f"payment {ext_order.payment_state.value}",
+                    )
+                )
+        return ReconcileOutcome()
 
     # Reaching here means the marketplace is currently reporting neither a cancellation
     # nor a payment problem, so any flag raised by an earlier sync no longer reflects
@@ -624,9 +674,11 @@ async def _reconcile_status(session: AsyncSession, order: Order, ext_order: Exte
     # auto_allocate_after_build now skips flagged orders — would silently stop receiving
     # stock from builds. A human-cleared-only flag would turn a transient API hiccup into
     # permanent damage.
+    cancellation_resolved = False
     if order.pending_marketplace_cancellation:
         order.pending_marketplace_cancellation = False
         order.sync_issue = None
+        cancellation_resolved = True
 
     if is_new:
         # A brand-new order can arrive already shipped on the marketplace's side (seller
@@ -649,10 +701,10 @@ async def _reconcile_status(session: AsyncSession, order: Order, ext_order: Exte
                 f"{_PLATFORM_LABELS[platform]} shows this order as shipped, but no units are allocated "
                 "locally — check stock and allocate manually."
             )
-            return False
+            return ReconcileOutcome(cancellation_resolved=cancellation_resolved)
         await allocation.ship_order(session, order)
-        return True
-    return False
+        return ReconcileOutcome(just_shipped=True, cancellation_resolved=cancellation_resolved)
+    return ReconcileOutcome(cancellation_resolved=cancellation_resolved)
 
 
 def _describe_error(error: Exception) -> str:

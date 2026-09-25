@@ -15,6 +15,7 @@ export type NotificationCategory =
   | "shipping_price_changed"
   | "shipping_profile_missing"
   | "replacement_parcel_review"
+  | "order_cancellation_pending"
   | "daily_summary";
 
 export type NotificationUrgency = "immediate" | "digest";

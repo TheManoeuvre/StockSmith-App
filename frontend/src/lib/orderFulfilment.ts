@@ -21,6 +21,20 @@ export interface OrderFulfilment {
  * per line, not the design's buildable/packaging-short signals which aren't on the payload).
  */
 export function orderFulfilment(order: Order): OrderFulfilment {
+  // A marketplace reported this order cancelled (or its payment reversed), but nothing
+  // local has changed yet — the reserved stock is still held until a human confirms a
+  // scrap/return-to-stock decision. Checked first: this can be true alongside any status
+  // (not allocated, part allocated, ready to ship) and is the most actionable state on the
+  // row — a cancelled-looking order that's silently still holding stock is exactly what a
+  // low-stock alert can fire on with nothing here to explain why.
+  if (order.pending_marketplace_cancellation) {
+    return {
+      label: "Cancellation pending review",
+      toneClass: "text-red-700",
+      detail: "Marketplace reports this order cancelled — stock stays reserved until confirmed",
+      action: { label: "Review", kind: "open" },
+    };
+  }
   // Shipped, but a sync found a second label and nobody has said what went in that
   // parcel yet — the backend lists this under "awaiting" for the same reason.
   if (order.replacement_parcels_need_review) {

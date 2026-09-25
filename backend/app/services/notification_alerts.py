@@ -216,6 +216,66 @@ async def raise_replacement_parcel_review_alert(session: AsyncSession, alert: Pe
     )
 
 
+@dataclass
+class PendingCancellationAlert:
+    """What raise_order_cancellation_pending_alert needs, captured by
+    order_sync._reconcile_status while its session is still open so the alert can be sent
+    after the sync's own commit — the same reason PendingReviewAlert above exists.
+
+    reason distinguishes the two situations that set Order.pending_marketplace_cancellation
+    (an outright marketplace cancellation vs. a payment reversal) so the notification reads
+    accurately rather than always saying "cancelled"."""
+
+    order_id: int
+    external_order_id: str | None
+    platform: ListingPlatform | None
+    reason: str
+
+
+async def raise_order_cancellation_pending_alert(session: AsyncSession, alert: PendingCancellationAlert) -> None:
+    """Raised the moment a sync first sets Order.pending_marketplace_cancellation. Nothing
+    local changes automatically when a marketplace reports a cancellation — the order's
+    stock reservation stays in place until a human picks a scrap/return-to-stock disposition
+    (see services/returns.process_cancellation) — so this is the only prompt that a
+    reservation is still live despite the marketplace-side cancellation. No dedup state
+    needed: the caller only constructs this once per False->True transition of the flag."""
+    type_settings = await get_type_settings_map(session)
+    config = type_settings.get(NotificationCategory.order_cancellation_pending)
+    if config is None or not config.enabled:
+        return
+    platform_label = {ListingPlatform.etsy: "Etsy", ListingPlatform.ebay: "eBay"}.get(alert.platform, "Marketplace")
+    await dispatch_notification(
+        session,
+        category=NotificationCategory.order_cancellation_pending,
+        urgency=NotificationUrgency.immediate,
+        title=f"{platform_label} order {alert.external_order_id or alert.order_id} {alert.reason} — review needed",
+        body=(
+            "Nothing has been changed locally, including reserved stock — review the order and "
+            "confirm a scrap/return-to-stock decision to release it."
+        ),
+        delivery_mode=config.delivery_mode,
+        related_entity_type="order",
+        related_entity_id=alert.order_id,
+    )
+
+
+async def raise_pending_cancellation_alerts(session: AsyncSession, pending: list[PendingCancellationAlert]) -> None:
+    for alert in pending:
+        await raise_order_cancellation_pending_alert(session, alert)
+
+
+async def resolve_order_cancellation_pending_alert(session: AsyncSession, order_id: int) -> None:
+    """Marks any unread order_cancellation_pending notification for this order read — called
+    once a human resolves the disposition (services/returns.process_cancellation) or a later
+    sync finds the flag no longer applies (order_sync._reconcile_status's self-heal branch)."""
+    await resolve_alerts(
+        session,
+        category=NotificationCategory.order_cancellation_pending,
+        related_entity_type="order",
+        related_entity_id=order_id,
+    )
+
+
 async def check_shipping_profile_missing_alerts(
     session: AsyncSession, platform: ListingPlatform, missing: list, present: list
 ) -> None:

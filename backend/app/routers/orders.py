@@ -40,6 +40,7 @@ from app.schemas.order_parcel import (
 )
 from app.schemas.order_return import CancellationPreview, OrderCancelRequest
 from app.services import allocation, order_parcels, order_substitution, returns
+from app.services.notification_alerts import resolve_order_cancellation_pending_alert
 from app.services.order_parcels import ReplacementCosts, get_replacement_costs_by_order
 from app.services.shipping_profiles import resolve_shipping_price_for_platform
 from app.services.csv_io import export_orders_csv
@@ -767,6 +768,9 @@ async def cancel_order_endpoint(
     order = await _get_order_with_lines(session, order_id)
     await returns.process_cancellation(session, order, payload.line_decisions, payload.reason)
     await session.commit()
+    # After the commit, same as order_sync's own deferred dispatch: resolve_alerts commits
+    # on its own and must not happen mid-transaction with the cancellation write above.
+    await resolve_order_cancellation_pending_alert(session, order_id)
     return await _serialize_one(session, await _get_order_with_lines(session, order_id))
 
 
