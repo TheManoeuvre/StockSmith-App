@@ -15,6 +15,15 @@ class OrderStatus(str, enum.Enum):
     cancelled = "cancelled"
 
 
+class OrderFulfilmentMethod(str, enum.Enum):
+    """Collect vs. delivery, read from a marketplace's own fulfilment data (currently only
+    Square reports this — Etsy/eBay orders are always shipped, so this stays NULL for them).
+    """
+
+    collect = "collect"
+    delivery = "delivery"
+
+
 class ManualOrderChannel(str, enum.Enum):
     """A hand-entered order's own channel label — "Manual · direct sale" vs. "Etsy · keyed
     by hand" etc. Deliberately separate from `Order.platform`, which means "this order was
@@ -68,6 +77,18 @@ class Order(Base):
     # marketplace-owned and never user-edited. NULL for manual orders and for any synced
     # order the marketplace didn't report one for.
     ship_by_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Collect vs. delivery — currently only ever set from Square's order fulfilments; NULL for
+    # every other platform and for manual orders. See OrderFulfilmentMethod.
+    fulfilment_method: Mapped[OrderFulfilmentMethod | None] = mapped_column(
+        portable_enum(OrderFulfilmentMethod, name="order_fulfilment_method"), nullable=True
+    )
+    # The pickup date for a `collect` order (Square's fulfillments[].pickup_details.pickup_at).
+    # Deliberately separate from ship_by_date rather than reusing it: a Square SHIPMENT
+    # fulfilment carries no date field at all, and ship_by_date already has its own
+    # unconditionally-refreshed semantics (the awaiting-orders sort — see
+    # order_sync._apply_financials) that a collection date shouldn't be conflated with. NULL
+    # for delivery orders and every other platform.
+    collect_by: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     notes: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
