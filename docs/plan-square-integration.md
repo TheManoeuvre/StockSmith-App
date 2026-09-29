@@ -2,9 +2,11 @@
 
 ## Status
 
-Planning only — nothing here is implemented. Square API details below are from general
-knowledge and **must be verified against Square's current docs/sandbox before building**
-(marked "verify").
+Planning only — nothing here is implemented. The sandbox spike (2026-09-29,
+`scripts/dev/square_sandbox_spike.py`) has confirmed the field names in the mapping table
+below against a real sandbox order (custom patch + delivery line + pickup fulfilment, paid
+with Square's test card). Two behaviours differ from what we assumed going in — see
+"Spike findings" below.
 
 ## Goal
 
@@ -80,21 +82,39 @@ Square owns: taking payment, issuing the receipt to the customer's email/phone, 
 customer directory. StockSmith owns: what to make, stock/allocation, fulfilment tracking,
 cost/profit.
 
-## Mapping Square -> StockSmith (verify all field names)
+## Mapping Square -> StockSmith (confirmed against sandbox 2026-09-29)
 
 | Square | StockSmith |
 |---|---|
 | Order `id` | `external_order_id` |
-| Order `line_items[].note` or modifier text | `OrderLine.variation_text` (customisation) |
-| Line item `catalog_object_id` / variation SKU | `OrderLine.sku` (match via existing SKU lookup) |
-| Line item named e.g. "Delivery" | order-level delivery flag; not a product line |
-| Order `fulfillments[]` type `PICKUP` / `SHIPMENT` | `fulfilment_method`; pickup `pickup_at`/`expires_at` -> `collect_by` (verify) |
-| Order `customer_id` | not imported (customer stays in Square) |
-| Order totals / tax | `grand_total`, `subtotal`, `tax_charged` |
-| Tender / payment status `COMPLETED` | `PaymentState.settled` |
-| Payment processing fee (Payments API) | `payment_fees` / `payment_net` |
-| Order `state` `CANCELED` | `is_cancelled` (feeds existing pending-cancellation flow) |
-| Order `updated_at` | `last_modified` (sync watermark) |
+| Line item `note` (plain string, confirmed — no modifier was needed) | `OrderLine.variation_text` (customisation) |
+| Line item `catalog_object_id` / variation SKU | `OrderLine.sku` (match via existing SKU lookup) — **not exercised by the spike**, the test order used ad-hoc line items with no catalog object; still open, see open question 1 |
+| Line item named e.g. "Delivery" | order-level delivery flag; not a product line (confirmed shape: plain line item, `name: "Delivery"`, no special type) |
+| Order `fulfillments[].type` `PICKUP` (confirmed; `SHIPMENT` not tested) | `fulfilment_method` |
+| Order `fulfillments[].pickup_details.pickup_at` (confirmed) | `collect_by` — no `expires_at` was present with `schedule_type: SCHEDULED`; that field only appears for `schedule_type: ASAP` per docs, not re-verified here |
+| Order `customer_id` | not imported (customer stays in Square) — spike order had no customer attached, so this wasn't exercised |
+| Order/line-item `total_tax_money` (confirmed; was £0 as expected — no tax rate configured, not VAT-registered) | `tax_charged` |
+| Order `total_money`, `net_amount_due_money` | `grand_total`, and **settlement check** — see spike finding below, not `order.state` |
+| Payment `processing_fee[].amount_money` (Payments API `GetPayment`; confirmed, see spike finding below) | `payment_fees` / `payment_net` |
+| Order `state` `CANCELED` (not tested this spike) | `is_cancelled` (feeds existing pending-cancellation flow) — still to verify |
+| Order `updated_at` (confirmed — advances when payment is applied) | `last_modified` (sync watermark) |
+
+### Spike findings (things that differed from assumption)
+
+1. **Settlement is not `order.state`.** The order's `state` stayed `"OPEN"` even after being
+   paid in full via the Payments API — it never flipped to `"COMPLETED"`. The reliable signal
+   that an order is paid in full is `net_amount_due_money.amount == 0` (it was the full order
+   total before payment, `0` after). `PaymentState.settled` should be derived from
+   `net_amount_due_money`, not `order.state`.
+2. **Processing fee is not on the payment returned from creating it.** The `Payment` object
+   returned immediately after `POST /payments` has no `processing_fee` field. A follow-up
+   `GET /payments/{id}` — even a couple of seconds later — returns
+   `processing_fee: [{ type: "INITIAL", amount_money: {...}, effective_at: <next day> }]`.
+   The `effective_at` timestamp is the next day even though the fee amount was already
+   available, which matches Square's documented "calculated after settlement" behaviour, but
+   in sandbox at least it's readable well before then. **Consequence:** the sync can't take
+   the fee from the payment-creation call; it needs a follow-up read (either immediately, or
+   as a deferred re-check) before it can populate `payment_fees`.
 
 ## Capturing the details: options for the counter
 
@@ -127,9 +147,9 @@ and revisit B if typing at the stall becomes a bottleneck.
 
 ## Phased plan
 
-1. **Spike (sandbox):** Square developer account, sandbox seller, create a test order with a
-   note, customer and pickup fulfilment; pull it with the API and inspect the real JSON.
-   Confirms every "verify" above before any schema work.
+1. ~~**Spike (sandbox):**~~ **Done 2026-09-29.** Square developer account, sandbox seller, test
+   order with a note, delivery line and pickup fulfilment, paid via Payments API, read back
+   with SearchOrders and GetPayment. See "Spike findings" above.
 2. **Schema:** migration for `fulfilment_method`, `collect_by`
    (if not reusing `ship_by_date`), `ListingPlatform.square`.
 3. **Adapter + sync:** `SquareAdapter`, registry branch, delivery-line handling, tests mirroring the Etsy/eBay ones.
@@ -157,7 +177,10 @@ and revisit B if typing at the stall becomes a bottleneck.
 ## Risks
 
 - Free-text customisation quality (typos, missing notes) if entered by hand at the counter.
-- Square API field names/behaviour unverified until the spike.
+- Processing fee isn't available at the moment of payment (see spike finding 2) — sync needs
+  a follow-up read of the payment, adding complexity/timing to when `payment_fees` is known.
+- Cancelled-order shape (`state: CANCELED`) and `SHIPMENT` fulfilments weren't exercised by
+  the spike — still to confirm before relying on them.
 
 ## Sales tax: Square vs Etsy/eBay
 
