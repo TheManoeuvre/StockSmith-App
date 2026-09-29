@@ -173,16 +173,24 @@ and revisit B if typing at the stall becomes a bottleneck.
    shipping-profile model is per-product, not per-fulfilment-method, so this would need either
    a fulfilment-aware BOM variant or a post-allocation adjustment step. Revisit once the base
    adapter works.
-2. **Refunds/cancellations.** Handle only via Square, surfaced in StockSmith through the
-   existing pending-cancellation flow?
-3. **Marking collected.** Should collecting in StockSmith update the Square order, or stay
-   one-way (Square -> StockSmith)?
+2. **Refunds/cancellations.** Handled only via Square; StockSmith picks up the resulting
+   `CANCELED` state on next sync and routes it through the existing pending-cancellation flow,
+   same as Etsy/eBay. No write-back. Shape of a cancelled Square order not yet exercised by the
+   spike — confirm before relying on `is_cancelled` mapping.
+3. **Marking collected. Decided: one-way (Square -> StockSmith), no write-back** — matches how
+   Etsy/eBay work today. Revisit if double-handling ("mark collected" in both places) becomes a
+   hassle.
 4. **Receipts.** Square emails/texts the receipt if a customer is attached and receipts are
-   enabled — confirm that's the receipt you want, rather than StockSmith generating one.
-5. **Tax.** See "Sales tax" below.
-6. **Locations / fees.** One Square location, or several? Should Square processing fees be
-   recorded for profit reporting?
-7. **Region.** Currency and tax type (`vat_charged` vs `tax_charged`) depend on your country's Square account.
+   enabled in your Square settings — StockSmith does not generate one (it has no contact
+   details to send it to). Just confirm your Square account has this switched on as wanted.
+5. **Tax.** Effectively resolved — not VAT-registered, so `total_tax_money` comes through as
+   £0 and is stored as-is (confirmed by spike). Revisit with an accountant if VAT status changes.
+6. **Locations. Decided: single location** — can be preselected in Settings rather than needing
+   a location picker. Processing fees: confirmed available via a follow-up `GetPayment` call
+   (see spike findings), will feed `payment_fees` for profit reporting as planned.
+7. **Region.** Resolved by spike — GBP, and Square returns a single `total_tax_money` field
+   regardless of region (no separate `vat_charged`). Revisit only if a non-UK Square account is
+   ever added.
 
 ## Risks
 
