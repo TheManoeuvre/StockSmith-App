@@ -114,6 +114,65 @@ function MarginSummary({ margin }: { margin: MarginResult }) {
   );
 }
 
+/** Margin for each variant covered by a variable-pricing group (or line-priced product as a
+ *  whole). Variants sharing a sale price can still differ on cost/shipping/fee, so this
+ *  collapses to a single MarginSummary when every variant agrees and falls back to a
+ *  low–high range otherwise — the same shape the price-history table's range uses. */
+function RangeMarginSummary({ margins }: { margins: MarginResult[] }) {
+  if (margins.length === 0) return null;
+  if (margins.length === 1) return <MarginSummary margin={margins[0]} />;
+
+  const profits = margins.map((m) => m.profit);
+  const percents = margins.map((m) => m.marginPercent);
+  const minProfit = Math.min(...profits);
+  const maxProfit = Math.max(...profits);
+  const minPercent = Math.min(...percents);
+  const maxPercent = Math.max(...percents);
+  const anyPostageMissing = margins.some((m) => m.postageMissing);
+
+  const profitLabel =
+    minProfit === maxProfit ? `£${minProfit.toFixed(2)}` : `£${minProfit.toFixed(2)}–£${maxProfit.toFixed(2)}`;
+  const percentLabel =
+    minPercent === maxPercent ? `${minPercent.toFixed(1)}%` : `${minPercent.toFixed(1)}%–${maxPercent.toFixed(1)}%`;
+
+  return (
+    <span className="text-sm">
+      Profit: <strong>{profitLabel}</strong> · Margin: <strong>{percentLabel}</strong>
+      {anyPostageMissing && (
+        <span className="ml-2 rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800" title="At least one variant has no shipping profile assigned, so postage is not deducted for it here.">
+          excludes postage
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** Mirrors the per-variant margin inputs LineRow builds, reused for a whole group of
+ *  variants sharing variable-pricing fields. */
+function marginInputsForVariant(variant: Variant, product: Product): MarginInputs {
+  return {
+    sale_price: variant.sale_price ?? product.sale_price,
+    shipping_profile_id: variant.effective_shipping_profile_id,
+    effective_platform_fee_percent: variant.effective_platform_fee_percent ?? product.effective_platform_fee_percent,
+    cost_per_unit: variant.cost_per_unit,
+    kitting_cost_per_unit: variant.kitting_cost_per_unit,
+  };
+}
+
+function computeVariantMargins(
+  variants: Variant[],
+  product: Product,
+  profiles: ShippingProfile[],
+  feeSource: MarginFeeSource | undefined
+): MarginResult[] {
+  const results: MarginResult[] = [];
+  for (const variant of variants) {
+    const margin = computeMargin(marginInputsForVariant(variant, product), profiles, feeSource);
+    if (margin) results.push(margin);
+  }
+  return results;
+}
+
 function ShippingProfileSelect({
   profiles,
   value,
@@ -499,6 +558,29 @@ export function PricingSection({ product }: { product: Product }) {
 
   const activeVariants = (variants ?? []).filter((v) => v.is_active);
 
+  // The price-history table only ever snapshots the product's own sale_price/margin, which
+  // stay null once pricing moves to variable/line — a variant never gets a snapshot of its
+  // own. For the latest row, showing today's live variant range beats a permanent "—".
+  const isVariantPriced = product.pricing_mode !== "product";
+  const liveVariantMargins = isVariantPriced
+    ? computeVariantMargins(activeVariants, product, profiles, feeConfig?.fee_source)
+    : [];
+  const liveSalePrices = activeVariants
+    .map((v) => (v.sale_price ?? product.sale_price))
+    .filter((p): p is string => p != null)
+    .map(Number);
+  const liveSalePriceRange =
+    liveSalePrices.length === 0
+      ? null
+      : { min: Math.min(...liveSalePrices), max: Math.max(...liveSalePrices) };
+  const liveMarginRange =
+    liveVariantMargins.length === 0
+      ? null
+      : {
+          min: Math.min(...liveVariantMargins.map((m) => m.marginPercent)),
+          max: Math.max(...liveVariantMargins.map((m) => m.marginPercent)),
+        };
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-3 rounded bg-white p-3 shadow-sm">
@@ -608,14 +690,33 @@ export function PricingSection({ product }: { product: Product }) {
             </tr>
           </thead>
           <tbody>
-            {history.map((h) => (
-              <tr key={h.id} className="border-b border-slate-100">
-                <td className="p-2">{new Date(h.recorded_at).toLocaleString()}</td>
-                <td className="p-2">{formatUnitCost(h.cost_per_unit)}</td>
-                <td className="p-2">{h.sale_price ? `£${Number(h.sale_price).toFixed(2)}` : "—"}</td>
-                <td className="p-2">{h.margin_percent ? `${Number(h.margin_percent).toFixed(1)}%` : "—"}</td>
-              </tr>
-            ))}
+            {history.map((h, index) => {
+              // Only the newest row can borrow today's live variant range — older rows have
+              // no per-variant history to fall back on, so they stay "—" as before.
+              const isLatest = index === 0;
+              const salePriceLabel = h.sale_price
+                ? `£${Number(h.sale_price).toFixed(2)}`
+                : isLatest && liveSalePriceRange
+                  ? liveSalePriceRange.min === liveSalePriceRange.max
+                    ? `£${liveSalePriceRange.min.toFixed(2)}`
+                    : `£${liveSalePriceRange.min.toFixed(2)}–£${liveSalePriceRange.max.toFixed(2)}`
+                  : "—";
+              const marginLabel = h.margin_percent
+                ? `${Number(h.margin_percent).toFixed(1)}%`
+                : isLatest && liveMarginRange
+                  ? liveMarginRange.min === liveMarginRange.max
+                    ? `${liveMarginRange.min.toFixed(1)}%`
+                    : `${liveMarginRange.min.toFixed(1)}%–${liveMarginRange.max.toFixed(1)}%`
+                  : "—";
+              return (
+                <tr key={h.id} className="border-b border-slate-100">
+                  <td className="p-2">{new Date(h.recorded_at).toLocaleString()}</td>
+                  <td className="p-2">{formatUnitCost(h.cost_per_unit)}</td>
+                  <td className="p-2">{salePriceLabel}</td>
+                  <td className="p-2">{marginLabel}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}
@@ -898,6 +999,7 @@ function VariableGroupRow({
 
   const saveStatus = useSaveStatus(saveMutation.status);
   const productProfileName = profiles.find((p) => p.id === product.shipping_profile_id)?.name;
+  const margins = computeVariantMargins(variants, product, profiles, feeSource);
 
   return (
     <form
@@ -957,6 +1059,7 @@ function VariableGroupRow({
           Save
         </SaveButton>
       )}
+      <RangeMarginSummary margins={margins} />
       <ErrorBanner error={saveMutation.error} />
     </form>
   );
