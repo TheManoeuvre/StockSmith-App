@@ -207,9 +207,10 @@ and revisit B if typing at the stall becomes a bottleneck.
    `get_adapter()` (the project's adapter factory — explicitly designed so a new marketplace
    is "additive only" here); a `square` entry in the sync scheduler; a rate-limit budget entry
    in `platform_api_usage.py` (Square's own published limits — to check, not yet looked up).
-6. **UI:** Orders list gets a collect/delivery indicator and a collect-by due date (alongside
-   the existing ship-by-date sort, but visually distinct — see open question below on how the
-   two should sit together); order detail shows the customisation text (reuses the existing
+6. **UI:** Orders list gets a collect/delivery indicator, and shows one merged "due" date
+   column/sort — `collect_by` for a collect order, `ship_by_date` for everything else —
+   rather than two separate date columns, so the list keeps one urgency ordering across every
+   platform (**decided**). Order detail shows the customisation text (reuses the existing
    Etsy variation-text display), the Square order reference, and collect vs. delivery.
    Optional filter for "ready to collect".
 7. **Optional, not scheduled:** Square webhooks for near-real-time sync (needs a public URL —
