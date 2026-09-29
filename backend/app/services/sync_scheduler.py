@@ -32,7 +32,11 @@ no need for anything cross-process."""
 # so the two can never run commit_sync concurrently for the same platform — avoids wasted
 # API calls and interleaved PlatformSyncRun rows. The manual endpoint waits for the lock;
 # the background loop below skips its tick instead of queuing up behind it (see _tick).
-_locks: dict[ListingPlatform, asyncio.Lock] = {ListingPlatform.etsy: asyncio.Lock(), ListingPlatform.ebay: asyncio.Lock()}
+_locks: dict[ListingPlatform, asyncio.Lock] = {
+    ListingPlatform.etsy: asyncio.Lock(),
+    ListingPlatform.ebay: asyncio.Lock(),
+    ListingPlatform.square: asyncio.Lock(),
+}
 
 # After this many consecutive PlatformAuthError results from the *background* loop
 # specifically (manual syncs don't count), stop retrying every interval and flip
@@ -129,12 +133,18 @@ async def _tick(platform: ListingPlatform) -> None:
             # never interleaves with a manual sync or refresh. An auth failure is the
             # loop's to count (below); anything else must not stop the tick from
             # recording the order sync it just completed as a success.
-            try:
-                await shipping_price_sync.refresh_if_due(platform)
-            except PlatformAuthError:
-                raise
-            except Exception:
-                logger.exception("Shipping price refresh failed for %s", platform.value)
+            #
+            # Square has no shipping-profile integration at all (no listings to link a
+            # profile to — see docs/plan-square-integration.md) — calling this for it would
+            # just raise NotConnectedError every time the refresh window elapses, so it's
+            # skipped rather than relying on the except below to swallow that noise forever.
+            if platform != ListingPlatform.square:
+                try:
+                    await shipping_price_sync.refresh_if_due(platform)
+                except PlatformAuthError:
+                    raise
+                except Exception:
+                    logger.exception("Shipping price refresh failed for %s", platform.value)
         except PlatformAuthError as exc:
             # commit_sync has already rolled back and logged this to PlatformSyncRun
             # (see order_sync._record_failure) — this is purely for the
@@ -243,7 +253,7 @@ def _log_if_loop_ended(platform: ListingPlatform, task: asyncio.Task) -> None:
 
 
 def start() -> None:
-    for platform in (ListingPlatform.etsy, ListingPlatform.ebay):
+    for platform in (ListingPlatform.etsy, ListingPlatform.ebay, ListingPlatform.square):
         if platform not in _tasks:
             task = asyncio.create_task(_loop(platform))
             task.add_done_callback(lambda t, p=platform: _log_if_loop_ended(p, t))

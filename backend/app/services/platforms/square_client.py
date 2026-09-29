@@ -6,7 +6,9 @@ takes the token and environment it needs directly rather than a PlatformConnecti
 
 import httpx
 
+from app.models.listing import ListingPlatform
 from app.models.platform_credential import PlatformEnvironment
+from app.services import platform_api_usage
 from app.services.platforms.errors import PlatformAuthError, PlatformSyncError
 
 _BASE_URLS = {
@@ -32,6 +34,10 @@ async def _request(access_token: str, environment: PlatformEnvironment, method: 
             response = await client.request(method, f"{base_url}{path}", headers=headers, json=json)
         except httpx.HTTPError as e:
             raise PlatformSyncError(f"Could not reach Square: {e}") from e
+
+    # Every completed round-trip counts against Square's daily budget, non-200s included —
+    # see services/platform_api_usage (mirrors Etsy/eBay's own _request_once).
+    platform_api_usage.record(ListingPlatform.square)
 
     if response.status_code == 401:
         raise PlatformAuthError("Square rejected this access token")

@@ -249,10 +249,30 @@ and revisit B if typing at the stall becomes a bottleneck.
    - Left unset rather than guessed: `subtotal` — Square's order response has no explicit
      subtotal field, and deriving one from `total_money` and the other totals would mean
      assuming a formula never checked against a real order with both tax and a discount.
-5. **Registry + sync wiring:** one branch in `app/services/platforms/__init__.py`'s
-   `get_adapter()` (the project's adapter factory — explicitly designed so a new marketplace
-   is "additive only" here); a `square` entry in the sync scheduler; a rate-limit budget entry
-   in `platform_api_usage.py` (Square's own published limits — to check, not yet looked up).
+5. ~~**Registry + sync wiring**~~ **Done 2026-09-29.** `get_adapter()` now returns a
+   `SquareAdapter` — skipping the client id/secret lookup entirely, since Square has none
+   (a pasted personal access token, not OAuth). `sync_scheduler` gained a Square lock and
+   starts a Square auto-sync loop alongside Etsy/eBay's, with one guard: the piggybacked
+   shipping-price refresh is skipped for Square (it has no shipping-profile integration at
+   all — nothing to link a postage price to), which would otherwise raise
+   `NotConnectedError` every cycle. `platform_api_usage` gained an explicit (conservative,
+   not provider-confirmed the way Etsy/eBay's figures are — Square publishes per-second
+   burst limits, not a daily cap) budget entry, and `square_client` now records every call
+   against it, same as the other two adapters. Also added Square to
+   `sync_status._SUMMARISED_PLATFORMS` and `notification_scheduler`'s API-usage-alert sweep,
+   so its sync health and usage alerts are visible even before a Settings UI exists for it.
+   5 new tests confirming the wiring itself (adapter resolution, environment fallback,
+   scheduler inclusion, the shipping-refresh skip) plus the full suite unaffected.
+
+   **What this doesn't do:** `_PUSH_ENABLED_PLATFORMS`/`listing_reconcile`'s platform tuples
+   and eBay/Etsy's shipping-profile-linking routes deliberately still exclude Square — it
+   has no listings to push and no shipping profiles to link, so those stay untouched by
+   design, not by oversight.
+   Manual sync already works end-to-end through the existing generic
+   `POST /platforms/square/preview-sync` / `/sync-orders` endpoints (no new endpoint needed
+   — they're keyed by the `{platform}` path parameter and already call `get_adapter`), but
+   there's still no Settings UI card to turn on Square's auto-sync toggle or trigger a
+   manual sync from — only via direct API calls, same caveat as the connect step.
 6. **UI:** Orders list gets a collect/delivery indicator, and shows one merged "due" date
    column/sort — `collect_by` for a collect order, `ship_by_date` for everything else —
    rather than two separate date columns, so the list keeps one urgency ordering across every

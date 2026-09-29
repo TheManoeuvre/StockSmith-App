@@ -90,7 +90,7 @@ async def test_reports_every_adapter_backed_platform_even_with_no_data(session):
     up but silent" are different problems and would look identical if the row vanished."""
     summaries = await get_sync_summary(session)
 
-    assert {s.platform for s in summaries} == {ListingPlatform.etsy, ListingPlatform.ebay}
+    assert {s.platform for s in summaries} == {ListingPlatform.etsy, ListingPlatform.ebay, ListingPlatform.square}
     for summary in summaries:
         assert summary.connected is False
         assert summary.last_sync_at is None

@@ -27,9 +27,17 @@ logger = logging.getLogger("stocksmith.platform_api_usage")
 # call family; 5,000 is the conservative working figure this app already uses for the
 # Trading API's tight budget (docs/plan-ebay-existing-store-onboarding.md). These are API
 # facts, not deployment config, so they live in code rather than Settings.
+#
+# Square doesn't publish a comparable daily ceiling — its documented limits are per-second
+# burst limits, not a daily cap — so 10,000 here is not a confirmed provider fact the way
+# the other two are; it's the same conservative default this module falls back to for any
+# unlisted platform, made explicit for a single in-person seller's realistic call volume
+# (order sync is the only thing that calls Square today — no listing push exists for it).
+# Revisit if Square-side throttling is ever actually observed.
 _DAILY_BUDGET: dict[ListingPlatform, int] = {
     ListingPlatform.etsy: 10_000,
     ListingPlatform.ebay: 5_000,
+    ListingPlatform.square: 10_000,
 }
 _DEFAULT_BUDGET = 10_000
 
