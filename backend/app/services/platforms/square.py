@@ -75,23 +75,14 @@ def _parse_fulfilment(fulfillments: list[dict]) -> tuple[OrderFulfilmentMethod |
     return None, None
 
 
-def _payment_state(order: dict, is_cancelled: bool) -> PaymentState:
-    """Settlement is net_amount_due_money hitting zero, NOT order.state — the sandbox spike
-    found a fully-paid order's state stays "OPEN" forever (see the plan doc's spike
-    findings). A cancelled order needs its own branch: the same spike found a cancelled,
-    never-paid order still reports a nonzero net_amount_due, which would otherwise read as
-    "awaiting payment" rather than "cancelled".
-
-    The reversed case below (a cancelled order that WAS paid) is an assumption, not
-    something the spike exercised — its cancelled test order was never paid. Square
-    requires refunding a paid order before/while cancelling it, so the presence of a
-    tender is used as a proxy for "this was paid at some point"; verify against a real
-    paid-then-cancelled sandbox order before trusting this in production.
-    """
-    if is_cancelled:
-        return PaymentState.reversed if order.get("tenders") else PaymentState.unsettled
+def _looks_paid(order: dict) -> bool:
+    """net_amount_due_money hitting zero, NOT order.state — the sandbox spike found a
+    fully-paid order's state stays "OPEN" forever (see the plan doc's spike findings). Also
+    requires a tender to exist: an order with nothing due and no tender at all (e.g. a
+    free/zero-total order) has nothing to reconcile against a payment and isn't "paid" in
+    any sense that matters here."""
     net_due = (order.get("net_amount_due_money") or {}).get("amount", 0)
-    return PaymentState.settled if net_due == 0 else PaymentState.unsettled
+    return net_due == 0 and bool(order.get("tenders"))
 
 
 class SquareAdapter:
@@ -180,16 +171,36 @@ class SquareAdapter:
         # has one terminal "shipped" status for both today (OrderStatus.shipped). Not
         # exercised by the sandbox spike, which never drove a fulfilment past PROPOSED.
         is_shipped = any(f.get("state") == "COMPLETED" for f in fulfillments)
-        payment_state = _payment_state(order, is_cancelled)
 
-        # Same enrich gate as Etsy/eBay: skip the extra GetPayment call for an order that's
-        # unsettled (nothing to fetch yet) or wasn't touched by this sync window (already
-        # has whatever financials an earlier sync recorded) — see ExternalOrder.financials_enriched.
+        # Whether a refund happened can only be answered by fetching the payment: a
+        # refunded order looks identical to a normally-settled one at the order level —
+        # state stays "OPEN" and net_amount_due_money stays 0 either way (confirmed live;
+        # see the plan doc's second spike run). So, unlike Etsy/eBay, payment_state here
+        # can require the same per-order call that fetches the processing fee — not just an
+        # optional enrichment of it. Only attempted when the order looks paid at all, and
+        # only within the same recency window Etsy/eBay use to avoid re-fetching an
+        # already-processed order on every later sync (last_modified bumps whenever a
+        # refund happens, so a refund after the watermark still re-enters this window).
         cutoff = ensure_utc(connection.last_orders_synced_at)
-        enrich = payment_state is not PaymentState.unsettled and (cutoff is None or last_modified >= cutoff)
+        looks_paid = _looks_paid(order)
+        should_check_payment = looks_paid and (cutoff is None or last_modified >= cutoff)
+
         payment_fees = payment_net = None
-        if enrich:
-            payment_fees, payment_net = await self._fetch_processing_fee(connection, order)
+        is_refunded = False
+        if should_check_payment:
+            payment_fees, payment_net, is_refunded = await self._fetch_payment_details(connection, order)
+
+        if is_cancelled or not looks_paid:
+            # Square blocks cancelling an order once a payment has been processed
+            # (confirmed live: "Orders cannot be canceled after payments have been
+            # processed") — so is_cancelled and looks_paid are never expected to both be
+            # true. If they somehow are, failing closed to unsettled matches the rest of
+            # this dataclass's fail-closed default.
+            payment_state = PaymentState.unsettled
+        elif is_refunded:
+            payment_state = PaymentState.reversed
+        else:
+            payment_state = PaymentState.settled
 
         lines = await self._parse_lines(connection, order.get("line_items") or [])
 
@@ -218,7 +229,7 @@ class SquareAdapter:
             payment_fees=payment_fees,
             payment_net=payment_net,
             payment_state=payment_state,
-            financials_enriched=enrich,
+            financials_enriched=should_check_payment,
         )
 
     async def _parse_lines(self, connection: PlatformConnection, line_items: list[dict]) -> list[ExternalOrderLine]:
@@ -239,8 +250,8 @@ class SquareAdapter:
 
     async def _resolve_skus(self, connection: PlatformConnection, catalog_object_ids: list[str]) -> dict[str, str]:
         """catalog_object_id -> sku, via the Catalog API — a line item never carries its
-        own sku directly. NOT yet exercised against a real sandbox catalogue item (see
-        square_client.batch_retrieve_catalog_objects); verify before relying on this."""
+        own sku directly. Confirmed against a real sandbox catalogue item (an ITEM_VARIATION
+        with item_variation_data.sku set) — see the plan doc's second spike run."""
         if not catalog_object_ids:
             return {}
         objects = await square_client.batch_retrieve_catalog_objects(
@@ -252,21 +263,29 @@ class SquareAdapter:
             if (sku := (obj.get("item_variation_data") or {}).get("sku"))
         }
 
-    async def _fetch_processing_fee(self, connection: PlatformConnection, order: dict) -> tuple[str | None, str | None]:
-        """The follow-up GetPayment call the sandbox spike found necessary — processing_fee
-        isn't on the payment Square returns at the moment it's taken."""
+    async def _fetch_payment_details(
+        self, connection: PlatformConnection, order: dict
+    ) -> tuple[str | None, str | None, bool]:
+        """The single follow-up GetPayment call that answers two things a settled-looking
+        order can't answer on its own: the processing fee (absent from the payment at the
+        moment it's taken — confirmed live) and whether it was refunded (a refunded order
+        looks identical to a normally-settled one — same order.state, same
+        net_amount_due_money — confirmed live; only payment.refunded_money tells them
+        apart). Returns (payment_fees, payment_net, is_refunded)."""
         tenders = order.get("tenders") or []
         if not tenders:
-            return None, None
+            return None, None, False
         payment_id = tenders[0].get("payment_id") or tenders[0].get("id")
         if not payment_id:
-            return None, None
+            return None, None, False
         payment = await square_client.get_payment(connection.access_token, connection.environment, payment_id)
+        is_refunded = (payment.get("refunded_money") or {}).get("amount", 0) > 0
+
         fee_entries = payment.get("processing_fee") or []
         if not fee_entries:
-            return None, None
+            return None, None, is_refunded
         fee_total = sum(entry.get("amount_money", {}).get("amount", 0) for entry in fee_entries)
         payment_fees = _parse_money({"amount": fee_total})
         total_amount = (order.get("total_money") or {}).get("amount")
         payment_net = _parse_money({"amount": total_amount - fee_total}) if total_amount is not None else None
-        return payment_fees, payment_net
+        return payment_fees, payment_net, is_refunded

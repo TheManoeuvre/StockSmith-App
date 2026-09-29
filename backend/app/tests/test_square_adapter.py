@@ -77,13 +77,14 @@ def _pickup_order(**overrides) -> dict:
     return order
 
 
-def _payment_with_fee(amount: int = 71) -> dict:
-    return {
-        "payment": {
-            "id": "oTMmKfEPYq6yrYRouZgBERFveePZY",
-            "processing_fee": [{"type": "INITIAL", "amount_money": {"amount": amount, "currency": "GBP"}}],
-        }
+def _payment_with_fee(amount: int = 71, refunded_amount: int = 0) -> dict:
+    payment = {
+        "id": "oTMmKfEPYq6yrYRouZgBERFveePZY",
+        "processing_fee": [{"type": "INITIAL", "amount_money": {"amount": amount, "currency": "GBP"}}],
     }
+    if refunded_amount:
+        payment["refunded_money"] = {"amount": refunded_amount, "currency": "GBP"}
+    return {"payment": payment}
 
 
 def _mock_search_orders(monkeypatch, pages: list[dict]):
@@ -231,17 +232,40 @@ async def test_cancelled_never_paid_order_is_unsettled_not_reversed(monkeypatch)
     assert order.payment_state == PaymentState.unsettled
 
 
-async def test_cancelled_previously_paid_order_is_reversed(monkeypatch):
-    cancelled = _pickup_order(state="CANCELED", net_amount_due_money={"amount": 1500, "currency": "GBP"})
-    _mock_search_orders(monkeypatch, [{"orders": [cancelled], "cursor": None}])
-    _mock_get_payment(monkeypatch)
+async def test_a_refunded_order_is_reversed_even_though_state_and_net_due_look_unchanged(monkeypatch):
+    """Regression test for a second sandbox check: refunding a paid order does NOT change
+    order.state (stays "OPEN", never "CANCELED" — Square blocks cancelling a paid order
+    outright) and does NOT change net_amount_due_money (stays 0, exactly like a normal
+    settled order). The only place the refund shows up is payment.refunded_money."""
+    refunded_order = _pickup_order()  # state OPEN, net_amount_due 0, exactly like settled
+    _mock_search_orders(monkeypatch, [{"orders": [refunded_order], "cursor": None}])
+    _mock_get_payment(monkeypatch, _payment_with_fee(refunded_amount=1500))
+    _mock_catalog(monkeypatch)
+
+    orders = await SquareAdapter().fetch_orders_since(session=None, connection=_connection(), since=None)
+
+    order = orders[0]
+    assert order.is_cancelled is False
+    assert order.payment_state == PaymentState.reversed
+
+
+async def test_cancelled_order_with_a_tender_still_fails_closed_to_unsettled(monkeypatch):
+    """Defensive only: Square is confirmed to block cancelling a paid order at all, so
+    is_cancelled and a tender being present should never co-occur in practice. If they
+    somehow do, this must not read as PaymentState.reversed."""
+    cancelled_with_tender = _pickup_order(state="CANCELED")
+    _mock_search_orders(monkeypatch, [{"orders": [cancelled_with_tender], "cursor": None}])
+    get_payment_calls = _mock_get_payment(monkeypatch)
     _mock_catalog(monkeypatch)
 
     orders = await SquareAdapter().fetch_orders_since(session=None, connection=_connection(), since=None)
 
     order = orders[0]
     assert order.is_cancelled is True
-    assert order.payment_state == PaymentState.reversed
+    assert order.payment_state == PaymentState.unsettled
+    # Still fetched (it "looks paid" by net_amount_due/tenders alone), but the cancelled
+    # check overrides whatever it would have said.
+    assert get_payment_calls == ["oTMmKfEPYq6yrYRouZgBERFveePZY"]
 
 
 async def test_sku_is_resolved_via_catalog_batch_retrieve(monkeypatch):

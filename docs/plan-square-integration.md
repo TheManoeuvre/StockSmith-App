@@ -132,6 +132,28 @@ cost/profit.
    fulfilment types only works for `PICKUP`; a `SHIPMENT` order would need a
    StockSmith-derived date (e.g. days from order date) rather than one read from Square, if a
    "ship by" date is wanted for delivery orders too.
+6. **Catalogue SKU resolution confirmed.** A real catalogue item (an `ITEM` with an
+   `ITEM_VARIATION` carrying `item_variation_data.sku`), ordered via `catalog_object_id`
+   rather than an ad-hoc line — the line item itself still has no `sku` field, but
+   `POST /catalog/batch-retrieve` on that id returns `item_variation_data.sku` exactly as
+   expected. `SquareAdapter._resolve_skus` is confirmed correct as written.
+7. **Square blocks cancelling a paid order outright — refunding first doesn't unblock it.**
+   `PUT /orders/{id}` with `state: CANCELED` on an order with a processed payment is rejected
+   every time (`"Orders cannot be canceled after payments have been processed"`), even after
+   issuing a refund via `POST /refunds` first. This is a hard rule, not a "cancel needs a
+   refund first" workflow — see the "Refunds/cancellations" open question for what this means
+   for StockSmith's write-back policy.
+8. **A refunded order is indistinguishable from a settled one at the order level.** After
+   refunding a paid order's payment, the *order* still shows `state: "OPEN"` and
+   `net_amount_due_money.amount: 0` — identical to normal settlement. The refund only shows up
+   on the *payment*: `GET /payments/{id}` returns `refunded_money: { amount: <refunded>,
+   currency }` and a new `refund_ids` array, while `status` stays `"COMPLETED"` throughout.
+   The order's own `refunds` field never populated in this sandbox run (even checked
+   immediately after a `PENDING`-status refund) — not relied upon.
+   **Consequence:** `PaymentState.reversed` cannot be derived from the order alone the way
+   Etsy/eBay derive it from their list response; it needs the same per-order payment fetch as
+   the processing fee, which `SquareAdapter` now does together in one call
+   (`_fetch_payment_details`) rather than the fee-only version built before this was found.
 
 ## Capturing the details: options for the counter
 
@@ -193,7 +215,7 @@ and revisit B if typing at the stall becomes a bottleneck.
 4. ~~**`SquareAdapter`**~~ **Done 2026-09-29** (`app/services/platforms/square.py` +
    `square_client.py`'s new `search_orders`/`get_payment`/`batch_retrieve_catalog_objects`;
    `ExternalOrder` gained `fulfilment_method`/`collect_by` fields, and `order_sync._apply_financials`
-   now writes them onto `Order`, same as `ship_by_date`). 12 new adapter tests, all passing,
+   now writes them onto `Order`, same as `ship_by_date`). 13 new adapter tests, all passing,
    plus the full existing suite (1,257 tests) unaffected. Only `fetch_orders_since` is
    implemented — every other `PlatformAdapter` Protocol method (OAuth, listing push/drafts)
    raises `NotImplementedError` with an explanation, since Square doesn't do either (see the
@@ -208,22 +230,25 @@ and revisit B if typing at the stall becomes a bottleneck.
      field in phase 5/6, not before.
    - Processing fee: a follow-up `GetPayment` call, gated the same way Etsy/eBay skip
      re-enrichment for an unsettled or already-synced order — confirmed and tested.
-   - **Two things this adapter does that the spike never actually verified — flagged in the
-     code, not silently assumed correct:**
-     1. **SKU resolution.** A line item has no `sku` field itself — only `catalog_object_id`
-        — so the adapter calls Square's Catalog API (`batch-retrieve`) to read
-        `item_variation_data.sku`. The sandbox spike's test orders used ad-hoc line items
-        with no catalog object at all, so this has never been exercised against a real
-        Square catalogue item. **Needs a follow-up sandbox check** (create a Catalog item,
-        order it, confirm the response shape) before this can be trusted in production.
-     2. **A cancelled-and-previously-paid order's payment state.** The spike's cancelled
-        test order was never paid. The adapter guesses `PaymentState.reversed` when a
-        cancelled order has a tender recorded (Square requires refunding a paid order
-        before/while cancelling it) — untested against a real paid-then-cancelled sandbox
-        order.
-   - Also left unset rather than guessed: `subtotal` — Square's order response has no
-     explicit subtotal field, and deriving one from `total_money` and the other totals would
-     mean assuming a formula never checked against a real order with both tax and a discount.
+   - **Both things flagged as unverified when this adapter was first built have since been
+     checked against a real sandbox run (2026-09-29, second spike run) and fixed:**
+     1. **SKU resolution — confirmed correct as written.** A real catalogue item
+        (`ITEM_VARIATION` with `item_variation_data.sku`), ordered via `catalog_object_id`,
+        round-trips through `batch-retrieve` exactly as the adapter assumed. No code change
+        needed.
+     2. **Refunded-order detection — was wrong, now fixed (spike findings 7-8).** The
+        original guess ("a cancelled order with a tender means reversed") turned out to be
+        both unreachable (Square blocks cancelling a paid order outright, confirmed live)
+        and wrong for the case that actually matters: a *refunded, not cancelled* order looks
+        identical to a settled one at the order level (`state: "OPEN"`,
+        `net_amount_due_money: 0`) — only `payment.refunded_money` reveals the refund.
+        `SquareAdapter` now fetches payment details (fee + refund status together, one call)
+        whenever an order looks paid, not only when it looks cancelled; see
+        `_fetch_payment_details`. 13 adapter tests (was 12), including two new ones covering
+        this directly.
+   - Left unset rather than guessed: `subtotal` — Square's order response has no explicit
+     subtotal field, and deriving one from `total_money` and the other totals would mean
+     assuming a formula never checked against a real order with both tax and a discount.
 5. **Registry + sync wiring:** one branch in `app/services/platforms/__init__.py`'s
    `get_adapter()` (the project's adapter factory — explicitly designed so a new marketplace
    is "additive only" here); a `square` entry in the sync scheduler; a rate-limit budget entry
