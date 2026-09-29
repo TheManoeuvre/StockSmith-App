@@ -12,6 +12,38 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-09-29
+
+### Added
+- **Margin per variant, and a price range for multi-variant products.** A variable-pricing
+  group now shows its own margin summary, collapsing to a low-high range when variants in
+  the group differ on price or cost. The price-history table's latest row also falls back
+  to today's live variant sale price/margin range instead of a permanent "-" once a
+  product is priced by variant.
+- **Alert when a marketplace-reported cancellation is awaiting review.** A marketplace
+  cancelling an order doesn't release its reserved stock until a person confirms a
+  scrap/return-to-stock disposition — until now that pending state was only visible on the
+  order's own detail page. A new notification (in-app and Pushover) fires the moment a
+  sync first flags the order, and the order list now surfaces "Cancellation pending
+  review" in the Fulfilment column with a Review action straight into the order detail.
+
+### Changed
+- **Daily and weekly order summaries.** Revenue and net profit figures are now prefixed
+  with the shop's default currency symbol instead of a bare number, and a new summary
+  auto-marks the previous one read so a superseded period doesn't linger in the unread
+  badge. The in-app notification list now only keeps the last 2 days of history, except
+  unread notifications, which never age out.
+
+### Fixed
+- **Packaged backend 500 on image-from-URL import.** Importing a product image from a URL,
+  or anything else that generates a folder name from a title, crashed with a 500 in the
+  installed app (never in dev). Fixed by bundling the transliteration module and data file
+  it depends on into the packaged backend.
+- **`cogs_pending` false positive on a line a substitution left at 0 quantity.** A
+  whole-line variant substitution moves all quantity off the original order line onto a
+  new one and leaves the original in place by design — that line was never going to be
+  allocated or costed, so its missing cost snapshot no longer counts as a gap.
+
 ## [0.20.0] - 2026-09-22
 
 ### Added
