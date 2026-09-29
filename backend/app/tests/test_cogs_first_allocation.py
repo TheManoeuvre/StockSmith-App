@@ -101,3 +101,25 @@ async def test_cogs_pending_true_when_a_mapped_line_has_no_snapshot(session):
 
     order = await _get_order_with_lines(session, order_read.id)
     assert _cogs_pending(order) is True
+
+
+async def test_cogs_pending_false_for_zero_qty_line_left_by_substitution(session):
+    """A whole-line variant substitution moves ordered_qty off the original line down to 0
+    (see OrderLineSubstitution) and leaves it in place rather than deleting it. That line
+    was never going to be allocated or costed, so it shouldn't make an otherwise fully
+    costed order read as cogs_pending."""
+    product = await _costed_product(session, current_stock=10)
+    order_read = await create_order(
+        OrderCreate(lines=[OrderLineInput(product_id=product.id, ordered_qty=2, unit_price=Decimal("10"))]),
+        session=session,
+    )
+
+    order = await _get_order_with_lines(session, order_read.id)
+    line = order.lines[0]
+    line.ordered_qty = 0
+    line.allocated_qty = 0
+    line.cost_per_unit_snapshot = None
+    await session.commit()
+
+    order = await _get_order_with_lines(session, order_read.id)
+    assert _cogs_pending(order) is False
