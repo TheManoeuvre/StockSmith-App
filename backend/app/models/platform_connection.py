@@ -99,4 +99,13 @@ class PlatformConnection(Base):
 
     @property
     def is_connected(self) -> bool:
+        # For OAuth platforms (Etsy/eBay), access_token and refresh_token are always set
+        # together (see the OAuth callback in routers/platforms.py) and cleared together on
+        # disconnect — refresh_token alone is a safe, and deliberately strict, proxy for
+        # "connected" there (an access_token with no refresh_token would mean something went
+        # wrong mid-flow, not a working connection). Square has no refresh flow at all: it's
+        # a pasted personal access token stored in access_token, with refresh_token always
+        # NULL, so it needs its own check.
+        if self.platform == ListingPlatform.square:
+            return self.access_token is not None
         return self.refresh_token is not None

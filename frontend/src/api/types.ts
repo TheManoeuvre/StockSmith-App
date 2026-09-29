@@ -1040,7 +1040,7 @@ export interface DashboardSummary {
   } | null;
 }
 
-export type ListingPlatform = "etsy" | "ebay" | "shopify";
+export type ListingPlatform = "etsy" | "ebay" | "shopify" | "square";
 
 /** A manually-entered order's own channel tag — see backend ManualOrderChannel. Distinct
  *  from ListingPlatform, which means "pulled in by marketplace sync". */
@@ -1154,6 +1154,10 @@ export interface Order {
   // shipByDate). Null for manual orders and for any synced order the marketplace
   // didn't report one for.
   ship_by_date: string | null;
+  // Collect vs. delivery, and the collect-by date for a collect order — currently only
+  // ever set for Square orders. Null for every other platform and for manual orders.
+  fulfilment_method: "collect" | "delivery" | null;
+  collect_by: string | null;
   cancelled_at: string | null;
   notes: string | null;
   created_at: string;

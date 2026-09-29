@@ -24,7 +24,7 @@ import { OrderReplacementParcelsSection } from "../../components/orders/OrderRep
 import { OrderShippingForm } from "../../components/orders/OrderShippingForm";
 import { OrderTimeline } from "../../components/orders/OrderTimeline";
 import { formatMoney } from "../../lib/money";
-import { orderFulfilment } from "../../lib/orderFulfilment";
+import { effectiveDueDate, orderFulfilment } from "../../lib/orderFulfilment";
 import { PLATFORM_COLORS, PLATFORM_LABELS } from "../../lib/platforms";
 import { STATUS_CLASSES, STATUS_LABELS } from "./route";
 
@@ -208,12 +208,10 @@ function OrderDetail() {
   const placed = new Date(order.order_placed_at).toLocaleString();
   const channelLabel = order.platform ? PLATFORM_LABELS[order.platform] : "Manual";
   const isDone = order.status === "shipped" || order.status === "cancelled";
-  const isOverdue =
-    !isDone &&
-    order.ship_by_date != null &&
-    new Date(order.ship_by_date).getTime() < Date.now();
-  const dueLabel = order.ship_by_date
-    ? `Due ${new Date(order.ship_by_date).toLocaleDateString(undefined, { day: "2-digit", month: "short" })}`
+  const due = effectiveDueDate(order);
+  const isOverdue = !isDone && due != null && new Date(due).getTime() < Date.now();
+  const dueLabel = due
+    ? `Due ${new Date(due).toLocaleDateString(undefined, { day: "2-digit", month: "short" })}`
     : null;
 
   return (
@@ -344,7 +342,13 @@ function OrderDetail() {
                 {order.external_order_id ? ` · ${order.external_order_id}` : ""}
               </p>
               <p className="truncate text-[12.5px] text-slate-500">
-                {channelLabel} · {placed}
+                {channelLabel}
+                {/* Only Square reports this today — see docs/plan-square-integration.md. */}
+                {order.fulfilment_method && (
+                  <> · {order.fulfilment_method === "collect" ? "Collect" : "Delivery"}</>
+                )}
+                {" · "}
+                {placed}
                 {dueLabel && (
                   <>
                     {" · "}

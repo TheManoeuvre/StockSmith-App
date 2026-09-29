@@ -52,3 +52,7 @@ ds-bundle/
 .design-sync/.cache/
 .design-sync/learnings/
 .design-sync/node_modules
+
+# Square sandbox spike throwaway output
+square_spike_output.json
+backend/square_spike_output.json

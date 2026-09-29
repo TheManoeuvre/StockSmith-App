@@ -21,6 +21,20 @@ class PlatformConnectResponse(BaseModel):
     authorize_url: str
 
 
+class SquareConnectRequest(BaseModel):
+    """Square is connected with a pasted personal access token rather than an OAuth
+    redirect — see docs/plan-square-integration.md. Connecting alone doesn't pick a
+    location; that's a separate step (SquareLocationRequest) once the seller has seen
+    the options this call's response returns."""
+
+    access_token: str
+    environment: PlatformEnvironment = PlatformEnvironment.sandbox
+
+
+class SquareLocationRequest(BaseModel):
+    location_id: str
+
+
 class PlatformStatus(BaseModel):
     connected: bool
     account_id: str | None

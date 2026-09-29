@@ -1,4 +1,5 @@
 import { api } from "./client";
+import type { NamedOption } from "./listingProfiles";
 import type { ListingPlatform } from "./types";
 
 export type PlatformEnvironment = "production" | "sandbox";
@@ -423,4 +424,12 @@ export const platformsApi = {
     ),
   adoptEbayListing: (productId: number, payload: AdoptListingRequest) =>
     api.post<AdoptListingResult>(`/platforms/ebay/products/${productId}/adopt-listing`, payload),
+  // Square has no OAuth redirect (see connect() above) — a pasted personal access token
+  // instead. connectSquare validates it and returns the account's locations to pick from;
+  // setSquareLocation is the separate second step that confirms which one to sync.
+  connectSquare: (accessToken: string, environment: PlatformEnvironment = "sandbox") =>
+    api.post<NamedOption[]>(`/platforms/square/connect`, { access_token: accessToken, environment }),
+  listSquareLocations: () => api.get<NamedOption[]>(`/platforms/square/locations`),
+  setSquareLocation: (locationId: string) =>
+    api.post<void>(`/platforms/square/location`, { location_id: locationId }),
 };

@@ -1,10 +1,12 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { platformsApi } from "../../../api/platforms";
 import type { ListingPlatform } from "../../../api/types";
 import { openExternalUrl } from "../../../lib/tauri";
 import { PLATFORM_COLORS, PLATFORM_LABELS } from "../../../lib/platforms";
 import { useShopIconUrl } from "../../../hooks/useShopIconUrl";
 import { ErrorBanner } from "../../common/ErrorBanner";
+import { SquareConnectDialog } from "./SquareConnectDialog";
 import { formatRelative, stateChip, useStoreHealth } from "./useStoreHealth";
 
 /**
@@ -18,6 +20,8 @@ export function StoreConnectionCard({ platform, onOpen }: { platform: ListingPla
   const { status, summary, connected, state, failingPushCount, blockedPushCount } = useStoreHealth(platform);
   const chip = stateChip(state, failingPushCount, blockedPushCount);
   const iconUrl = useShopIconUrl(platform, status?.has_shop_icon ?? false, status?.connected_at ?? null);
+  const isSquare = platform === "square";
+  const [squareDialogOpen, setSquareDialogOpen] = useState(false);
 
   const invalidateStatus = () => {
     queryClient.invalidateQueries({
@@ -79,17 +83,19 @@ export function StoreConnectionCard({ platform, onOpen }: { platform: ListingPla
                 .filter(Boolean)
                 .join(" · ");
 
+  // Square has no OAuth redirect — "Connect"/"Reconnect" opens the paste-token dialog
+  // instead of connectMutation's authorize_url flow (see SquareConnectDialog).
   const primary = !connected
     ? {
-        label: connectMutation.isPending ? "Opening…" : "Connect",
-        run: () => connectMutation.mutate(),
-        pending: connectMutation.isPending,
+        label: isSquare ? "Connect" : connectMutation.isPending ? "Opening…" : "Connect",
+        run: () => (isSquare ? setSquareDialogOpen(true) : connectMutation.mutate()),
+        pending: !isSquare && connectMutation.isPending,
       }
     : state === "reconnect"
       ? {
-          label: connectMutation.isPending ? "Opening…" : "Reconnect",
-          run: () => connectMutation.mutate(),
-          pending: connectMutation.isPending,
+          label: isSquare ? "Reconnect" : connectMutation.isPending ? "Opening…" : "Reconnect",
+          run: () => (isSquare ? setSquareDialogOpen(true) : connectMutation.mutate()),
+          pending: !isSquare && connectMutation.isPending,
         }
       : {
           label: syncMutation.isPending ? "Syncing…" : "Sync now",
@@ -151,6 +157,14 @@ export function StoreConnectionCard({ platform, onOpen }: { platform: ListingPla
           </button>
         )}
       </div>
+      {squareDialogOpen && (
+        <SquareConnectDialog
+          onClose={() => {
+            setSquareDialogOpen(false);
+            invalidateStatus();
+          }}
+        />
+      )}
     </section>
   );
 }

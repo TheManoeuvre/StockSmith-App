@@ -31,7 +31,7 @@ async def _tick() -> None:
         await notification_alerts.check_material_forecast_alerts(session)
         await notification_alerts.check_order_unfulfillable_alerts(session)
         await notification_alerts.check_pending_order_threshold(session)
-        for platform in (ListingPlatform.etsy, ListingPlatform.ebay):
+        for platform in (ListingPlatform.etsy, ListingPlatform.ebay, ListingPlatform.square):
             await notification_alerts.check_platform_api_usage_alerts(session, platform)
 
         await flush_digest(session)

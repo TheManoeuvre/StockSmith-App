@@ -29,6 +29,8 @@ from app.schemas.platform import (
     PlatformCredentialWrite,
     PlatformStatus,
     PlatformSyncSummary,
+    SquareConnectRequest,
+    SquareLocationRequest,
     SyncCommitResult,
     SyncHealth,
     SyncPreviewResult,
@@ -94,6 +96,7 @@ from app.services.platforms.base import ClassicListingCandidate
 from app.services.platforms.ebay import EbayAdapter
 from app.services.platforms.etsy import EtsyAdapter
 from app.services.platforms.errors import PlatformAuthError, PlatformError, PlatformRateLimitError, PlatformSyncError
+from app.services.platforms import square_client
 from app.services.url_import import fetch_image_bytes
 from app.services.variants import compute_full_sku
 
@@ -108,6 +111,7 @@ _PLATFORM_LABELS: dict[ListingPlatform, str] = {
     ListingPlatform.etsy: "Etsy",
     ListingPlatform.ebay: "eBay",
     ListingPlatform.shopify: "Shopify",
+    ListingPlatform.square: "Square",
 }
 
 # OAuth scopes to request per platform — kept here (not on the adapter) since scope
@@ -424,6 +428,57 @@ async def get_sync_health(
     return await sync_status.get_sync_health(session, window_days=window_days)
 
 
+# Declared before /{platform}/connect for the same single-segment-collision reason as
+# /sync-summary and /sync-health above: "square" would otherwise also match {platform} on
+# the generic OAuth routes below, which Square doesn't use at all — it's a pasted personal
+# access token, not a redirect flow (see docs/plan-square-integration.md).
+@router.post("/square/connect", response_model=list[NamedOption], dependencies=[Depends(require_auth)])
+async def connect_square(
+    payload: SquareConnectRequest, session: AsyncSession = Depends(get_db)
+) -> list[NamedOption]:
+    """Validate a pasted Square access token by listing the seller's locations — doubling
+    as the data for the location picker, since picking one is a separate step
+    (/square/location) once the seller has seen the options. Storing the token here (before
+    a location is chosen) is enough for PlatformConnection.is_connected to report true."""
+    try:
+        locations = await square_client.fetch_locations(payload.access_token, payload.environment)
+    except (PlatformAuthError, PlatformSyncError) as e:
+        raise _map_platform_error(e)
+
+    connection = await _get_or_create_connection(session, ListingPlatform.square, payload.environment)
+    connection.access_token = payload.access_token
+    connection.connected_at = datetime.now(timezone.utc)
+    await session.commit()
+    return [NamedOption(id=loc["id"], label=loc.get("name", loc["id"])) for loc in locations]
+
+
+@router.get("/square/locations", response_model=list[NamedOption], dependencies=[Depends(require_auth)])
+async def list_square_locations(session: AsyncSession = Depends(get_db)) -> list[NamedOption]:
+    """Re-lists locations for an already-connected Square account — lets the seller change
+    which location is synced without having to paste the access token again."""
+    connection = await _require_connection(session, ListingPlatform.square)
+    try:
+        locations = await square_client.fetch_locations(connection.access_token, connection.environment)
+    except (PlatformAuthError, PlatformSyncError) as e:
+        raise _map_platform_error(e)
+    return [NamedOption(id=loc["id"], label=loc.get("name", loc["id"])) for loc in locations]
+
+
+@router.post("/square/location", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_auth)])
+async def set_square_location(payload: SquareLocationRequest, session: AsyncSession = Depends(get_db)) -> None:
+    """Pick which of the seller's Square locations to sync orders from. Square's location
+    id is stored in external_account_id — the same field Etsy/eBay use for "which account
+    is this" — since a StockSmith connection is scoped to one location the same way it's
+    scoped to one shop, and switching it should reset the sync watermark for the same
+    reason switching Etsy shops does (see the OAuth callback above)."""
+    connection = await _require_connection(session, ListingPlatform.square)
+    if connection.external_account_id is not None and connection.external_account_id != payload.location_id:
+        connection.last_orders_synced_at = None
+        connection.unpaid_hold_since = None
+    connection.external_account_id = payload.location_id
+    await session.commit()
+
+
 @router.post("/{platform}/connect", response_model=PlatformConnectResponse, dependencies=[Depends(require_auth)])
 async def connect_platform(
     platform: ListingPlatform,
@@ -665,9 +720,10 @@ async def disconnect_platform(platform: ListingPlatform, session: AsyncSession =
     # already-imported orders re-fetched at 10–20 API calls each, a sync that ran for
     # the better part of an hour, and restarts that threw the progress away. The
     # different-shop case is handled where it can actually be detected — the OAuth
-    # callback compares the freshly fetched account id against the stored one and
-    # resets the watermark only if it changed. is_connected keys on refresh_token, so
-    # a retained account id doesn't make the row look connected.
+    # callback (or, for Square, /square/location) compares the freshly fetched account
+    # id against the stored one and resets the watermark only if it changed.
+    # is_connected keys on access_token/refresh_token, both cleared below, so a
+    # retained account id doesn't make the row look connected.
     result = await session.execute(select(PlatformConnection).where(PlatformConnection.platform == platform))
     connection = result.scalar_one_or_none()
     if connection is None:

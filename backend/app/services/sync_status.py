@@ -26,7 +26,10 @@ from app.services.platforms.base import ensure_utc
 # Mirrors the frontend's CONNECTABLE_PLATFORMS — platforms with a real adapter. Shopify is
 # in the ListingPlatform enum for future use but has no adapter, so it can never have a
 # connection or a sync run and would only ever render as a permanently-disconnected row.
-_SUMMARISED_PLATFORMS = (ListingPlatform.etsy, ListingPlatform.ebay)
+# Square has a real adapter (order sync only — see docs/plan-square-integration.md) but no
+# frontend card yet; included here regardless so the summary is correct as soon as the
+# frontend catches up, rather than needing a second backend change then.
+_SUMMARISED_PLATFORMS = (ListingPlatform.etsy, ListingPlatform.ebay, ListingPlatform.square)
 
 
 async def _latest_commit_runs(session: AsyncSession) -> dict[ListingPlatform, PlatformSyncRun]:

@@ -11,6 +11,7 @@ class ListingPlatform(str, enum.Enum):
     etsy = "etsy"
     ebay = "ebay"
     shopify = "shopify"
+    square = "square"
 
 
 class Listing(Base):
