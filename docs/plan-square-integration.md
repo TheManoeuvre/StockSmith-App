@@ -13,6 +13,18 @@ and collect/deliver choice, issue the customer a receipt, and see the order in S
 next to Etsy/eBay orders — one place to know what to make, what each item should say, and
 whether it's being collected or delivered.
 
+## Reference docs
+
+Square developer docs (Orders API):
+- [How it works](https://developer.squareup.com/docs/orders-api/how-it-works) · [Search Orders](https://developer.squareup.com/docs/orders-api/manage-orders/search-orders) · [Create orders](https://developer.squareup.com/docs/orders-api/create-orders)
+- [Manage order fulfilments](https://developer.squareup.com/docs/orders-api/fulfillments) (pickup / shipment / delivery / in-store; stored on `Order.fulfillments`) · [Fulfilment object](https://developer.squareup.com/reference/square/objects/Fulfillment)
+- [Orders API reference](https://developer.squareup.com/reference/square/orders-api)
+
+Square UK help centre:
+- [Tax settings](https://squareup.com/help/gb/en/article/5061-create-and-manage-your-tax-settings) · [UK tax and invoice requirements](https://squareup.com/help/gb/en/article/7054-united-kingdom-tax-and-invoice-requirements)
+
+(These were found via search only — Square's sites are blocked from the cloud session, so field names remain "verify".)
+
 ## Decisions so far
 
 | Question | Answer |
@@ -20,6 +32,7 @@ whether it's being collected or delivered.
 | Store customer contact details in StockSmith? | **No** (revised) — Square already holds contact and delivery details; StockSmith stays consistent with its no-buyer-data default |
 | Payment | **Paid in full up front** (orders arrive settled) |
 | How orders are entered at the counter | **Undecided** — see options below |
+| VAT | **Seller is not VAT-registered — VAT is out of scope for now.** Import tax fields as reported (expected £0) and revisit if that changes |
 | Deliverable for this pass | This plan; no code |
 
 ## What already exists (and helps)
@@ -163,3 +176,13 @@ Consequence for StockSmith: import Square's tax as `tax_charged`/`vat_charged`, 
 Whether that matches how Etsy/eBay orders are treated today needs checking in the profit
 calculations before building. Tax setup (rates, VAT registration) is one to confirm with an
 accountant.
+
+## Fees comparison (UK, not VAT-registered)
+
+On an Etsy order the seller's earnings screen shows buyer-paid amount minus Etsy's transaction,
+payment processing and regulatory operating fees, plus VAT charged on those fees. All of it is
+deducted by Etsy before payout — nothing further is paid to Etsy afterwards. Square works the
+same way for its own charge: its processing fee is taken from the payout. Neither needs a
+separate payment. Income tax on overall profit is separate from both (see accountant).
+StockSmith should import Square's processing fee as `payment_fees` so profit matches how Etsy
+orders are reported.
