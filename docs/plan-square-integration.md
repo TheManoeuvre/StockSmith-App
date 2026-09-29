@@ -17,7 +17,7 @@ whether it's being collected or delivered.
 
 | Question | Answer |
 |---|---|
-| Store customer contact details in StockSmith? | **Yes**, on the order |
+| Store customer contact details in StockSmith? | **No** (revised) — Square already holds contact and delivery details; StockSmith stays consistent with its no-buyer-data default |
 | Payment | **Paid in full up front** (orders arrive settled) |
 | How orders are entered at the counter | **Undecided** — see options below |
 | Deliverable for this pass | This plan; no code |
@@ -34,13 +34,11 @@ whether it's being collected or delivered.
 
 ## What's missing / must change
 
-1. **Customer contact details.** `order_sync` deliberately does *not* persist buyer name/
-   note for marketplace orders (see the comments near `order_sync.py:505`), and there are no
-   email/phone columns. Needed: `buyer_email`, `buyer_phone` on `Order` (nullable), and
-   Square orders allowed to persist name/email/phone. This is a scoped exception to the
-   privacy default, applying to Square only, because the seller is the merchant of record
-   and already holds this data in Square. Etsy/eBay behaviour stays unchanged. Worth
-   stating in Settings and in the privacy notes.
+1. **No customer details.** Square is the system of record for name, email, phone and
+   delivery address, and issues the receipt. StockSmith stores none of it, which keeps the
+   existing privacy default intact for every platform (no exception in `order_sync`, no new
+   personal-data columns, backups/exports unchanged). The order carries a Square order id so
+   you can look the customer up in Square when needed.
 2. **Fulfilment method** (collect vs deliver, plus collection date). No field today.
    Add `fulfilment_method` (collect | delivery) and `collect_by` (date, nullable) on `Order`.
 3. **Delivery as a line item.** Delivery is a normal Square line item (e.g. "Delivery").
@@ -78,7 +76,7 @@ cost/profit.
 | Line item `catalog_object_id` / variation SKU | `OrderLine.sku` (match via existing SKU lookup) |
 | Line item named e.g. "Delivery" | order-level delivery flag; not a product line |
 | Order `fulfillments[]` type `PICKUP` / `SHIPMENT` | `fulfilment_method`; pickup `pickup_at`/`expires_at` -> `collect_by` (verify) |
-| Order `customer_id` -> Customers API | `buyer_name`, `buyer_email`, `buyer_phone` |
+| Order `customer_id` | not imported (customer stays in Square) |
 | Order totals / tax | `grand_total`, `subtotal`, `tax_charged` |
 | Tender / payment status `COMPLETED` | `PaymentState.settled` |
 | Payment processing fee (Payments API) | `payment_fees` / `payment_net` |
@@ -108,7 +106,7 @@ and revisit B if typing at the stall becomes a bottleneck.
 - Optional later: Square webhooks (`order.created`/`order.updated`) for near-real-time.
   Needs a publicly reachable URL, which a desktop install doesn't have — so polling first.
 - Auth: Square OAuth (production) with a sandbox environment for testing (mirrors eBay's
-  sandbox/production `PlatformEnvironment`). Scopes likely `ORDERS_READ`, `CUSTOMERS_READ`,
+  sandbox/production `PlatformEnvironment`). Scopes likely `ORDERS_READ`,
   `PAYMENTS_READ`, `ITEMS_READ` (verify). A personal access token is a simpler first step
   for a single-seller app.
 - Square locations: an order belongs to a location; pick the relevant location(s) in
@@ -119,12 +117,11 @@ and revisit B if typing at the stall becomes a bottleneck.
 1. **Spike (sandbox):** Square developer account, sandbox seller, create a test order with a
    note, customer and pickup fulfilment; pull it with the API and inspect the real JSON.
    Confirms every "verify" above before any schema work.
-2. **Schema:** migration for `buyer_email`, `buyer_phone`, `fulfilment_method`, `collect_by`
+2. **Schema:** migration for `fulfilment_method`, `collect_by`
    (if not reusing `ship_by_date`), `ListingPlatform.square`.
-3. **Adapter + sync:** `SquareAdapter`, registry branch, order_sync exception for storing
-   Square customer details, delivery-line handling, tests mirroring the Etsy/eBay ones.
+3. **Adapter + sync:** `SquareAdapter`, registry branch, delivery-line handling, tests mirroring the Etsy/eBay ones.
 4. **UI:** Orders list/detail show customisation text, collect vs delivery, collect-by date,
-   contact details (with a click-to-copy/mailto); filter "to make" / "ready to collect".
+   Square order reference; filter "to make" / "ready to collect".
 5. **Settings:** connect Square, choose location, name of the delivery line item.
 6. **Optional:** webhooks; write-back (mark Square fulfilment complete when collected).
 
@@ -139,16 +136,30 @@ and revisit B if typing at the stall becomes a bottleneck.
    one-way (Square -> StockSmith)?
 4. **Receipts.** Square emails/texts the receipt if a customer is attached and receipts are
    enabled — confirm that's the receipt you want, rather than StockSmith generating one.
-5. **Privacy.** Storing customer contact details adds a data-protection obligation
-   (UK GDPR if applicable): retention policy and backups containing personal data.
-   Backups/exports (`csv_io` includes `buyer_name`) would now include more personal data.
+5. **Tax.** See "Sales tax" below.
 6. **Locations / fees.** One Square location, or several? Should Square processing fees be
    recorded for profit reporting?
-7. **Region.** Currency/tax handling (`vat_charged` vs `tax_charged`) depends on your
-   country's Square account.
+7. **Region.** Currency and tax type (`vat_charged` vs `tax_charged`) depend on your country's Square account.
 
 ## Risks
 
-- Reversing the "no buyer data" default; must remain Square-only and documented.
 - Free-text customisation quality (typos, missing notes) if entered by hand at the counter.
 - Square API field names/behaviour unverified until the spike.
+
+## Sales tax: Square vs Etsy/eBay
+
+StockSmith does not calculate or remit tax itself: it records `tax_charged`/`vat_charged` and
+`grand_total` exactly as the platform reports them. So the question is who collects and pays
+the tax, which differs by channel (verify for your region and tax status):
+
+- **Etsy/eBay:** in many regions they act as a marketplace facilitator and collect/remit some
+  taxes on your behalf, so those amounts are deducted before you're paid.
+- **Square:** does **not** do this. It can calculate tax on a sale (using tax rates you set up)
+  and show it on the receipt, but the money lands with you and **you** are responsible for
+  reporting and paying it. Square takes only its processing fee.
+
+Consequence for StockSmith: import Square's tax as `tax_charged`/`vat_charged`, and treat
+`grand_total` minus tax as revenue for profit reporting, so Square sales aren't overstated.
+Whether that matches how Etsy/eBay orders are treated today needs checking in the profit
+calculations before building. Tax setup (rates, VAT registration) is one to confirm with an
+accountant.
