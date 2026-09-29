@@ -88,7 +88,7 @@ cost/profit.
 |---|---|
 | Order `id` | `external_order_id` |
 | Line item `note` (plain string, confirmed — no modifier was needed) | `OrderLine.variation_text` (customisation) |
-| Line item `catalog_object_id` / variation SKU | `OrderLine.sku` (match via existing SKU lookup) — **not exercised by the spike**, the test order used ad-hoc line items with no catalog object; still open, see open question 1 |
+| Line item `catalog_object_id` / variation SKU | `OrderLine.sku` (match via existing SKU lookup) — **not exercised by the spike** (the test order used ad-hoc line items with no catalog object), but confirmed as the intended model: see decision below |
 | Line item named e.g. "Delivery" | order-level delivery flag; not a product line (confirmed shape: plain line item, `name: "Delivery"`, no special type) |
 | Order `fulfillments[].type` `PICKUP` (confirmed; `SHIPMENT` not tested) | `fulfilment_method` |
 | Order `fulfillments[].pickup_details.pickup_at` (confirmed) | `collect_by` — no `expires_at` was present with `schedule_type: SCHEDULED`; that field only appears for `schedule_type: ASAP` per docs, not re-verified here |
@@ -160,9 +160,19 @@ and revisit B if typing at the stall becomes a bottleneck.
 
 ## Open questions
 
-1. **Custom items vs catalogue.** Is a leather patch a standard product with a customisation
-   field (fits today's model), or a one-off with no catalogue entry? This decides whether
-   stock/BOM allocation applies or lines are "make to order".
+1. ~~**Custom items vs catalogue.**~~ **Decided:** a Square product is a catalogue `Product`
+   synced from StockSmith the same way as Etsy/eBay — SKU, quantity, BOM. E.g. "Bag Scouting
+   Patch" is built from a leather patch blank + UV ink + cello bag, same as today. The
+   customisation text (`note`) rides alongside on the order line; it doesn't change what's
+   allocated from stock.
+
+   **Future consideration (not blocking this pass):** collection vs delivery should be able to
+   change *what* gets consumed and *which* shipping profile applies — e.g. a collected order
+   skips packaging/kitting BOM items (no cello bag/mailer needed if it's handed over the
+   counter) and uses a "Collection" shipping profile instead of a postal one. Today's BOM/
+   shipping-profile model is per-product, not per-fulfilment-method, so this would need either
+   a fulfilment-aware BOM variant or a post-allocation adjustment step. Revisit once the base
+   adapter works.
 2. **Refunds/cancellations.** Handle only via Square, surfaced in StockSmith through the
    existing pending-cancellation flow?
 3. **Marking collected.** Should collecting in StockSmith update the Square order, or stay
