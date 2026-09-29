@@ -15,6 +15,17 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.21.0] - 2026-09-29
 
 ### Added
+- **Connect a Square store and sync its orders.** Square joins Etsy and eBay as a
+  supported platform. Since Square has no OAuth app review flow worth going through for a
+  single-seller install, connecting is a pasted personal access token plus a location
+  picker (Square orders are scoped to a location) — reachable from the Stores hub or the
+  store's own page, with a card to change location later without re-pasting the token.
+  Orders sync on the same schedule as Etsy/eBay, with their own API usage budget and
+  health/usage alerts. Square items are treated as StockSmith catalogue products, so
+  there's no listing push, shipping-profile linking, or OAuth section on its store page.
+  Orders also gain a Collect/Delivery tag next to the platform badge, driven by a new
+  shared due-date rule (collect-by for a collect order, ship-by otherwise) used on both
+  the orders list and detail view.
 - **Margin per variant, and a price range for multi-variant products.** A variable-pricing
   group now shows its own margin summary, collapsing to a low-high range when variants in
   the group differ on price or cost. The price-history table's latest row also falls back
