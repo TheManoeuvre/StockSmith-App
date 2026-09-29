@@ -18,11 +18,17 @@ Output lands at dist/stocksmith-backend.exe (single file).
 
 import os
 
+from PyInstaller.utils.hooks import collect_data_files
+
 datas = [
     ("alembic.ini", "."),
     ("alembic/env.py", "alembic"),
     ("alembic/script.py.mako", "alembic"),
     ("alembic/versions", "alembic/versions"),
+    # text_unidecode's transliteration table (data.bin) is read at import time via
+    # pkgutil.get_data — being pure data, not a .py file, it's invisible to PyInstaller's
+    # hiddenimports and must be collected explicitly or every slugify() call crashes.
+    *collect_data_files("text_unidecode"),
 ]
 
 # release.yml writes this from the PUSHOVER_APP_API_TOKEN repo secret immediately before
