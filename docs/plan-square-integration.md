@@ -167,13 +167,62 @@ and revisit B if typing at the stall becomes a bottleneck.
 1. ~~**Spike (sandbox):**~~ **Done 2026-09-29.** Square developer account, sandbox seller, test
    orders covering a paid pickup order, a paid shipment order, and a cancelled order; read back
    with SearchOrders and GetPayment. See "Spike findings" above.
-2. **Schema:** migration for `fulfilment_method`, `collect_by`
-   (if not reusing `ship_by_date`), `ListingPlatform.square`.
-3. **Adapter + sync:** `SquareAdapter`, registry branch, delivery-line handling, tests mirroring the Etsy/eBay ones.
-4. **UI:** Orders list/detail show customisation text, collect vs delivery, collect-by date,
-   Square order reference; filter "to make" / "ready to collect".
-5. **Settings:** connect Square, choose location, name of the delivery line item.
-6. **Optional:** webhooks; write-back (mark Square fulfilment complete when collected).
+2. ~~**Schema:**~~ **Done 2026-09-29** (commit `fb23ed1`). `ListingPlatform.square`,
+   `orders.fulfilment_method`, `orders.collect_by`. Migration verified to apply/roll back
+   cleanly; existing order/listing/platform tests (398) unaffected.
+3. **Connect Square (minimal settings).** Enough to get a working credential end-to-end
+   before writing adapter logic against it:
+   - A Square personal access token first (simpler than OAuth for a single-seller app —
+     matches the plan's original recommendation); stored through the existing encrypted
+     `platform_credentials`/`platform_connections` machinery the same way Etsy/eBay tokens
+     are, keyed to `ListingPlatform.square`.
+   - Sandbox vs. production selection reuses the existing `PlatformEnvironment` split
+     (mirrors eBay).
+   - Location: **decided single-location** — at connect time, call Square's `/locations` and
+     let you confirm which one (in case the sandbox/production account ever has more than
+     one), then store that `location_id` on the connection.
+   - Full OAuth (if ever needed for a public listing on Square's app marketplace) is
+     explicitly deferred — out of scope unless you ask for it later.
+4. **`SquareAdapter`** (`app/services/platforms/square.py`), implementing the same
+   `PlatformAdapter` protocol as Etsy/eBay, with every spike finding baked in:
+   - Pull orders via `SearchOrders`, filtered by `updated_at` against the sync watermark
+     (same shape as Etsy/eBay's pull-sync).
+   - Map line items to `ExternalOrderLine`: `note` -> `variation_text`; SKU/catalog match the
+     same way Etsy/eBay lines resolve to a `Product`/variant; recognise the configured
+     "Delivery" line by name and route it to `fulfilment_method = delivery` instead of
+     treating it as an unmapped product line.
+   - Map `fulfillments[].type` (`PICKUP`/`SHIPMENT`) to `fulfilment_method`; pickup's
+     `pickup_at` to `collect_by` (shipment orders leave `collect_by` NULL — no such field
+     exists on a Square shipment).
+   - Settlement: `PaymentState.settled` from `net_amount_due_money == 0`, but **only when the
+     order isn't cancelled** (spike finding 4) — check `order.state == "CANCELED"` first.
+   - Cancellation: `order.state == "CANCELED"` -> `is_cancelled`, same
+     pending-marketplace-cancellation flow as Etsy/eBay.
+   - Processing fee: a follow-up `GetPayment` call after the order read (spike finding 2) to
+     populate `payment_fees`/`payment_net` — needs its own small retry/deferred-check design
+     since the fee may not be back yet on the very first read.
+   - Tests mirroring the existing Etsy/eBay adapter test files (paid-only import, cancellation,
+     ship-by/collect-by surfacing, delivery-line handling).
+5. **Registry + sync wiring:** one branch in `app/services/platforms/__init__.py`'s
+   `get_adapter()` (the project's adapter factory — explicitly designed so a new marketplace
+   is "additive only" here); a `square` entry in the sync scheduler; a rate-limit budget entry
+   in `platform_api_usage.py` (Square's own published limits — to check, not yet looked up).
+6. **UI:** Orders list gets a collect/delivery indicator and a collect-by due date (alongside
+   the existing ship-by-date sort, but visually distinct — see open question below on how the
+   two should sit together); order detail shows the customisation text (reuses the existing
+   Etsy variation-text display), the Square order reference, and collect vs. delivery.
+   Optional filter for "ready to collect".
+7. **Optional, not scheduled:** Square webhooks for near-real-time sync (needs a public URL —
+   out of reach for a desktop install, so no timeline); write-back (marking a Square
+   fulfilment complete from StockSmith) — decided against for now (see open question 3);
+   fulfilment-aware BOM/shipping-profile switching (see open question 1's future
+   consideration).
+
+**Suggested build order:** 3 -> 4 -> 5 -> 6, i.e. get a real Square credential and location
+connected first (so the adapter can be exercised against your actual sandbox as it's built,
+not just fixtures), then the adapter itself with tests, then wire it into the scheduler, then
+surface it in the UI last. Each of 3-6 is a natural point to check in before moving to the
+next.
 
 ## Open questions
 
