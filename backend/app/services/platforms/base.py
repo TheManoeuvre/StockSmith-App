@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Protocol
 
+from app.models.order import OrderFulfilmentMethod
 from app.models.platform_connection import PlatformConnection
 
 
@@ -100,6 +101,14 @@ class ExternalOrder:
     # when the marketplace didn't report one, which order_sync leaves untouched rather
     # than treating as "no longer due".
     ship_by_date: datetime | None = None
+    # Collect vs. delivery, and the collect-by date for a collect order — currently only
+    # ever set by SquareAdapter (see docs/plan-square-integration.md); Etsy/eBay orders are
+    # always shipped, so both stay None for them. Kept separate from ship_by_date rather
+    # than overloading it: a Square SHIPMENT fulfilment carries no date field at all (see
+    # the plan doc's spike findings), so there is nothing sensible to put in collect_by for
+    # a delivery order.
+    fulfilment_method: OrderFulfilmentMethod | None = None
+    collect_by: datetime | None = None
     lines: list[ExternalOrderLine] = field(default_factory=list)
     # The untouched marketplace response this was parsed from — carried through so a
     # preview/debug view can show ground truth alongside our interpretation of it. Cheap

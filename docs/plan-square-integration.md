@@ -190,26 +190,40 @@ and revisit B if typing at the stall becomes a bottleneck.
    - **Still needed:** a Settings UI card (paste-token form + location picker) — currently
      only reachable via the API. Deferred to alongside phase 6's UI work, or sooner if you'd
      like to test this via the app rather than API calls.
-4. **`SquareAdapter`** (`app/services/platforms/square.py`), implementing the same
-   `PlatformAdapter` protocol as Etsy/eBay, with every spike finding baked in:
-   - Pull orders via `SearchOrders`, filtered by `updated_at` against the sync watermark
-     (same shape as Etsy/eBay's pull-sync).
-   - Map line items to `ExternalOrderLine`: `note` -> `variation_text`; SKU/catalog match the
-     same way Etsy/eBay lines resolve to a `Product`/variant; recognise the configured
-     "Delivery" line by name and route it to `fulfilment_method = delivery` instead of
-     treating it as an unmapped product line.
-   - Map `fulfillments[].type` (`PICKUP`/`SHIPMENT`) to `fulfilment_method`; pickup's
-     `pickup_at` to `collect_by` (shipment orders leave `collect_by` NULL — no such field
-     exists on a Square shipment).
-   - Settlement: `PaymentState.settled` from `net_amount_due_money == 0`, but **only when the
-     order isn't cancelled** (spike finding 4) — check `order.state == "CANCELED"` first.
-   - Cancellation: `order.state == "CANCELED"` -> `is_cancelled`, same
-     pending-marketplace-cancellation flow as Etsy/eBay.
-   - Processing fee: a follow-up `GetPayment` call after the order read (spike finding 2) to
-     populate `payment_fees`/`payment_net` — needs its own small retry/deferred-check design
-     since the fee may not be back yet on the very first read.
-   - Tests mirroring the existing Etsy/eBay adapter test files (paid-only import, cancellation,
-     ship-by/collect-by surfacing, delivery-line handling).
+4. ~~**`SquareAdapter`**~~ **Done 2026-09-29** (`app/services/platforms/square.py` +
+   `square_client.py`'s new `search_orders`/`get_payment`/`batch_retrieve_catalog_objects`;
+   `ExternalOrder` gained `fulfilment_method`/`collect_by` fields, and `order_sync._apply_financials`
+   now writes them onto `Order`, same as `ship_by_date`). 12 new adapter tests, all passing,
+   plus the full existing suite (1,257 tests) unaffected. Only `fetch_orders_since` is
+   implemented — every other `PlatformAdapter` Protocol method (OAuth, listing push/drafts)
+   raises `NotImplementedError` with an explanation, since Square doesn't do either (see the
+   module's own docstring). **Not yet wired into `get_adapter()`/the scheduler** — that's
+   step 5, next.
+   - Settlement from `net_amount_due_money == 0`, cancellation checked first (spike findings
+     1 and 4) — confirmed and tested.
+   - `fulfillments[].type` -> `fulfilment_method`; pickup's `pickup_at` -> `collect_by`;
+     shipment leaves `collect_by` NULL — confirmed and tested.
+   - The "Delivery" line is excluded from `ExternalOrder.lines` by a hardcoded
+     case-insensitive name match (`_DELIVERY_LINE_NAME` in `square.py`) — becomes a Settings
+     field in phase 5/6, not before.
+   - Processing fee: a follow-up `GetPayment` call, gated the same way Etsy/eBay skip
+     re-enrichment for an unsettled or already-synced order — confirmed and tested.
+   - **Two things this adapter does that the spike never actually verified — flagged in the
+     code, not silently assumed correct:**
+     1. **SKU resolution.** A line item has no `sku` field itself — only `catalog_object_id`
+        — so the adapter calls Square's Catalog API (`batch-retrieve`) to read
+        `item_variation_data.sku`. The sandbox spike's test orders used ad-hoc line items
+        with no catalog object at all, so this has never been exercised against a real
+        Square catalogue item. **Needs a follow-up sandbox check** (create a Catalog item,
+        order it, confirm the response shape) before this can be trusted in production.
+     2. **A cancelled-and-previously-paid order's payment state.** The spike's cancelled
+        test order was never paid. The adapter guesses `PaymentState.reversed` when a
+        cancelled order has a tender recorded (Square requires refunding a paid order
+        before/while cancelling it) — untested against a real paid-then-cancelled sandbox
+        order.
+   - Also left unset rather than guessed: `subtotal` — Square's order response has no
+     explicit subtotal field, and deriving one from `total_money` and the other totals would
+     mean assuming a formula never checked against a real order with both tax and a discount.
 5. **Registry + sync wiring:** one branch in `app/services/platforms/__init__.py`'s
    `get_adapter()` (the project's adapter factory — explicitly designed so a new marketplace
    is "additive only" here); a `square` entry in the sync scheduler; a rate-limit budget entry
