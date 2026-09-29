@@ -273,12 +273,32 @@ and revisit B if typing at the stall becomes a bottleneck.
    — they're keyed by the `{platform}` path parameter and already call `get_adapter`), but
    there's still no Settings UI card to turn on Square's auto-sync toggle or trigger a
    manual sync from — only via direct API calls, same caveat as the connect step.
-6. **UI:** Orders list gets a collect/delivery indicator, and shows one merged "due" date
-   column/sort — `collect_by` for a collect order, `ship_by_date` for everything else —
-   rather than two separate date columns, so the list keeps one urgency ordering across every
-   platform (**decided**). Order detail shows the customisation text (reuses the existing
-   Etsy variation-text display), the Square order reference, and collect vs. delivery.
-   Optional filter for "ready to collect".
+6. ~~**UI**~~ **Done 2026-09-29** — verified end-to-end in a browser against a real scratch
+   backend + the real Square sandbox (not just type-checked), not only settings but the
+   piece the plan originally scoped to phase 6:
+   - **Connect Square**, held back at step 3 for lack of a UI, is now built: a
+     `SquareConnectDialog` (paste-token + environment, then a location picker) reached from
+     both the Stores hub card and the store's own page; a `SquareLocationCard` lets the
+     location be changed later without re-pasting the token (`GET /platforms/square/locations`).
+     Manually confirmed live: a bad token surfaces Square's real rejection
+     ("Square rejected this access token") all the way through the dialog.
+   - Square's store page shows only what applies to it (connection header, location,
+     order sync/preview/log) — the listing-push, listing-profiles, tools, and OAuth
+     developer-app sections are hidden for it, since none of those concepts exist for
+     Square (see the "custom items vs catalogue" decision — Square sells ordinary
+     StockSmith catalogue products, but never pushes a listing to Square itself).
+   - **Orders list/detail:** `Order` gained `fulfilment_method`/`collect_by` in both the
+     backend response schema (`OrderRead` — these existed on the model since step 2 but were
+     never actually returned by the API until now) and the frontend type. A shared
+     `effectiveDueDate()` helper (collect_by for a collect order, ship_by_date otherwise)
+     replaced the ship_by_date-only due-date logic in both the list and detail view, per the
+     earlier merged-column decision. A small "Collect"/"Delivery" tag appears next to the
+     platform badge in both places. Customisation text and the Square order reference needed
+     no changes at all — both already rendered generically (`variation_text`,
+     `external_order_id`).
+   - Not built: the "ready to collect" filter (optional per the original plan, skipped for
+     now) and a configurable delivery-line-item name (still hardcoded in the adapter, as
+     phase 4 already flagged).
 7. **Optional, not scheduled:** Square webhooks for near-real-time sync (needs a public URL —
    out of reach for a desktop install, so no timeline); write-back (marking a Square
    fulfilment complete from StockSmith) — decided against for now (see open question 3);

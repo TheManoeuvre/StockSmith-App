@@ -4,7 +4,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, model_validator
 
 from app.models.listing import ListingPlatform
-from app.models.order import ManualOrderChannel, OrderStatus
+from app.models.order import ManualOrderChannel, OrderFulfilmentMethod, OrderStatus
 from app.schemas.order_parcel import PostageChargeRead, ReplacementParcelRead
 
 
@@ -120,6 +120,11 @@ class OrderRead(BaseModel):
     order_placed_at: datetime
     shipped_at: datetime | None
     ship_by_date: datetime | None = None
+    # Collect vs. delivery, and the collect-by date for a collect order — currently only
+    # ever set for Square orders (see app.models.order.OrderFulfilmentMethod). Null for
+    # every other platform and for manual orders.
+    fulfilment_method: OrderFulfilmentMethod | None = None
+    collect_by: datetime | None = None
     cancelled_at: datetime | None
     notes: str | None
     created_at: datetime

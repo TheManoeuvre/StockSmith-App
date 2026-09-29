@@ -22,7 +22,7 @@ import { useRefreshOnSync } from "../../hooks/useRefreshOnSync";
 import { formatMoney } from "../../lib/money";
 import { formatDayMonth } from "../../lib/format";
 import { maskBuyerName } from "../../lib/names";
-import { orderFulfilment } from "../../lib/orderFulfilment";
+import { effectiveDueDate, orderFulfilment } from "../../lib/orderFulfilment";
 import { PLATFORM_COLORS, PLATFORM_LABELS } from "../../lib/platforms";
 
 /**
@@ -72,21 +72,22 @@ function orderMarginPct(order: Order): number | null {
   return v > 0 ? (Number(order.net_profit) / v) * 100 : null;
 }
 
-// The marketplace's ship-by deadline, or "—" when it didn't report one (manual orders,
-// and any synced order predating this field). A done order shows the date plain — the
-// deadline no longer matters once it's shipped or cancelled.
+// The marketplace's due date — ship-by for most orders, collect-by for a Square collect
+// order (see effectiveDueDate) — or "—" when nothing was reported (manual orders, and any
+// synced order predating this field). A done order shows the date plain — the deadline no
+// longer matters once it's shipped, collected, or cancelled.
 function dueLabel(order: Order): string {
-  if (!order.ship_by_date) return "—";
-  return formatDayMonth(order.ship_by_date);
+  const due = effectiveDueDate(order);
+  if (!due) return "—";
+  return formatDayMonth(due);
 }
 
-// Red once the deadline has passed on an order still awaiting shipment — the one state
+// Red once the deadline has passed on an order still awaiting fulfilment — the one state
 // that actually needs chasing. Shipped/cancelled orders never render as overdue.
 function dueTone(order: Order): string {
-  if (isDone(order) || !order.ship_by_date) return "text-slate-500";
-  return new Date(order.ship_by_date).getTime() < Date.now()
-    ? "font-semibold text-red-600"
-    : "text-slate-500";
+  const due = effectiveDueDate(order);
+  if (isDone(order) || !due) return "text-slate-500";
+  return new Date(due).getTime() < Date.now() ? "font-semibold text-red-600" : "text-slate-500";
 }
 
 function netProfitSub(order: Order): string {
@@ -332,6 +333,12 @@ function OrderRow({
         >
           {order.platform ? PLATFORM_LABELS[order.platform] : "Manual"}
         </span>
+        {/* Only Square reports this today — see docs/plan-square-integration.md. */}
+        {order.fulfilment_method && (
+          <span className="ml-1 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10.5px] font-medium text-slate-600">
+            {order.fulfilment_method === "collect" ? "Collect" : "Delivery"}
+          </span>
+        )}
       </td>
       <td className={`p-2 align-top ${dueTone(order)}`}>{dueLabel(order)}</td>
       <td className="p-2 align-top">

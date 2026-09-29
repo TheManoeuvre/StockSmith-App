@@ -1,5 +1,17 @@
 import type { Order } from "../api/types";
 
+/**
+ * The date that actually matters for "when must this be dealt with by" — decided
+ * (2026-09-29) to merge into one column/sort across every platform rather than showing
+ * ship_by_date and collect_by separately: collect_by for a Square collect order,
+ * ship_by_date for everything else (a Square delivery order's ship_by_date is never
+ * populated — Square reports no date field at all for a shipment fulfilment — so it falls
+ * back to null there the same as any other order the marketplace didn't report one for).
+ */
+export function effectiveDueDate(order: Order): string | null {
+  return order.fulfilment_method === "collect" ? order.collect_by : order.ship_by_date;
+}
+
 export interface OrderFulfilment {
   /** Short state name for the list column / the slide-over's Fulfilment stat tile. */
   label: string;

@@ -13,6 +13,8 @@ import { ListingProfiles } from "../ListingProfiles";
 import { PlatformLimitsEditor } from "../PlatformLimitsEditor";
 import { DeveloperAppCard } from "./DeveloperAppCard";
 import { OrderSyncCard } from "./OrderSyncCard";
+import { SquareConnectDialog } from "./SquareConnectDialog";
+import { SquareLocationCard } from "./SquareLocationCard";
 import { StockPushesCard } from "./StockPushesCard";
 import { StoreToolsCard } from "./StoreToolsCard";
 import { formatRelative, stateChip, useStoreHealth } from "./useStoreHealth";
@@ -36,6 +38,8 @@ export function StorePage({ platform }: { platform: ListingPlatform }) {
   // server state: it picks which environment's credentials the Developer app card edits and
   // which one "Connect" targets, independent of whatever's actually connected.
   const [environment, setEnvironment] = useState<PlatformEnvironment>("production");
+  const isSquare = platform === "square";
+  const [squareDialogMode, setSquareDialogMode] = useState<"connect" | "change-location" | null>(null);
 
   const invalidateStatus = () => {
     queryClient.invalidateQueries({
@@ -54,9 +58,14 @@ export function StorePage({ platform }: { platform: ListingPlatform }) {
     onSuccess: invalidateStatus,
   });
 
-  const connectLabel = connectMutation.isPending
-    ? "Opening…"
-    : `${state === "reconnect" ? "Reconnect" : "Connect"}${environment === "sandbox" ? " to sandbox" : ""}`;
+  const connectLabel = isSquare
+    ? state === "reconnect"
+      ? "Reconnect"
+      : "Connect"
+    : connectMutation.isPending
+      ? "Opening…"
+      : `${state === "reconnect" ? "Reconnect" : "Connect"}${environment === "sandbox" ? " to sandbox" : ""}`;
+  const runConnect = () => (isSquare ? setSquareDialogMode("connect") : connectMutation.mutate());
 
   return (
     // Nested so each platform's editors sit under stores-sync/<platform>/…, which is what lets
@@ -111,8 +120,8 @@ export function StorePage({ platform }: { platform: ListingPlatform }) {
               ) : (
                 <button
                   type="button"
-                  onClick={() => connectMutation.mutate()}
-                  disabled={connectMutation.isPending}
+                  onClick={runConnect}
+                  disabled={!isSquare && connectMutation.isPending}
                   className="h-7 rounded-md bg-slate-900 px-2.5 text-xs font-semibold text-white disabled:opacity-50"
                 >
                   {connectLabel}
@@ -148,7 +157,20 @@ export function StorePage({ platform }: { platform: ListingPlatform }) {
             )}
           </section>
 
-          {connected && (
+          {connected && isSquare && (
+            <>
+              <SquareLocationCard
+                status={status}
+                onChangeLocation={() => setSquareDialogMode("change-location")}
+              />
+              <OrderSyncCard platform={platform} status={status} />
+            </>
+          )}
+          {/* Square has no listings to push, adopt, or set per-product platform limits for
+              (see docs/plan-square-integration.md) — its products are ordinary StockSmith
+              catalogue products, not marketplace listings — and no OAuth app credential to
+              configure, so none of the sections below apply to it. */}
+          {connected && !isSquare && (
             <>
               <OrderSyncCard platform={platform} status={status} />
               <StockPushesCard
@@ -171,13 +193,24 @@ export function StorePage({ platform }: { platform: ListingPlatform }) {
               <StoreToolsCard platform={platform} status={status} />
             </>
           )}
-          <DeveloperAppCard
-            platform={platform}
-            environment={environment}
-            onEnvironmentChange={setEnvironment}
-          />
+          {!isSquare && (
+            <DeveloperAppCard
+              platform={platform}
+              environment={environment}
+              onEnvironmentChange={setEnvironment}
+            />
+          )}
         </div>
       </DirtyPath>
+      {squareDialogMode && (
+        <SquareConnectDialog
+          mode={squareDialogMode}
+          onClose={() => {
+            setSquareDialogMode(null);
+            invalidateStatus();
+          }}
+        />
+      )}
     </DirtyPath>
   );
 }
