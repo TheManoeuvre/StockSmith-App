@@ -211,9 +211,17 @@ def _cogs_pending(order: Order) -> bool:
 
     Materials only, deliberately. Kitting has no per-line snapshot to be missing; a shipped
     order whose kitting ledger drifted is a data-repair problem
-    (scripts/backfill_order_kitting_ledger.py), not something to flag on every read."""
+    (scripts/backfill_order_kitting_ledger.py), not something to flag on every read.
+
+    ordered_qty == 0 is excluded: that's a line a variant substitution moved its entire
+    quantity off of (see OrderLineSubstitution), kept around by design rather than deleted.
+    It was never going to be allocated or shipped, so a missing snapshot there isn't a
+    real gap — it's the replacement line (with its own product_id/qty) that matters."""
     return any(
-        not line.needs_mapping and line.product_id is not None and line.cost_per_unit_snapshot is None
+        not line.needs_mapping
+        and line.product_id is not None
+        and line.ordered_qty > 0
+        and line.cost_per_unit_snapshot is None
         for line in order.lines
     )
 
