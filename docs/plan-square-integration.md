@@ -90,13 +90,14 @@ cost/profit.
 | Line item `note` (plain string, confirmed — no modifier was needed) | `OrderLine.variation_text` (customisation) |
 | Line item `catalog_object_id` / variation SKU | `OrderLine.sku` (match via existing SKU lookup) — **not exercised by the spike** (the test order used ad-hoc line items with no catalog object), but confirmed as the intended model: see decision below |
 | Line item named e.g. "Delivery" | order-level delivery flag; not a product line (confirmed shape: plain line item, `name: "Delivery"`, no special type) |
-| Order `fulfillments[].type` `PICKUP` (confirmed; `SHIPMENT` not tested) | `fulfilment_method` |
+| Order `fulfillments[].type` `PICKUP` / `SHIPMENT` (both confirmed) | `fulfilment_method` |
 | Order `fulfillments[].pickup_details.pickup_at` (confirmed) | `collect_by` — no `expires_at` was present with `schedule_type: SCHEDULED`; that field only appears for `schedule_type: ASAP` per docs, not re-verified here |
+| Order `fulfillments[].shipment_details.recipient.address` (confirmed) | not imported — delivery address stays in Square, same as other customer contact details |
 | Order `customer_id` | not imported (customer stays in Square) — spike order had no customer attached, so this wasn't exercised |
 | Order/line-item `total_tax_money` (confirmed; was £0 as expected — no tax rate configured, not VAT-registered) | `tax_charged` |
 | Order `total_money`, `net_amount_due_money` | `grand_total`, and **settlement check** — see spike finding below, not `order.state` |
 | Payment `processing_fee[].amount_money` (Payments API `GetPayment`; confirmed, see spike finding below) | `payment_fees` / `payment_net` |
-| Order `state` `CANCELED` (not tested this spike) | `is_cancelled` (feeds existing pending-cancellation flow) — still to verify |
+| Order `state` `CANCELED` (confirmed) | `is_cancelled` (feeds existing pending-cancellation flow) |
 | Order `updated_at` (confirmed — advances when payment is applied) | `last_modified` (sync watermark) |
 
 ### Spike findings (things that differed from assumption)
@@ -115,6 +116,22 @@ cost/profit.
    in sandbox at least it's readable well before then. **Consequence:** the sync can't take
    the fee from the payment-creation call; it needs a follow-up read (either immediately, or
    as a deferred re-check) before it can populate `payment_fees`.
+3. **Cancelling an order requires cancelling its fulfilment in the same call.**
+   `PUT /orders/{id}` with `state: CANCELED` alone is rejected (`400 INVALID_VALUE`) unless
+   every fulfilment on the order is also moved to a terminal state
+   (`CANCELED`/`COMPLETED`/`FAILED`) in that same request. Done correctly, `order.state`
+   reliably flips to `"CANCELED"` — unlike settlement, cancellation is one thing `order.state`
+   is trustworthy for.
+4. **A cancelled order is not "settled".** The cancelled test order (never paid) still shows
+   `net_amount_due_money.amount: 1500` — nonzero, same as any unpaid order. So the settlement
+   check (finding 1) must only be evaluated when `order.state != "CANCELED"`, otherwise a
+   cancelled order looks indistinguishable from one still awaiting payment.
+5. **Shipment fulfilments carry no date field.** `fulfillments[].shipment_details` has
+   `recipient.address` but nothing equivalent to pickup's `pickup_at` — no ship-by or expected
+   ship date in this flow at all. Reusing one date field (`ship_by_date`/`collect_by`) for both
+   fulfilment types only works for `PICKUP`; a `SHIPMENT` order would need a
+   StockSmith-derived date (e.g. days from order date) rather than one read from Square, if a
+   "ship by" date is wanted for delivery orders too.
 
 ## Capturing the details: options for the counter
 
@@ -148,7 +165,7 @@ and revisit B if typing at the stall becomes a bottleneck.
 ## Phased plan
 
 1. ~~**Spike (sandbox):**~~ **Done 2026-09-29.** Square developer account, sandbox seller, test
-   order with a note, delivery line and pickup fulfilment, paid via Payments API, read back
+   orders covering a paid pickup order, a paid shipment order, and a cancelled order; read back
    with SearchOrders and GetPayment. See "Spike findings" above.
 2. **Schema:** migration for `fulfilment_method`, `collect_by`
    (if not reusing `ship_by_date`), `ListingPlatform.square`.
@@ -175,8 +192,9 @@ and revisit B if typing at the stall becomes a bottleneck.
    adapter works.
 2. **Refunds/cancellations.** Handled only via Square; StockSmith picks up the resulting
    `CANCELED` state on next sync and routes it through the existing pending-cancellation flow,
-   same as Etsy/eBay. No write-back. Shape of a cancelled Square order not yet exercised by the
-   spike — confirm before relying on `is_cancelled` mapping.
+   same as Etsy/eBay. No write-back. Shape confirmed by spike (see finding 3) — cancelling
+   requires the fulfilment to be cancelled in the same call, and `order.state` reliably becomes
+   `"CANCELED"` once that's done.
 3. **Marking collected. Decided: one-way (Square -> StockSmith), no write-back** — matches how
    Etsy/eBay work today. Revisit if double-handling ("mark collected" in both places) becomes a
    hassle.
@@ -197,8 +215,8 @@ and revisit B if typing at the stall becomes a bottleneck.
 - Free-text customisation quality (typos, missing notes) if entered by hand at the counter.
 - Processing fee isn't available at the moment of payment (see spike finding 2) — sync needs
   a follow-up read of the payment, adding complexity/timing to when `payment_fees` is known.
-- Cancelled-order shape (`state: CANCELED`) and `SHIPMENT` fulfilments weren't exercised by
-  the spike — still to confirm before relying on them.
+- Shipment fulfilments have no date field to hang a "ship by" surfacing on (see spike finding
+  5) — a delivery due-date would need to be StockSmith-derived, not read from Square.
 
 ## Sales tax: Square vs Etsy/eBay
 

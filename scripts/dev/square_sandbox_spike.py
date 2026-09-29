@@ -96,13 +96,126 @@ payment = call(
 results["payment"] = payment
 print(f"Payment {payment['id']} status {payment['status']}")
 
-# 4. Read it back the way StockSmith's sync would: SearchOrders, newest first.
+# 4. A second order using a SHIPMENT fulfilment instead of PICKUP, paid the same way, so we
+#    can see the delivery-address shape (the pickup order above never exercised this).
+shipment_order_body = {
+    "idempotency_key": str(uuid.uuid4()),
+    "order": {
+        "location_id": location_id,
+        "line_items": [
+            {
+                "name": "Leather patch (custom)",
+                "quantity": "1",
+                "note": "Text on patch: HINETT'S HOME",
+                "base_price_money": {"amount": 1500, "currency": currency},
+            },
+            {
+                "name": "Delivery",
+                "quantity": "1",
+                "base_price_money": {"amount": 350, "currency": currency},
+            },
+        ],
+        "fulfillments": [
+            {
+                "type": "SHIPMENT",
+                "state": "PROPOSED",
+                "shipment_details": {
+                    "recipient": {
+                        "display_name": "Test Customer",
+                        "address": {
+                            "address_line_1": "1 Test Street",
+                            "locality": "London",
+                            "postal_code": "E1 6AN",
+                            "country": "GB",
+                        },
+                    },
+                },
+            }
+        ],
+    },
+}
+shipment_order = call("POST", "/orders", shipment_order_body)["order"]
+results["shipment_order_created"] = shipment_order
+print(f"Created shipment order {shipment_order['id']}, total {shipment_order['total_money']}")
+
+shipment_payment = call(
+    "POST",
+    "/payments",
+    {
+        "idempotency_key": str(uuid.uuid4()),
+        "source_id": "cnon:card-nonce-ok",
+        "location_id": location_id,
+        "order_id": shipment_order["id"],
+        "amount_money": shipment_order["total_money"],
+    },
+)["payment"]
+results["shipment_order_payment"] = shipment_payment
+print(f"Shipment order payment {shipment_payment['id']} status {shipment_payment['status']}")
+
+shipment_order_after_payment = call("GET", f"/orders/{shipment_order['id']}")["order"]
+results["shipment_order_after_payment"] = shipment_order_after_payment
+
+# 5. A third order that we then cancel, to see the CANCELED shape. No payment — cancelling an
+#    unpaid order is the simplest way to see the state transition.
+cancel_order_body = {
+    "idempotency_key": str(uuid.uuid4()),
+    "order": {
+        "location_id": location_id,
+        "line_items": [
+            {
+                "name": "Leather patch (custom)",
+                "quantity": "1",
+                "note": "Text on patch: CANCEL ME",
+                "base_price_money": {"amount": 1500, "currency": currency},
+            },
+        ],
+        "fulfillments": [
+            {
+                "type": "PICKUP",
+                "state": "PROPOSED",
+                "pickup_details": {
+                    "recipient": {"display_name": "Test Customer"},
+                    "schedule_type": "SCHEDULED",
+                    "pickup_at": pickup_at,
+                },
+            }
+        ],
+    },
+}
+order_to_cancel = call("POST", "/orders", cancel_order_body)["order"]
+results["order_to_cancel_created"] = order_to_cancel
+print(f"Created order to cancel {order_to_cancel['id']}")
+
+cancelled_order = call(
+    "PUT",
+    f"/orders/{order_to_cancel['id']}",
+    {
+        "idempotency_key": str(uuid.uuid4()),
+        "order": {
+            "location_id": location_id,
+            "version": order_to_cancel["version"],
+            "state": "CANCELED",
+            # Square requires every fulfilment to be in a terminal state before the order
+            # itself can be CANCELED — update the existing fulfilment by its uid.
+            "fulfillments": [
+                {
+                    "uid": order_to_cancel["fulfillments"][0]["uid"],
+                    "state": "CANCELED",
+                }
+            ],
+        },
+    },
+)["order"]
+results["cancelled_order"] = cancelled_order
+print(f"Order {cancelled_order['id']} state after cancel: {cancelled_order['state']}")
+
+# 6. Read everything back the way StockSmith's sync would: SearchOrders, newest first.
 found = call(
     "POST",
     "/orders/search",
     {
         "location_ids": [location_id],
-        "limit": 5,
+        "limit": 10,
         "query": {"sort": {"sort_field": "UPDATED_AT", "sort_order": "DESC"}},
     },
 )
