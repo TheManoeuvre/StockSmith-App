@@ -170,19 +170,26 @@ and revisit B if typing at the stall becomes a bottleneck.
 2. ~~**Schema:**~~ **Done 2026-09-29** (commit `fb23ed1`). `ListingPlatform.square`,
    `orders.fulfilment_method`, `orders.collect_by`. Migration verified to apply/roll back
    cleanly; existing order/listing/platform tests (398) unaffected.
-3. **Connect Square (minimal settings).** Enough to get a working credential end-to-end
-   before writing adapter logic against it:
-   - A Square personal access token first (simpler than OAuth for a single-seller app —
-     matches the plan's original recommendation); stored through the existing encrypted
-     `platform_credentials`/`platform_connections` machinery the same way Etsy/eBay tokens
-     are, keyed to `ListingPlatform.square`.
-   - Sandbox vs. production selection reuses the existing `PlatformEnvironment` split
-     (mirrors eBay).
-   - Location: **decided single-location** — at connect time, call Square's `/locations` and
-     let you confirm which one (in case the sandbox/production account ever has more than
-     one), then store that `location_id` on the connection.
-   - Full OAuth (if ever needed for a public listing on Square's app marketplace) is
-     explicitly deferred — out of scope unless you ask for it later.
+3. ~~**Connect Square (minimal settings).**~~ **Done 2026-09-29** (commit `366490d`) —
+   backend only, no frontend UI yet:
+   - A pasted Square personal access token (simpler than OAuth for a single-seller app),
+     stored through the existing encrypted `platform_connections` machinery, keyed to
+     `ListingPlatform.square`. `PlatformConnection.is_connected` needed a Square-specific
+     branch since it has no refresh token to key off (Etsy/eBay's stricter check is
+     unchanged).
+   - Sandbox vs. production reuses the existing `PlatformEnvironment` split (mirrors eBay).
+   - Location: `POST /platforms/square/connect` validates the token and returns the
+     account's locations; `POST /platforms/square/location` stores the chosen one in
+     `external_account_id` (the same field Etsy/eBay use for "which account"), resetting the
+     sync watermark on a change, same as an Etsy shop change. `GET /platforms/square/locations`
+     lets the location be changed later without re-pasting the token.
+   - New `app/services/platforms/square_client.py` holds just enough Square REST access
+     (list locations) to support connecting — not the full adapter, which is next.
+   - Full OAuth (if ever needed for a public listing on Square's app marketplace) remains
+     explicitly deferred.
+   - **Still needed:** a Settings UI card (paste-token form + location picker) — currently
+     only reachable via the API. Deferred to alongside phase 6's UI work, or sooner if you'd
+     like to test this via the app rather than API calls.
 4. **`SquareAdapter`** (`app/services/platforms/square.py`), implementing the same
    `PlatformAdapter` protocol as Etsy/eBay, with every spike finding baked in:
    - Pull orders via `SearchOrders`, filtered by `updated_at` against the sync watermark
