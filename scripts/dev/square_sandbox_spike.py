@@ -30,10 +30,12 @@ HEADERS = {
 results: dict = {}
 
 
-def call(method: str, path: str, body: dict | None = None) -> dict:
+def call(method: str, path: str, body: dict | None = None, allow_error: bool = False) -> dict:
     response = httpx.request(method, f"{BASE}{path}", headers=HEADERS, json=body, timeout=30)
     data = response.json()
     if response.status_code >= 400:
+        if allow_error:
+            return {"_error": True, "_status": response.status_code, **data}
         sys.exit(f"{method} {path} failed ({response.status_code}):\n{json.dumps(data, indent=2)}")
     return data
 
@@ -209,7 +211,173 @@ cancelled_order = call(
 results["cancelled_order"] = cancelled_order
 print(f"Order {cancelled_order['id']} state after cancel: {cancelled_order['state']}")
 
-# 6. Read everything back the way StockSmith's sync would: SearchOrders, newest first.
+# 7. A catalogue item with a SKU, and an order line that references it via
+#    catalog_object_id — SquareAdapter resolves SKUs this way since an order line item
+#    never carries its own `sku` field directly. Not exercised by anything above (those
+#    orders used ad-hoc line items with no catalog object at all).
+catalog_body = {
+    "idempotency_key": str(uuid.uuid4()),
+    "object": {
+        "type": "ITEM",
+        "id": "#leather-patch",
+        "item_data": {
+            "name": "Leather Patch (Catalogue)",
+            "variations": [
+                {
+                    "type": "ITEM_VARIATION",
+                    "id": "#leather-patch-regular",
+                    "item_variation_data": {
+                        "item_id": "#leather-patch",
+                        "name": "Regular",
+                        "sku": "PATCH-REG-01",
+                        "pricing_type": "FIXED_PRICING",
+                        "price_money": {"amount": 1500, "currency": currency},
+                    },
+                }
+            ],
+        },
+    },
+}
+catalog_result = call("POST", "/catalog/object", catalog_body)
+results["catalog_object_created"] = catalog_result
+variation_id = next(
+    m["object_id"] for m in catalog_result.get("id_mappings", []) if m["client_object_id"] == "#leather-patch-regular"
+)
+print(f"Created catalogue item, variation id {variation_id}")
+
+catalog_batch_retrieve = call("POST", "/catalog/batch-retrieve", {"object_ids": [variation_id]})
+results["catalog_batch_retrieve"] = catalog_batch_retrieve
+print(f"Batch-retrieved {len(catalog_batch_retrieve.get('objects', []))} catalog object(s)")
+
+catalog_order_body = {
+    "idempotency_key": str(uuid.uuid4()),
+    "order": {
+        "location_id": location_id,
+        "line_items": [
+            {
+                "catalog_object_id": variation_id,
+                "quantity": "1",
+                "note": "Text on patch: CATALOGUE TEST",
+            }
+        ],
+    },
+}
+catalog_order = call("POST", "/orders", catalog_order_body)["order"]
+results["catalog_order_created"] = catalog_order
+print(f"Created catalogue-linked order {catalog_order['id']}")
+
+# 8. A paid order that we then try to cancel — to see whether Square allows cancelling a
+#    paid order directly or insists on a refund first, and what net_amount_due_money/state
+#    look like afterward. SquareAdapter currently guesses "a cancelled order with a tender
+#    recorded means PaymentState.reversed" — untested until now.
+paid_to_cancel_body = {
+    "idempotency_key": str(uuid.uuid4()),
+    "order": {
+        "location_id": location_id,
+        "line_items": [
+            {
+                "name": "Leather patch (custom)",
+                "quantity": "1",
+                "note": "Text on patch: PAID THEN CANCELLED",
+                "base_price_money": {"amount": 1500, "currency": currency},
+            },
+        ],
+        "fulfillments": [
+            {
+                "type": "PICKUP",
+                "state": "PROPOSED",
+                "pickup_details": {
+                    "recipient": {"display_name": "Test Customer"},
+                    "schedule_type": "SCHEDULED",
+                    "pickup_at": pickup_at,
+                },
+            }
+        ],
+    },
+}
+paid_to_cancel = call("POST", "/orders", paid_to_cancel_body)["order"]
+results["paid_to_cancel_created"] = paid_to_cancel
+print(f"Created order to pay then cancel: {paid_to_cancel['id']}")
+
+paid_to_cancel_payment = call(
+    "POST",
+    "/payments",
+    {
+        "idempotency_key": str(uuid.uuid4()),
+        "source_id": "cnon:card-nonce-ok",
+        "location_id": location_id,
+        "order_id": paid_to_cancel["id"],
+        "amount_money": paid_to_cancel["total_money"],
+    },
+)["payment"]
+results["paid_to_cancel_payment"] = paid_to_cancel_payment
+print(f"Paid order {paid_to_cancel['id']}, payment status {paid_to_cancel_payment['status']}")
+
+paid_to_cancel_after_payment = call("GET", f"/orders/{paid_to_cancel['id']}")["order"]
+
+cancel_attempt = call(
+    "PUT",
+    f"/orders/{paid_to_cancel['id']}",
+    {
+        "idempotency_key": str(uuid.uuid4()),
+        "order": {
+            "location_id": location_id,
+            "version": paid_to_cancel_after_payment["version"],
+            "state": "CANCELED",
+            "fulfillments": [
+                {"uid": paid_to_cancel_after_payment["fulfillments"][0]["uid"], "state": "CANCELED"}
+            ],
+        },
+    },
+    allow_error=True,
+)
+
+if cancel_attempt.get("_error"):
+    results["cancel_paid_order_direct_rejected"] = cancel_attempt
+    print(f"Cancelling a PAID order directly was rejected ({cancel_attempt['_status']}) — refunding first, then retrying")
+
+    refund = call(
+        "POST",
+        "/refunds",
+        {
+            "idempotency_key": str(uuid.uuid4()),
+            "payment_id": paid_to_cancel_payment["id"],
+            "amount_money": paid_to_cancel_payment["amount_money"],
+            "reason": "Sandbox spike test refund",
+        },
+    )["refund"]
+    results["refund"] = refund
+    print(f"Refund {refund['id']} status {refund['status']}")
+
+    paid_to_cancel_after_refund = call("GET", f"/orders/{paid_to_cancel['id']}")["order"]
+    results["paid_to_cancel_after_refund"] = paid_to_cancel_after_refund
+    print(
+        f"Order after refund (retry-cancel skipped — Square already told us this is rejected) "
+        f"-> state {paid_to_cancel_after_refund['state']}, "
+        f"net_amount_due {paid_to_cancel_after_refund.get('net_amount_due_money')}, "
+        f"refunded_amount_money {paid_to_cancel_after_refund.get('refunded_money')}, "
+        f"tenders present: {bool(paid_to_cancel_after_refund.get('tenders'))}, "
+        f"refunds present: {bool(paid_to_cancel_after_refund.get('refunds'))}"
+    )
+
+    # Also check the payment object itself — the refund may show up there
+    # (refunded_money/status) even though the order can never become CANCELED.
+    paid_to_cancel_payment_after_refund = call("GET", f"/payments/{paid_to_cancel_payment['id']}")["payment"]
+    results["paid_to_cancel_payment_after_refund"] = paid_to_cancel_payment_after_refund
+    print(
+        f"Payment after refund -> status {paid_to_cancel_payment_after_refund.get('status')}, "
+        f"refunded_money {paid_to_cancel_payment_after_refund.get('refunded_money_money') or paid_to_cancel_payment_after_refund.get('refunded_money')}"
+    )
+else:
+    cancelled_paid_order = cancel_attempt["order"]
+    results["cancelled_paid_order_direct"] = cancelled_paid_order
+    print(
+        f"Cancelled a PAID order directly, no refund needed -> state {cancelled_paid_order['state']}, "
+        f"net_amount_due {cancelled_paid_order.get('net_amount_due_money')}, "
+        f"tenders present: {bool(cancelled_paid_order.get('tenders'))}"
+    )
+
+# 9. Read everything back the way StockSmith's sync would: SearchOrders, newest first.
 found = call(
     "POST",
     "/orders/search",

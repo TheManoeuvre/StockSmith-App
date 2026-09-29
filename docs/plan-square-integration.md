@@ -261,11 +261,30 @@ next.
    shipping-profile model is per-product, not per-fulfilment-method, so this would need either
    a fulfilment-aware BOM variant or a post-allocation adjustment step. Revisit once the base
    adapter works.
-2. **Refunds/cancellations.** Handled only via Square; StockSmith picks up the resulting
-   `CANCELED` state on next sync and routes it through the existing pending-cancellation flow,
-   same as Etsy/eBay. No write-back. Shape confirmed by spike (see finding 3) — cancelling
-   requires the fulfilment to be cancelled in the same call, and `order.state` reliably becomes
-   `"CANCELED"` once that's done.
+2. **Refunds/cancellations. Decided: no write-back from StockSmith, same as Etsy/eBay.**
+   Handled only via Square; StockSmith picks up the resulting `CANCELED` state on next sync
+   and routes it through the existing pending-cancellation flow. Etsy has no seller-initiated
+   cancel/refund endpoint at all, so its one-way policy isn't a choice; eBay and Square could
+   technically support a write-back, but StockSmith treats the marketplace as the system of
+   record for anything that moves money or touches the buyer relationship (refund amount,
+   buyer notification, dispute handling) on principle, not just API availability.
+
+   A second sandbox check (2026-09-29) confirms this is the right call for Square
+   specifically, not just consistent with the others: **Square's Orders API refuses to
+   cancel an order once a payment has been processed** (`"Orders cannot be canceled after
+   payments have been processed"`, confirmed live — even after issuing a refund first). The
+   only real lever on a paid order is a refund (a payment action, not an order action), and
+   the order itself stays open in Square's system afterward rather than becoming
+   `CANCELED` — so a "Cancel in StockSmith" button couldn't actually cancel the paid orders
+   StockSmith would ever hold anyway (unpaid ones are never imported). This also means the
+   `PaymentState.reversed` heuristic in `SquareAdapter._payment_state` (a cancelled order
+   with a tender recorded) is unreachable in practice — see the adapter fix below.
+
+   Cancellation shape for an unpaid order (the only kind that actually can become
+   `CANCELED`) is confirmed by the spike (finding 3) — cancelling requires the fulfilment to
+   be cancelled in the same call, and `order.state` reliably becomes `"CANCELED"` once
+   that's done. What a *refunded-but-not-cancelled* paid order looks like (its order/payment
+   fields) was being checked in the second sandbox run alongside this decision.
 3. **Marking collected. Decided: one-way (Square -> StockSmith), no write-back** — matches how
    Etsy/eBay work today. Revisit if double-handling ("mark collected" in both places) becomes a
    hassle.
