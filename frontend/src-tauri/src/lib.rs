@@ -7,7 +7,8 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Manager, State, WindowEvent};
 use tauri_plugin_autostart::ManagerExt;
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogResult};
+use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_updater::UpdaterExt;
@@ -347,8 +348,14 @@ async fn spawn_sidecar_if_needed(app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Upper bound on the release notes shown in the update dialog. A native message dialog
-/// doesn't scroll, so an over-long body would push the buttons out of reach.
+/// The GitHub repo release notes are published under, used to build a "view full notes"
+/// link for the update dialog. Kept in sync with the updater endpoint in tauri.conf.json.
+const GITHUB_REPO: &str = "TheManoeuvre/StockSmith-App";
+
+/// Upper bound on the release notes shown in the update dialog, as a safety net. The
+/// per-bullet summary below is normally well under this, but a native message dialog
+/// doesn't scroll, so an unusually long list of changes could still push the buttons out
+/// of reach.
 const MAX_NOTES_CHARS: usize = 1200;
 
 /// Trims release notes to `limit` characters, cutting at a line boundary so the result
@@ -360,7 +367,38 @@ fn truncate_notes(notes: &str, limit: usize) -> String {
     }
     let clipped: String = notes.chars().take(limit).collect();
     let cut = clipped.rfind('\n').unwrap_or(clipped.len());
-    format!("{}\n\n(…see the full release notes on GitHub)", clipped[..cut].trim_end())
+    format!("{}\n(…see the full release notes on GitHub)", clipped[..cut].trim_end())
+}
+
+/// Reduces CHANGELOG.md prose to a one-line-per-feature bullet list for the update dialog.
+/// Every changelog entry is written as `- **Headline.** paragraph of wrapped detail...`
+/// (see CHANGELOG.md's own header comment), so pulling out just the bold headline — plus
+/// each `### Section` heading — gives a concise summary without having to actually
+/// summarize free text. A bullet with no bold headline falls back to its raw first line.
+fn summarize_notes(notes: &str) -> String {
+    let mut out = String::new();
+    for line in notes.lines() {
+        let line = line.trim();
+        if let Some(heading) = line.strip_prefix("### ") {
+            if !out.is_empty() {
+                out.push('\n');
+            }
+            out.push_str(heading.trim());
+            out.push('\n');
+        } else if let Some(rest) = line.strip_prefix("- ") {
+            let headline = if let Some(bold) = rest.strip_prefix("**") {
+                bold.find("**").map(|end| bold[..end].trim()).unwrap_or_else(|| rest.trim())
+            } else {
+                rest.trim()
+            };
+            out.push_str("• ");
+            out.push_str(headline);
+            out.push('\n');
+        }
+        // Wrapped continuation prose isn't a new bullet or heading, so it's dropped —
+        // the headline alone is the "1-2 lines per feature" summary.
+    }
+    truncate_notes(out.trim(), MAX_NOTES_CHARS)
 }
 
 /// Checks GitHub Releases (via the endpoint configured in tauri.conf.json) for a newer
@@ -381,30 +419,46 @@ async fn check_for_update_and_maybe_install(app: &tauri::AppHandle) {
     // workflow fills from the matching CHANGELOG.md section. Older releases (and any
     // build where the section was missing) have none, so the version-only wording stays
     // as the fallback rather than leaving an empty gap in the dialog.
-    //
-    // Truncated because this is a native OS dialog with no scrollbar — an unbounded body
-    // would push the Yes/No buttons off-screen on a long changelog, leaving the user
-    // unable to answer it at all.
     let notes = update.body.as_deref().unwrap_or("").trim();
-    let message = if notes.is_empty() {
+    let summary = if notes.is_empty() { String::new() } else { summarize_notes(notes) };
+    let message = if summary.is_empty() {
         format!(
             "A new version ({}) is available. Install it now? The app will restart.",
             update.version
         )
     } else {
         format!(
-            "A new version ({}) is available.\n\nWhat's new:\n{}\n\nInstall it now? The app will restart.",
+            "A new version ({}) is available.\n\nWhat's new:\n{}\nInstall it now? The app will restart.",
             update.version,
-            truncate_notes(notes, MAX_NOTES_CHARS)
+            summary
         )
     };
 
-    let confirmed = app
+    // A native message dialog can't render a clickable hyperlink, so "view the full notes"
+    // is its own button instead of inline text; pressing it opens the release page and
+    // leaves the update prompt unanswered (checked again next launch).
+    let release_url =
+        format!("https://github.com/{GITHUB_REPO}/releases/tag/v{}", update.version);
+
+    let result = app
         .dialog()
         .message(message)
         .title("StockSmith Update Available")
-        .buttons(MessageDialogButtons::YesNo)
-        .blocking_show();
+        .buttons(MessageDialogButtons::YesNoCancelCustom(
+            "Install".into(),
+            "Later".into(),
+            "View on GitHub".into(),
+        ))
+        .blocking_show_with_result();
+
+    let confirmed = match result {
+        MessageDialogResult::Custom(label) if label == "Install" => true,
+        MessageDialogResult::Custom(label) if label == "View on GitHub" => {
+            let _ = app.opener().open_url(release_url, None::<&str>);
+            false
+        }
+        _ => false,
+    };
 
     if !confirmed {
         return;
