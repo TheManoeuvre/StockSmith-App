@@ -341,7 +341,7 @@ relying on it being entered by hand.
 | 5 | Event-driven push + hourly reconcile | Add Square to `listing_push._PUSH_ENABLED_PLATFORMS` and `listing_reconcile._PLATFORMS` | High | **Must**, after #3 |
 | 6 | Create a listing (`create_draft_listing`) | `UpsertCatalogObject` (item + variations, idempotency key), created **archived**; images via `CreateCatalogImage` | Medium — no draft state (finding C1) | **Must** |
 | 7 | Draft readiness | New Square rule set: name, fixed price (or variable pricing), a SKU per unit | High | **Must**, with #6 |
-| 8 | Adopt existing listings | Write SKUs onto existing Square variations; read-then-upsert with `version` | High | **Should** — for items entered by hand at the counter |
+| 8 | Adopt existing listings | Write SKUs onto existing Square variations; read-then-upsert with `version` | High | **Could** — no hand-entered items in Square yet (decision 4) |
 | 9 | Platform limits, catalogue compatibility, variant conflicts | Add Square to `platform_limits._DEFAULT_LIMITS` | High | **Should** |
 | 10 | Platform fee components | Square fee rows via a migration — `seed._ensure_platform_fee_components` returns early if any row exists, so seeding won't reach existing installs | High | **Should** |
 | 11 | Push log, sync health, API usage | Already generic | High | Free |
@@ -410,7 +410,8 @@ written to `square_catalogue_spike_output.json`.
 - Image upload (`CreateCatalogImage`, multipart) — not exercised.
 - 429 behaviour. Square publishes no daily cap. `square_client._request` currently turns a
   429 into a plain `PlatformSyncError` with no retry/backoff.
-- Whether Square Online (same catalogue) exposes pushed items automatically.
+- Whether Square Online (same catalogue, and in use — see decision 3) exposes pushed or
+  archived items.
 
 ### Code that currently assumes Etsy/eBay only
 
@@ -423,13 +424,29 @@ written to `square_catalogue_spike_output.json`.
 - `platform_limits._DEFAULT_LIMITS` has no Square entry.
 - The Square store page hides the listing-push sections (phase 6).
 
-### Open decisions
+### Decisions (2026-09-30)
 
-1. **Created items: archived (review in Dashboard, then un-archive) or live on the till?**
-   Recommendation: archived, matching the Etsy rule that StockSmith never publishes.
-2. May a push switch on `track_inventory` for a variation that has it off, or only report it?
-3. Is Square Online in use? It shares the catalogue.
-4. Are there items already in Square entered by hand? If so, adoption (#8) moves up.
+1. **Created items start archived.** StockSmith creates the item with `is_archived: true`,
+   and the seller un-archives it in the Square Dashboard. This keeps the Etsy rule that
+   StockSmith never puts anything on sale. There's no per-push choice.
+2. **Tracking off → report, plus a separate confirmed action.**
+   - A variation with `track_inventory` off shows as "tracking off" in the product's Square
+     sync status, and the stock push skips it rather than silently doing nothing.
+   - A separate, explicitly confirmed action switches tracking on. Pushes never change it
+     implicitly.
+   - Items StockSmith creates are created with tracking on.
+3. **Square Online is in use.** It shares the catalogue, so whether a pushed item appears
+   online must be checked before #6 ships.
+   - Archived items are expected to be hidden online as well as on the till, but that's
+     unverified.
+   - The Square sandbox may not offer a Square Online site at all. If so, this check needs
+     another route (e.g. reading a known production item's online-visibility fields) — to
+     be agreed before running anything against production.
+4. **No hand-entered items in Square yet.** Adoption (#8) stays low priority; creating items
+   (#6) comes first.
+
+Still open, for the seller rather than a decision: on a real till, does Square block, warn,
+or allow selling an out-of-stock item (C4 only covered the API)?
 
 ## Open questions
 
