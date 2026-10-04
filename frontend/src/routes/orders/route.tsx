@@ -94,6 +94,11 @@ function netProfitSub(order: Order): string {
   if (order.cogs_pending) return "COGS pending";
   if (order.postage_cost_missing) return "No postage cost";
   if (order.platform != null && order.payment_fees == null) return "Fees not reported";
+  // Before shipping, postage cost is only the shipping profile's estimate (or not known
+  // at all), not what the label actually cost — a margin on top of that reads as more
+  // certain than it is, and is often overstated. Wait for the order to ship and freeze
+  // in the real postage cost before putting a number on it.
+  if (order.status !== "shipped") return "Before shipping";
   const pct = orderMarginPct(order);
   return pct == null ? "" : `${pct.toFixed(0)}% margin`;
 }
@@ -295,7 +300,7 @@ function OrderRow({
     order.discount_amount != null ? Number(order.discount_amount) : 0;
   const listPrice =
     discount > 0 && order.subtotal != null ? Number(order.subtotal) + discount : null;
-  const marginPct = orderMarginPct(order);
+  const marginPct = order.status === "shipped" ? orderMarginPct(order) : null;
   const netFg =
     order.net_profit != null && Number(order.net_profit) < 0
       ? "text-red-600"
