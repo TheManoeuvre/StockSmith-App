@@ -42,6 +42,12 @@ def _is_due(now: datetime, settings: NotificationSettings) -> bool:
     last = settings.daily_summary_last_fired_at
     if last is None:
         return True
+    if last.tzinfo is None:
+        # SQLite hands back naive datetimes even for DateTime(timezone=True) columns, and
+        # everything written here is UTC -- without this, .astimezone() would read the stored
+        # value as local time and shift the comparison by the UTC offset (see
+        # notifications._digest_due, which has the same fix).
+        last = last.replace(tzinfo=timezone.utc)
     last_local = last.astimezone()
     return last_local.date() < now.date() or last_local.hour < settings.daily_summary_hour_local
 
