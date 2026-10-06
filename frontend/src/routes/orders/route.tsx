@@ -281,6 +281,16 @@ function OrdersListContent() {
   );
 }
 
+// A small filled star marks a personalized line item in the orders list — a glanceable,
+// non-text cue that this order needs its customization text read before packing.
+function PersonalizationIcon() {
+  return (
+    <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M12 2l2.9 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l7.1-1.01z" />
+    </svg>
+  );
+}
+
 function OrderRow({
   order,
   onOpen,
@@ -354,6 +364,14 @@ function OrderRow({
                   ? `Unmapped: ${l.sku ?? "—"}`
                   : (l.product_name ?? "—")}
               </span>
+              {l.variation_text && (
+                <span
+                  title={`Personalized: ${l.variation_text}`}
+                  className="inline-flex shrink-0 items-center justify-center rounded-full bg-violet-100 p-0.5 text-violet-600"
+                >
+                  <PersonalizationIcon />
+                </span>
+              )}
             </div>
           ))}
       </td>
