@@ -775,13 +775,17 @@ class EbayAdapter:
         cutoff = ensure_utc(connection.last_orders_synced_at)
         enrich = payment_state is not PaymentState.unsettled and (cutoff is None or last_modified >= cutoff)
 
-        payment_fees = payment_net = payment_status = None
+        payment_fees = payment_net = payment_status = refunded_amount = None
         tracking_number = carrier = None
         postage_charges: list[ExternalPostageCharge] = []
         if enrich:
-            payment_fees, payment_net, payment_status, postage_charges = await self._fetch_transactions(
-                session, connection, order.get("orderId")
-            )
+            (
+                payment_fees,
+                payment_net,
+                payment_status,
+                postage_charges,
+                refunded_amount,
+            ) = await self._fetch_transactions(session, connection, order.get("orderId"))
             if is_shipped:
                 tracking_number, carrier = await self._fetch_tracking(session, connection, order.get("orderId"))
 
@@ -823,6 +827,7 @@ class EbayAdapter:
             shipping_charged=self._net_money(pricing.get("deliveryCost"), pricing.get("deliveryDiscount")),
             tax_charged=self._parse_money(pricing.get("tax")),
             discount_amount=item_discount,
+            refunded_amount=refunded_amount,
             payment_fees=payment_fees,
             payment_net=payment_net,
             payment_status=payment_status,
@@ -943,6 +948,19 @@ class EbayAdapter:
         anything ever erroring. It also covers adjustment, fee and importCharges — real
         terms in eBay's total that nothing here reads yet.
         """
+        if external.refunded_amount is not None and external.grand_total is not None:
+            # A refund is not part of the buyer's total (it is read from the Finances API,
+            # not pricingSummary), so it can't be reconciled term by term. It can still be
+            # sanity-checked: refunding more than the buyer paid means a REFUND row is being
+            # double-counted or attributed to the wrong order.
+            if float(external.refunded_amount) - float(external.grand_total) >= 0.01:
+                logger.warning(
+                    "eBay order %s refunds %s, more than the %s the buyer paid. A REFUND transaction is being "
+                    "misread or double-counted.",
+                    external.external_order_id,
+                    external.refunded_amount,
+                    external.grand_total,
+                )
         if external.grand_total is None or external.subtotal is None:
             return
         parts = float(external.subtotal) + float(external.shipping_charged or 0) + float(external.tax_charged or 0)
@@ -961,7 +979,7 @@ class EbayAdapter:
 
     async def _fetch_transactions(
         self, session, connection: PlatformConnection, order_id
-    ) -> tuple[str | None, str | None, str | None, list[ExternalPostageCharge]]:
+    ) -> tuple[str | None, str | None, str | None, list[ExternalPostageCharge], str | None]:
         """Sell Finances API getTransactions filtered by orderId — mirrors Etsy's
         per-receipt _fetch_payment. Reads the SALE transaction's fee total for this order;
         a transaction whose payout hasn't settled yet just means these stay None,
@@ -982,7 +1000,7 @@ class EbayAdapter:
         settled" forever, which is exactly what a genuinely unsettled order looks like.
         """
         if order_id is None:
-            return None, None, None, []
+            return None, None, None, [], None
         try:
             response = await self._authed_request(
                 session,
@@ -997,18 +1015,19 @@ class EbayAdapter:
             # breakdown and nothing else; failing the whole sync over it would be a far
             # worse trade.
             logger.warning("Skipping eBay fee lookup for order %s: %s", order_id, e)
-            return None, None, None, []
+            return None, None, None, [], None
         if response.status_code != 200:
             logger.warning(
                 "eBay fee lookup failed for order %s: %d %s", order_id, response.status_code, response.text[:500]
             )
-            return None, None, None, []
+            return None, None, None, [], None
         results = response.json().get("transactions", [])
         labels = self._parse_shipping_labels(results, str(order_id))
+        refunded = self._sum_refunds(results, str(order_id))
         sale = next((t for t in results if str(t.get("transactionType")).upper() == "SALE"), None)
         if sale is None:
             logger.info("eBay returned no SALE transaction for order %s — fees not available yet", order_id)
-            return None, None, None, labels
+            return None, None, None, labels, refunded
 
         # totalFeeAmount is the dedicated total-fees field on eBay's Transaction schema.
         # This previously summed totalFeeBasisAmount instead, which is wrong twice over:
@@ -1039,8 +1058,31 @@ class EbayAdapter:
             f"{float(net):.2f}" if net is not None else None,
             sale.get("transactionStatus"),
             labels,
+            refunded,
         )
 
+    @staticmethod
+    def _sum_refunds(transactions: list[dict], order_id: str | None = None) -> str | None:
+        """Money returned to the buyer, summed from the REFUND transactions in a
+        getTransactions response. None when there are none, so an order that was never
+        refunded stays distinguishable from a zero. The amount is taken on magnitude (a
+        REFUND is booked as a DEBIT, but the sign convention isn't worth betting on — see
+        _discount_total). A refund carrying a different orderId is skipped: the orderId
+        filter can return rows for other orders, as it does for bulk label purchases."""
+        total = 0.0
+        found = False
+        for tx in transactions:
+            if str(tx.get("transactionType")).upper() != "REFUND":
+                continue
+            tx_order_id = tx.get("orderId")
+            if order_id is not None and tx_order_id is not None and str(tx_order_id) != order_id:
+                continue
+            value = (tx.get("amount") or {}).get("value")
+            if value is None:
+                continue
+            total += abs(float(value))
+            found = True
+        return f"{total:.2f}" if found else None
     @classmethod
     def _parse_shipping_labels(cls, transactions: list[dict], order_id: str | None = None) -> list[ExternalPostageCharge]:
         """Every SHIPPING_LABEL DEBIT in a getTransactions response, oldest first. eBay

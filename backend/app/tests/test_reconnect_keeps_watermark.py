@@ -40,11 +40,10 @@ async def test_disconnect_keeps_the_watermark_and_account_id(session, connection
     await platforms_router.disconnect_platform(ListingPlatform.etsy, session)
 
     connection = await _refresh(session, connection)
-    # Genuinely disconnected — tokens gone, is_connected false, auto-sync off.
+    # Genuinely disconnected — tokens gone, is_connected false.
     assert connection.refresh_token is None
     assert connection.access_token is None
     assert connection.is_connected is False
-    assert connection.auto_sync_enabled is False
     # ...but the sync position is retained for a same-shop reconnect.
     assert connection.last_orders_synced_at.replace(tzinfo=timezone.utc) == _WATERMARK
     assert connection.unpaid_hold_since.replace(tzinfo=timezone.utc) == _HOLD
@@ -134,3 +133,31 @@ async def test_first_ever_connection_starts_with_no_watermark(session, complete_
     )
     assert connection.external_account_id == "777"
     assert connection.last_orders_synced_at is None
+
+
+async def test_disconnect_and_reconnect_keeps_auto_sync_on(session, connection, complete_oauth):
+    """Disconnect/reconnect is the first thing anyone tries on a stuck platform; it must
+    not quietly switch auto-sync off."""
+    connection.auto_sync_enabled = True
+    await session.commit()
+    await platforms_router.disconnect_platform(ListingPlatform.etsy, session)
+
+    connection = await _refresh(session, connection)
+    assert connection.is_connected is False  # the scheduler won't tick it while disconnected
+
+    await complete_oauth(session, account_id="12345")
+
+    connection = await _refresh(session, connection)
+    assert connection.is_connected is True
+    assert connection.auto_sync_enabled is True
+
+
+async def test_reconnecting_as_a_different_shop_switches_auto_sync_off(session, connection, complete_oauth):
+    connection.auto_sync_enabled = True
+    await session.commit()
+    await platforms_router.disconnect_platform(ListingPlatform.etsy, session)
+
+    await complete_oauth(session, account_id="99999")
+
+    connection = await _refresh(session, connection)
+    assert connection.auto_sync_enabled is False
