@@ -42,6 +42,7 @@ from app.schemas.product import (
     ProductPage,
     ProductPriceSnapshotRead,
     ProductRead,
+    ProductStoreState,
     ProductUpdate,
 )
 from app.schemas.variant import VariantCreate, VariantRead
@@ -56,7 +57,7 @@ from app.services.buildability import (
     get_buildable_by_product,
     get_ready_to_ship_by_bundle,
 )
-from app.services import abc, attribute_values, listing_push, platform_fees, variant_merge, variant_platform_conflicts
+from app.services import abc, attribute_values, listing_push, platform_fees, product_platforms, variant_merge, variant_platform_conflicts
 from app.services.csv_io import export_products_csv, import_products_csv
 from app.services.kitting import (
     _clamp_value_to_ceiling,
@@ -196,6 +197,7 @@ class _ProductReadContext:
     fee_components: object
     shipping_profiles_by_id: dict
     abc_rules: abc.Rules
+    store_states: dict
 
     @staticmethod
     async def build(session: AsyncSession) -> "_ProductReadContext":
@@ -222,6 +224,7 @@ class _ProductReadContext:
             fee_components=fee_components,
             shipping_profiles_by_id=await get_shipping_profiles_by_id(session),
             abc_rules=await abc.load_rules(session),
+            store_states=await product_platforms.store_states(session),
         )
 
 
@@ -314,6 +317,11 @@ def _read_product(product: Product, ctx: "_ProductReadContext") -> ProductRead:
                 resolve_shipping_cost_for_fee_source(shipping_profile, ctx.fee_source) if shipping_profile else None
             ),
             "cogs_incomplete": product.id in ctx.cogs_incomplete_ids,
+            "store_states": [
+                ProductStoreState(platform=platform.value, is_on=is_on, is_locked=is_locked)
+                for platform in product_platforms.PUSHABLE_PLATFORMS
+                for is_on, is_locked in [ctx.store_states.get(product.id, {}).get(platform, (True, False))]
+            ],
             # Bundles are never counted (their quantity is derived from components), so
             # they carry no classification rather than a meaningless one.
             "classification": (
@@ -449,6 +457,7 @@ async def create_product(payload: ProductCreate, session: AsyncSession = Depends
     await session.flush()  # assigns product.id without a second commit round-trip
     product.sku = sku or f"SKU-{product.id:04d}"
     await apply_default_kitting_bom(session, product.id)
+    await product_platforms.apply_new_product_defaults(session, product.id)
     await session.commit()
     return await _get_product_with_type(session, product.id)
 

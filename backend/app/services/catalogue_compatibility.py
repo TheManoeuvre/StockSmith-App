@@ -26,6 +26,7 @@ from app.models.asset import AssetType, ProductAsset
 from app.models.listing import ListingPlatform
 from app.models.product import Product
 from app.models.variant import ProductVariant
+from app.services import product_platforms
 from app.schemas.platform_limits import (
     CatalogueCompatibilityReport,
     FieldViolation,
@@ -64,9 +65,12 @@ async def scan_catalogue(session: AsyncSession, platform: ListingPlatform) -> Ca
     table = await load_limit_table(session)
     effective = resolve_effective_limits({platform}, table)
 
-    products = list(
-        (await session.execute(select(Product).where(Product.is_active.is_(True)))).scalars()
-    )
+    # Products switched off for this store aren't headed there, so what they'd breach is
+    # noise. Counted separately so the report doesn't just look smaller for no reason.
+    excluded = await product_platforms.excluded_product_ids(session, platform)
+    active = list((await session.execute(select(Product).where(Product.is_active.is_(True)))).scalars())
+    products = [product for product in active if product.id not in excluded]
+    excluded_count = len(active) - len(products)
     variants = list(
         (
             await session.execute(
@@ -144,5 +148,6 @@ async def scan_catalogue(session: AsyncSession, platform: ListingPlatform) -> Ca
         total_products=len(products),
         blocked_count=blocked,
         warning_count=warned,
+        excluded_count=excluded_count,
         products=reported,
     )

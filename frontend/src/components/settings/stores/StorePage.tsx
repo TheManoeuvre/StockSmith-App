@@ -16,6 +16,7 @@ import { OrderSyncCard } from "./OrderSyncCard";
 import { SquareConnectDialog } from "./SquareConnectDialog";
 import { SquareLocationCard } from "./SquareLocationCard";
 import { StockPushesCard } from "./StockPushesCard";
+import { ProductScopeCard } from "./ProductScopeCard";
 import { StoreToolsCard } from "./StoreToolsCard";
 import { formatRelative, stateChip, useStoreHealth } from "./useStoreHealth";
 
@@ -179,6 +180,7 @@ export function StorePage({ platform }: { platform: ListingPlatform }) {
                 failingPushCount={failingPushCount}
                 blockedPushCount={blockedPushCount}
               />
+              {status && <ProductScopeCard platform={platform} status={status} />}
               <ListingProfiles platform={platform}>
                 {platform === "etsy" && (
                   <Disclosure

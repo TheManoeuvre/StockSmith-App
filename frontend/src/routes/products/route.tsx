@@ -22,6 +22,7 @@ import { CsvImportExport } from "../../components/common/CsvImportExport";
 import { FilterTabs } from "../../components/common/FilterTabs";
 import { GroupHeaderRow, Th } from "../../components/common/ListTable";
 import { PlatformSyncBadge } from "../../components/products/PlatformSyncBadge";
+import { storeState } from "../../components/products/ProductStoreSection";
 import { inclFallbacksNote, sellableSummary } from "../../lib/format";
 import { formatUnitCost } from "../../lib/money";
 
@@ -524,7 +525,8 @@ function ProductRow({
       <td className="p-2">
         <div className="flex flex-wrap gap-1">
           {storeStatuses.map(({ platform, byProduct }) => {
-            const status = byProduct[p.id];
+            // A store the product is switched off for gets no badge at all.
+            const status = storeState(p, platform).is_on ? byProduct[p.id] : undefined;
             // A product absent from a platform's index has never been checked against it
             // — that's "not listed here", so show nothing rather than a "not tested"
             // badge implying it should be.

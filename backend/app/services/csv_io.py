@@ -20,6 +20,7 @@ from app.services.colours import find_or_create as find_or_create_colour
 from app.services import material_categories
 from app.services.costing import recompute_material
 from app.services.kitting import apply_default_kitting_bom
+from app.services.product_platforms import apply_new_product_defaults
 from app.services.validation import validate_qty_for_unit
 
 MATERIALS_CSV_FIELDS = [
@@ -402,6 +403,7 @@ async def import_products_csv(session: AsyncSession, content: bytes) -> dict:
                 if not sku:
                     product.sku = f"SKU-{product.id:04d}"
                 await apply_default_kitting_bom(session, product.id)
+                await apply_new_product_defaults(session, product.id)
                 created += 1
             else:
                 existing.name = name

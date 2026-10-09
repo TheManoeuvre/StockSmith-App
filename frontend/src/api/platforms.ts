@@ -1,6 +1,6 @@
 import { api } from "./client";
 import type { NamedOption } from "./listingProfiles";
-import type { ListingPlatform } from "./types";
+import type { ListingPlatform, ProductStoreState } from "./types";
 
 export type PlatformEnvironment = "production" | "sandbox";
 
@@ -37,6 +37,12 @@ export interface PlatformStatus {
   // sync) stand down so order sync keeps its headroom.
   api_calls_today: number;
   api_call_budget: number;
+  // Per-product store switches. product_scope_decided_at stays null until the one-off
+  // "all products on or off?" prompt has been answered for this store.
+  new_products_default_on: boolean;
+  product_scope_decided_at: string | null;
+  products_on_count: number;
+  products_off_count: number;
 }
 
 export interface SyncSettingsUpdate {
@@ -373,6 +379,12 @@ export const platformsApi = {
   status: (platform: ListingPlatform) => api.get<PlatformStatus>(`/platforms/${platform}/status`),
   connect: (platform: ListingPlatform, environment: PlatformEnvironment = "production") =>
     api.post<{ authorize_url: string }>(`/platforms/${platform}/connect?environment=${environment}`),
+  setProductStore: (platform: ListingPlatform, productId: number, on: boolean) =>
+    api.put<ProductStoreState>(`/platforms/${platform}/products/${productId}/store`, { on }),
+  applyProductScope: (platform: ListingPlatform, on: boolean) =>
+    api.post<{ products_set: number }>(`/platforms/${platform}/product-scope`, { on }),
+  setNewProductDefault: (platform: ListingPlatform, onByDefault: boolean) =>
+    api.put<void>(`/platforms/${platform}/new-product-default`, { on_by_default: onByDefault }),
   disconnect: (platform: ListingPlatform) => api.post<void>(`/platforms/${platform}/disconnect`),
   previewSync: (platform: ListingPlatform) => api.post<SyncPreviewResult>(`/platforms/${platform}/preview-sync`),
   syncOrders: (platform: ListingPlatform) => api.post<SyncCommitResult>(`/platforms/${platform}/sync-orders`),

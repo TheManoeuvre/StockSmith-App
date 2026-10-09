@@ -150,6 +150,7 @@ export function VariantEditor({ productId }: { productId: number }) {
       <ErrorBanner error={platformConflict ? null : createVariantMutation.error} />
       {platformConflict && (
         <PlatformConflictDialog
+          productId={productId}
           detail={platformConflict}
           busy={createVariantMutation.isPending}
           onResolve={(resolution) => createVariantMutation.mutate(resolution)}
@@ -374,6 +375,7 @@ function VariantRow({
           <ErrorBanner error={renameMutation.error ?? (togglePlatformConflict ? null : toggleActiveMutation.error)} />
           {togglePlatformConflict && (
             <PlatformConflictDialog
+              productId={productId}
               detail={togglePlatformConflict}
               busy={toggleActiveMutation.isPending}
               onResolve={(resolution) => toggleActiveMutation.mutate(resolution)}

@@ -61,6 +61,18 @@ class ProductUpdate(BaseModel):
     variant_attribute3_name: str | None = None
 
 
+class ProductStoreState(BaseModel):
+    """One store's on/off switch for one product.
+
+    `is_locked` means a live listing pins the store on, so the switch cannot be turned off
+    until that listing is ended.
+    """
+
+    platform: str
+    is_on: bool
+    is_locked: bool = False
+
+
 class ProductRead(ProductBase):
     model_config = ConfigDict(from_attributes=True)
 
@@ -95,6 +107,7 @@ class ProductRead(ProductBase):
     expected_max_sellable_reason: str | None = None
     theoretical_max_sellable: int | None = None
     theoretical_max_sellable_reason: str | None = None
+    store_states: list[ProductStoreState] = []
     cost_per_unit: Decimal | None = None
     # Base kitting BOM cost per unit — the packaging half of what it costs to fulfil one
     # unit, so margin can account for it (see pricing.compute_profit_margin). None for a

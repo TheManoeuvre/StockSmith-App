@@ -57,4 +57,6 @@ class CatalogueCompatibilityReport(BaseModel):
     total_products: int
     blocked_count: int
     warning_count: int
+    # Active products switched off for this store, left out of every count above.
+    excluded_count: int = 0
     products: list[ProductCompatibility]

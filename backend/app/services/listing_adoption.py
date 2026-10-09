@@ -18,7 +18,7 @@ from app.schemas.listing_adoption import (
     VariationMappingEntry,
     VariationMappingProposal,
 )
-from app.services import listing_sync
+from app.services import listing_sync, product_platforms
 from app.services.platforms.base import ClassicListingCandidate, ListingProductRef, UnadoptedListingCandidate
 from app.services.variants import compute_full_sku
 
@@ -486,6 +486,8 @@ async def apply_adoption(
         session, product, platform, marketplace_shipping_id
     )
 
+    # Linking a listing is an unambiguous "sold here" — see draft_listing.push_draft.
+    await product_platforms.set_product_store(session, product.id, platform, True)
     await session.commit()
     summary = await listing_sync.get_stored_product_sync_status(session, product.id, platform)
     return AdoptListingResult(

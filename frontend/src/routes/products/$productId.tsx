@@ -17,6 +17,7 @@ import { StockSection } from "../../components/products/StockSection";
 import { PricingSection } from "../../components/products/PricingSection";
 import { ProductPlatformSettingsPanel } from "../../components/products/ProductPlatformSettingsPanel";
 import { PlatformSyncSection } from "../../components/products/PlatformSyncSection";
+import { ProductStoreSection } from "../../components/products/ProductStoreSection";
 import { CopyButton } from "../../components/common/CopyButton";
 import { Badge } from "../../components/common/Badge";
 import { ConfirmDialog } from "../../components/common/ConfirmDialog";
@@ -855,12 +856,11 @@ function ProductDetail() {
               showBuildableToggle={!product.is_bundle}
             />
             {(["etsy", "ebay"] as const).map((platform) => (
-              <div key={platform} className="flex flex-col gap-3">
-                <h3 className="text-md font-semibold capitalize">{platform}</h3>
+              <ProductStoreSection key={platform} product={product} platform={platform}>
                 <ProductPlatformSettingsPanel productId={id} platform={platform} />
                 <PlatformSyncSection productId={id} platform={platform} />
                 <SyncLog productId={id} platform={platform} />
-              </div>
+              </ProductStoreSection>
             ))}
           </section>
         )}
