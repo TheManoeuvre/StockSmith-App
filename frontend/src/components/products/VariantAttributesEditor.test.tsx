@@ -246,3 +246,34 @@ it("offers only active colours of the type, keeping the original", async () => {
   expect(screen.queryByLabelText("White")).toBeNull();
   expect(screen.getAllByRole("checkbox")).toHaveLength(4); // rule toggle, 2 colours, quantity toggle
 });
+
+it("tells two live colours of the same name apart, and lets both be ticked", async () => {
+  // A second brand bought because the first ran out: two active whites. Labelled by
+  // colour alone they are indistinguishable, and as attribute values they collide.
+  const petg = { material_type_id: 3, is_active: true };
+  const sunluWhite = { id: 9, name: "Sunlu | PETG | Matte White", colour: "White", ...petg };
+  const bambuWhite = { id: 56, name: "Bambu Lab | PETG Basic | White", colour: "White", ...petg };
+  const black = { id: 17, name: "Bambu Lab | PETG HF | Black", colour: "Black", ...petg };
+  setRoutes([
+    { method: "GET", path: "/products/48/bom", respond: () => [{ id: 1, product_id: 48, material_id: 9, qty_required: "10" }] },
+    { method: "GET", path: "/products/48/variants", respond: () => [] },
+    { method: "GET", path: "/materials", respond: () => [sunluWhite, black, bambuWhite] },
+    { method: "GET", path: "/materials?material_type_id=3", respond: () => [sunluWhite, black, bambuWhite] },
+    { method: "GET", path: "/materials/colours", respond: () => [] },
+  ]);
+  renderEditor();
+  await userEvent.type(await screen.findByPlaceholderText("Size, Colour…"), "Colour");
+  await userEvent.click(screen.getByLabelText("Material driven by this attribute"));
+
+  // Only the clashing colour gets the long form; Black stays as it was.
+  await screen.findByLabelText("Black");
+  expect(screen.getByLabelText("White — Sunlu | PETG | Matte White (original)")).toBeChecked();
+  const bambu = screen.getByLabelText("White — Bambu Lab | PETG Basic | White");
+  expect(bambu).not.toBeChecked();
+
+  await userEvent.click(bambu);
+
+  // Ticking the second must not replace the first.
+  expect(bambu).toBeChecked();
+  expect(screen.getByLabelText("White — Sunlu | PETG | Matte White (original)")).toBeChecked();
+});
