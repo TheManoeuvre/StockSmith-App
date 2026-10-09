@@ -178,6 +178,9 @@ class PendingReviewAlert:
     amount: Decimal | None  # None for a bulk label — see OrderPostageCharge.amount
     currency: str | None
     posted_at: datetime | None
+    # Set when the parcel came from a marketplace shipment rather than a label charge
+    # (order_parcels.apply_extra_shipments) — changes the wording only.
+    shipment_tracking: str | None = None
 
 
 async def raise_replacement_parcel_review_alert(session: AsyncSession, alert: PendingReviewAlert) -> None:
@@ -207,8 +210,12 @@ async def raise_replacement_parcel_review_alert(session: AsyncSession, alert: Pe
         urgency=NotificationUrgency.immediate,
         title=f"Replacement parcel sent for {platform_label} order {alert.external_order_id or alert.order_id}",
         body=(
-            f"A second shipping label ({money}) was bought against this order{when}. "
-            "Add what was sent and why on the order's Fulfilment tab so stock and profit stay right."
+            (
+                f"A second parcel (tracking {alert.shipment_tracking}) was shipped against this order{when}. "
+                if alert.shipment_tracking
+                else f"A second shipping label ({money}) was bought against this order{when}. "
+            )
+            + "Add what was sent and why on the order's Fulfilment tab so stock and profit stay right."
         ),
         delivery_mode=config.delivery_mode,
         related_entity_type="order",
