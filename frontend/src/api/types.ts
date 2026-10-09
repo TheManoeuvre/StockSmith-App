@@ -697,6 +697,8 @@ export interface BulkBomAmendRequest {
   lines: BulkBomAmendLine[];
   apply?: boolean;
   include_inactive?: boolean;
+  // Also overwrite rows the user set by hand in a variant's own BOM editor.
+  include_manual?: boolean;
   is_kitting?: boolean;
 }
 
@@ -713,6 +715,7 @@ export interface BulkBomAmendUnit {
   variant_id: number;
   variant_name: string;
   changes: BulkBomAmendChange[]; // empty when already correct
+  kept_manual: BulkBomAmendChange[]; // changes not made: the row was set by hand
 }
 
 export interface BulkBomAmendResult {
@@ -720,6 +723,7 @@ export interface BulkBomAmendResult {
   matched_variant_count: number;
   changed_variant_count: number;
   skipped_inactive_count: number;
+  kept_manual_count: number;
   units: BulkBomAmendUnit[];
 }
 

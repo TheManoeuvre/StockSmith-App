@@ -847,6 +847,7 @@ async def amend_variant_bom_overrides(
         payload.lines,
         apply=payload.apply,
         include_inactive=payload.include_inactive,
+        include_manual=payload.include_manual,
         is_kitting=payload.is_kitting,
     )
 
@@ -854,22 +855,24 @@ async def amend_variant_bom_overrides(
         # Same reasoning as the single-variant path: a BOM change moves max_buildable,
         # which moves the quantity pushed to the marketplace. _enqueue dedupes and
         # debounces, so amending forty variants schedules forty tasks that drain safely.
-        for variant, changes, _replaced, _new in units:
+        for variant, changes, _replaced, _new, _kept in units:
             if changes:
                 listing_push.enqueue_for_product(product_id, variant.id)
 
     return BulkBomAmendResult(
         applied=payload.apply,
         matched_variant_count=matched_count,
-        changed_variant_count=sum(1 for _v, changes, _r, _n in units if changes),
+        changed_variant_count=sum(1 for _v, changes, _r, _n, _k in units if changes),
+        kept_manual_count=sum(len(kept) for _v, _c, _r, _n, kept in units),
         skipped_inactive_count=skipped_inactive,
         units=[
             BulkBomAmendUnit(
                 variant_id=variant.id,
                 variant_name=variant.variant_name,
                 changes=[BulkBomAmendChange(**c) for c in changes],
+                kept_manual=[BulkBomAmendChange(**c) for c in kept],
             )
-            for variant, changes, _replaced, _new in units
+            for variant, changes, _replaced, _new, kept in units
         ],
     )
 

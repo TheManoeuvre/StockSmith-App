@@ -237,6 +237,9 @@ class BulkBomAmendRequest(BaseModel):
     # default, not an option.
     apply: bool = False
     include_inactive: bool = False
+    # Rows the user set by hand in a variant's own BOM editor are left alone unless this
+    # is set; the preview lists them as kept either way.
+    include_manual: bool = False
 
 
 class BulkBomAmendChange(BaseModel):
@@ -252,6 +255,8 @@ class BulkBomAmendUnit(BaseModel):
     variant_id: int
     variant_name: str
     changes: list[BulkBomAmendChange]  # empty when this variant is already correct
+    # Changes not made because the row they would replace was set by hand.
+    kept_manual: list[BulkBomAmendChange] = []
 
 
 class BulkBomAmendResult(BaseModel):
@@ -259,6 +264,7 @@ class BulkBomAmendResult(BaseModel):
     matched_variant_count: int
     changed_variant_count: int
     skipped_inactive_count: int
+    kept_manual_count: int = 0
     units: list[BulkBomAmendUnit]
 
 
