@@ -139,3 +139,52 @@ async def test_bulk_sku_check_skips_excluded_products(session):
     result = await listing_sync.check_all_products_sku_sync(session, {}, EBAY)
     assert [s.product_id for s in result.summaries] == [kept.id]
     assert product_platforms.PUSHABLE_PLATFORMS == (ETSY, EBAY)
+
+
+@pytest.mark.asyncio
+async def test_products_csv_round_trips_the_store_switches(session):
+    import csv
+    import io
+
+    from app.services.csv_io import export_products_csv, import_products_csv
+
+    off = await _product(session, "Off", "SKU-OFF")
+    await _product(session, "On", "SKU-ON")
+    await set_product_store(session, off.id, EBAY, False)
+    await session.commit()
+
+    rows = {r["sku"]: r for r in csv.DictReader(io.StringIO(await export_products_csv(session)))}
+    assert (rows["SKU-OFF"]["sold_on_ebay"], rows["SKU-OFF"]["sold_on_etsy"]) == ("false", "true")
+    assert rows["SKU-ON"]["sold_on_ebay"] == "true"
+
+    content = b"name,sku,description,is_active,sold_on_etsy,sold_on_ebay\nOff,SKU-OFF,,true,,true\nNew,SKU-NEW,,true,false,\n"
+    result = await import_products_csv(session, content)
+    assert result["failed"] == []
+    new = (await session.execute(select(Product).where(Product.sku == "SKU-NEW"))).scalar_one()
+    assert await excluded_product_ids(session, ETSY) == {new.id}  # explicit cell applied
+    assert await excluded_product_ids(session, EBAY) == set()  # explicit true turned it back on
+
+
+@pytest.mark.asyncio
+async def test_products_csv_without_store_columns_changes_nothing(session):
+    from app.services.csv_io import import_products_csv
+
+    off = await _product(session, "Off", "SKU-OFF")
+    await set_product_store(session, off.id, EBAY, False)
+    await session.commit()
+    await import_products_csv(session, b"name,sku,description,is_active\nOff,SKU-OFF,,true\n")
+    assert await excluded_product_ids(session, EBAY) == {off.id}
+
+
+@pytest.mark.asyncio
+async def test_product_list_can_be_narrowed_to_a_store(session):
+    from app.routers.products import list_products
+
+    off = await _product(session, "Off", "SKU-OFF")
+    on = await _product(session, "On", "SKU-ON")
+    await set_product_store(session, off.id, EBAY, False)
+    await session.commit()
+
+    page = await list_products(limit=50, offset=0, sold_on=EBAY, session=session)
+    assert [p.id for p in page.items] == [on.id]
+    assert page.total == 1

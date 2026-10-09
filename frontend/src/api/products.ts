@@ -1,5 +1,6 @@
 import { api, downloadCsv, uploadCsv, type CsvImportResult } from "./client";
 import type {
+  ListingPlatform,
   ABCClass,
   AttributeValueMergePlan,
   AttributeValueMergePreviewRequest,
@@ -64,7 +65,7 @@ export const productsApi = {
   listPaged: (
     limit: number,
     offset: number,
-    opts: { cogsIncomplete?: boolean; includeInactive?: boolean; q?: string } = {},
+    opts: { cogsIncomplete?: boolean; includeInactive?: boolean; soldOn?: ListingPlatform; q?: string } = {},
   ) =>
     api.get<ProductPage>(
       // Filtered server-side: the list is paginated, so narrowing it client-side would
@@ -72,6 +73,7 @@ export const productsApi = {
       `/products?limit=${limit}&offset=${offset}` +
         `${opts.cogsIncomplete ? "&cogs_incomplete=true" : ""}` +
         `${opts.includeInactive ? "&include_inactive=true" : ""}` +
+        `${opts.soldOn ? `&sold_on=${opts.soldOn}` : ""}` +
         `${opts.q?.trim() ? `&q=${encodeURIComponent(opts.q.trim())}` : ""}`,
     ),
   get: (id: number) => api.get<Product>(`/products/${id}`),

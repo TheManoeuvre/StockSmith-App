@@ -21,6 +21,7 @@ from app.schemas.kitting import KittingBomLine, KittingBomLineRead
 from app.schemas.stock_adjustment import StockAdjustmentRead
 from app.schemas.stock_event import ProductStockEventRead
 from app.models.pricing import ProductPriceSnapshot
+from app.models.listing import ListingPlatform
 from app.schemas.product import (
     AttributeValueMergePlan,
     AttributeValueMergePreviewRequest,
@@ -354,6 +355,9 @@ async def list_products(
     # for the same reason as the category filter above: the list is paginated, so filtering
     # in the client would only ever narrow the current page and leave `total` wrong.
     cogs_incomplete: bool = False,
+    # Narrows to products switched on for one store (unset counts as on, a live listing pins
+    # it on). Server-side for the same pagination reason as the filters above.
+    sold_on: ListingPlatform | None = None,
     # Off by default, so a deactivated product falls out of the list the way a deleted one
     # would — see DELETE /products/{id} below, which sets is_active=False rather than
     # removing the row. Server-side for the same pagination reason as the filters above;
@@ -370,6 +374,8 @@ async def list_products(
     # this page's product IDs, which is also what lets the gap set be exact rather than
     # page-local. See _ProductReadContext.
     ctx = await _ProductReadContext.build(session)
+    if sold_on is not None and sold_on not in product_platforms.PUSHABLE_PLATFORMS:
+        raise HTTPException(status_code=400, detail=f"{sold_on.value} has no product listings")
     count_query = select(func.count()).select_from(Product)
     incomplete_count_query = select(func.count()).select_from(Product).where(Product.id.in_(ctx.cogs_incomplete_ids))
     inactive_count_query = select(func.count()).select_from(Product).where(Product.is_active.is_(False))
@@ -380,6 +386,13 @@ async def list_products(
         .options(selectinload(Product.product_category))
         .outerjoin(ProductCategory, ProductCategory.id == Product.product_category_id)
     )
+    if sold_on is not None:
+        off = await product_platforms.excluded_product_ids(session, sold_on)
+        if off:
+            count_query = count_query.where(Product.id.not_in(off))
+            incomplete_count_query = incomplete_count_query.where(Product.id.not_in(off))
+            inactive_count_query = inactive_count_query.where(Product.id.not_in(off))
+            query = query.where(Product.id.not_in(off))
     if product_category_id is not None:
         count_query = count_query.where(Product.product_category_id == product_category_id)
         incomplete_count_query = incomplete_count_query.where(Product.product_category_id == product_category_id)

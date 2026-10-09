@@ -8,19 +8,21 @@ Built as recommended in "Decisions needed", with these departures from the plan 
 - **New products**: only an *off* default writes a row (`is_target = false`). An on default
   writes nothing — unset already means on, and changing the store default later never moves
   an existing product either way, so explicit "on" rows would buy nothing.
-- **CSV**: import applies the store defaults to created products; export has no per-store
-  column yet.
-- **Products list**: off stores lose their badge; the "Sold on" filter is not built (the
-  list is server-paginated, so it needs a backend query param).
-- **Notification alert scoping** (`check_shipping_profile_missing_alerts`) and the
-  new-product form's store chips are not built.
+- **CSV**: export and import carry `sold_on_etsy` / `sold_on_ebay`. A blank cell on import
+  leaves the switch alone; an explicit cell wins over the store default, and a live product
+  can't be imported off (the row fails).
+- **Products list**: off stores lose their badge, and a "Sold on" filter narrows the
+  server-paginated list (`GET /products?sold_on=`).
+- **Shipping-profile-missing alert** is skipped when every active product using the profile
+  is off for that store; a profile no product uses still alerts.
+- **New-product form** shows a chip per connected store, starting at the store's default; only
+  flipped chips are written.
 - **Different-account reconnect** clears `product_scope_decided_at`, so the prompt is asked
   again for a different shop.
 - The functional UI uses existing components; the visual pass is still the Claude Design
   hand-off.
 
-Original planning findings
- below come from reading
+Original planning findings below come from reading
 `services/product_platforms.py`, `models/listing_profile.py` (`ProductPlatformSettings`),
 `models/platform_connection.py`, and the product/store UI as they exist today.
 

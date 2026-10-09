@@ -27,7 +27,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.listing import ListingPlatform
 from app.models.notification import NotificationAlertState, NotificationCategory, NotificationDeliveryMode, NotificationUrgency
 from app.models.order import Order, OrderStatus
-from app.services import platform_api_usage
+from app.models.product import Product
+from app.services import platform_api_usage, product_platforms
 from app.services.buildability import get_orders_awaiting_inventory
 from app.services.forecasting import compute_material_forecasts
 from app.services.notifications import (
@@ -276,6 +277,17 @@ async def resolve_order_cancellation_pending_alert(session: AsyncSession, order_
     )
 
 
+async def _used_only_by(session: AsyncSession, shipping_profile_id: int, product_ids: set[int]) -> bool:
+    """True when the profile has active users and every one of them is in `product_ids`."""
+    users = {
+        row[0]
+        for row in await session.execute(
+            select(Product.id).where(Product.shipping_profile_id == shipping_profile_id, Product.is_active.is_(True))
+        )
+    }
+    return bool(users) and users <= product_ids
+
+
 async def check_shipping_profile_missing_alerts(
     session: AsyncSession, platform: ListingPlatform, missing: list, present: list
 ) -> None:
@@ -297,8 +309,13 @@ async def check_shipping_profile_missing_alerts(
     config = type_settings.get(NotificationCategory.shipping_profile_missing)
     label = "Etsy" if platform == ListingPlatform.etsy else platform.value.capitalize()
     thing = "shipping profile" if platform == ListingPlatform.etsy else "postage policy"
+    off = await product_platforms.excluded_product_ids(session, platform)
     for profile in missing:
         if entity(profile) in flagged:
+            continue
+        # A profile only products switched off for this store use is no loss here. A profile no
+        # product uses at all still alerts, as it always did.
+        if off and await _used_only_by(session, profile.id, off):
             continue
         if config is not None and config.enabled:
             await dispatch_notification(
