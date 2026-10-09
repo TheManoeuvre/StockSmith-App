@@ -159,6 +159,7 @@ export function ReplacementParcelModal({
         // Always the placeholder's own label (postage mode is pinned to it above) — the
         // backend retires the placeholder for us.
         input.postage_charge_id = parcel.postage_charge?.id ?? null;
+        input.completes_parcel_id = parcel.id;
         input.postage_cost = labelNeedsAmount ? postageForSave : null;
       } else {
         input.postage_charge_id = chargeForSave;

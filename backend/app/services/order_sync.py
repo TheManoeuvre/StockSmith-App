@@ -393,6 +393,12 @@ async def commit_sync(platform: ListingPlatform) -> SyncCommitResult:
                     pending_review_alerts.extend(
                         await order_parcels.apply_postage_charges(session, order, ext_order.postage_charges)
                     )
+                # Off the list response, so no enrich gate. Shipped orders only: Order
+                # exists for it, and a pre-shipment receipt has no parcels to report.
+                if ext_order.is_shipped and ext_order.shipments:
+                    pending_review_alerts.extend(
+                        await order_parcels.apply_extra_shipments(session, order, ext_order.shipments)
+                    )
                 order_ids.append(order.id)
 
             if raw_external_orders:
