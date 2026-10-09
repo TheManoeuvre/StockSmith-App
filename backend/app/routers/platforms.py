@@ -475,6 +475,7 @@ async def set_square_location(payload: SquareLocationRequest, session: AsyncSess
     if connection.external_account_id is not None and connection.external_account_id != payload.location_id:
         connection.last_orders_synced_at = None
         connection.unpaid_hold_since = None
+        connection.auto_sync_enabled = False
     connection.external_account_id = payload.location_id
     await session.commit()
 
@@ -551,6 +552,8 @@ async def platform_callback(
         )
         connection.last_orders_synced_at = None
         connection.unpaid_hold_since = None
+        # A new shop must not start unattended commits before a manual sync has been run.
+        connection.auto_sync_enabled = False
     connection.external_account_id = account_id
     connection.connected_at = datetime.now(timezone.utc)
     if platform == ListingPlatform.etsy:
@@ -734,7 +737,11 @@ async def disconnect_platform(platform: ListingPlatform, session: AsyncSession =
     connection.scopes = None
     connection.connected_at = None
     connection.last_refreshed_at = None
-    connection.auto_sync_enabled = False
+    # auto_sync_enabled is deliberately left as it was. Clearing it meant the first thing
+    # anyone tries when a platform looks stuck — disconnect, reconnect — quietly switched
+    # off the very thing they were trying to fix, with nothing surfacing it. The scheduler
+    # still won't tick a disconnected shop (_tick requires is_connected), and a reconnect
+    # as a *different* shop switches it off again in the OAuth callback.
     connection.consecutive_auth_failures = 0
     if connection.shop_icon_path:
         resolve_asset_path(connection.shop_icon_path).unlink(missing_ok=True)

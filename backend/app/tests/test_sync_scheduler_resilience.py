@@ -97,7 +97,7 @@ async def test_tick_skipped_while_a_sync_is_in_flight_is_logged(monkeypatch, cap
 
 async def test_disabled_auto_sync_tick_does_nothing(monkeypatch):
     """Guards the read of the flag itself: auto-sync off must skip before any adapter
-    work, which is what makes a disconnect (which clears the flag) stop the loop dead
+    work, which is what lets a manual switch-off stop the loop dead
     without erroring."""
     monkeypatch.setattr(sync_scheduler, "_load_connection", _returning(_SimpleConnection(auto_sync_enabled=False)))
 
