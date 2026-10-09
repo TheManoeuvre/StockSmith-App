@@ -8,6 +8,11 @@ below against a real sandbox order (custom patch + delivery line + pickup fulfil
 with Square's test card). Two behaviours differ from what we assumed going in — see
 "Spike findings" below.
 
+**Update 2026-09-30:** phases 1–6 (order import) have since shipped in 0.21.0. A second
+spike (`scripts/dev/square_catalogue_spike.py`) now revisits the "never push a listing to
+Square" decision — see "Catalogue sync (spike 2026-09-30)" below. Nothing from that section
+is built yet.
+
 ## Goal
 
 Take in-person orders for custom items (e.g. a leather patch), capture the customisation
@@ -287,6 +292,7 @@ and revisit B if typing at the stall becomes a bottleneck.
      developer-app sections are hidden for it, since none of those concepts exist for
      Square (see the "custom items vs catalogue" decision — Square sells ordinary
      StockSmith catalogue products, but never pushes a listing to Square itself).
+     **Being revisited** — see "Catalogue sync (spike 2026-09-30)".
    - **Orders list/detail:** `Order` gained `fulfilment_method`/`collect_by` in both the
      backend response schema (`OrderRead` — these existed on the model since step 2 but were
      never actually returned by the API until now) and the frontend type. A shared
@@ -310,6 +316,137 @@ connected first (so the adapter can be exercised against your actual sandbox as 
 not just fixtures), then the adapter itself with tests, then wire it into the scheduler, then
 surface it in the UI last. Each of 3-6 is a natural point to check in before moving to the
 next.
+
+## Catalogue sync (spike 2026-09-30)
+
+Planning only — nothing here is built. Goal: treat the Square catalogue the way Etsy's is
+treated today — push a product from StockSmith, check a product's listing against Square
+and correct its quantity, and keep quantities in step automatically. **Orders stay
+one-way**: Square remains the source of truth for orders, and nothing here writes order
+status, cancellations or refunds back (see open questions 2 and 3).
+
+This reverses the earlier "Square never gets a pushed listing" position (phase 6 and open
+question 1). The Square product is still an ordinary StockSmith catalogue `Product` — the
+change is that StockSmith can now *create* it and *keep its quantity* in Square, rather than
+relying on it being entered by hand.
+
+### Etsy functions and their Square equivalents
+
+| # | Etsy function today | Square equivalent | Feasibility | Recommendation |
+|---|---|---|---|---|
+| 1 | Listing SKU index (`build_listing_sku_index`) | `SearchCatalogItems` with `archived_state: ARCHIVED_STATE_ALL` + `BatchRetrieveInventoryCounts` for the chosen location | High | **Must** — everything below depends on it |
+| 2 | Per-product check sync (`/check-sync`) | Generic once #1 exists | High | **Must** |
+| 3 | Push corrections (`push_listing_quantity`) | `BatchChangeInventory` `PHYSICAL_COUNT`, ≤100 changes per call, dated to the sales-imported watermark (finding C2) | High | **Must** |
+| 4 | Check all listings in bulk | Generic once #1 exists | High | **Must** |
+| 5 | Event-driven push + hourly reconcile | Add Square to `listing_push._PUSH_ENABLED_PLATFORMS` and `listing_reconcile._PLATFORMS` | High | **Must**, after #3 |
+| 6 | Create a listing (`create_draft_listing`) | `UpsertCatalogObject` (item + variations, idempotency key), created **archived**; images via `CreateCatalogImage` | Medium — no draft state (finding C1) | **Must** |
+| 7 | Draft readiness | New Square rule set: name, fixed price (or variable pricing), a SKU per unit | High | **Must**, with #6 |
+| 8 | Adopt existing listings | Write SKUs onto existing Square variations; read-then-upsert with `version` | High | **Could** — no hand-entered items in Square yet (decision 4) |
+| 9 | Platform limits, catalogue compatibility, variant conflicts | Add Square to `platform_limits._DEFAULT_LIMITS` | High | **Should** |
+| 10 | Platform fee components | Square fee rows via a migration — `seed._ensure_platform_fee_components` returns early if any row exists, so seeding won't reach existing installs | High | **Should** |
+| 11 | Push log, sync health, API usage | Already generic | High | Free |
+| – | Per-platform listing copy, backfill, listing profiles, shipping-profile linking, ongoing price sync | Etsy-specific, low value, or not done for Etsy either | – | Skip |
+| – | Order status / cancel / refund write-back | – | – | **Out of scope** |
+
+Square limits used above (from Square's object reference, not re-verified unless noted in
+the findings): item name 512, variation name 255, `description_html` 65,535, 250 variations
+per item, 6 item options per item, SKU 255 (**confirmed**, finding C3).
+
+### Findings (confirmed against sandbox)
+
+Run twice on 2026-09-30 with `scripts/dev/square_catalogue_spike.py`; full responses are
+written to `square_catalogue_spike_output.json`.
+
+- **C1. Archiving works as a stand-in for a draft.**
+  - An item can be created with `is_archived: true`, have stock set while archived, and be
+    un-archived later by an upsert.
+  - Archiving only hides the item from the till: an API order for an archived variation was
+    still accepted and paid. That's harmless here, because counter orders come through the
+    till.
+  - `SearchCatalogItems` **excludes archived items by default**. The index must pass
+    `ARCHIVED_STATE_ALL`, or a just-pushed archived item reads as "not found". `ListCatalog`
+    does include archived items.
+  - The search index lags writes by a few seconds. An immediate search after creating an
+    item can return nothing.
+  - **Versioning is enforced per field.** An upsert with a stale `version` that changes a
+    field modified in the meantime is rejected (`VERSION_MISMATCH`, naming the field and
+    both values). Resending unchanged content with a stale version is accepted. Omitting
+    `version` on an existing object is rejected.
+  - So every update is read-then-upsert, and a clash with a Dashboard edit comes back as a
+    clear error rather than a silent overwrite.
+- **C2. Backdated physical counts have later sales re-applied on top.**
+  - The test ran: count 10 dated 3h ago, then a paid sale of 2, leaving 8.
+  - A count of 10 dated 1h ago (before the sale) reads back **8**: the sale is re-applied on
+    top.
+  - A count of 10 dated *now* reads back **10**: the sale is lost. This is the race a naive
+    "set absolute quantity" push would have.
+  - Counts dated more than 24h ago are rejected (`INVALID_TIME`, "cannot set history older
+    than 24h0m0s"). 23h50m was accepted.
+  - **Design consequence:** date each `PHYSICAL_COUNT` to the point up to which StockSmith
+    has imported all Square sales, not to "now". If that point is more than 24h old
+    (e.g. order sync has been failing), skip the push and flag it rather than pushing a
+    count dated now.
+  - Always send `ignore_unchanged_counts: false`. The default skips a count equal to the
+    previous count, which here would drop a legitimate correction.
+- **C3. SKUs: duplicates allowed, 255-character limit.**
+  - Two items with the same SKU were both accepted, and an exact SKU search returns both.
+    The index must report a duplicated SKU as a conflict, not pick one.
+  - The SKU limit is exactly 255: 255 accepted, 256 rejected ("longer than max length 255").
+  - Looser than Etsy (32) or eBay (50), so Square never becomes the strictest SKU limit.
+- **C4. Overselling drives stock negative.**
+  - Selling 3 with 1 in stock via a paid API order was accepted, and the count went to
+    **−2**.
+  - `location_overrides[].sold_out` was `true` on the first run but still absent on the
+    second run's immediate read. Square sets it asynchronously, so don't rely on it.
+  - A later StockSmith push corrects the negative count. Whether the till app itself blocks
+    or warns on a sold-out item is **not** covered by the API test — check on a real device.
+
+### Still unverified
+
+- Whether a count backdated *earlier* than an existing later count is ignored. The
+  watermark-dated pushes should only move forward in time, but confirm before relying on it.
+  Relatedly, how Square orders two counts with the same `occurred_at` (several pushes within
+  one sync interval would share one).
+- Image upload (`CreateCatalogImage`, multipart) — not exercised.
+- 429 behaviour. Square publishes no daily cap. `square_client._request` currently turns a
+  429 into a plain `PlatformSyncError` with no retry/backoff.
+- Whether Square Online (same catalogue, and in use — see decision 3) exposes pushed or
+  archived items.
+
+### Code that currently assumes Etsy/eBay only
+
+- `SquareAdapter`'s `push_listing_quantity` / `create_draft_listing` /
+  `build_listing_sku_index` raise `NotImplementedError`, and its module docstring states the
+  old decision.
+- `listing_push._PUSH_ENABLED_PLATFORMS`, `listing_reconcile._PLATFORMS`.
+- `draft_listing` / `draft_readiness` branch Etsy-else-eBay, so Square would silently fall
+  into the eBay branch.
+- `platform_limits._DEFAULT_LIMITS` has no Square entry.
+- The Square store page hides the listing-push sections (phase 6).
+
+### Decisions (2026-09-30)
+
+1. **Created items start archived.** StockSmith creates the item with `is_archived: true`,
+   and the seller un-archives it in the Square Dashboard. This keeps the Etsy rule that
+   StockSmith never puts anything on sale. There's no per-push choice.
+2. **Tracking off → report, plus a separate confirmed action.**
+   - A variation with `track_inventory` off shows as "tracking off" in the product's Square
+     sync status, and the stock push skips it rather than silently doing nothing.
+   - A separate, explicitly confirmed action switches tracking on. Pushes never change it
+     implicitly.
+   - Items StockSmith creates are created with tracking on.
+3. **Square Online is in use.** It shares the catalogue, so whether a pushed item appears
+   online must be checked before #6 ships.
+   - Archived items are expected to be hidden online as well as on the till, but that's
+     unverified.
+   - The Square sandbox may not offer a Square Online site at all. If so, this check needs
+     another route (e.g. reading a known production item's online-visibility fields) — to
+     be agreed before running anything against production.
+4. **No hand-entered items in Square yet.** Adoption (#8) stays low priority; creating items
+   (#6) comes first.
+
+Still open, for the seller rather than a decision: on a real till, does Square block, warn,
+or allow selling an out-of-stock item (C4 only covered the API)?
 
 ## Open questions
 
