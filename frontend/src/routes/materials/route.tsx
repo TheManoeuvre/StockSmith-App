@@ -18,6 +18,7 @@ import { Badge } from "../../components/common/Badge";
 import { CsvImportExport } from "../../components/common/CsvImportExport";
 import { FilterTabs } from "../../components/common/FilterTabs";
 import { GroupHeaderRow, Th } from "../../components/common/ListTable";
+import { DuplicateColoursNotice } from "../../components/materials/DuplicateColoursNotice";
 import {
   isLowStock,
   normalizeQtyForUnit,
@@ -505,6 +506,8 @@ function MaterialsListContent() {
           <ErrorBanner error={createMutation.error} />
         </form>
       )}
+
+      {data && <DuplicateColoursNotice materials={data} />}
 
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <FilterTabs
