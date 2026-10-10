@@ -260,6 +260,7 @@ async def _copy_overrides(session: AsyncSession, model, loser_id: int, survivor_
                 material_id=row.material_id,
                 qty_required=row.qty_required,
                 replaces_material_id=row.replaces_material_id,
+                source=row.source,
             )
         )
         await session.delete(row)

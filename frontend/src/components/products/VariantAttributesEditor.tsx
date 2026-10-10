@@ -403,6 +403,10 @@ function MaterialRulePanel({
         .sort((a, b) => colourLabel(a).localeCompare(colourLabel(b))),
   });
 
+  // Colours alone are not always unique within a type (a second brand bought because the
+  // first ran out), so a colour that appears twice is shown with its full material name.
+  const labelOf = useMemo(() => materialLabeller(siblings ?? []), [siblings]);
+
   if (baseMaterial.material_type_id == null) {
     return (
       <p className="pl-4 text-xs text-amber-700">
@@ -422,7 +426,11 @@ function MaterialRulePanel({
         const key = Object.keys(next).find((k) => next[k] === material.id);
         if (key) delete next[key];
       } else {
-        next[material.colour || material.name] = material.id;
+        // The attribute value is normally the colour name. When another material already
+        // owns that value, key on the full label instead so both can be ticked; otherwise
+        // the second would silently replace the first.
+        const colour = colourLabel(material);
+        next[colour in next ? labelOf(material) : colour] = material.id;
       }
       onChangeRule({ ...rule, valueToMaterialId: next });
       onDeriveValues(Object.keys(next).join(", "));
@@ -433,7 +441,7 @@ function MaterialRulePanel({
         {siblings.map((m) => (
           <label key={m.id} className="flex items-center gap-1 text-xs">
             <input type="checkbox" checked={checkedIds.has(m.id)} onChange={() => toggle(m)} />
-            {m.colour || m.name}
+            {labelOf(m)}
             {m.id === baseMaterial.id && " (original)"}
           </label>
         ))}
@@ -459,7 +467,7 @@ function MaterialRulePanel({
           >
             {siblings.map((m) => (
               <option key={m.id} value={m.id}>
-                {m.colour || m.name}
+                {labelOf(m)}
               </option>
             ))}
           </select>
@@ -471,6 +479,17 @@ function MaterialRulePanel({
 
 function colourLabel(m: Material): string {
   return m.colour || m.name;
+}
+
+/** Colour name where it identifies the material, "Colour — full name" where another
+ * material in the list shares it. */
+export function materialLabeller(materials: Material[]): (m: Material) => string {
+  const counts = new Map<string, number>();
+  for (const m of materials) counts.set(colourLabel(m), (counts.get(colourLabel(m)) ?? 0) + 1);
+  return (m) => {
+    const colour = colourLabel(m);
+    return (counts.get(colour) ?? 0) > 1 && m.name !== colour ? `${colour} — ${m.name}` : colour;
+  };
 }
 
 function QuantityRulePanel({

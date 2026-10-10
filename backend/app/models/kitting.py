@@ -71,6 +71,8 @@ class ProductVariantKittingMaterial(Base):
     replaces_material_id: Mapped[int | None] = mapped_column(
         ForeignKey("materials.id", ondelete="RESTRICT"), nullable=True
     )
+    # See ProductVariantMaterial.source.
+    source: Mapped[str] = mapped_column(String(6), nullable=False, default="rule", server_default="rule")
 
     variant: Mapped["ProductVariant"] = relationship(back_populates="kitting_overrides")
 

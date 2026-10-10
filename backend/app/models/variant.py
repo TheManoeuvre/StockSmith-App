@@ -109,5 +109,10 @@ class ProductVariantMaterial(Base):
     replaces_material_id: Mapped[int | None] = mapped_column(
         ForeignKey("materials.id", ondelete="RESTRICT"), nullable=True
     )
+    # "rule" for a row written by variant generation or a bulk amend, "manual" for one
+    # the user set in the variant's own BOM editor. Bulk amend leaves manual rows alone
+    # unless told otherwise. Rows that predate the column are "rule": their origin is
+    # unknown, and treating them as hand edits would make bulk amend skip all of them.
+    source: Mapped[str] = mapped_column(String(6), nullable=False, default="rule", server_default="rule")
 
     variant: Mapped["ProductVariant"] = relationship(back_populates="bom_overrides")
