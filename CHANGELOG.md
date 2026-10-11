@@ -12,11 +12,50 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-10-11
+
+### Added
+- **Switch a store off for a product.** A product can now be turned off for Etsy or eBay.
+  Off drops that store's panels on the product page, its variant-limit warnings, its
+  compatibility-scan entries and its bulk SKU checks, which also saves marketplace API calls;
+  a product with a live listing stays on. Each store has a "turn on for new products by
+  default" setting and a one-off all-on/all-off prompt on its settings page (reconnecting the
+  same shop never asks again). Also new: `sold_on_etsy`/`sold_on_ebay` CSV columns, a "Sold
+  on" filter on the products list, store chips on the new-product form, and a "Don't sell
+  this on eBay" action in the variant-limit popup. The "shipping profile missing" alert now
+  only counts products that are on for that store.
+- **eBay refunds are recorded.** A refunded eBay order used to count the returned money as
+  profit and never showed a Refunded figure. Refunds are now read from eBay and shown on the
+  order, and a warning appears if a refund exceeds what the buyer paid.
+- **Second Etsy parcels are picked up.** When Etsy lists more than one shipment on an order,
+  each extra one now appears as a replacement parcel awaiting review, instead of never
+  coming back for assignment. Completing a label-less placeholder parcel retires it and
+  carries its tracking over.
+- **Personalised order lines are flagged.** A small star badge on an orders-list line shows
+  that the buyer supplied personalisation; hover it to read the text.
+
 ### Changed
 - **Orders list no longer shows a margin for orders that haven't shipped.** Before shipping,
   postage cost is only the shipping profile's estimate (or missing), so the margin read as
   more certain than it was and was often overstated. Those rows now say "Before shipping"
   under the net profit figure; the margin appears once the order ships.
+- **Hand-edited variant BOM lines survive bulk amend.** Lines you set in a variant's own BOM
+  editor are now left alone by default; the preview lists what was skipped, and a checkbox
+  ("Also overwrite lines set by hand") includes them. Edits made before this release aren't
+  protected, because their origin wasn't recorded.
+- **Same-coloured materials are easier to tell apart.** The variant colour picker shows the
+  full material name where two materials of a type share a colour (previously ticking the
+  second silently replaced the first), and the Materials page flags such pairs with a
+  "Merge into first" shortcut.
+- **Update dialog is shorter.** It lists one line per feature and has a "View on GitHub"
+  button, so a long release no longer pushes the Yes/No buttons out of reach.
+
+### Fixed
+- **Reconnecting a store keeps auto-sync on.** Disconnecting and reconnecting the same shop
+  used to switch auto-sync off silently. Connecting a different shop, or switching Square
+  location, still starts with it off.
+- **Late daily summary and backups.** The scheduler misread its last-run time as local time,
+  so the daily summary and scheduled backups could go out hours late.
 
 ## [0.21.0] - 2026-09-29
 
