@@ -7,7 +7,7 @@ product on or off for this store?" prompt, so it is never asked again — includ
 disconnect/reconnect of the same shop.
 
 Revision ID: a7c2e4b19d35
-Revises: 95c15157d55b
+Revises: b7d3e5a19c42
 Create Date: 2026-10-09 00:00:00.000000
 
 """
@@ -18,7 +18,7 @@ import sqlalchemy as sa
 
 
 revision: str = 'a7c2e4b19d35'
-down_revision: Union[str, Sequence[str], None] = '95c15157d55b'
+down_revision: Union[str, Sequence[str], None] = 'b7d3e5a19c42'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

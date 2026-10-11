@@ -16,6 +16,7 @@ from app.services.platforms.base import (
     ExternalOrder,
     ExternalOrderLine,
     ExternalPostageCharge,
+    ExternalShipment,
     ListingProductRef,
     PaymentState,
     TokenSet,
@@ -515,10 +516,24 @@ class EtsyAdapter:
         # StockSmith stores only a single tracking number per order (see
         # models.order.Order.tracking_number), so the first one wins, same as eBay's
         # _fetch_tracking.
-        shipments = receipt.get("shipments") or []
-        first_shipment = shipments[0] if shipments else {}
+        raw_shipments = sorted(
+            receipt.get("shipments") or [], key=lambda s: s.get("shipment_notification_timestamp") or 0
+        )
+        first_shipment = raw_shipments[0] if raw_shipments else {}
         tracking_number = first_shipment.get("tracking_code")
         carrier = first_shipment.get("carrier_name")
+        shipments = [
+            ExternalShipment(
+                tracking_number=s.get("tracking_code") or None,
+                carrier=s.get("carrier_name") or None,
+                shipped_at=(
+                    datetime.fromtimestamp(s["shipment_notification_timestamp"], tz=timezone.utc)
+                    if s.get("shipment_notification_timestamp")
+                    else None
+                ),
+            )
+            for s in raw_shipments
+        ]
 
         grand_total = self._parse_money(receipt.get("grandtotal"))
         currency = (receipt.get("grandtotal") or {}).get("currency_code")
@@ -633,6 +648,7 @@ class EtsyAdapter:
             tracking_number=tracking_number,
             carrier=carrier,
             postage_charges=postage_charges,
+            shipments=shipments,
         )
 
     def _parse_transaction(self, tx: dict) -> ExternalOrderLine:

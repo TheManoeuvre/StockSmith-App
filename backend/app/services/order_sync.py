@@ -393,6 +393,12 @@ async def commit_sync(platform: ListingPlatform) -> SyncCommitResult:
                     pending_review_alerts.extend(
                         await order_parcels.apply_postage_charges(session, order, ext_order.postage_charges)
                     )
+                # Off the list response, so no enrich gate. Shipped orders only: Order
+                # exists for it, and a pre-shipment receipt has no parcels to report.
+                if ext_order.is_shipped and ext_order.shipments:
+                    pending_review_alerts.extend(
+                        await order_parcels.apply_extra_shipments(session, order, ext_order.shipments)
+                    )
                 order_ids.append(order.id)
 
             if raw_external_orders:
@@ -474,7 +480,12 @@ def _apply_financials(order: Order, ext_order: ExternalOrder) -> None:
     order.tax_charged = _parse_price(ext_order.tax_charged)
     order.vat_charged = _parse_price(ext_order.vat_charged)
     order.discount_amount = _parse_price(ext_order.discount_amount)
-    order.refunded_amount = _parse_price(ext_order.refunded_amount)
+
+    # Etsy reads refunds off the receipt (always present); eBay reads them from the
+    # Finances API, so an eBay pass that skipped enrichment reports None and must not
+    # blank a refund stored earlier.
+    if ext_order.financials_enriched or ext_order.refunded_amount is not None:
+        order.refunded_amount = _parse_price(ext_order.refunded_amount)
 
     # Everything above comes straight off the order-list response and is always accurate.
     # The three fields below come from a separate per-order call the adapter may have

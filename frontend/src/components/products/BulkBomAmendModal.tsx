@@ -88,6 +88,8 @@ export function BulkBomAmendModal({
   // "leave that side alone per variant", and the preview shows what each one has.
   const [selectedLines, setSelectedLines] = useState<Record<number, SelectedLine>>({});
   const [preview, setPreview] = useState<BulkBomAmendResult | null>(null);
+  // Rows set by hand in a variant's own BOM editor are left as they are unless this is on.
+  const [includeManual, setIncludeManual] = useState(false);
 
   const resetSelection = () => {
     setSelectedLines({});
@@ -149,6 +151,7 @@ export function BulkBomAmendModal({
         attribute_value: attributeValue.trim(),
         lines,
         apply,
+        include_manual: includeManual,
         is_kitting: bomSource === "kitting",
       }),
     onSuccess: (result) => {
@@ -349,6 +352,18 @@ export function BulkBomAmendModal({
           )}
         </div>
 
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={includeManual}
+            onChange={(e) => {
+              setPreview(null);
+              setIncludeManual(e.target.checked);
+            }}
+          />
+          Also overwrite lines set by hand in a variant's BOM editor
+        </label>
+
         <ErrorBanner error={amendMutation.error} />
 
         {preview && (
@@ -365,6 +380,16 @@ export function BulkBomAmendModal({
               )}
               .
             </p>
+            {preview.kept_manual_count > 0 && (
+              <p className="text-sm text-slate-600">
+                {preview.kept_manual_count} line(s) set by hand were left as they are:{" "}
+                {preview.units
+                  .filter((u) => u.kept_manual.length > 0)
+                  .map((u) => u.variant_name)
+                  .join(", ")}
+                . Tick the box above to overwrite them too.
+              </p>
+            )}
             {preview.units.filter((u) => u.changes.length > 0).length > 0 ? (
               <div className="max-h-64 overflow-auto">
                 <table className="w-full border-collapse text-left text-sm">
@@ -386,8 +411,9 @@ export function BulkBomAmendModal({
                           <td className="p-1">{unit.variant_name}</td>
                           <td className="p-1">{change.base_material_name}</td>
                           {/* A non-null "before" means an override already existed and is
-                              about to be replaced — highlighted because it may well have
-                              been edited by hand, which nothing here can detect. */}
+                              about to be replaced — highlighted so the overwrite is
+                              seen before it happens. Hand-set rows never reach this
+                              table unless the box above is ticked. */}
                           <td
                             className={`p-1 ${change.before_qty !== null ? "font-medium text-amber-800" : "text-slate-500"}`}
                           >
@@ -412,7 +438,9 @@ export function BulkBomAmendModal({
               </div>
             ) : (
               <p className="text-sm text-slate-500">
-                Every matching variant is already set this way.
+                {preview.kept_manual_count > 0
+                  ? "Nothing to change on the other variants."
+                  : "Every matching variant is already set this way."}
               </p>
             )}
           </div>

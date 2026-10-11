@@ -37,6 +37,10 @@ class ReplacementParcelCreate(BaseModel):
     # Link an already-synced marketplace label instead of typing a figure — see
     # OrderPostageCharge. Only charges on the same order with sequence >= 2 qualify.
     postage_charge_id: int | None = None
+    # A sync placeholder (source=sync, no items) this parcel completes: it is retired in
+    # the same transaction. Needed for placeholders with no label to piggyback on —
+    # postage_charge_id retires only the one holding that label.
+    completes_parcel_id: int | None = None
     tracking_number: str | None = None
     carrier: str | None = None
     notes: str | None = None

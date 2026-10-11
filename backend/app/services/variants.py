@@ -167,6 +167,7 @@ class ResolvedOverride:
             material_id=self.material_id,
             replaces_material_id=self.replaces_material_id,
             qty_required=self.qty_required,
+            source="rule",
         )
 
 
@@ -540,6 +541,7 @@ async def amend_attribute_bom_overrides(
     *,
     apply: bool = False,
     include_inactive: bool = False,
+    include_manual: bool = False,
     is_kitting: bool = False,
 ) -> tuple[list, int, int]:
     """Rewrites one base BOM line per amend line, across every variant sharing an
@@ -555,11 +557,13 @@ async def amend_attribute_bom_overrides(
     quantity-override or substitution row for that line is replaced — with a blank
     material or quantity carrying that side over from the row being replaced, so a
     material change keeps per-variant quantities and vice versa — and every other row
-    on the variant — including hand-added additive lines — is left alone. It cannot do
-    better than that, because ProductVariantMaterial has no provenance column: a
-    rule-generated row and a hand-edited one are indistinguishable. The preview is the
-    answer to that, not a heuristic; the user sees each row that would be replaced and
-    consents to it.
+    on the variant — including hand-added additive lines — is left alone.
+
+    A row set by hand in the variant's own BOM editor (source="manual") is left alone
+    too, unless include_manual is set; it is reported in each unit's kept list, as the
+    change it would have received, so the preview shows what is being protected. Rows
+    from before the source column existed read as "rule", so they are replaced as they
+    always were. The preview remains the user's consent for whatever does get replaced.
     """
     product = await session.get(Product, product_id)
     if product is None:
@@ -635,25 +639,27 @@ async def amend_attribute_bom_overrides(
     unit_validation: list[tuple[int, Decimal]] = []
     for variant in targets:
         existing = existing_by_variant.get(variant.id, [])
-        changes, replaced_rows, new_rows = _plan_amend(variant, existing, lines, base_lines, name_by_material_id)
+        changes, replaced_rows, new_rows, kept = _plan_amend(
+            variant, existing, lines, base_lines, name_by_material_id, include_manual
+        )
         # An amend that lands a line on a material another of this variant's lines already
         # uses is legitimate (each keeps its own quantity, buildability sums them) — and
         # the preview shows the resulting material per line, so it isn't silent either.
 
         unit_validation.extend((row.material_id, row.qty_required) for row in new_rows)
-        units.append((variant, changes, replaced_rows, new_rows))
+        units.append((variant, changes, replaced_rows, new_rows, kept))
 
     await validate_lines_against_units(session, unit_validation, "qty_required")
 
     if apply:
-        for _variant, _changes, replaced_rows, _new_rows in units:
+        for _variant, _changes, replaced_rows, _new_rows, _kept in units:
             for row in replaced_rows:
                 await session.delete(row)
         # Flush the deletes before inserting: a replacement reuses the same
         # (variant_id, material_id, replaces_material_id), and in a single flush SQLAlchemy
         # orders the INSERT before the DELETE, tripping the unique index.
         await session.flush()
-        for variant, _changes, _replaced_rows, new_rows in units:
+        for variant, _changes, _replaced_rows, new_rows, _kept in units:
             for row in new_rows:
                 session.add(row.to_row(variant.id, variant_material_cls))
         await session.commit()
@@ -667,11 +673,16 @@ def _plan_amend(
     lines: list,
     base_lines: dict[int, ProductMaterial],
     name_by_material_id: dict[int, str],
-) -> tuple[list, list[ProductVariantMaterial], list[ResolvedOverride]]:
+    include_manual: bool = False,
+) -> tuple[list, list[ProductVariantMaterial], list[ResolvedOverride], list]:
     """Works out, for one variant, which existing rows the amend replaces and what it
     writes in their place. Pure — no session, no I/O — so the merge rules are testable
-    directly and the caller can reuse the result for both preview and apply."""
+    directly and the caller can reuse the result for both preview and apply.
+
+    The fourth value is the changes that were NOT made because the row they would
+    replace is a hand edit (see amend_attribute_bom_overrides)."""
     changes: list = []
+    kept: list = []
     replaced: list[ProductVariantMaterial] = []
     new_rows: list[ResolvedOverride] = []
 
@@ -712,9 +723,21 @@ def _plan_amend(
         # row at all, so the amend deletes the old one and writes nothing.
         is_noop = target_material == base_id and target_qty == base_qty
 
+        change = {
+            "base_material_id": base_id,
+            "base_material_name": _name(name_by_material_id, base_id),
+            "before_material_id": before_material,
+            "before_qty": before_qty,
+            "after_material_id": None if is_noop else target_material,
+            "after_qty": None if is_noop else target_qty,
+        }
+
         if current is not None:
             if not is_noop and current.material_id == target_material and Decimal(current.qty_required) == target_qty:
                 continue  # already exactly right — no change for this line
+            if current.source == "manual" and not include_manual:
+                kept.append(change)
+                continue
             replaced.append(current)
 
         if not is_noop:
@@ -730,15 +753,6 @@ def _plan_amend(
         if current is None and is_noop:
             continue  # inherited the base BOM before, still does — nothing happened
 
-        changes.append(
-            {
-                "base_material_id": base_id,
-                "base_material_name": _name(name_by_material_id, base_id),
-                "before_material_id": before_material,
-                "before_qty": before_qty,
-                "after_material_id": None if is_noop else target_material,
-                "after_qty": None if is_noop else target_qty,
-            }
-        )
+        changes.append(change)
 
-    return changes, replaced, new_rows
+    return changes, replaced, new_rows, kept

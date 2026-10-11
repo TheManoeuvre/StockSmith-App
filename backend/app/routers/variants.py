@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -236,6 +238,24 @@ async def merge_variant(
     )
 
 
+async def _existing_sources(session: AsyncSession, row_cls, variant_id: int) -> dict[tuple[int, int | None], tuple[Decimal, str]]:
+    """(material_id, replaces_material_id) -> (qty_required, source) for a variant's
+    current override rows. The editor PUTs the variant's whole list on every save, so
+    without this every row would look hand-made; a row that comes back unchanged keeps
+    the source it had."""
+    rows = (await session.execute(select(row_cls).where(row_cls.variant_id == variant_id))).scalars()
+    return {(r.material_id, r.replaces_material_id): (Decimal(r.qty_required), r.source) for r in rows}
+
+
+def _source_for(line, existing: dict[tuple[int, int | None], tuple[Decimal, str]]) -> str:
+    """"manual" for a line that is new or whose quantity the user changed, else whatever
+    it was before."""
+    previous = existing.get((line.material_id, line.replaces_material_id))
+    if previous is not None and previous[0] == Decimal(line.qty_required):
+        return previous[1]
+    return "manual"
+
+
 @router.put("/{variant_id}/bom-overrides", response_model=VariantRead)
 async def replace_bom_overrides(
     variant_id: int, payload: list[VariantBomLine], session: AsyncSession = Depends(get_db)
@@ -287,6 +307,7 @@ async def replace_bom_overrides(
         session, [(l.material_id, l.qty_required) for l in payload], "qty_required"
     )
 
+    existing = await _existing_sources(session, ProductVariantMaterial, variant_id)
     await session.execute(delete(ProductVariantMaterial).where(ProductVariantMaterial.variant_id == variant_id))
     overrides = [
         ProductVariantMaterial(
@@ -294,6 +315,7 @@ async def replace_bom_overrides(
             material_id=l.material_id,
             qty_required=l.qty_required,
             replaces_material_id=l.replaces_material_id,
+            source=_source_for(l, existing),
         )
         for l in payload
     ]
@@ -360,6 +382,7 @@ async def replace_kitting_bom_overrides(
         session, [(l.material_id, l.qty_required) for l in payload], "qty_required"
     )
 
+    existing = await _existing_sources(session, ProductVariantKittingMaterial, variant_id)
     await session.execute(
         delete(ProductVariantKittingMaterial).where(ProductVariantKittingMaterial.variant_id == variant_id)
     )
@@ -369,6 +392,7 @@ async def replace_kitting_bom_overrides(
             material_id=l.material_id,
             qty_required=l.qty_required,
             replaces_material_id=l.replaces_material_id,
+            source=_source_for(l, existing),
         )
         for l in payload
     ]

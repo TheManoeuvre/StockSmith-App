@@ -83,6 +83,20 @@ class ExternalPostageCharge:
 
 
 @dataclass
+class ExternalShipment:
+    """One parcel the marketplace has dispatched for an order — an entry of Etsy's receipt
+    `shipments` array. Unlike ExternalPostageCharge this doesn't depend on a label having
+    been bought through the marketplace, so it also catches a parcel posted with a label
+    from elsewhere. `tracking_number` is the dedupe key
+    (order_parcels.apply_extra_shipments); a shipment without one can't be told apart on
+    a later sync and is ignored."""
+
+    tracking_number: str | None
+    carrier: str | None = None
+    shipped_at: datetime | None = None
+
+
+@dataclass
 class ExternalOrder:
     external_order_id: str
     buyer_name: str | None
@@ -166,6 +180,12 @@ class ExternalOrder:
     # them, an empty list when financials_enriched is False means "not fetched", not
     # "no labels"; order_sync only applies these when financials_enriched is True.
     postage_charges: list[ExternalPostageCharge] = field(default_factory=list)
+
+    # Every parcel dispatched against the order, oldest first, straight off the list
+    # response (so, unlike postage_charges, always populated — no enrich gate). Entry 0 is
+    # the original shipment (already Order.tracking_number); later ones are resends.
+    # Only Etsy fills this today.
+    shipments: list[ExternalShipment] = field(default_factory=list)
 
 
 @dataclass

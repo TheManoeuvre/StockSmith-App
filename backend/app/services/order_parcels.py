@@ -47,7 +47,7 @@ from app.services.costing import recompute_material
 from app.services.notification_alerts import PendingReviewAlert, raise_replacement_parcel_review_alert
 from app.services.notifications import resolve_alerts
 from app.services.order_costs import compute_line_cost_snapshot
-from app.services.platforms.base import ExternalPostageCharge
+from app.services.platforms.base import ExternalPostageCharge, ExternalShipment
 
 logger = logging.getLogger(__name__)
 from app.services.stock_events import record_stock_event
@@ -162,6 +162,29 @@ async def create_manual_parcel(session: AsyncSession, order: Order, payload: Rep
     if order.status == OrderStatus.cancelled:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot add a parcel to a cancelled order")
 
+    tracking, carrier = payload.tracking_number or None, payload.carrier or None
+    if payload.completes_parcel_id is not None:
+        placeholder = (
+            await session.execute(
+                select(OrderReplacementParcel)
+                .where(OrderReplacementParcel.id == payload.completes_parcel_id)
+                .options(selectinload(OrderReplacementParcel.items))
+                .execution_options(populate_existing=True)
+            )
+        ).scalar_one_or_none()
+        if (
+            placeholder is None
+            or placeholder.order_id != order.id
+            or placeholder.source != ReplacementParcelSource.sync
+            or placeholder.items
+        ):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="That parcel can't be completed this way")
+        # Keep the marketplace's tracking number on the real parcel: it is how the next
+        # sync recognises the shipment as already handled (apply_extra_shipments).
+        tracking = tracking or placeholder.tracking_number
+        carrier = carrier or placeholder.carrier
+        await delete_parcel(session, placeholder)
+
     charge = None
     if payload.postage_charge_id is not None:
         charge = await _get_charge_for_link(session, order, payload.postage_charge_id)
@@ -184,6 +207,7 @@ async def create_manual_parcel(session: AsyncSession, order: Order, payload: Rep
                     status_code=status.HTTP_409_CONFLICT,
                     detail="That shipping label is already linked to another parcel",
                 )
+            tracking, carrier = tracking or holder.tracking_number, carrier or holder.carrier
             await delete_parcel(session, holder)
 
     parcel = OrderReplacementParcel(
@@ -192,8 +216,8 @@ async def create_manual_parcel(session: AsyncSession, order: Order, payload: Rep
         source=ReplacementParcelSource.manual,
         needs_review=False,
         postage_cost=payload.postage_cost,
-        tracking_number=payload.tracking_number or None,
-        carrier=payload.carrier or None,
+        tracking_number=tracking,
+        carrier=carrier,
         notes=payload.notes or None,
         sent_at=payload.sent_at or datetime.now(timezone.utc),
     )
@@ -559,6 +583,72 @@ async def apply_postage_charges(
                 amount=amount,
                 currency=ext.currency,
                 posted_at=ext.posted_at,
+            )
+        )
+    return pending
+
+
+async def apply_extra_shipments(
+    session: AsyncSession, order: Order, shipments: list[ExternalShipment]
+) -> list[PendingReviewAlert]:
+    """Turns every marketplace shipment after the original into a replacement parcel.
+
+    Independent of postage labels: Etsy's ledger rarely identifies a label in a way
+    apply_postage_charges can match, but the receipt always lists each dispatched parcel.
+    Entry 0 is the original shipment (Order.tracking_number) and is never a parcel. A
+    shipment is already known when a parcel on the order carries its tracking number (or
+    it is the order's own); otherwise it adopts the oldest parcel with no tracking yet
+    (one the user recorded by hand, or a label-spawned placeholder) before a new
+    needs_review parcel is created. Tracking number is the identity, so a parcel the user
+    completes must keep it — the modal prefills it, and create_manual_parcel carries it
+    over from a placeholder it retires."""
+    pending: list[PendingReviewAlert] = []
+    extras = [s for s in shipments[1:] if s.tracking_number]
+    if order.platform is None or not extras:
+        return pending
+    parcels = list(
+        (
+            await session.execute(
+                select(OrderReplacementParcel)
+                .where(OrderReplacementParcel.order_id == order.id)
+                .order_by(OrderReplacementParcel.sent_at, OrderReplacementParcel.id)
+            )
+        ).scalars()
+    )
+    known = {p.tracking_number for p in parcels if p.tracking_number}
+    known.add(shipments[0].tracking_number)
+    known.add(order.tracking_number)
+    for ship in extras:
+        if ship.tracking_number in known:
+            continue
+        known.add(ship.tracking_number)
+        blank = next((p for p in parcels if not p.tracking_number), None)
+        if blank is not None:
+            blank.tracking_number = ship.tracking_number
+            blank.carrier = blank.carrier or ship.carrier
+            continue
+        parcel = OrderReplacementParcel(
+            order_id=order.id,
+            reason=ReplacementParcelReason.unspecified,
+            source=ReplacementParcelSource.sync,
+            needs_review=True,
+            tracking_number=ship.tracking_number,
+            carrier=ship.carrier,
+            sent_at=ship.shipped_at or datetime.now(timezone.utc),
+            notes=f"Auto-created from {order.platform.value} shipment {ship.tracking_number}",
+        )
+        session.add(parcel)
+        await session.flush()
+        parcels.append(parcel)
+        pending.append(
+            PendingReviewAlert(
+                order_id=order.id,
+                external_order_id=order.external_order_id,
+                platform=order.platform,
+                amount=None,
+                currency=None,
+                posted_at=ship.shipped_at,
+                shipment_tracking=ship.tracking_number,
             )
         )
     return pending

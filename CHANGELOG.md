@@ -12,6 +12,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **Orders list no longer shows a margin for orders that haven't shipped.** Before shipping,
+  postage cost is only the shipping profile's estimate (or missing), so the margin read as
+  more certain than it was and was often overstated. Those rows now say "Before shipping"
+  under the net profit figure; the margin appears once the order ships.
+
 ## [0.21.0] - 2026-09-29
 
 ### Added

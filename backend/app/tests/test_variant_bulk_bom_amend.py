@@ -2,9 +2,9 @@
 
 Overrides could previously only be set per attribute value at generation time, so a
 mistake found afterwards had to be corrected variant by variant. This writes to many
-variants at once and cannot tell a rule-generated row from a hand-edited one
-(ProductVariantMaterial has no provenance column), which is why preview is the default
-and why the merge is scoped narrowly to the base lines actually named.
+variants at once, which is why preview is the default and why the merge is scoped
+narrowly to the base lines actually named. Rows carry a provenance (source: "rule" or
+"manual"); hand-edited rows are left alone unless the amend asks to include them.
 """
 
 from decimal import Decimal
@@ -20,7 +20,9 @@ from app.models.material import Material, LegacyMaterialCategory, MaterialUnit
 from app.models.material_type import MaterialType
 from app.models.product import Product, ProductMaterial
 from app.models.variant import ProductVariant, ProductVariantMaterial
+from app.routers import variants as variants_router
 from app.schemas.product import BulkBomAmendLine, BulkBomAmendRequest
+from app.schemas.variant import VariantBomLine
 
 FILAMENT, IVORY, OAK, GLUE, BOX = 1, 2, 3, 4, 5
 
@@ -419,3 +421,130 @@ async def test_kitting_amend_preview_reports_existing_substitution(session, prod
     change = by_variant[10].changes[0]
     assert change.before_qty == Decimal("3")
     assert change.after_qty == Decimal("5")
+
+
+# --- Provenance: hand edits are left alone ---------------------------------------------
+
+
+async def _hand_edited_row(session, variant_id=10, qty="12"):
+    session.add(
+        ProductVariantMaterial(variant_id=variant_id, material_id=FILAMENT, qty_required=Decimal(qty), source="manual")
+    )
+    await session.commit()
+
+
+async def test_a_hand_edited_row_is_kept_by_default(session, product, pushes):
+    await _hand_edited_row(session)
+
+    result = await _amend(
+        session,
+        attribute_name="Size",
+        attribute_value="Large",
+        lines=[BulkBomAmendLine(base_material_id=FILAMENT, qty_required=Decimal("14"))],
+        apply=True,
+    )
+
+    # Variant 10 keeps its hand-set 12; variant 11 (no row) is amended as usual.
+    assert [(r.qty_required, r.source) for r in await _rows(session, 10)] == [(Decimal("12"), "manual")]
+    assert [(r.qty_required, r.source) for r in await _rows(session, 11)] == [(Decimal("14"), "rule")]
+    assert result.kept_manual_count == 1
+    assert result.changed_variant_count == 1
+    unit = next(u for u in result.units if u.variant_id == 10)
+    assert unit.changes == []
+    assert [(c.before_qty, c.after_qty) for c in unit.kept_manual] == [(Decimal("12"), Decimal("14"))]
+    assert ("product", 1, 10) not in pushes  # nothing changed, so nothing to push
+
+
+async def test_include_manual_overwrites_a_hand_edited_row(session, product, pushes):
+    await _hand_edited_row(session)
+
+    result = await _amend(
+        session,
+        attribute_name="Size",
+        attribute_value="Large",
+        lines=[BulkBomAmendLine(base_material_id=FILAMENT, qty_required=Decimal("14"))],
+        include_manual=True,
+        apply=True,
+    )
+
+    assert [(r.qty_required, r.source) for r in await _rows(session, 10)] == [(Decimal("14"), "rule")]
+    assert result.kept_manual_count == 0
+
+
+async def test_rows_from_before_the_source_column_are_replaced_as_before(session, product, pushes):
+    """The column defaults to "rule", so existing data behaves exactly as it did."""
+    session.add(ProductVariantMaterial(variant_id=10, material_id=FILAMENT, qty_required=Decimal("12")))
+    await session.commit()
+
+    await _amend(
+        session,
+        attribute_name="Size",
+        attribute_value="Large",
+        lines=[BulkBomAmendLine(base_material_id=FILAMENT, qty_required=Decimal("14"))],
+        apply=True,
+    )
+
+    assert [(r.qty_required, r.source) for r in await _rows(session, 10)] == [(Decimal("14"), "rule")]
+
+
+async def test_a_hand_edited_row_already_correct_is_not_reported_as_kept(session, product):
+    await _hand_edited_row(session, qty="14")
+
+    result = await _amend(
+        session,
+        attribute_name="Size",
+        attribute_value="Large",
+        lines=[BulkBomAmendLine(base_material_id=FILAMENT, qty_required=Decimal("14"))],
+    )
+
+    assert result.kept_manual_count == 0
+
+
+# --- Provenance: how the variant BOM editor stamps rows ---------------------------------
+
+
+async def test_saving_in_the_editor_marks_new_and_changed_rows_manual(session, product, pushes):
+    await variants_router.replace_bom_overrides(
+        variant_id=10,
+        payload=[VariantBomLine(material_id=FILAMENT, qty_required=Decimal("12"))],
+        session=session,
+    )
+
+    assert [(r.qty_required, r.source) for r in await _rows(session, 10)] == [(Decimal("12"), "manual")]
+
+
+async def test_saving_in_the_editor_does_not_claim_rows_it_did_not_change(session, product, pushes):
+    """The editor re-sends the whole list on every save, so a rule-generated row that
+    comes back untouched must stay "rule" — otherwise one edit anywhere would make every
+    row on the variant look hand-made."""
+    session.add_all([
+        ProductVariantMaterial(variant_id=10, material_id=FILAMENT, qty_required=Decimal("12"), source="rule"),
+        ProductVariantMaterial(variant_id=10, material_id=GLUE, qty_required=Decimal("2"), source="rule"),
+    ])
+    await session.commit()
+
+    await variants_router.replace_bom_overrides(
+        variant_id=10,
+        payload=[
+            VariantBomLine(material_id=FILAMENT, qty_required=Decimal("12")),  # unchanged
+            VariantBomLine(material_id=GLUE, qty_required=Decimal("3")),  # edited
+        ],
+        session=session,
+    )
+
+    sources = {r.material_id: r.source for r in await _rows(session, 10)}
+    assert sources == {FILAMENT: "rule", GLUE: "manual"}
+
+
+async def test_a_variant_merge_keeps_each_rows_source(session, product):
+    from app.services.variant_merge import _copy_overrides
+
+    session.add(
+        ProductVariantMaterial(variant_id=10, material_id=FILAMENT, qty_required=Decimal("12"), source="manual")
+    )
+    await session.commit()
+
+    await _copy_overrides(session, ProductVariantMaterial, loser_id=10, survivor_id=12)
+    await session.commit()
+
+    assert [(r.qty_required, r.source) for r in await _rows(session, 12)] == [(Decimal("12"), "manual")]

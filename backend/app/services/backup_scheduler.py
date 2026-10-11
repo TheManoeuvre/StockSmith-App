@@ -13,7 +13,7 @@ entirely.
 
 import asyncio
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 
 from app.db import async_session_factory
 from app.services import backup
@@ -40,8 +40,11 @@ def _is_due(now: datetime, scheduled_hour: int, last_run: datetime | None) -> bo
         return False
     if last_run is None:
         return True
-    # last_run is stored timezone-aware in UTC; compare in local time, since the schedule is
-    # expressed in local hours.
+    # last_run is UTC, but SQLite hands back naive datetimes even for DateTime(timezone=True)
+    # columns, and .astimezone() would read a naive value as local time. Tag it UTC first,
+    # then compare in local time, since the schedule is expressed in local hours.
+    if last_run.tzinfo is None:
+        last_run = last_run.replace(tzinfo=timezone.utc)
     last_local = last_run.astimezone()
     return last_local.date() < now.date() or last_local.hour < scheduled_hour
 

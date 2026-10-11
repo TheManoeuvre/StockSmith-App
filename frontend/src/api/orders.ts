@@ -86,6 +86,8 @@ export interface ReplacementParcelCreateInput {
   reason: ReplacementParcelReason;
   postage_cost?: string | null;
   postage_charge_id?: number | null;
+  /** A sync placeholder this parcel completes; the backend retires it. */
+  completes_parcel_id?: number | null;
   tracking_number?: string | null;
   carrier?: string | null;
   notes?: string | null;
