@@ -28,7 +28,7 @@ export function PlatformCompatibilityPanel({ platform }: { platform: ListingPlat
   if (error) return <ErrorBanner error={error} />;
   if (!data || data.products.length === 0) return null;
 
-  const { blocked_count, warning_count, total_products } = data;
+  const { blocked_count, warning_count, total_products, excluded_count } = data;
 
   return (
     <div className="flex flex-col gap-2 rounded border border-amber-300 bg-amber-50 p-3 text-sm">
@@ -42,6 +42,9 @@ export function PlatformCompatibilityPanel({ platform }: { platform: ListingPlat
           </>
         )}
         {warning_count > 0 && <> · {warning_count} need adjusting</>}.
+        {excluded_count > 0 && (
+          <span className="text-slate-500"> {excluded_count} switched off for {label} aren't counted.</span>
+        )}
       </p>
       <div className="flex flex-col gap-2">
         {data.products.map((product) => (

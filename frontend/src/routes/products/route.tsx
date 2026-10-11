@@ -10,7 +10,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent } from 
 import { platformsApi, type ProductSyncStatus } from "../../api/platforms";
 import { productsApi } from "../../api/products";
 import type { ListingPlatform, Product } from "../../api/types";
-import { CONNECTABLE_PLATFORMS } from "../../lib/platforms";
+import { CONNECTABLE_PLATFORMS, PLATFORM_LABELS } from "../../lib/platforms";
 import { useAssetUrl } from "../../hooks/useAssetUrl";
 import { useLazyVisible } from "../../hooks/useLazyVisible";
 import { useDirtyRegistration } from "../../hooks/useDirtyRegistry";
@@ -22,6 +22,8 @@ import { CsvImportExport } from "../../components/common/CsvImportExport";
 import { FilterTabs } from "../../components/common/FilterTabs";
 import { GroupHeaderRow, Th } from "../../components/common/ListTable";
 import { PlatformSyncBadge } from "../../components/products/PlatformSyncBadge";
+import { NewProductStoreChips, useNewProductStores, type StoreChoices } from "../../components/products/NewProductStoreChips";
+import { storeState } from "../../components/products/ProductStoreSection";
 import { inclFallbacksNote, sellableSummary } from "../../lib/format";
 import { formatUnitCost } from "../../lib/money";
 
@@ -124,6 +126,7 @@ function ProductsListContent() {
   // Off by default, same as the materials list's showInactive — an inactive product is
   // hidden from the main list until asked for.
   const [showInactive, setShowInactive] = useState(false);
+  const [soldOn, setSoldOn] = useState<"" | ListingPlatform>("");
   // Collapsed category groups, by label. Session-only, same as the materials list.
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
@@ -140,11 +143,12 @@ function ProductsListContent() {
   }, [searchInput]);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["products", page, tab, q, showInactive],
+    queryKey: ["products", page, tab, q, showInactive, soldOn],
     queryFn: () =>
       productsApi.listPaged(PRODUCTS_PAGE_SIZE, page * PRODUCTS_PAGE_SIZE, {
         cogsIncomplete: tab === "cost-gaps",
         includeInactive: showInactive,
+        soldOn: soldOn || undefined,
         q,
       }),
     placeholderData: keepPreviousData,
@@ -175,14 +179,27 @@ function ProductsListContent() {
   const [showForm, setShowForm] = useState(false);
   const [name, setName] = useState("");
   const [sku, setSku] = useState("");
+  const newProductStores = useNewProductStores();
+  const [storeChoices, setStoreChoices] = useState<StoreChoices>({});
 
   const createFormDirty =
     showForm && (name.trim() !== "" || sku.trim() !== "");
   useDirtyRegistration("new-product", "New product", createFormDirty);
 
   const createMutation = useMutation({
-    mutationFn: () => productsApi.create({ name, sku: sku || null }),
+    mutationFn: async () => {
+      const created = await productsApi.create({ name, sku: sku || null });
+      // The server already applied each store's default; only a chip the user flipped needs a write.
+      for (const { platform, defaultOn } of newProductStores) {
+        const chosen = storeChoices[platform];
+        if (chosen !== undefined && chosen !== defaultOn) {
+          await platformsApi.setProductStore(platform, created.id, chosen);
+        }
+      }
+      return created;
+    },
     onSuccess: () => {
+      setStoreChoices({});
       queryClient.invalidateQueries({ queryKey: ["products"] });
       setShowForm(false);
       setName("");
@@ -269,6 +286,24 @@ function ProductsListContent() {
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
           />
+          {newProductStores.length > 0 && (
+            <select
+              aria-label="Sold on"
+              className="rounded border border-slate-300 px-2 py-1.5 text-sm"
+              value={soldOn}
+              onChange={(e) => {
+                setSoldOn(e.target.value as typeof soldOn);
+                setPage(0);
+              }}
+            >
+              <option value="">All stores</option>
+              {newProductStores.map(({ platform }) => (
+                <option key={platform} value={platform}>
+                  Sold on {PLATFORM_LABELS[platform]}
+                </option>
+              ))}
+            </select>
+          )}
           {(showInactive || inactiveTotal > 0) && (
             <label className="flex shrink-0 cursor-pointer items-center gap-1 text-[12px] text-slate-500">
               <input
@@ -311,6 +346,7 @@ function ProductsListContent() {
               onChange={(e) => setSku(e.target.value)}
             />
           </label>
+          <NewProductStoreChips stores={newProductStores} choices={storeChoices} onChange={setStoreChoices} />
           <button
             type="submit"
             className="rounded bg-slate-900 px-4 py-1.5 text-white"
@@ -524,7 +560,8 @@ function ProductRow({
       <td className="p-2">
         <div className="flex flex-wrap gap-1">
           {storeStatuses.map(({ platform, byProduct }) => {
-            const status = byProduct[p.id];
+            // A store the product is switched off for gets no badge at all.
+            const status = storeState(p, platform).is_on ? byProduct[p.id] : undefined;
             // A product absent from a platform's index has never been checked against it
             // — that's "not listed here", so show nothing rather than a "not tested"
             // badge implying it should be.

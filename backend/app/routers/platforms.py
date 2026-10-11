@@ -18,10 +18,15 @@ from app.models.platform_credential import PlatformAppCredential, PlatformEnviro
 from app.models.platform_listing_push import PlatformListingPush
 from app.models.platform_sync_run import PlatformSyncRun, SyncRunMode, SyncRunStatus
 from app.models.product import Product
+from app.schemas.product import ProductStoreState
 from app.models.variant import ProductVariant
 from app.schemas.listing import BulkListingSyncResult, ProductListingSyncSummary, PushCorrectionsResult
 from app.schemas.platform import (
     EbaySigningKeyStatus,
+    NewProductDefaultRequest,
+    ProductScopeRequest,
+    ProductScopeResult,
+    ProductStoreRequest,
     ListingPushPage,
     ListingPushRead,
     PlatformConnectResponse,
@@ -86,6 +91,7 @@ from app.services import (
     order_sync,
     platform_api_usage,
     platform_credentials,
+    product_platforms,
     shipping_price_sync,
     sync_scheduler,
     sync_status,
@@ -339,6 +345,11 @@ async def _status_from_connection(
     # equivalent, so its connections can never be in this state.
     needs_reconnect = platform == ListingPlatform.ebay and not _has_trading_scope(connection)
 
+    excluded = await product_platforms.excluded_product_ids(session, platform)
+    active_ids = {row[0] for row in await session.execute(select(Product.id).where(Product.is_active.is_(True)))}
+    active_count = len(active_ids)
+    off_count = len(excluded & active_ids)
+
     return PlatformStatus(
         connected=True,
         account_id=connection.external_account_id,
@@ -361,6 +372,10 @@ async def _status_from_connection(
         needs_reconnect_reason=_MISSING_TRADING_SCOPE_HINT if needs_reconnect else None,
         api_calls_today=await platform_api_usage.usage_today(session, platform),
         api_call_budget=platform_api_usage.daily_budget(platform),
+        new_products_default_on=connection.new_products_default_on,
+        product_scope_decided_at=connection.product_scope_decided_at,
+        products_on_count=active_count - off_count,
+        products_off_count=off_count,
     )
 
 
@@ -552,6 +567,9 @@ async def platform_callback(
         )
         connection.last_orders_synced_at = None
         connection.unpaid_hold_since = None
+        # A different shop has a different product mix, so the all-on/all-off prompt
+        # is worth asking again.
+        connection.product_scope_decided_at = None
         # A new shop must not start unattended commits before a manual sync has been run.
         connection.auto_sync_enabled = False
     connection.external_account_id = account_id
@@ -1151,6 +1169,67 @@ async def _settings_schema(session, product_id: int, platform: ListingPlatform) 
     )
 
 
+@router.put(
+    "/{platform}/products/{product_id}/store",
+    response_model=ProductStoreState,
+    dependencies=[Depends(require_auth)],
+)
+async def set_product_store(
+    platform: ListingPlatform,
+    product_id: int,
+    payload: ProductStoreRequest,
+    session: AsyncSession = Depends(get_db),
+) -> ProductStoreState:
+    """Turns this product on or off for one store, leaving the rest of its settings alone."""
+    if platform not in product_platforms.PUSHABLE_PLATFORMS:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{platform.value} has no product listings")
+    if await session.get(Product, product_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    try:
+        await product_platforms.set_product_store(session, product_id, platform, payload.on)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    await session.commit()
+    is_on, is_locked = (await product_platforms.store_states(session, [product_id])).get(product_id, {}).get(
+        platform, (True, False)
+    )
+    return ProductStoreState(platform=platform.value, is_on=is_on, is_locked=is_locked)
+
+
+@router.post(
+    "/{platform}/product-scope",
+    response_model=ProductScopeResult,
+    dependencies=[Depends(require_auth)],
+)
+async def apply_product_scope(
+    platform: ListingPlatform, payload: ProductScopeRequest, session: AsyncSession = Depends(get_db)
+) -> ProductScopeResult:
+    """Sets every product on or off for this store. This is the one-off prompt's answer, and
+    also the "apply to all" action on the store page. Products live on the store stay on."""
+    if platform not in product_platforms.PUSHABLE_PLATFORMS:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{platform.value} has no product listings")
+    try:
+        count = await product_platforms.apply_store_scope(session, platform, payload.on)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    await session.commit()
+    return ProductScopeResult(products_set=count)
+
+
+@router.put(
+    "/{platform}/new-product-default",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_auth)],
+)
+async def set_new_product_default(
+    platform: ListingPlatform, payload: NewProductDefaultRequest, session: AsyncSession = Depends(get_db)
+) -> None:
+    """Whether newly created products start on for this store. Existing products are untouched."""
+    connection = await _require_connection(session, platform)
+    connection.new_products_default_on = payload.on_by_default
+    await session.commit()
+
+
 @router.get(
     "/{platform}/products/{product_id}/settings",
     response_model=ProductPlatformSettingsRead,
@@ -1179,6 +1258,11 @@ async def update_product_platform_settings(
     if product is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
 
+    if payload.is_target is False and platform in await product_platforms.live_platforms(session, product_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"This product is live on {platform.value}; end the listing there before turning the store off.",
+        )
     settings = await listing_profiles.get_or_create_settings(session, product_id, platform)
     settings.listing_profile_id = payload.listing_profile_id
     settings.is_target = payload.is_target

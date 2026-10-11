@@ -176,6 +176,29 @@ class TestRefresh:
         assert notes[0].category == NotificationCategory.shipping_profile_missing
         assert "Gone" in notes[0].title
 
+    async def test_no_missing_alert_when_only_switched_off_products_use_the_profile(self, session, marketplace):
+        from app.models.product import Product
+        from app.services.product_platforms import set_product_store
+
+        await _connect(session)
+        await _enable(session, NotificationCategory.shipping_profile_missing)
+        gone = await _profile(session, "Gone", etsy_shipping_profile_id=999, price_etsy=Decimal("4.00"))
+        product = Product(name="Pot", sku="SKU-1", shipping_profile_id=gone.id)
+        session.add(product)
+        await session.commit()
+        await set_product_store(session, product.id, ETSY, False)
+        await session.commit()
+        marketplace([_mp()])
+
+        await shipping_price_sync.refresh(session, ETSY)
+        assert await _notifications(session) == []
+
+        # Switching the product back on makes the missing profile matter again.
+        await set_product_store(session, product.id, ETSY, True)
+        await session.commit()
+        await shipping_price_sync.refresh(session, ETSY)
+        assert len(await _notifications(session)) == 1
+
     async def test_a_profile_that_reappears_can_alert_again_later(self, session, marketplace):
         await _connect(session)
         await _enable(session, NotificationCategory.shipping_profile_missing)

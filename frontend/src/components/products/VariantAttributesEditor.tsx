@@ -360,6 +360,7 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
       )}
       {platformConflict && (
         <PlatformConflictDialog
+          productId={product.id}
           detail={platformConflict}
           busy={generateMutation.isPending}
           onResolve={(resolution) => generateMutation.mutate({ ...askedWith, onPlatformConflict: resolution })}

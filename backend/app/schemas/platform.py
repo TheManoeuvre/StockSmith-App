@@ -79,6 +79,12 @@ class PlatformStatus(BaseModel):
     # sync) stand down — see services/platform_api_usage. 0/0 when disconnected.
     api_calls_today: int = 0
     api_call_budget: int = 0
+    # Per-product store switches. `product_scope_decided_at` is None until the one-off
+    # "all products on or off?" prompt has been answered for this store.
+    new_products_default_on: bool = True
+    product_scope_decided_at: datetime | None = None
+    products_on_count: int = 0
+    products_off_count: int = 0
 
     normalise_utc = field_validator(
         "connected_at",
@@ -87,6 +93,7 @@ class PlatformStatus(BaseModel):
         "last_sync_attempt_at",
         "last_sync_success_at",
         "unpaid_hold_since",
+        "product_scope_decided_at",
     )(_as_utc)
 
 
@@ -282,3 +289,21 @@ class ListingPushRead(BaseModel):
 class ListingPushPage(BaseModel):
     items: list[ListingPushRead]
     total: int
+
+
+class ProductScopeRequest(BaseModel):
+    """Answer to the one-off prompt: set every product on (true) or off (false)."""
+
+    on: bool
+
+
+class ProductScopeResult(BaseModel):
+    products_set: int
+
+
+class NewProductDefaultRequest(BaseModel):
+    on_by_default: bool
+
+
+class ProductStoreRequest(BaseModel):
+    on: bool

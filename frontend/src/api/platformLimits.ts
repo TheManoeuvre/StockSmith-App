@@ -54,6 +54,8 @@ export interface CatalogueCompatibilityReport {
   total_products: number;
   blocked_count: number;
   warning_count: number;
+  /** Active products switched off for this store, left out of every count above. */
+  excluded_count: number;
   products: ProductCompatibility[];
 }
 

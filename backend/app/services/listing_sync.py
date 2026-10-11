@@ -13,7 +13,7 @@ from app.schemas.listing import (
     ProductSyncStatus,
     UnitSyncResult,
 )
-from app.services import listing_push
+from app.services import listing_push, product_platforms
 from app.services.platforms.base import ExternalListingRef
 from app.services.variants import compute_full_sku
 
@@ -251,7 +251,10 @@ async def check_all_products_sku_sync(
     product, so a shop-wide check costs the same one marketplace fetch as a
     single-product check."""
     result = await session.execute(select(Product.id).where(Product.is_active.is_(True)))
-    product_ids = [row[0] for row in result]
+    # Products switched off for this store are left alone: checking them writes Listing
+    # rows for a marketplace they were never meant for.
+    excluded = await product_platforms.excluded_product_ids(session, platform)
+    product_ids = [row[0] for row in result if row[0] not in excluded]
 
     summaries = [await check_product_sku_sync(session, pid, index, platform) for pid in product_ids]
     return BulkListingSyncResult(

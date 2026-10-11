@@ -34,7 +34,7 @@ from app.models.listing import Listing, ListingPlatform
 from app.models.platform_connection import PlatformConnection
 from app.models.product import Product
 from app.models.variant import ProductVariant
-from app.services import draft_readiness, file_storage, listing_copy, listing_profiles, listing_push
+from app.services import draft_readiness, file_storage, listing_copy, listing_profiles, listing_push, product_platforms
 from app.services.general_settings import get_general_settings
 from app.services.platforms.base import DraftImage, DraftListing, DraftUnit
 from app.services.variants import compute_full_sku
@@ -283,6 +283,9 @@ async def push_draft(
                 listing.published_sku = unit.sku
             linked += 1
 
+        # Drafting is an unambiguous "this product is sold here". Written explicitly, not left
+        # to the live-listing override, so the store stays on if the listing is later ended.
+        await product_platforms.set_product_store(session, product_id, platform, True)
         await session.commit()
         return DraftPushResult(
             external_listing_id=result.external_listing_id,

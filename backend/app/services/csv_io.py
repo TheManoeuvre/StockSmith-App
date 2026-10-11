@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.models.listing import ListingPlatform
 from app.models.manufacturer import Manufacturer
 from app.models.material import Material, MaterialAdjustment, MaterialAdjustmentMode, MaterialUnit
 from app.models.material_category import MaterialCategory
@@ -20,6 +21,8 @@ from app.services.colours import find_or_create as find_or_create_colour
 from app.services import material_categories
 from app.services.costing import recompute_material
 from app.services.kitting import apply_default_kitting_bom
+from app.services import product_platforms
+from app.services.product_platforms import apply_new_product_defaults
 from app.services.validation import validate_qty_for_unit
 
 MATERIALS_CSV_FIELDS = [
@@ -38,7 +41,10 @@ MATERIALS_CSV_FIELDS = [
     "product_url",
 ]
 
-PRODUCTS_CSV_FIELDS = ["name", "sku", "description", "is_active"]
+# sold_on_<store> is the per-product store switch. Blank on import leaves the switch alone, so
+# an older export (or a spreadsheet without the columns) never flips anything by omission.
+PRODUCTS_CSV_STORE_COLUMNS = {"sold_on_etsy": ListingPlatform.etsy, "sold_on_ebay": ListingPlatform.ebay}
+PRODUCTS_CSV_FIELDS = ["name", "sku", "description", "is_active", *PRODUCTS_CSV_STORE_COLUMNS]
 
 ORDERS_CSV_FIELDS = [
     "id",
@@ -309,6 +315,7 @@ async def import_materials_csv(session: AsyncSession, content: bytes) -> dict:
 
 async def export_products_csv(session: AsyncSession) -> str:
     result = await session.execute(select(Product).order_by(Product.name))
+    states = await product_platforms.store_states(session)
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=PRODUCTS_CSV_FIELDS)
     writer.writeheader()
@@ -319,6 +326,10 @@ async def export_products_csv(session: AsyncSession) -> str:
                 "sku": p.sku or "",
                 "description": p.description or "",
                 "is_active": "true" if p.is_active else "false",
+                **{
+                    column: "true" if states.get(p.id, {}).get(platform, (True, False))[0] else "false"
+                    for column, platform in PRODUCTS_CSV_STORE_COLUMNS.items()
+                },
             }
         )
     return buf.getvalue()
@@ -402,12 +413,22 @@ async def import_products_csv(session: AsyncSession, content: bytes) -> dict:
                 if not sku:
                     product.sku = f"SKU-{product.id:04d}"
                 await apply_default_kitting_bom(session, product.id)
+                await apply_new_product_defaults(session, product.id)
                 created += 1
             else:
                 existing.name = name
                 existing.description = description
                 existing.is_active = is_active
                 updated += 1
+
+            # After create/update so a new row has its id, and applied over the store defaults
+            # (which only ran for created rows) — an explicit cell always wins.
+            for column, platform in PRODUCTS_CSV_STORE_COLUMNS.items():
+                cell = row.get(column)
+                if cell is None or cell.strip() == "":
+                    continue
+                target = product if existing is None else existing
+                await product_platforms.set_product_store(session, target.id, platform, _parse_bool(cell))
 
             await session.commit()
         except (ValueError, KeyError) as e:

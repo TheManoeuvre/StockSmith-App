@@ -429,6 +429,13 @@ export interface MaterialStockHistoryEntry {
   purchase_id: number | null;
 }
 
+export interface ProductStoreState {
+  platform: ListingPlatform;
+  is_on: boolean;
+  /** A live listing pins the store on; it can't be turned off until that listing is ended. */
+  is_locked: boolean;
+}
+
 export interface Product {
   id: number;
   name: string;
@@ -480,6 +487,8 @@ export interface Product {
   effective_shipping_cost: string | null;
   /** Missing a shipping profile or a materials cost — see the backend's _cogs_incomplete. */
   cogs_incomplete: boolean;
+  /** One entry per listing store: is the product switched on for it, and is a live listing pinning it on. */
+  store_states: ProductStoreState[];
   main_image_asset_id: number | null;
   ready_to_ship: number | null;
   variant_attribute1_name: string | null;
