@@ -147,7 +147,7 @@ jobs:
       # --lib only: there is no binary to test, and building the full app would pull in the
       # frontend bundle and a real sidecar, neither of which this job produces.
       - name: Run Rust tests
-        run: cargo test --lib
+        run: cargo test --lib --locked
         working-directory: frontend/src-tauri
 
   # release.yml only triggers on v* tags, so its logic is otherwise unexercised until a
