@@ -421,7 +421,7 @@ function Dashboard() {
                             ? { variantId: r.build.variantId }
                             : {}),
                         }}
-                        className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800"
+                        className="whitespace-nowrap rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800"
                       >
                         Build now
                       </Link>
@@ -492,7 +492,7 @@ function Dashboard() {
                       <button
                         onClick={() => openDraftPurchase(group.materials)}
                         title="Draft one purchase covering every at-risk material from this supplier"
-                        className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-normal text-amber-800"
+                        className="whitespace-nowrap rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-normal text-amber-800"
                       >
                         Create draft purchase
                       </button>
@@ -530,7 +530,7 @@ function Dashboard() {
                       <td className="p-2">
                         <button
                           onClick={() => openDraftPurchase([m])}
-                          className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800"
+                          className="whitespace-nowrap rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800"
                         >
                           Create draft purchase
                         </button>
