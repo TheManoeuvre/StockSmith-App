@@ -13,6 +13,7 @@ import { ErrorBanner } from "../common/ErrorBanner";
 import {
   ReferenceDataTable,
   type ExpandedRowContext,
+  type ReferenceColumn,
   type ReferenceField,
   type ReferenceRow,
 } from "../reference/ReferenceDataTable";
@@ -106,6 +107,95 @@ function DriftMarker({
       {PLATFORM_LABEL[platform]} now {money(remote.domestic_price)}
     </span>
   );
+}
+
+/**
+ * One channel's cell in a collapsed row: what the buyer is charged over what it costs.
+ *
+ * A price that came from the marketplace (the profile is linked and has a price of its own)
+ * carries a dot — green while it still matches what the marketplace charges, amber once the
+ * marketplace has moved on — with the detail in the tooltip. A price the channel doesn't set
+ * falls back to the default and is shown muted, so it never reads as imported.
+ */
+function ChannelCell({
+  profile,
+  platform,
+  source,
+  lastRefreshed,
+}: {
+  profile: ShippingProfile;
+  platform: LinkedPlatform;
+  source: MarketplaceSource;
+  lastRefreshed: string | null | undefined;
+}) {
+  const label = PLATFORM_LABEL[platform];
+  const own = profile[PRICE_KEY[platform]];
+  const cost = profile[platform === "etsy" ? "cost_etsy" : "cost_ebay"];
+  const linked = profile[LINK_KEY[platform]] != null;
+  const remote = linkedMarketplaceProfile(profile, platform, source);
+
+  let marker: { className: string; title: string } | null = null;
+  if (linked && remote?.is_calculated) {
+    marker = { className: "bg-slate-300", title: `Calculated per buyer on ${label} — no fixed price to sync` };
+  } else if (linked && own != null) {
+    const drifted = remote?.domestic_price != null && Number(own) !== Number(remote.domestic_price);
+    marker = drifted
+      ? { className: "bg-amber-500", title: `${label} now charges ${money(remote.domestic_price)} — open the row to pull it` }
+      : {
+          className: "bg-emerald-500",
+          title: lastRefreshed
+            ? `Synced from ${label} · last refreshed ${new Date(lastRefreshed).toLocaleString()}`
+            : `Synced from ${label}`,
+        };
+  }
+
+  return (
+    <span className="flex items-baseline gap-1 tabular-nums">
+      <span className={own != null ? "text-slate-800" : "text-slate-400"} title={own != null ? undefined : "Uses the default price"}>
+        {money(own ?? profile.price)}
+      </span>
+      {marker && (
+        <span
+          role="img"
+          aria-label={marker.title}
+          title={marker.title}
+          className={`inline-block h-1.5 w-1.5 shrink-0 self-center rounded-full ${marker.className}`}
+        />
+      )}
+      <span className="text-slate-400">/ {money(cost)}</span>
+    </span>
+  );
+}
+
+/** Collapsed-row columns: per-channel charge / cost, so profiles compare without opening each. */
+function useProfileColumns(sources: Record<LinkedPlatform, MarketplaceSource>): ReferenceColumn<ShippingProfile>[] {
+  const { data: statuses } = useQuery({
+    queryKey: ["shipping-profiles", "refresh-status"],
+    queryFn: () => shippingProfilesApi.refreshStatus(),
+  });
+  return useMemo(() => {
+    const refreshed = (platform: LinkedPlatform) =>
+      statuses?.find((s) => s.platform === platform)?.last_shipping_price_refresh_at;
+    const channel = (platform: LinkedPlatform): ReferenceColumn<ShippingProfile> => ({
+      header: `${PLATFORM_LABEL[platform]} charge / cost`,
+      render: (profile) => (
+        <ChannelCell profile={profile} platform={platform} source={sources[platform]} lastRefreshed={refreshed(platform)} />
+      ),
+    });
+    return [
+      channel("etsy"),
+      channel("ebay"),
+      {
+        header: "Manual charge / cost",
+        render: (profile) => (
+          <span className="tabular-nums">
+            <span className="text-slate-800">{money(profile.price)}</span>
+            <span className="text-slate-400"> / {money(profile.cost_manual)}</span>
+          </span>
+        ),
+      },
+    ];
+  }, [sources, statuses]);
 }
 
 /** The "Pull price from Etsy / eBay" actions and the marketplace's current view of the link. */
@@ -394,6 +484,7 @@ export function ShippingProfileSettings() {
   const etsy = useMarketplaceSource("etsy");
   const ebay = useMarketplaceSource("ebay");
   const sources = useMemo(() => ({ etsy, ebay }), [etsy, ebay]);
+  const columns = useProfileColumns(sources);
 
   const archiveMutation = useMutation({
     mutationFn: ({ id, archived }: { id: number; archived: boolean }) =>
@@ -474,6 +565,13 @@ export function ShippingProfileSettings() {
         }}
         fields={fields}
         usageLabel={(n) => `${n} record${n === 1 ? "" : "s"}`}
+        nameHeader="Profile"
+        rowLeading={(profile) =>
+          profile.is_archived ? (
+            <span className="rounded bg-slate-100 px-1.5 py-0.5 text-xs font-normal text-slate-600">Archived</span>
+          ) : null
+        }
+        columns={columns}
         expandedExtras={(ctx) => (
           <>
             <MarketplaceLinkActions ctx={ctx} sources={sources} />
