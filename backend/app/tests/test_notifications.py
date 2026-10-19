@@ -517,7 +517,7 @@ class TestDigestRouting:
             )
 
         [(title, body)] = await self._flush_recording(session, monkeypatch)
-        assert title == "StockSmith: 2 updates"
+        assert title == "Order Alert: 2 items"
         # Distinguishable lines — the whole point of the roll-up. Generic per-alert titles
         # used to render this as the same string repeated.
         assert body == "- Order #242 — 3 items short\n- Order #243 — 1 item short"
@@ -652,7 +652,7 @@ class TestDigestBodyFitsThePhone:
 
         title, body = await self._flush(session, monkeypatch)
 
-        assert title == "StockSmith: 2 updates"
+        assert title == "Stock Alert: 2 items"
         assert body == (
             "- Bambu Lab | PLA Matte | Ice Blue is running low\n- Magnet | 6x3mm Disk is running low"
         )
@@ -666,7 +666,7 @@ class TestDigestBodyFitsThePhone:
 
         title, body = await self._flush(session, monkeypatch)
 
-        assert title == "StockSmith: 8 updates"
+        assert title == "Stock Alert: 8 items"
         assert body == "5 × Filament low\n2 × Hardware low\n1 × Packaging low"
         assert len(body) <= notifications._DIGEST_DETAIL_CHAR_BUDGET
 
@@ -692,9 +692,10 @@ class TestDigestBodyFitsThePhone:
             related_entity_id=material.id,
         )
 
-        _, body = await self._flush(session, monkeypatch)
+        title, body = await self._flush(session, monkeypatch)
 
         assert body == "4 × Orders short on stock\n1 × Filament critically low"
+        assert title == "Alerts: 5 items"
 
     async def test_a_material_deleted_before_the_flush_falls_back_to_a_generic_label(self, session, monkeypatch):
         for i in range(8):

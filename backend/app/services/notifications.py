@@ -296,6 +296,26 @@ def _digest_due(settings: NotificationSettings, *, now: datetime | None = None) 
     return last_local.date() < now.date() or last_local.hour < slot_hour
 
 
+# Which kind of alert a digest is about, so its title says so ("Stock Alert: 7 items"). Pushover
+# already shows the app's icon, so the title spends no characters on the app name. A batch
+# that mixes kinds falls back to the plain "Alerts".
+_DIGEST_KIND_LABELS: dict[NotificationCategory, str] = {
+    NotificationCategory.material_forecast_warning: "Stock Alert",
+    NotificationCategory.material_forecast_critical: "Stock Alert",
+    NotificationCategory.order_unfulfillable: "Order Alert",
+    NotificationCategory.order_blocked: "Order Alert",
+    NotificationCategory.order_cancellation_pending: "Order Alert",
+    NotificationCategory.pending_order_threshold: "Order Alert",
+    NotificationCategory.replacement_parcel_review: "Order Alert",
+}
+
+
+def _digest_title(pending: list[Notification]) -> str:
+    kinds = {_DIGEST_KIND_LABELS.get(n.category, "Alerts") for n in pending}
+    kind = kinds.pop() if len(kinds) == 1 else "Alerts"
+    return f"{kind}: {len(pending)} item{'s' if len(pending) != 1 else ''}"
+
+
 async def _material_category_names(session: AsyncSession, pending: list[Notification]) -> dict[int, str]:
     """material id -> its category name, for the material alerts in a digest batch."""
     material_ids = {
@@ -378,7 +398,7 @@ async def flush_digest(session: AsyncSession) -> None:
         await session.commit()
         return
 
-    title = f"StockSmith: {len(pending)} update{'s' if len(pending) != 1 else ''}"
+    title = _digest_title(pending)
     body = await _build_digest_body(session, pending)
 
     # The batch expires only if everything in it is routine. One blocker or failure batched
