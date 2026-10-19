@@ -981,7 +981,7 @@ function MaterialDetail() {
                         },
                       })
                     }
-                    className="rounded border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm text-amber-800"
+                    className="whitespace-nowrap rounded border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm text-amber-800"
                   >
                     Create draft purchase
                   </button>
