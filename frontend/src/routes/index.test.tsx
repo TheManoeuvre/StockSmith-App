@@ -284,3 +284,33 @@ it("shows ranked fallback suggestions on a packaging shortfall and logs the pick
   await waitFor(() => expect(usagePosted).toMatchObject({ material_id: 15, substitute_material_id: 16, order_id: 102 }));
   expect(await screen.findByText(/Logged — using Medium box instead/)).toBeInTheDocument();
 });
+
+it("collapses stock-short lines for one variation into a row with a due-date range", async () => {
+  const line = (id: number, order: number, due: string | null, variant = 5) => ({
+    line_id: id,
+    order_id: order,
+    product_id: 9,
+    variant_id: variant,
+    product_name: "Pencil Pot",
+    variant_name: variant === 5 ? "6 Stud / Blue" : "6 Stud / Red",
+    short_by: 1,
+    order_placed_at: "2026-08-10T09:00:00Z",
+    due_date: due,
+    has_bom: true,
+  });
+  await renderDashboard({
+    orders_awaiting_inventory: [
+      line(1, 394, "2026-08-15T12:00:00Z"),
+      line(2, 395, "2026-08-18T12:00:00Z"),
+      line(3, 396, "2026-08-17T12:00:00Z", 6),
+    ],
+    orders_awaiting_packaging: [],
+  });
+
+  const blue = (await screen.findByText("Pencil Pot — 6 Stud / Blue")).closest("tr")!;
+  expect(within(blue).getByText("#394")).toBeInTheDocument();
+  expect(within(blue).getByText("#395")).toBeInTheDocument();
+  expect(within(blue).getByText("15–18 Aug")).toBeInTheDocument();
+  // Exactly one row per variation.
+  expect(screen.getAllByText(/Pencil Pot — 6 Stud/)).toHaveLength(2);
+});

@@ -111,7 +111,7 @@ async def test_pushover(session: AsyncSession = Depends(get_db)) -> PushoverTest
     if not settings_row.pushover_user_key:
         return PushoverTestResult(success=False, reason="No Pushover user key is saved yet.")
     success, reason = await notifications.send_pushover(
-        settings_row.pushover_user_key, "StockSmith test notification", "Pushover is set up correctly."
+        settings_row.pushover_user_key, "Test notification", "Pushover is set up correctly."
     )
     return PushoverTestResult(success=success, reason=reason)
 

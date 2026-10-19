@@ -30,6 +30,7 @@ _ORDERS_AWAITING_INVENTORY_SQL = text(
            p.name AS product_name, pv.variant_name AS variant_name,
            (ol.ordered_qty - ol.allocated_qty) AS short_by,
            o.order_placed_at, o.platform AS platform,
+           CASE WHEN o.fulfilment_method = 'collect' THEN o.collect_by ELSE o.ship_by_date END AS due_date,
            COALESCE(
                p.is_bundle
                OR EXISTS (SELECT 1 FROM product_materials pm WHERE pm.product_id = ol.product_id)
@@ -561,6 +562,7 @@ async def get_orders_awaiting_inventory(session: AsyncSession) -> list[OrderAwai
             variant_name=row.variant_name,
             short_by=int(row.short_by),
             order_placed_at=row.order_placed_at,
+            due_date=row.due_date,
             platform=row.platform,
             has_bom=bool(row.has_bom),
         )
