@@ -14,6 +14,7 @@ import { SyncStatusIndicator } from "../components/common/SyncStatusIndicator";
 import { NotificationCenter } from "../components/common/NotificationCenter";
 import { MaintenanceOverlay } from "../components/common/MaintenanceOverlay";
 import { UnsavedChangesDialog } from "../components/common/UnsavedChangesDialog";
+import { useRefreshOnSync } from "../hooks/useRefreshOnSync";
 import { DirtyRegistryProvider } from "../hooks/useDirtyRegistry";
 import { GuardProvider, useUnsavedChangesGuard } from "../hooks/useUnsavedChangesGuard";
 import { dashboardApi } from "../api/dashboard";
@@ -94,6 +95,9 @@ const BADGE_TONE_CLASSES: Record<NavBadgeTone, string> = {
  * that never changed tone and asked for nothing.
  */
 function useNavBadges() {
+  // Mounted here rather than on the Orders page: the sidebar is on every page, and a background
+  // import must refresh the badge even if the user never opens Orders.
+  useRefreshOnSync();
   const { data: summary } = useQuery({
     queryKey: ["dashboard-summary"],
     queryFn: dashboardApi.summary,
