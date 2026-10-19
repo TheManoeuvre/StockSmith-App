@@ -12,6 +12,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **Batched phone notifications no longer get cut off.** When a lot of items ran low at once,
+  iOS clipped the Pushover message mid-list. A batch now names each item while it all fits on
+  the lock screen, and otherwise shows counts instead, such as "8 × Filament low", "2 × Hardware
+  low", "1 × Packaging low". The full list is still in the in-app notification log. Batch
+  titles now say what they are about ("Stock Alert: 7 items", "Order Alert: 2 items") instead of
+  repeating the app name, which the phone already shows as the icon. Low-stock lines also drop
+  the repeated "is running low", so more items can be named before it switches to counts.
+
 ## [0.22.0] - 2026-10-11
 
 ### Added
