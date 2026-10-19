@@ -11,7 +11,7 @@ import type {
 import { Badge } from "../components/common/Badge";
 import { Th } from "../components/common/ListTable";
 import { SubstituteSuggestions } from "../components/materials/SubstituteSuggestions";
-import { formatDayMonth, roundQty } from "../lib/format";
+import { formatDayMonth, formatDayMonthRange, roundQty } from "../lib/format";
 import { formatMoney } from "../lib/money";
 import {
   formatLeadTime,
@@ -58,11 +58,18 @@ function stockoutDetail(m: LowStockMaterial): string | undefined {
 type FulfillmentRow = {
   key: string;
   orderId: number;
+  /** Every order this row stands for — more than one when stock-short lines for the same
+   * product variation are collapsed into a single row. */
+  orderIds: number[];
   shortOn: "Stock" | "Packaging" | "No BOM defined";
   item: string;
   shortBy: string;
   placedAt: string;
+  /** Due dates (ISO) of the orders on this row; empty entries already dropped. */
+  dueDates: string[];
   platform: ListingPlatform | null;
+  /** Distinct channels across the orders on this row. */
+  platforms: (ListingPlatform | null)[];
   build: { productId: number; variantId: number | null } | null;
   /** Only set on a "Packaging" row — the short material, for logging a picked fallback. */
   materialId: number | null;
@@ -73,40 +80,74 @@ type FulfillmentRow = {
  * common, expected case for a maker. Excludes lines with no BOM at all (see blockedRows). */
 function awaitingProductRows(data: DashboardSummary): FulfillmentRow[] {
   const rows: FulfillmentRow[] = [];
+  // One row per product variation: several orders short on the same item collapse together,
+  // their short-by summed, rather than each taking a line of its own.
+  const byVariation = new Map<string, FulfillmentRow>();
   for (const o of data.orders_awaiting_inventory) {
     if (!o.has_bom) continue;
-    rows.push({
-      key: `inv-${o.line_id}`,
+    const key =
+      o.product_id != null
+        ? `inv-${o.product_id}-${o.variant_id ?? "none"}`
+        : `inv-line-${o.line_id}`;
+    const existing = byVariation.get(key);
+    if (existing) {
+      if (!existing.orderIds.includes(o.order_id)) existing.orderIds.push(o.order_id);
+      existing.shortBy = String(Number(existing.shortBy) + o.short_by);
+      if (o.due_date) existing.dueDates.push(o.due_date);
+      if (!existing.platforms.includes(o.platform)) existing.platforms.push(o.platform);
+      if (o.order_placed_at < existing.placedAt) existing.placedAt = o.order_placed_at;
+      continue;
+    }
+    const row: FulfillmentRow = {
+      key,
       orderId: o.order_id,
+      orderIds: [o.order_id],
       shortOn: "Stock",
       item:
         (o.product_name ?? "—") + (o.variant_name ? ` — ${o.variant_name}` : ""),
       shortBy: String(o.short_by),
       placedAt: o.order_placed_at,
+      dueDates: o.due_date ? [o.due_date] : [],
       platform: o.platform,
+      platforms: [o.platform],
       build:
         o.product_id != null
           ? { productId: o.product_id, variantId: o.variant_id }
           : null,
       materialId: null,
       suggestedSubstitutes: [],
-    });
+    };
+    byVariation.set(key, row);
+    rows.push(row);
   }
   for (const [i, o] of data.orders_awaiting_packaging.entries()) {
     rows.push({
       key: `pkg-${o.order_id}-${o.material_id}-${i}`,
       orderId: o.order_id,
+      orderIds: [o.order_id],
       shortOn: "Packaging",
       item: o.material_name,
       shortBy: roundQty(o.short_by),
       placedAt: o.order_placed_at,
+      dueDates: o.due_date ? [o.due_date] : [],
       platform: o.platform,
+      platforms: [o.platform],
       build: null,
       materialId: o.material_id,
       suggestedSubstitutes: o.suggested_substitutes ?? [],
     });
   }
-  rows.sort((a, b) => a.placedAt.localeCompare(b.placedAt));
+  // Most urgent first: earliest due date, rows with none after, ties by when placed.
+  const earliestDue = (r: FulfillmentRow) =>
+    r.dueDates.length > 0
+      ? Math.min(...r.dueDates.map((d) => new Date(d).getTime()))
+      : Number.POSITIVE_INFINITY;
+  rows.sort((a, b) => {
+    const da = earliestDue(a);
+    const db = earliestDue(b);
+    if (da !== db) return da < db ? -1 : 1;
+    return a.placedAt.localeCompare(b.placedAt);
+  });
   return rows;
 }
 
@@ -119,12 +160,15 @@ function blockedRows(data: DashboardSummary): FulfillmentRow[] {
     rows.push({
       key: `blocked-${o.line_id}`,
       orderId: o.order_id,
+      orderIds: [o.order_id],
       shortOn: "No BOM defined",
       item:
         (o.product_name ?? "—") + (o.variant_name ? ` — ${o.variant_name}` : ""),
       shortBy: String(o.short_by),
       placedAt: o.order_placed_at,
+      dueDates: o.due_date ? [o.due_date] : [],
       platform: o.platform,
+      platforms: [o.platform],
       build:
         o.product_id != null
           ? { productId: o.product_id, variantId: o.variant_id }
@@ -364,7 +408,7 @@ function Dashboard() {
                 <Th>Short on</Th>
                 <Th>Item</Th>
                 <Th align="right">Short by</Th>
-                <Th>Placed</Th>
+                <Th>Due</Th>
                 <Th>{""}</Th>
               </tr>
             </thead>
@@ -373,23 +417,33 @@ function Dashboard() {
                 <Fragment key={r.key}>
                 <tr className="border-b border-slate-100">
                   <td className="p-2">
-                    <Link
-                      to="/orders/$orderId"
-                      params={{ orderId: String(r.orderId) }}
-                      className="text-slate-900 underline"
-                    >
-                      #{r.orderId}
-                    </Link>
+                    {r.orderIds.map((id, i) => (
+                      <Fragment key={id}>
+                        {i > 0 && ", "}
+                        <Link
+                          to="/orders/$orderId"
+                          params={{ orderId: String(id) }}
+                          className="text-slate-900 underline"
+                        >
+                          #{id}
+                        </Link>
+                      </Fragment>
+                    ))}
                   </td>
                   <td className="p-2">
-                    <span
-                      className={`rounded px-1.5 py-0.5 text-[10.5px] font-semibold ${
-                        r.platform
-                          ? PLATFORM_COLORS[r.platform].muted
-                          : "border border-slate-200 bg-slate-50 text-slate-600"
-                      }`}
-                    >
-                      {r.platform ? PLATFORM_LABELS[r.platform] : "Manual"}
+                    <span className="inline-flex gap-1">
+                      {r.platforms.map((p) => (
+                        <span
+                          key={p ?? "manual"}
+                          className={`rounded px-1.5 py-0.5 text-[10.5px] font-semibold ${
+                            p
+                              ? PLATFORM_COLORS[p].muted
+                              : "border border-slate-200 bg-slate-50 text-slate-600"
+                          }`}
+                        >
+                          {p ? PLATFORM_LABELS[p] : "Manual"}
+                        </span>
+                      ))}
                     </span>
                   </td>
                   <td className="p-2">
@@ -406,7 +460,7 @@ function Dashboard() {
                   <td className="p-2 text-right text-amber-700 tabular-nums">
                     {r.shortBy}
                   </td>
-                  <td className="p-2">{formatDayMonth(r.placedAt)}</td>
+                  <td className="p-2">{formatDayMonthRange(r.dueDates)}</td>
                   <td className="p-2">
                     {r.build && (
                       <Link

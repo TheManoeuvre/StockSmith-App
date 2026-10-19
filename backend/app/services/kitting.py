@@ -14,7 +14,7 @@ from app.models.kitting import (
 )
 from app.models.listing import Listing, ListingPlatform
 from app.models.material import Material, MaterialAdjustment
-from app.models.order import Order, OrderLine, OrderStatus
+from app.models.order import Order, OrderFulfilmentMethod, OrderLine, OrderStatus
 from app.models.variant import ProductVariant
 from app.schemas.dashboard import OrderAwaitingPackaging
 from app.schemas.kitting import OrderKittingOverrideLine, OrderKittingRequirementLine, OrderKittingSummary, VariantKittingBomLine
@@ -1062,6 +1062,7 @@ async def get_orders_awaiting_packaging(session: AsyncSession) -> list[OrderAwai
             material_name=material_names.get(material_id, "Unknown material"),
             short_by=short_by,
             order_placed_at=order.order_placed_at,
+            due_date=order.collect_by if order.fulfilment_method == OrderFulfilmentMethod.collect else order.ship_by_date,
             platform=order.platform,
             suggested_substitutes=substitutes_by_material.get(material_id, []),
         )

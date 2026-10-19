@@ -51,6 +51,27 @@ export function formatDayMonth(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { day: "2-digit", month: "short" });
 }
 
+// A due-date span for a row that stands for several orders: "17 Oct" when they all fall on one
+// day, "15–18 Oct" within a month, "28 Sep – 02 Oct" across months. Null/missing dates are
+// skipped; "—" when none of them has one.
+export function formatDayMonthRange(isos: (string | null | undefined)[]): string {
+  const times = isos
+    .filter((v): v is string => !!v)
+    .map((v) => new Date(v))
+    .sort((a, b) => a.getTime() - b.getTime());
+  if (times.length === 0) return "—";
+  const first = times[0];
+  const last = times[times.length - 1];
+  const start = formatDayMonth(first.toISOString());
+  const end = formatDayMonth(last.toISOString());
+  if (start === end) return start;
+  if (first.getMonth() === last.getMonth() && first.getFullYear() === last.getFullYear()) {
+    const day = first.toLocaleDateString(undefined, { day: "2-digit" });
+    return `${day}–${end}`;
+  }
+  return `${start} – ${end}`;
+}
+
 // The quantity fields every sellable-bearing row carries. Both Product and Variant
 // satisfy it, so the one derivation below serves the product header, the variant rows
 // and the products list without any of them drifting from the others.
