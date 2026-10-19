@@ -67,7 +67,7 @@ class TestMaterialForecastDedup:
         await _set_type(session, NotificationCategory.material_forecast_critical)
         await _set_type(session, NotificationCategory.material_forecast_warning)
 
-        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s: _forecasts_stub(["critical"]))
+        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s, **kw: _forecasts_stub(["critical"]))
         await notification_alerts.check_material_forecast_alerts(session)
         assert len(await _notification_titles(session)) == 1
 
@@ -79,22 +79,50 @@ class TestMaterialForecastDedup:
         await _set_type(session, NotificationCategory.material_forecast_critical)
         await _set_type(session, NotificationCategory.material_forecast_warning)
 
-        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s: _forecasts_stub(["critical"]))
+        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s, **kw: _forecasts_stub(["critical"]))
         await notification_alerts.check_material_forecast_alerts(session)
 
-        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s: _forecasts_stub(["ok"]))
+        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s, **kw: _forecasts_stub(["ok"]))
         await notification_alerts.check_material_forecast_alerts(session)
 
-        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s: _forecasts_stub(["critical"]))
+        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s, **kw: _forecasts_stub(["critical"]))
         await notification_alerts.check_material_forecast_alerts(session)
 
         assert len(await _notification_titles(session)) == 2
+
+    async def test_recovery_marks_alert_read(self, session, monkeypatch):
+        await _set_type(session, NotificationCategory.material_forecast_critical)
+        await _set_type(session, NotificationCategory.material_forecast_warning)
+
+        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s, **kw: _forecasts_stub(["warning"]))
+        await notification_alerts.check_material_forecast_alerts(session)
+        unread = (await session.execute(select(Notification).where(Notification.read_at.is_(None)))).scalars().all()
+        assert len(unread) == 1
+
+        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s, **kw: _forecasts_stub(["ok"]))
+        await notification_alerts.check_material_forecast_alerts(session)
+        unread = (await session.execute(select(Notification).where(Notification.read_at.is_(None)))).scalars().all()
+        assert unread == []
+
+    async def test_real_forecast_requests_healthy_materials(self, session, monkeypatch):
+        """The real compute_material_forecasts omits healthy materials unless asked, which is
+        what stopped recovery being seen."""
+        await _set_type(session, NotificationCategory.material_forecast_critical)
+        seen: dict = {}
+
+        async def spy(s, **kw):
+            seen.update(kw)
+            return []
+
+        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", spy)
+        await notification_alerts.check_material_forecast_alerts(session)
+        assert seen.get("include_all") is True
 
     async def test_disabled_type_never_fires(self, session, monkeypatch):
         await _set_type(session, NotificationCategory.material_forecast_critical, enabled=False)
         await _set_type(session, NotificationCategory.material_forecast_warning, enabled=False)
 
-        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s: _forecasts_stub(["critical"]))
+        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s, **kw: _forecasts_stub(["critical"]))
         await notification_alerts.check_material_forecast_alerts(session)
         assert await _notification_titles(session) == []
 
@@ -350,13 +378,13 @@ class TestAutoResolve:
         await _set_type(session, NotificationCategory.material_forecast_critical)
         await _set_type(session, NotificationCategory.material_forecast_warning)
 
-        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s: _forecasts_stub(["critical"]))
+        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s, **kw: _forecasts_stub(["critical"]))
         await notification_alerts.check_material_forecast_alerts(session)
         result = await session.execute(select(Notification).where(Notification.category == NotificationCategory.material_forecast_critical))
         notification = result.scalar_one()
         assert notification.read_at is None
 
-        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s: _forecasts_stub(["ok"]))
+        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s, **kw: _forecasts_stub(["ok"]))
         await notification_alerts.check_material_forecast_alerts(session)
 
         await session.refresh(notification)
