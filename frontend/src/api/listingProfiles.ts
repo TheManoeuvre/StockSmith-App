@@ -16,6 +16,7 @@ export interface ListingProfile {
   etsy_shop_section_id: number | null;
   etsy_processing_min: number | null;
   etsy_processing_max: number | null;
+  etsy_auto_renew: boolean | null;
 
   ebay_category_id: string | null;
   ebay_condition: string | null;
@@ -24,6 +25,7 @@ export interface ListingProfile {
   ebay_return_policy_id: string | null;
   ebay_merchant_location_key: string | null;
   ebay_marketplace_id: string | null;
+  ebay_handling_time_days: number | null;
 }
 
 export type ListingProfileWrite = Partial<Omit<ListingProfile, "id" | "platform">> & { name?: string };

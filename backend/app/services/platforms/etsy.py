@@ -1446,7 +1446,7 @@ class EtsyAdapter:
             "readiness_state_id": draft.metadata.get("etsy.readiness_state_id"),
             "type": "physical",
         }
-        for optional in ("etsy.is_supply", "etsy.return_policy_id", "etsy.shop_section_id"):
+        for optional in ("etsy.is_supply", "etsy.return_policy_id", "etsy.shop_section_id", "etsy.should_auto_renew"):
             value = draft.metadata.get(optional)
             if value is not None:
                 form[optional.split(".", 1)[1]] = value

@@ -3,6 +3,7 @@ import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/rea
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { Route } from "./settings";
 
 vi.mock("../api/client", async () => (await import("../test/fakeBackend")).clientMock());
 
@@ -201,6 +202,21 @@ describe("settings page", () => {
       // This is what makes the root unsaved-changes blocker cover page switches: a search-param
       // change is a real navigation, so no guard code is needed on this route at all.
       await waitFor(() => expect(router.state.location.search).toEqual({ page: "lists" }));
+    });
+
+    it("keeps a known ?panel= alongside the store and drops an unknown one", () => {
+      // Called directly: a match's search is merged over the raw URL, so it can't show what
+      // validateSearch discarded.
+      const validate = Route.options.validateSearch as (s: Record<string, unknown>) => unknown;
+      expect(validate({ page: "stores-sync", store: "etsy", panel: "listing-profiles" })).toEqual({
+        page: "stores-sync",
+        store: "etsy",
+        panel: "listing-profiles",
+      });
+      expect(validate({ page: "stores-sync", store: "etsy", panel: "nonsense" })).toEqual({
+        page: "stores-sync",
+        store: "etsy",
+      });
     });
 
     it("falls back to the default for an unrecognised page", async () => {
