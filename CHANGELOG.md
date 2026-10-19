@@ -12,7 +12,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Dashboard "Orders awaiting products" now shows one row per product variation (orders listed together, short-by summed) instead of one row per order line, and its "Placed" column is now "Due" — the same date as the Orders page's Due column, shown as a range (e.g. 15–18 Oct) when the orders differ.
+
 ### Fixed
+
 - **Batched phone notifications no longer get cut off.** When a lot of items ran low at once,
   iOS clipped the Pushover message mid-list. A batch now names each item while it all fits on
   the lock screen, and otherwise shows counts instead, such as "8 × Filament low", "2 × Hardware

@@ -952,6 +952,8 @@ export interface OrderAwaitingInventory {
   variant_name: string | null;
   short_by: number;
   order_placed_at: string;
+  /** Effective due date — same figure as the Orders page's Due column. */
+  due_date: string | null;
   platform: ListingPlatform | null;
   /** False means there's no BOM (and it's not a bundle) to ever build more from — a genuine
    * blocker, not just a wait for stock. See the dashboard's "Blocked orders" section. */
@@ -965,6 +967,7 @@ export interface OrderAwaitingPackaging {
   short_by: string;
   platform: ListingPlatform | null;
   order_placed_at: string;
+  due_date: string | null;
   /** Ranked, human-curated fallbacks for material_id — suggested only, never auto-applied. */
   suggested_substitutes?: SubstituteSuggestion[];
 }

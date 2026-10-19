@@ -58,6 +58,9 @@ class OrderAwaitingInventory(BaseModel):
     variant_name: str | None
     short_by: int
     order_placed_at: datetime
+    # The order's effective due date (collect-by for a collect order, else ship-by) — the same
+    # figure as the Orders page's Due column. None when the marketplace reported no date.
+    due_date: datetime | None = None
     platform: ListingPlatform | None = None
     # False means the product has no BOM at all (and isn't a bundle, which is fulfilled from
     # its components' stock rather than a BOM) — so this shortfall can never close by
@@ -73,6 +76,7 @@ class OrderAwaitingPackaging(BaseModel):
     material_name: str
     short_by: Decimal
     order_placed_at: datetime
+    due_date: datetime | None = None
     platform: ListingPlatform | None = None
     # Ranked, human-curated fallbacks for material_id — suggested only, never
     # auto-applied. See app.models.material_substitute.
