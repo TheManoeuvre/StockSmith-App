@@ -653,12 +653,28 @@ class TestDigestBodyFitsThePhone:
         title, body = await self._flush(session, monkeypatch)
 
         assert title == "Stock Alert: 2 items"
-        assert body == (
-            "- Bambu Lab | PLA Matte | Ice Blue is running low\n- Magnet | 6x3mm Disk is running low"
+        assert body == "- Bambu Lab | PLA Matte | Ice Blue\n- Magnet | 6x3mm Disk"
+
+    async def test_a_critical_material_keeps_a_marker_among_plain_names(self, session, monkeypatch):
+        await self._warn(session, await self._material(session, "Ice Blue", "Filament"))
+        black = await self._material(session, "Black", "Filament")
+        await notifications.dispatch_notification(
+            session,
+            category=NotificationCategory.material_forecast_critical,
+            urgency=NotificationUrgency.immediate,
+            title="Black is critically low",
+            body="body",
+            delivery_mode=NotificationDeliveryMode.digest,
+            related_entity_type="material",
+            related_entity_id=black.id,
         )
 
+        _, body = await self._flush(session, monkeypatch)
+
+        assert body == "- Ice Blue\n- Black (critical)"
+
     async def test_too_many_items_become_counts_by_material_category(self, session, monkeypatch):
-        for i in range(5):
+        for i in range(8):
             await self._warn(session, await self._material(session, f"Bambu Lab | PLA Basic | Colour {i}", "Filament"))
         await self._warn(session, await self._material(session, "Magnet | 6x3mm Disk", "Hardware"))
         await self._warn(session, await self._material(session, "Bottle Opener Insert", "Hardware"))
@@ -666,8 +682,8 @@ class TestDigestBodyFitsThePhone:
 
         title, body = await self._flush(session, monkeypatch)
 
-        assert title == "Stock Alert: 8 items"
-        assert body == "5 × Filament low\n2 × Hardware low\n1 × Packaging low"
+        assert title == "Stock Alert: 11 items"
+        assert body == "8 × Filament low\n2 × Hardware low\n1 × Packaging low"
         assert len(body) <= notifications._DIGEST_DETAIL_CHAR_BUDGET
 
     async def test_counts_cover_non_material_alerts_and_critical_materials(self, session, monkeypatch):

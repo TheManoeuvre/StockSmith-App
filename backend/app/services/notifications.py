@@ -340,10 +340,23 @@ def _digest_group_label(notification: Notification, material_categories: dict[in
     return _DIGEST_GROUP_LABELS.get(notification.category, notification.category.value.replace("_", " ").capitalize())
 
 
+def _digest_line(notification: Notification) -> str:
+    """The item as one digest line. Under a "Stock Alert" title the "is running low" on every
+    material line is noise that costs characters, so a warning is just the name and a critical
+    one keeps a short marker; every other alert's title already reads well as it is."""
+    title = notification.title
+    if notification.category == NotificationCategory.material_forecast_warning:
+        return title.removesuffix(" is running low")
+    if notification.category == NotificationCategory.material_forecast_critical:
+        name = title.removesuffix(" is critically low")
+        return f"{name} (critical)" if name != title else title
+    return title
+
+
 async def _build_digest_body(session: AsyncSession, pending: list[Notification]) -> str:
     """One line per item while that fits what a phone will show; otherwise one line per kind
     of alert with a count, largest group first. Never a list cut off mid-item."""
-    detail = "\n".join(f"- {n.title}" for n in pending)
+    detail = "\n".join(f"- {_digest_line(n)}" for n in pending)
     if len(detail) <= _DIGEST_DETAIL_CHAR_BUDGET:
         return detail
 
