@@ -16,6 +16,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings as app_settings
+from app.models.material import Material
 from app.models.notification import (
     ALERT_TYPES,
     DEFAULT_IMMEDIATE_ALERT_TYPES,
@@ -31,7 +32,31 @@ from app.models.notification import (
 logger = logging.getLogger("stocksmith.notifications")
 
 _PUSHOVER_URL = "https://api.pushover.net/1/messages.json"
-_DIGEST_BODY_LINE_CAP = 10
+
+# iOS cuts a push off after roughly seven lines (~250 characters) even when long-pressed open;
+# Pushover itself allows 1024, so the phone, not the API, is the limit that matters. A digest
+# that fits this budget lists each item; one that doesn't is summarised as counts, so what the
+# lock screen shows is always a complete, sensible message rather than a list cut mid-word.
+_DIGEST_DETAIL_CHAR_BUDGET = 250
+
+# Counts-mode label for each alert type, "<n> × <label>". Material forecasts are labelled by
+# the material's own category instead (see _digest_group_label); these cover everything else.
+_DIGEST_GROUP_LABELS: dict[NotificationCategory, str] = {
+    NotificationCategory.marketplace_sync_failure: "Marketplace sync failures",
+    NotificationCategory.order_unfulfillable: "Orders short on stock",
+    NotificationCategory.order_blocked: "Orders blocked",
+    NotificationCategory.platform_reconnect_required: "Marketplaces to reconnect",
+    NotificationCategory.pending_order_threshold: "Pending order alerts",
+    NotificationCategory.backup_failed: "Backup failures",
+    NotificationCategory.secondary_backup_unreachable: "Backup location issues",
+    NotificationCategory.marketplace_api_soft_limit: "API limit warnings",
+    NotificationCategory.marketplace_api_hard_limit: "API limits reached",
+    NotificationCategory.shipping_price_changed: "Shipping price changes",
+    NotificationCategory.shipping_profile_missing: "Missing shipping profiles",
+    NotificationCategory.replacement_parcel_review: "Parcels to review",
+    NotificationCategory.order_cancellation_pending: "Cancellations to process",
+    NotificationCategory.daily_summary: "Summaries",
+}
 
 # How far back the in-app notification window (list_notifications, unread_only=False) shows
 # read notifications. An unread one never ages out regardless of how old it is — this is a
@@ -271,6 +296,46 @@ def _digest_due(settings: NotificationSettings, *, now: datetime | None = None) 
     return last_local.date() < now.date() or last_local.hour < slot_hour
 
 
+async def _material_category_names(session: AsyncSession, pending: list[Notification]) -> dict[int, str]:
+    """material id -> its category name, for the material alerts in a digest batch."""
+    material_ids = {
+        n.related_entity_id
+        for n in pending
+        if n.related_entity_type == "material" and n.related_entity_id is not None
+    }
+    if not material_ids:
+        return {}
+    result = await session.execute(select(Material).where(Material.id.in_(material_ids)))
+    return {m.id: m.category_name for m in result.scalars() if m.category_name}
+
+
+def _digest_group_label(notification: Notification, material_categories: dict[int, str]) -> str:
+    if notification.category in (
+        NotificationCategory.material_forecast_warning,
+        NotificationCategory.material_forecast_critical,
+    ):
+        suffix = "critically low" if notification.category == NotificationCategory.material_forecast_critical else "low"
+        category = material_categories.get(notification.related_entity_id or -1, "Material")
+        return f"{category} {suffix}"
+    return _DIGEST_GROUP_LABELS.get(notification.category, notification.category.value.replace("_", " ").capitalize())
+
+
+async def _build_digest_body(session: AsyncSession, pending: list[Notification]) -> str:
+    """One line per item while that fits what a phone will show; otherwise one line per kind
+    of alert with a count, largest group first. Never a list cut off mid-item."""
+    detail = "\n".join(f"- {n.title}" for n in pending)
+    if len(detail) <= _DIGEST_DETAIL_CHAR_BUDGET:
+        return detail
+
+    material_categories = await _material_category_names(session, pending)
+    counts: dict[str, int] = {}
+    for n in pending:
+        label = _digest_group_label(n, material_categories)
+        counts[label] = counts.get(label, 0) + 1
+    # sorted() is stable, so equally-sized groups keep the order they first arrived in.
+    return "\n".join(f"{count} × {label}" for label, count in sorted(counts.items(), key=lambda kv: -kv[1]))
+
+
 async def flush_digest(session: AsyncSession) -> None:
     """Batches every not-yet-sent digest-mode notification into one Pushover message (and
     the same unread-count bump the Windows toast side reads). Called from
@@ -314,10 +379,7 @@ async def flush_digest(session: AsyncSession) -> None:
         return
 
     title = f"StockSmith: {len(pending)} update{'s' if len(pending) != 1 else ''}"
-    lines = [f"- {n.title}" for n in pending[:_DIGEST_BODY_LINE_CAP]]
-    if len(pending) > _DIGEST_BODY_LINE_CAP:
-        lines.append(f"...and {len(pending) - _DIGEST_BODY_LINE_CAP} more")
-    body = "\n".join(lines)
+    body = await _build_digest_body(session, pending)
 
     # The batch expires only if everything in it is routine. One blocker or failure batched
     # in (a type whose urgency is immediate but which the user routed to the digest) keeps
