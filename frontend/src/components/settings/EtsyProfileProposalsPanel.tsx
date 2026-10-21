@@ -33,6 +33,8 @@ export function EtsyProfileProposalsPanel() {
   const [shippingNames, setShippingNames] = useState<Record<number, string>>({});
   const [shippingLinks, setShippingLinks] = useState<Record<number, number | null>>({});
   const [shippingAccepted, setShippingAccepted] = useState<Set<number>>(new Set());
+  // Existing profiles (by id) whose matching unassigned products should be assigned.
+  const [existingAccepted, setExistingAccepted] = useState<Set<number>>(new Set());
 
   const previewMutation = useMutation({
     mutationFn: () => etsyProfileProposalsApi.preview(),
@@ -46,11 +48,13 @@ export function EtsyProfileProposalsPanel() {
       setShippingNames(Object.fromEntries(shipping.map((p) => [p.etsy_shipping_profile_id, p.title])));
       setShippingLinks({});
       setShippingAccepted(new Set());
+      setExistingAccepted(new Set());
     },
   });
 
   const proposals = previewMutation.data?.proposals ?? [];
   const shippingProposals = previewMutation.data?.shipping_profiles ?? [];
+  const existingAssignments = previewMutation.data?.existing_assignments ?? [];
 
   // Local profiles not yet linked to Etsy, offered as "link this one instead".
   const localProfiles = useQuery({
@@ -70,6 +74,8 @@ export function EtsyProfileProposalsPanel() {
             ? { etsy_shipping_profile_id: id, link_shipping_profile_id: link }
             : { etsy_shipping_profile_id: id, name: shippingNames[id] ?? "" };
         }),
+        true,
+        [...existingAccepted],
       ),
     onSuccess: () => {
       queryClient.invalidateQueries({
@@ -102,7 +108,16 @@ export function EtsyProfileProposalsPanel() {
     });
   }
 
-  const acceptedCount = accepted.size + shippingAccepted.size;
+  function toggleExisting(id: number) {
+    setExistingAccepted((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  const acceptedCount = accepted.size + shippingAccepted.size + existingAccepted.size;
   const result = applyMutation.data;
 
   return (
@@ -126,10 +141,36 @@ export function EtsyProfileProposalsPanel() {
       <ErrorBanner error={previewMutation.error} />
       <ErrorBanner error={applyMutation.error} />
 
-      {previewMutation.data && proposals.length === 0 && shippingProposals.length === 0 && (
+      {previewMutation.data && proposals.length === 0 && shippingProposals.length === 0 && existingAssignments.length === 0 && (
         <p className="text-slate-600">
           Nothing to suggest — no linked Etsy listing carries the details a profile needs.
         </p>
+      )}
+
+      {existingAssignments.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <div>
+            <p className="font-medium">Existing profiles</p>
+            <p className="text-xs text-slate-500">
+              Products whose Etsy listing already matches one of your profiles but haven't been assigned to it.
+            </p>
+          </div>
+          {existingAssignments.map((group) => (
+            <div key={group.profile_id} className="rounded border border-slate-200 p-2">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={existingAccepted.has(group.profile_id)}
+                  onChange={() => toggleExisting(group.profile_id)}
+                  aria-label={`Assign to ${group.profile_name}`}
+                />
+                <span className="flex-1">{group.profile_name}</span>
+                <span className="shrink-0 text-xs text-slate-500">{group.product_count} product(s)</span>
+              </label>
+              <p className="text-xs text-slate-500">{group.product_names.join(", ")}</p>
+            </div>
+          ))}
+        </div>
       )}
 
       {proposals.map((proposal) => (
@@ -179,7 +220,7 @@ export function EtsyProfileProposalsPanel() {
         </div>
       )}
 
-      {(proposals.length > 0 || shippingProposals.length > 0) && (
+      {(proposals.length > 0 || shippingProposals.length > 0 || existingAssignments.length > 0) && (
         <button
           onClick={() => applyMutation.mutate()}
           disabled={applyMutation.isPending || acceptedCount === 0}
@@ -192,7 +233,7 @@ export function EtsyProfileProposalsPanel() {
       {result && (
         <div className="rounded bg-slate-50 p-2">
           Created <strong>{result.profiles_created}</strong> profile(s) and assigned{" "}
-          <strong>{result.products_assigned}</strong> product(s).
+          <strong>{result.products_assigned + (result.existing_products_assigned ?? 0)}</strong> product(s).
           {(result.shipping_profiles_created > 0 || result.shipping_profiles_linked > 0) && (
             <>
               {" "}

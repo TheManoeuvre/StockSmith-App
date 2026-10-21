@@ -17,8 +17,10 @@ from app.models.product import Product
 from app.models.shipping_profile import ShippingProfile
 from app.services.listing_profile_backfill import (
     ShippingSelection,
+    apply_existing_assignments,
     apply_proposals,
     apply_shipping_proposals,
+    propose_existing_assignments,
     propose_profiles,
     propose_shipping_profiles,
 )
@@ -372,3 +374,28 @@ async def test_a_calculated_etsy_profile_is_created_without_a_price(session):
     )
     profile = (await session.execute(select(ShippingProfile))).scalar_one()
     assert profile.price_etsy is None and Decimal(profile.price) == 0
+
+
+@pytest.mark.asyncio
+async def test_products_matching_an_existing_profile_can_be_assigned_to_it(session):
+    pot = await _matched(session, "Pot", 1)
+    mount = await _matched(session, "Mount", 2)
+    await _matched(session, "Other", 3)
+    profile = ListingProfile(
+        platform=ETSY, name="Mine", etsy_taxonomy_id=1234, etsy_who_made="i_did", etsy_when_made="made_to_order"
+    )
+    session.add(profile)
+    await session.commit()
+    session.add(ProductPlatformSettings(product_id=mount.id, platform=ETSY, listing_profile_id=profile.id))
+    await session.commit()
+    listings = [listing(1), listing(2), listing(3, taxonomy_id=5678)]
+
+    groups = await propose_existing_assignments(session, listings)
+    assert [(g.profile_id, g.product_ids) for g in groups] == [(profile.id, [pot.id])]
+
+    assert await apply_existing_assignments(session, listings, [profile.id]) == 1
+    settings = (
+        await session.execute(select(ProductPlatformSettings).where(ProductPlatformSettings.product_id == pot.id))
+    ).scalar_one()
+    assert settings.listing_profile_id == profile.id
+    assert await propose_existing_assignments(session, listings) == []

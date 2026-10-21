@@ -54,6 +54,7 @@ from app.schemas.listing_profile import (
     TaxonomyNode,
 )
 from app.schemas.etsy_backfill import (
+    ExistingProfileAssignmentRead,
     ApplyProfileProposalsRequest,
     ApplyProfileProposalsResult,
     EtsyBackfillPreview,
@@ -1022,7 +1023,17 @@ async def get_etsy_profile_proposals(session: AsyncSession = Depends(get_db)) ->
 
     proposals = await listing_profile_backfill.propose_profiles(session, listings, names)
     shipping = await listing_profile_backfill.propose_shipping_profiles(session, listings, etsy_profiles)
+    existing = await listing_profile_backfill.propose_existing_assignments(session, listings)
     return ProfileProposalsRead(
+        existing_assignments=[
+            ExistingProfileAssignmentRead(
+                profile_id=g.profile_id,
+                profile_name=g.profile_name,
+                product_count=len(g.product_ids),
+                product_names=g.product_names[:5],
+            )
+            for g in existing
+        ],
         proposals=[
             ProfileProposalRead(
                 index=index,
@@ -1103,7 +1114,13 @@ async def apply_etsy_profile_proposals(
         etsy_profiles=etsy_profiles,
         assign_products=payload.assign_products,
     )
+    existing_assigned = (
+        await listing_profile_backfill.apply_existing_assignments(session, listings, payload.existing_profile_ids)
+        if payload.assign_products and payload.existing_profile_ids
+        else 0
+    )
     return ApplyProfileProposalsResult(
+        existing_products_assigned=existing_assigned,
         profiles_created=result.profiles_created,
         products_assigned=result.products_assigned,
         shipping_profiles_created=shipping.shipping_profiles_created,

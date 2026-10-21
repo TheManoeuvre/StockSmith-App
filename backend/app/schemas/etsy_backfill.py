@@ -94,8 +94,18 @@ class ShippingProfileProposalRead(BaseModel):
     product_names: list[str]
 
 
+class ExistingProfileAssignmentRead(BaseModel):
+    """Products whose Etsy listing matches an existing profile, not yet assigned to it."""
+
+    profile_id: int
+    profile_name: str
+    product_count: int
+    product_names: list[str]
+
+
 class ProfileProposalsRead(BaseModel):
     proposals: list[ProfileProposalRead]
+    existing_assignments: list[ExistingProfileAssignmentRead] = []
     shipping_profiles: list[ShippingProfileProposalRead] = []
 
 
@@ -117,6 +127,8 @@ class ApplyProfileProposalsRequest(BaseModel):
     items: list[ProfileSelection] = []
     shipping_items: list[ShippingProfileSelection] = []
     assign_products: bool = True
+    # Existing profiles whose matching unassigned products should be pointed at them.
+    existing_profile_ids: list[int] = []
 
 
 class ApplyProfileProposalsResult(BaseModel):
@@ -125,3 +137,4 @@ class ApplyProfileProposalsResult(BaseModel):
     shipping_profiles_created: int = 0
     shipping_profiles_linked: int = 0
     shipping_products_assigned: int = 0
+    existing_products_assigned: int = 0
