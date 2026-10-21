@@ -6,6 +6,7 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import { ProductImage } from "../../components/products/ProductImage";
 import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { platformsApi, type ProductSyncStatus } from "../../api/platforms";
 import { productsApi } from "../../api/products";
@@ -456,15 +457,11 @@ function ProductRow({
       className={`cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50 ${!p.is_active ? "opacity-60" : ""}`}
     >
       <td className="p-2">
-        <div className="h-20 w-20 overflow-hidden rounded border border-slate-200 bg-slate-50">
-          {imageUrl && (
-            <img
-              src={imageUrl}
-              alt={p.name}
-              className="h-full w-full object-cover"
-            />
-          )}
-        </div>
+        <ProductImage
+          src={imageUrl}
+          alt={p.name}
+          className="h-20 w-20 rounded border"
+        />
       </td>
       <td className="p-2">
         <Link
