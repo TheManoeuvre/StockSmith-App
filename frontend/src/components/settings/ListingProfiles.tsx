@@ -138,14 +138,14 @@ export function ListingProfiles({ platform, children }: { platform: ListingPlatf
   );
 }
 
-function ProfileForm({
+export function ProfileForm({
   platform,
   profile,
   onDone,
 }: {
   platform: ListingPlatform;
   profile?: ListingProfile;
-  onDone: () => void;
+  onDone: (saved?: ListingProfile) => void;
 }) {
   const initialDraft: ListingProfileWrite = {
     name: profile?.name ?? "",
@@ -221,11 +221,11 @@ function ProfileForm({
       profile
         ? listingProfilesApi.update(platform, profile.id, draft)
         : listingProfilesApi.create(platform, draft),
-    onSuccess: () => {
+    onSuccess: (saved) => {
       // Clear the dirty flag before the parent unmounts this form, so the unsaved-changes
       // guard doesn't flash on the way out.
       markSaved(draft);
-      onDone();
+      onDone(saved);
     },
   });
 
@@ -369,7 +369,7 @@ function ProfileForm({
         >
           Save
         </button>
-        <button onClick={onDone} className="rounded border border-slate-300 px-3 py-1 text-xs">
+        <button onClick={() => onDone()} className="rounded border border-slate-300 px-3 py-1 text-xs">
           Cancel
         </button>
       </div>
