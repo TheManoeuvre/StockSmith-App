@@ -38,14 +38,14 @@ export function EtsyProfileProposalsPanel() {
     mutationFn: () => etsyProfileProposalsApi.preview(),
     onSuccess: (data) => {
       setNames(Object.fromEntries(data.proposals.map((p) => [p.index, p.suggested_name])));
-      // Only complete combinations are pre-accepted. An incomplete one is still worth
-      // showing — it tells you which field to go and set — but creating it would produce a
+      // Opt in: nothing is ticked until you choose it. An incomplete combination is still
+      // shown — it tells you which field to go and set — but creating it would produce a
       // profile that can't draft anything.
-      setAccepted(new Set(data.proposals.filter((p) => p.is_complete).map((p) => p.index)));
+      setAccepted(new Set());
       const shipping = data.shipping_profiles ?? [];
       setShippingNames(Object.fromEntries(shipping.map((p) => [p.etsy_shipping_profile_id, p.title])));
       setShippingLinks({});
-      setShippingAccepted(new Set(shipping.map((p) => p.etsy_shipping_profile_id)));
+      setShippingAccepted(new Set());
     },
   });
 
@@ -207,6 +207,20 @@ export function EtsyProfileProposalsPanel() {
   );
 }
 
+const WHO_MADE: Record<string, string> = {
+  i_did: "Made by you",
+  someone_else: "Made by someone else",
+  collective: "Made by a collective",
+};
+
+const WHEN_MADE: Record<string, string> = {
+  made_to_order: "Made to order",
+  "2020_2026": "Made 2020–2026",
+  "2010_2019": "Made 2010–2019",
+  "2007_2009": "Made 2007–2009",
+  before_2007: "Made before 2007",
+};
+
 function ProposalRow({
   proposal,
   name,
@@ -223,7 +237,12 @@ function ProposalRow({
   return (
     <div className={`rounded border p-2 ${proposal.is_complete ? "border-slate-200" : "border-amber-300"}`}>
       <div className="flex items-center gap-2">
-        <input type="checkbox" checked={accepted} onChange={onToggle} />
+        <input
+          type="checkbox"
+          checked={accepted}
+          onChange={onToggle}
+          aria-label={`Create ${name}`}
+        />
         <input
           className="flex-1 rounded border border-slate-300 px-2 py-1 text-sm"
           value={name}
@@ -232,8 +251,15 @@ function ProposalRow({
         <span className="shrink-0 text-xs text-slate-500">{proposal.product_count} product(s)</span>
       </div>
       <p className="mt-1 text-xs text-slate-500">
-        {proposal.taxonomy_id !== null && <>Category {proposal.taxonomy_id} · </>}
-        {proposal.who_made} · {proposal.when_made}
+        {proposal.category_path
+          ? proposal.category_path
+          : proposal.taxonomy_id !== null
+            ? `Category ${proposal.taxonomy_id}`
+            : "No category"}
+        {" · "}
+        {WHO_MADE[proposal.who_made ?? ""] ?? proposal.who_made ?? "Maker not set"}
+        {" · "}
+        {WHEN_MADE[proposal.when_made ?? ""] ?? proposal.when_made ?? "Date not set"}
       </p>
       <p className="text-xs text-slate-500">{proposal.product_names.join(", ")}</p>
       {!proposal.is_complete && (

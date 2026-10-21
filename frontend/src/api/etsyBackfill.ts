@@ -50,6 +50,7 @@ export interface ProfileProposal {
   product_count: number;
   product_names: string[];
   taxonomy_id: number | null;
+  category_path?: string | null;
   who_made: string | null;
   when_made: string | null;
   is_supply: boolean | null;

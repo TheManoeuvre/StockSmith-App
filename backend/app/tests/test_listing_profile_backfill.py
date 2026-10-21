@@ -146,11 +146,50 @@ async def test_an_incomplete_combination_is_still_proposed_but_flagged(session):
 
 
 @pytest.mark.asyncio
-async def test_suggested_name_leads_with_the_making_details(session):
+async def test_suggested_name_uses_the_category_in_words(session):
     """Etsy's taxonomy id is a number nobody recognises on sight."""
     await _matched(session, "Pot", 1)
-    proposals = await propose_profiles(session, [listing(1)])
-    assert proposals[0].suggested_name.startswith("Handmade")
+    proposals = await propose_profiles(session, [listing(1)], {1234: "Desk Organisers"})
+    assert proposals[0].suggested_name == "Desk Organisers – Handmade"
+    assert "1234" not in proposals[0].suggested_name
+
+
+@pytest.mark.asyncio
+async def test_suggested_names_are_unique(session):
+    await _matched(session, "Pot", 1)
+    await _matched(session, "Old pot", 2)
+    proposals = await propose_profiles(
+        session, [listing(1), listing(2, when_made="2007_2009")], {1234: "Desk Organisers"}
+    )
+    names = [p.suggested_name for p in proposals]
+    assert len(set(names)) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_combination_an_existing_profile_covers_is_not_proposed(session):
+    await _matched(session, "Pot", 1)
+    await _matched(session, "Mount", 2)
+    session.add(
+        ListingProfile(
+            platform=ETSY,
+            name="Mine",
+            etsy_taxonomy_id=1234,
+            etsy_who_made="i_did",
+            etsy_when_made="made_to_order",
+        )
+    )
+    await session.commit()
+    proposals = await propose_profiles(session, [listing(1), listing(2, taxonomy_id=5678)])
+    assert [p.signature.taxonomy_id for p in proposals] == [5678]
+
+
+@pytest.mark.asyncio
+async def test_a_suggested_name_never_collides_with_an_existing_profile(session):
+    await _matched(session, "Pot", 1)
+    session.add(ListingProfile(platform=ETSY, name="Desk Organisers – Handmade", etsy_taxonomy_id=1))
+    await session.commit()
+    proposals = await propose_profiles(session, [listing(1)], {1234: "Desk Organisers"})
+    assert proposals[0].suggested_name != "Desk Organisers – Handmade"
 
 
 @pytest.mark.asyncio
