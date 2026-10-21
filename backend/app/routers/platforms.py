@@ -1011,7 +1011,16 @@ async def get_etsy_profile_proposals(session: AsyncSession = Depends(get_db)) ->
     except PlatformError as e:
         raise _map_platform_error(e)
 
-    proposals = await listing_profile_backfill.propose_profiles(session, listings)
+    # Best effort: without it, names fall back to the making details and the category is
+    # simply not shown, rather than refusing the proposals.
+    try:
+        nodes = await adapter.fetch_taxonomy_nodes(session, connection)
+    except PlatformError:
+        nodes = []
+    names = {n["id"]: n["name"] for n in nodes}
+    paths = {n["id"]: n["path"] for n in nodes}
+
+    proposals = await listing_profile_backfill.propose_profiles(session, listings, names)
     shipping = await listing_profile_backfill.propose_shipping_profiles(session, listings, etsy_profiles)
     return ProfileProposalsRead(
         proposals=[
@@ -1022,6 +1031,7 @@ async def get_etsy_profile_proposals(session: AsyncSession = Depends(get_db)) ->
                 product_count=len(p.product_ids),
                 product_names=p.product_names[:5],
                 taxonomy_id=p.signature.taxonomy_id,
+                category_path=paths.get(p.signature.taxonomy_id),
                 who_made=p.signature.who_made,
                 when_made=p.signature.when_made,
                 is_supply=p.signature.is_supply,

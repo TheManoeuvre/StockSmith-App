@@ -70,6 +70,9 @@ class ProfileProposalRead(BaseModel):
     product_count: int
     product_names: list[str]
     taxonomy_id: int | None
+    # Readable category path ("Home & Living > Storage > Desk Organisers"); None when the
+    # taxonomy couldn't be fetched.
+    category_path: str | None = None
     who_made: str | None
     when_made: str | None
     is_supply: bool | None
