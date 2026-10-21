@@ -12,12 +12,31 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-10-21
+
+### Added
+
+- **Etsy listing profiles can be assigned in bulk.** Products whose listings already match an existing
+  Etsy listing profile are now offered for assignment to it (opt-in, unticked by default). Suggested
+  new profiles skip combinations an existing profile already covers, get readable names built from
+  the category name, and show the category path and plain-language making details.
+- **Create a listing profile without leaving the product.** The Stores tab's profile picker now has a
+  "create profile" option that reuses the Settings form inline and selects the new profile on save.
+- **Placeholder icons for pictureless items.** Products show a parcel icon and materials a layers icon
+  instead of a blank tile.
+- Collapsed shipping profile rows now show per-channel prices.
+
 ### Changed
 
 - Dashboard "Orders awaiting products" now shows one row per product variation (orders listed together, short-by summed) instead of one row per order line, and its "Placed" column is now "Due" — the same date as the Orders page's Due column, shown as a range (e.g. 15–18 Oct) when the orders differ.
 
 ### Fixed
 
+- **Platform quantity ceiling now needs Save.** The ceiling and buildable-stock toggle used to save on
+  blur or click, bypassing the slide-over's Save button and unsaved-changes warning.
+- Buttons and the sync badge no longer wrap their text onto two lines.
+- Navigation badges refresh when a background sync finishes, on any page.
+- Low-stock notifications are marked read once the material recovers.
 - **Batched phone notifications no longer get cut off.** When a lot of items ran low at once,
   iOS clipped the Pushover message mid-list. A batch now names each item while it all fits on
   the lock screen, and otherwise shows counts instead, such as "8 × Filament low", "2 × Hardware
