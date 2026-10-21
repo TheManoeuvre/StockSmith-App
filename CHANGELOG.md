@@ -12,6 +12,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **The sidebar collapses to icons when the window is narrow.** Below 1024px wide it shrinks to an icon rail so the page gets more room. Hovering an icon shows the page name and what it is for, and items with a count (orders awaiting shipment, low stock and so on) show a coloured dot instead of the number.
+
 ## [0.23.0] - 2026-10-21
 
 ### Added
