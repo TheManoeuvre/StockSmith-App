@@ -61,7 +61,9 @@ type FulfillmentRow = {
   /** Every order this row stands for — more than one when stock-short lines for the same
    * product variation are collapsed into a single row. */
   orderIds: number[];
-  shortOn: "Stock" | "Packaging" | "No BOM defined";
+  shortOn: "Stock" | "Packaging" | "No BOM defined" | "Unmapped SKU";
+  /** Set on an "Unmapped SKU" row — the action is mapping the line on the order, not building. */
+  needsMapping?: boolean;
   item: string;
   shortBy: string;
   placedAt: string;
@@ -135,6 +137,24 @@ function awaitingProductRows(data: DashboardSummary): FulfillmentRow[] {
       build: null,
       materialId: o.material_id,
       suggestedSubstitutes: o.suggested_substitutes ?? [],
+    });
+  }
+  for (const o of data.orders_awaiting_mapping ?? []) {
+    rows.push({
+      key: `map-${o.line_id}`,
+      orderId: o.order_id,
+      orderIds: [o.order_id],
+      shortOn: "Unmapped SKU",
+      needsMapping: true,
+      item: o.sku ?? "—",
+      shortBy: String(o.short_by),
+      placedAt: o.order_placed_at,
+      dueDates: o.due_date ? [o.due_date] : [],
+      platform: o.platform,
+      platforms: [o.platform],
+      build: null,
+      materialId: null,
+      suggestedSubstitutes: [],
     });
   }
   // Most urgent first: earliest due date, rows with none after, ties by when placed.
@@ -212,7 +232,8 @@ function Dashboard() {
 
   const awaitingInventory = data.orders_awaiting_inventory.filter((o) => o.has_bom).length;
   const awaitingPackaging = data.orders_awaiting_packaging.length;
-  const awaitingCount = awaitingInventory + awaitingPackaging;
+  const awaitingMapping = (data.orders_awaiting_mapping ?? []).length;
+  const awaitingCount = awaitingInventory + awaitingPackaging + awaitingMapping;
   const rows = awaitingProductRows(data);
   const blocked = blockedRows(data);
 
@@ -245,7 +266,9 @@ function Dashboard() {
             label="Orders awaiting products"
             value={String(awaitingCount)}
             unit="right now"
-            note={`${awaitingInventory} short on stock · ${awaitingPackaging} short on packaging`}
+            note={`${awaitingInventory} short on stock · ${awaitingPackaging} short on packaging${
+              awaitingMapping > 0 ? ` · ${awaitingMapping} unmapped` : ""
+            }`}
             accent={
               awaitingCount > 0 ? "border-l-amber-500" : "border-l-slate-400"
             }
@@ -462,6 +485,15 @@ function Dashboard() {
                   </td>
                   <td className="p-2">{formatDayMonthRange(r.dueDates)}</td>
                   <td className="p-2">
+                    {r.needsMapping && (
+                      <Link
+                        to="/orders/$orderId"
+                        params={{ orderId: String(r.orderId) }}
+                        className="whitespace-nowrap rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800"
+                      >
+                        Map order
+                      </Link>
+                    )}
                     {r.build && (
                       <Link
                         to="/products/$productId"
