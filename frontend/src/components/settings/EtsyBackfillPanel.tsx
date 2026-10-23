@@ -115,7 +115,7 @@ export function EtsyBackfillPanel() {
 
       {applyMutation.data && (
         <div className="rounded bg-slate-50 p-2">
-          Updated <strong>{applyMutation.data.products_updated}</strong> product(s) —{" "}
+          Updated <strong>{applyMutation.data.products_updated}</strong> product(s):{" "}
           {applyMutation.data.descriptions_filled} description(s), {applyMutation.data.prices_filled}{" "}
           price(s), {applyMutation.data.images_filled} image(s).
           {applyMutation.data.errors.length > 0 && (

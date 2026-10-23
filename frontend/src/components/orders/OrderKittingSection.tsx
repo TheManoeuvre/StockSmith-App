@@ -118,7 +118,7 @@ export function OrderKittingSection({ orderId, currency }: { orderId: number; cu
       <h2 className="mb-1 text-lg font-semibold">Kitting</h2>
       <p className="mb-2 text-sm text-slate-500">
         Auto-computed from each line's kitting BOM. Override the qty for a material shared across lines (e.g. one
-        label instead of two) — the cost follows the override, and feeds Kitting COGS above.
+        label instead of two): the cost follows the override, and feeds Kitting COGS above.
       </p>
       <table className="w-full border-collapse text-left text-sm">
         <thead>
@@ -150,8 +150,8 @@ export function OrderKittingSection({ orderId, currency }: { orderId: number; cu
                 className="p-2"
                 title={
                   line.unit_cost_is_frozen
-                    ? `${line.unit_cost} each — frozen when this material was consumed`
-                    : `${line.unit_cost} each — today's material cost, frozen once consumed`
+                    ? `${line.unit_cost} each: frozen when this material was consumed`
+                    : `${line.unit_cost} each: today's material cost, frozen once consumed`
                 }
               >
                 {formatMoney(line.effective_cost, currency)}
@@ -180,7 +180,7 @@ export function OrderKittingSection({ orderId, currency }: { orderId: number; cu
                   />
                   {!material && <span className="text-xs text-slate-400">Additional line</span>}
                 </td>
-                <td className="p-2 text-slate-400">—</td>
+                <td className="p-2 text-slate-400">-</td>
                 <td className="p-2">
                   <input
                     className="w-20 rounded border border-slate-300 px-2 py-1"
@@ -194,9 +194,9 @@ export function OrderKittingSection({ orderId, currency }: { orderId: number; cu
                 </td>
                 {/* Effective/Cost/Reserved stay blank until saved — these rows aren't in the
                     server's computed summary yet. */}
-                <td className="p-2 text-slate-400">—</td>
-                <td className="p-2 text-slate-400">—</td>
-                <td className="p-2 text-slate-400">—</td>
+                <td className="p-2 text-slate-400">-</td>
+                <td className="p-2 text-slate-400">-</td>
+                <td className="p-2 text-slate-400">-</td>
                 <td className="p-2">
                   <button
                     onClick={() => setExtras((prev) => prev.filter((_, j) => j !== i))}
@@ -214,7 +214,7 @@ export function OrderKittingSection({ orderId, currency }: { orderId: number; cu
         <p className="font-medium">Kitting cost {formatMoney(summary.effective_cost_total, currency)}</p>
         {Number(summary.effective_cost_total) !== Number(summary.consumed_cost_total) && (
           <p className="text-xs text-slate-500">
-            {formatMoney(summary.consumed_cost_total, currency)} consumed so far — that's the figure in Kitting COGS
+            {formatMoney(summary.consumed_cost_total, currency)} consumed so far. That's the figure in Kitting COGS
             above; they match once the order has fully shipped.
           </p>
         )}

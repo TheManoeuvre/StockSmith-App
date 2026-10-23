@@ -63,7 +63,7 @@ function UnresolvedVariances() {
       </div>
 
       {data && data.length === 0 ? (
-        <p className="text-slate-500">Nothing outstanding — every counted difference has been settled.</p>
+        <p className="text-slate-500">Nothing outstanding: every counted difference has been settled.</p>
       ) : (
         <>
           <p className="text-sm text-slate-500">
@@ -101,7 +101,7 @@ function UnresolvedVariances() {
                 <p className="text-sm text-amber-800">{line.conflict_reason}</p>
                 <p className="mt-1 text-sm">
                   Expected {roundQty(line.expected_qty)} · counted{" "}
-                  {line.counted_qty === null ? "—" : roundQty(line.counted_qty)}
+                  {line.counted_qty === null ? "-" : roundQty(line.counted_qty)}
                   {line.system_qty_at_approval !== null && <> · system now {roundQty(line.system_qty_at_approval)}</>}
                 </p>
                 <div className="mt-2 flex flex-wrap gap-2">

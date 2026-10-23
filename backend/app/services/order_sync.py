@@ -664,7 +664,7 @@ async def _reconcile_status(session: AsyncSession, order: Order, ext_order: Exte
             order.pending_marketplace_cancellation = True
             order.sync_issue = (
                 f"{_PLATFORM_LABELS[platform]} reports this order's payment as "
-                f"{ext_order.payment_state.value} — review and cancel/return it."
+                f"{ext_order.payment_state.value}: review and cancel/return it."
             )
             if not was_pending:
                 return ReconcileOutcome(
@@ -713,7 +713,7 @@ async def _reconcile_status(session: AsyncSession, order: Order, ext_order: Exte
             # allocated (manually, or by a later sync) and actually ships.
             order.sync_issue = (
                 f"{_PLATFORM_LABELS[platform]} shows this order as shipped, but no units are allocated "
-                "locally — check stock and allocate manually."
+                "locally: check stock and allocate manually."
             )
             return ReconcileOutcome(cancellation_resolved=cancellation_resolved)
         await allocation.ship_order(session, order)
@@ -812,7 +812,7 @@ async def fail_orphaned_runs() -> int:
         orphans = list(result.scalars())
         for run in orphans:
             run.status = SyncRunStatus.error
-            run.error_message = "Interrupted — StockSmith stopped before this sync finished"
+            run.error_message = "Interrupted. StockSmith stopped before this sync finished"
             run.finished_at = datetime.now(timezone.utc)
         if orphans:
             await session.commit()

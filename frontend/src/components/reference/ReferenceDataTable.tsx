@@ -371,7 +371,7 @@ function ExpandedRow<T extends ReferenceRow>({
     markSaved,
   } = useEditableCopy<Record<string, string>>({
     key: "fields",
-    label: `${title} — ${row.name}`,
+    label: `${title}: ${row.name}`,
     initial: seed,
     seed,
     // The row id: a different row is a different thing being edited, but a background refetch

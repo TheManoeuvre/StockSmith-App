@@ -266,7 +266,7 @@ function ProfileForm({
               value={draft.etsy_shipping_profile_id ?? null}
               onChange={(v) => set({ etsy_shipping_profile_id: v === null ? null : Number(v) })}
               emptyHint="No shipping profiles on this Etsy shop."
-              failedHint="Couldn't read your shipping profiles. Reconnect Etsy in Settings — this needs a permission that older connections didn't grant."
+              failedHint="Couldn't read your shipping profiles. Reconnect Etsy in Settings: this needs a permission that older connections didn't grant."
             />
           </Field>
           <Field label="Processing profile" required>
@@ -276,7 +276,7 @@ function ProfileForm({
               value={draft.etsy_readiness_state_id ?? null}
               onChange={(v) => set({ etsy_readiness_state_id: v === null ? null : Number(v) })}
               emptyHint="No processing profiles on this Etsy shop."
-              failedHint="Couldn't read your processing profiles. Reconnect Etsy in Settings — this needs a permission that older connections didn't grant."
+              failedHint="Couldn't read your processing profiles. Reconnect Etsy in Settings: this needs a permission that older connections didn't grant."
             />
           </Field>
           <Field label="Who made it" required>
@@ -415,7 +415,7 @@ function OptionSelect({
       value={value ?? ""}
       onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
     >
-      <option value="">—</option>
+      <option value="">-</option>
       {options.map((option) => (
         <option key={option.value} value={option.value}>
           {option.label}
@@ -456,7 +456,7 @@ function RemoteSelect({
       onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
       disabled={!options}
     >
-      <option value="">{options ? "—" : "Loading…"}</option>
+      <option value="">{options ? "-" : "Loading…"}</option>
       {options?.map((option) => (
         <option key={option.id} value={option.id}>
           {option.label}

@@ -232,7 +232,7 @@ async def merge(session: AsyncSession, model: type[Base], source_id: int, target
             raise InUseError(
                 f'"{source.name}" is used by {count} '
                 f"{reference.noun_singular if count == 1 else reference.noun_plural}, which record what "
-                f"actually happened. Merging would rewrite them — archive it instead."
+                f"actually happened. Merging would rewrite them: archive it instead."
             )
 
     for reference in references:

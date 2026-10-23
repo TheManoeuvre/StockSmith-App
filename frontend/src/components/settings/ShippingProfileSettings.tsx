@@ -101,7 +101,7 @@ function DriftMarker({
   return (
     <span
       className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800"
-      title={`${PLATFORM_LABEL[platform]} currently charges ${money(remote.domestic_price)} for '${remote.title}'${remote.domestic_fallback ? " (first destination — no domestic one found)" : ""}. Pull the price to update margin.`}
+      title={`${PLATFORM_LABEL[platform]} currently charges ${money(remote.domestic_price)} for '${remote.title}'${remote.domestic_fallback ? " (first destination: no domestic one found)" : ""}. Pull the price to update margin.`}
     >
       {PLATFORM_LABEL[platform]} now {money(remote.domestic_price)}
     </span>
@@ -142,10 +142,10 @@ function MarketplaceLinkActions({
                 <>
                   <span className="font-medium">{remote.title}</span>
                   {calculated ? (
-                    <span className="ml-1 text-slate-400">— calculated on {PLATFORM_LABEL[platform]}</span>
+                    <span className="ml-1 text-slate-400">(calculated on {PLATFORM_LABEL[platform]})</span>
                   ) : remote.domestic_price != null ? (
                     <span className="ml-1 text-slate-400">
-                      — charges {money(remote.domestic_price)}
+                      charges {money(remote.domestic_price)}
                       {remote.domestic_fallback && " (first destination; no domestic one found)"}
                     </span>
                   ) : null}
@@ -326,7 +326,7 @@ function RefreshFromMarketplaces({ onRefreshed }: { onRefreshed: () => void }) {
         <div className="rounded bg-slate-50 p-2 text-xs">
           {lastResult.error ? (
             <p className="text-amber-800">
-              {PLATFORM_LABEL[lastResult.platform as LinkedPlatform]} couldn't be read — nothing was changed:{" "}
+              {PLATFORM_LABEL[lastResult.platform as LinkedPlatform]} couldn't be read, so nothing was changed:{" "}
               {lastResult.error}
             </p>
           ) : (
@@ -413,7 +413,7 @@ export function ShippingProfileSettings() {
       const hint = !source.connected
         ? `Connect ${PLATFORM_LABEL[platform]} in Integrations to link a profile.`
         : source.error
-          ? `Couldn't read ${PLATFORM_LABEL[platform]}'s profiles — reconnect ${PLATFORM_LABEL[platform]} to grant the newer permission.`
+          ? `Couldn't read ${PLATFORM_LABEL[platform]}'s profiles: reconnect ${PLATFORM_LABEL[platform]} to grant the newer permission.`
           : source.loaded && source.profiles.length === 0
             ? `No ${label.toLowerCase()}s on this ${PLATFORM_LABEL[platform]} account.`
             : undefined;

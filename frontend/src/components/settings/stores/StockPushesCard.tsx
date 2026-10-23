@@ -77,14 +77,14 @@ export function StockPushesCard({
         <div className="rounded border border-red-200 bg-red-50 p-2.5 text-sm text-red-800">
           <p className="font-medium">
             {failingPushCount === 1 ? "One listing isn't" : `${failingPushCount} listings aren't`} receiving
-            stock updates — the quantity shown on {label} may be stale.
+            stock updates: the quantity shown on {label} may be stale.
           </p>
           {recentFailures.length > 0 && (
             <ul className="mt-1 list-disc pl-5 text-xs">
               {recentFailures.slice(0, 5).map((p) => (
                 <li key={p.id}>
                   {p.product_name ?? `Product #${p.product_id}`}
-                  {p.variant_name ? ` — ${p.variant_name}` : ""}: {p.error_message ?? "unknown error"}
+                  {p.variant_name ? ` (${p.variant_name})` : ""}: {p.error_message ?? "unknown error"}
                 </li>
               ))}
             </ul>
@@ -107,13 +107,13 @@ export function StockPushesCard({
               {recentBlocked.slice(0, 5).map((p) => (
                 <li key={p.id}>
                   {p.product_name ?? `Product #${p.product_id}`}
-                  {p.variant_name ? ` — ${p.variant_name}` : ""}: {p.error_message ?? "unknown reason"}
+                  {p.variant_name ? ` (${p.variant_name})` : ""}: {p.error_message ?? "unknown reason"}
                 </li>
               ))}
             </ul>
           )}
           <p className="mt-1 text-xs">
-            Retrying won't help until the listing changes, so StockSmith has stopped trying — it re-checks
+            Retrying won't help until the listing changes, so StockSmith has stopped trying: it re-checks
             weekly, or use Push corrections on the product as soon as you've fixed it.
           </p>
         </div>
@@ -132,7 +132,7 @@ export function StockPushesCard({
           {nearBudget && (
             <span className="text-amber-700">
               {" "}
-              — automatic pushes are paused until usage falls; order sync is unaffected
+              (automatic pushes are paused until usage falls; order sync is unaffected)
             </span>
           )}
         </p>

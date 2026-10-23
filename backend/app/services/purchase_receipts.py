@@ -138,9 +138,9 @@ async def record_receipts(
             material = await session.get(Material, line.material_id)
             name = material.name if material else f"line {line_id}"
             detail = (
-                f"Cannot receive {qty} of {name} — only {outstanding} still outstanding"
+                f"Cannot receive {qty} of {name}, only {outstanding} still outstanding"
                 if outstanding > 0
-                else f"Cannot receive {name} — that line is already complete"
+                else f"Cannot receive {name}: that line is already complete"
             )
             raise HTTPException(status_code=http_status.HTTP_400_BAD_REQUEST, detail=detail)
         material = await session.get(Material, line.material_id)
@@ -250,7 +250,7 @@ async def close_line(
     if line.outstanding_qty == 0:
         raise HTTPException(
             status_code=http_status.HTTP_400_BAD_REQUEST,
-            detail="That line is already complete — there is nothing outstanding to close",
+            detail="That line is already complete: there is nothing outstanding to close",
         )
 
     if apportion_remainder:

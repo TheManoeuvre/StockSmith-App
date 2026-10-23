@@ -180,11 +180,11 @@ async def _load_pair(session: AsyncSession, source_id: int, target_id: int) -> t
         raise ReferenceDataError("Material not found.")
     if source.unit != target.unit:
         raise ReferenceDataError(
-            f'"{source.name}" is counted in {source.unit.value} and "{target.name}" in {target.unit.value} — '
-            "quantities in different units cannot be added together."
+            f'"{source.name}" is counted in {source.unit.value} and "{target.name}" in {target.unit.value}. '
+            "Quantities in different units cannot be added together."
         )
     if not target.is_active:
-        raise ReferenceDataError(f'"{target.name}" is deactivated — reactivate it before merging into it.')
+        raise ReferenceDataError(f'"{target.name}" is deactivated: reactivate it before merging into it.')
     return source, target
 
 

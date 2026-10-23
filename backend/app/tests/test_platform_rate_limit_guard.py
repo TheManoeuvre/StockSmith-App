@@ -96,7 +96,7 @@ async def test_etsy_401_surviving_a_refresh_is_auth_error(monkeypatch):
     adapter = _etsy(monkeypatch)
     monkeypatch.setattr(adapter, "_request_once", _responder((401, {})))
 
-    with pytest.raises(PlatformAuthError, match="reconnect required"):
+    with pytest.raises(PlatformAuthError, match="Reconnect required"):
         await adapter._authed_request(None, _Connection(), "GET", "/shops/1/receipts")
 
 
@@ -117,5 +117,5 @@ async def test_ebay_401_surviving_a_refresh_is_auth_error(monkeypatch):
     adapter = _ebay(monkeypatch)
     monkeypatch.setattr(adapter, "_request_once", _responder((401, {})))
 
-    with pytest.raises(PlatformAuthError, match="reconnect required"):
+    with pytest.raises(PlatformAuthError, match="Reconnect required"):
         await adapter._authed_request(None, _Connection(), "GET", "https://api.ebay.com/x")

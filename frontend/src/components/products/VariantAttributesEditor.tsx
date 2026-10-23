@@ -177,7 +177,7 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
           {isExpanded ? "▾" : "▸"}
         </span>
         Variant attributes
-        <span className="font-normal text-slate-500">— define attributes and generate variants</span>
+        <span className="font-normal text-slate-500">: define attributes and generate variants</span>
       </button>
 
       {isExpanded && (
@@ -198,7 +198,7 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
               </label>
               <label className="flex flex-col gap-1 flex-1">
                 <span className="text-sm">
-                  Values (comma-separated){row.materialRules.length > 0 && " — derived from checked materials below"}
+                  Values (comma-separated){row.materialRules.length > 0 && ": derived from checked materials below"}
                 </span>
                 <input
                   className="w-full rounded border border-slate-300 px-2 py-1 disabled:bg-slate-50 disabled:text-slate-500"
@@ -411,7 +411,7 @@ function MaterialRulePanel({
   if (baseMaterial.material_type_id == null) {
     return (
       <p className="pl-4 text-xs text-amber-700">
-        "{baseMaterial.name}" has no Material Type set — assign one (in Materials) to group its colour variants
+        "{baseMaterial.name}" has no Material Type set: assign one (in Materials) to group its colour variants
         before this can drive substitutions.
       </p>
     );
@@ -489,7 +489,7 @@ export function materialLabeller(materials: Material[]): (m: Material) => string
   for (const m of materials) counts.set(colourLabel(m), (counts.get(colourLabel(m)) ?? 0) + 1);
   return (m) => {
     const colour = colourLabel(m);
-    return (counts.get(colour) ?? 0) > 1 && m.name !== colour ? `${colour} — ${m.name}` : colour;
+    return (counts.get(colour) ?? 0) > 1 && m.name !== colour ? `${colour}: ${m.name}` : colour;
   };
 }
 

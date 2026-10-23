@@ -75,7 +75,7 @@ async def get_adapter(
             env_label = f" ({resolved_environment.value})" if platform == ListingPlatform.ebay else ""
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"{_LABELS[platform]}{env_label} is not configured — add its Client ID/Secret in Settings > Integrations",
+                detail=f"{_LABELS[platform]}{env_label} is not configured: add its Client ID/Secret in Settings > Integrations",
             )
         if platform == ListingPlatform.etsy:
             adapter = EtsyAdapter(client_id, client_secret)

@@ -525,7 +525,7 @@ function MaterialDetail() {
               value={
                 Number(material.on_order_qty ?? 0) > 0
                   ? `+${roundQty(material.on_order_qty)}`
-                  : "—"
+                  : "-"
               }
               sub={
                 Number(material.on_order_qty ?? 0) > 0
@@ -1097,7 +1097,7 @@ function MaterialDetail() {
                 This is a stock count: the figure you enter is what you
                 counted, so the material stops showing as due, its count date
                 moves to today, and nothing it has done since counts as
-                movement. Adjusting by an amount doesn't — a known change isn't
+                movement. Adjusting by an amount doesn't: a known change isn't
                 a count.
               </p>
             )}
@@ -1280,7 +1280,7 @@ function HistoryComment({ h }: { h: MaterialStockHistoryEntry }) {
       </Link>
     );
   }
-  return <>{h.reason ?? "—"}</>;
+  return <>{h.reason ?? "-"}</>;
 }
 
 /** The Supplier tab's PO list — reuses the Stock tab's already-fetched history query

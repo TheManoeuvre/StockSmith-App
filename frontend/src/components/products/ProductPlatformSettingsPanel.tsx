@@ -192,7 +192,7 @@ function PanelBody({ productId, platform }: { productId: number; platform: Listi
               profiles && (
                 <span className="text-slate-500">
                   {profiles.length === 0
-                    ? `No ${label} profiles yet — create one in Settings › Integrations.`
+                    ? `No ${label} profiles yet: create one in Settings › Integrations.`
                     : "Nothing is applied until a profile is chosen."}
                 </span>
               )
@@ -237,7 +237,7 @@ function PanelBody({ productId, platform }: { productId: number; platform: Listi
               <span className="text-slate-500">
                 {settings.resolved_description
                   ? `Using the product description (${settings.resolved_description.length} chars).`
-                  : "No description anywhere — a listing needs one."}
+                  : "No description anywhere: a listing needs one."}
               </span>
             )}
           </label>

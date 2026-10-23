@@ -100,7 +100,7 @@ function CostLine({
       <span className="inline-block w-8 text-xs text-slate-400">{label}</span>
       {value ?? (
         <span className={missingLabel ? "text-amber-700" : undefined}>
-          — {missingLabel ?? ""}
+          - {missingLabel ?? ""}
         </span>
       )}
     </span>
@@ -493,12 +493,12 @@ function ProductRow({
             <CopyButton value={p.sku} label={`Copy ${p.sku}`} />
           </span>
         ) : (
-          "—"
+          "-"
         )}
       </td>
       <td className="p-2 tabular-nums">
         {p.is_bundle
-          ? `Ready to ship: ${p.ready_to_ship ?? "—"}`
+          ? `Ready to ship: ${p.ready_to_ship ?? "-"}`
           : p.current_stock}
       </td>
       {/* One column, and it's the figure that reaches the marketplaces — the three it
@@ -506,12 +506,12 @@ function ProductRow({
           inputs to it rather than answers in their own right. */}
       <td className="p-2 tabular-nums">
         {p.is_bundle ? (
-          "—"
+          "-"
         ) : (
           <>
             <span className="flex items-baseline gap-2">
               <strong className={sellable.headline === 0 ? "text-red-600" : ""}>
-                {sellable.headline ?? "—"}
+                {sellable.headline ?? "-"}
               </strong>
               {sellable.capLabel && (
                 <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">
@@ -527,7 +527,7 @@ function ProductRow({
         )}
       </td>
       <td className="p-2 tabular-nums">
-        {p.sale_price ? formatUnitCost(p.sale_price) : "—"}
+        {p.sale_price ? formatUnitCost(p.sale_price) : "-"}
       </td>
       <td className="p-2">
         <CostLine

@@ -286,7 +286,7 @@ function OrderDetail() {
           <div className="flex items-center justify-between gap-3 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
             <span>
               <span className="font-medium">Replacement parcel detected.</span> A
-              second {channelLabel} shipping label was bought against this order —
+              second {channelLabel} shipping label was bought against this order:
               record what was sent and why so stock and profit stay right.
             </span>
             <button
@@ -312,7 +312,7 @@ function OrderDetail() {
           <div className="flex items-center justify-between rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">
             <span>
               <span className="font-medium">{channelLabel}</span> reports this
-              order as cancelled. Nothing has been changed locally — review and
+              order as cancelled. Nothing has been changed locally: review and
               confirm.
             </span>
             <button
@@ -384,7 +384,7 @@ function OrderDetail() {
           <>
             {order.lines.some((l) => l.needs_mapping) && (
               <div className="rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                Some lines couldn't be matched to a product — map them below, or
+                Some lines couldn't be matched to a product: map them below, or
                 the order can't reserve stock.
               </div>
             )}
@@ -552,13 +552,13 @@ function OrderFinancialsPanel({ order }: { order: Order }) {
           <p className="text-slate-500">Platform fees</p>
           <p>
             {order.platform == null ? (
-              "—"
+              "-"
             ) : order.payment_fees != null ? (
               `-${formatMoney(order.payment_fees, currency)}`
             ) : (
               <span
                 className="text-slate-500"
-                title={`StockSmith has no fee figure from this marketplace yet. Either it hasn't billed the order, or the fee lookup is failing — check Settings > Integrations.`}
+                title={`StockSmith has no fee figure from this marketplace yet. Either it hasn't billed the order, or the fee lookup is failing: check Settings > Integrations.`}
               >
                 Not reported yet
               </span>
@@ -573,7 +573,7 @@ function OrderFinancialsPanel({ order }: { order: Order }) {
             }
             title={
               order.postage_cost_actual != null
-                ? "What the marketplace charged for the first shipping label — used instead of the shipping profile's estimate."
+                ? "What the marketplace charged for the first shipping label: used instead of the shipping profile's estimate."
                 : undefined
             }
           >
@@ -581,7 +581,7 @@ function OrderFinancialsPanel({ order }: { order: Order }) {
               ? `-${formatMoney(order.postage_cost_effective, currency)}`
               : order.postage_cost_missing
                 ? "Not recorded"
-                : "—"}
+                : "-"}
           </p>
           {order.postage_cost_actual != null ? (
             <p className="text-xs text-slate-400">
@@ -603,21 +603,21 @@ function OrderFinancialsPanel({ order }: { order: Order }) {
           <p title="Each line's build-BOM cost per unit across the units that have shipped, frozen when the line was first allocated.">
             {order.materials_cogs != null
               ? `-${formatMoney(order.materials_cogs, currency)}`
-              : "—"}
+              : "-"}
           </p>
         </div>
         <div>
           <p className="text-slate-500">Kitting COGS</p>
-          <p title="Packaging actually consumed for this order's shipped units — one box per parcel, not per unit — valued at what each material cost when it was consumed.">
+          <p title="Packaging consumed for this order's shipped units, valued at what each material cost when it was consumed. One box per parcel, not per unit.">
             {order.kitting_cogs != null
               ? `-${formatMoney(order.kitting_cogs, currency)}`
-              : "—"}
+              : "-"}
           </p>
         </div>
         {order.replacement_postage != null && (
           <div>
             <p className="text-slate-500">Replacement postage</p>
-            <p title="Postage on every replacement parcel sent against this order — the marketplace label where one was detected, else the figure you entered.">
+            <p title="Postage on every replacement parcel sent against this order: the marketplace label where one was detected, else the figure you entered.">
               -{formatMoney(order.replacement_postage, currency)}
             </p>
           </div>
@@ -637,17 +637,17 @@ function OrderFinancialsPanel({ order }: { order: Order }) {
           >
             {order.net_profit != null
               ? formatMoney(order.net_profit, currency)
-              : "—"}
+              : "-"}
           </p>
           {order.cogs_pending && (
             <p className="text-xs text-amber-700">
-              COGS pending — one or more lines haven't been allocated yet, so
+              COGS pending: one or more lines haven't been allocated yet, so
               this figure doesn't include their cost.
             </p>
           )}
           {order.postage_cost_missing && (
             <p className="text-xs text-amber-700">
-              No postage cost — this order shipped without a shipping profile,
+              No postage cost: this order shipped without a shipping profile,
               so this figure doesn't deduct what postage cost. Assign the
               product a shipping profile so future orders capture it.
             </p>
@@ -769,7 +769,7 @@ function OrderLineRow({
       ? "border-l-[3px] border-l-blue-300 py-2 pr-2 pl-[9px]"
       : "p-2";
 
-  const dash = <span className="text-slate-300">—</span>;
+  const dash = <span className="text-slate-300">-</span>;
 
   return (
     <tr className={`border-b border-slate-100 ${isFullySubstituted ? "bg-slate-50" : ""}`}>
@@ -777,14 +777,14 @@ function OrderLineRow({
         {line.needs_mapping ? (
           <div className="flex flex-col gap-1">
             <span className="text-amber-700">
-              Unmapped SKU: {line.sku ?? "—"}
+              Unmapped SKU: {line.sku ?? "-"}
             </span>
             <UnmappedLineResolver line={line} />
           </div>
         ) : (
           <span className={isFullySubstituted ? "text-slate-400" : ""}>
-            {line.product_name ?? "—"}
-            {line.variant_name ? ` — ${line.variant_name}` : ""}
+            {line.product_name ?? "-"}
+            {line.variant_name ? ` (${line.variant_name})` : ""}
           </span>
         )}
         {line.variation_text && (
@@ -841,10 +841,10 @@ function OrderLineRow({
           ? dash
           : lineValue != null
             ? formatMoney(lineValue.toFixed(2), line.currency ?? currency)
-            : "—"}
+            : "-"}
       </td>
       <td className="p-2">
-        {isFullySubstituted ? dash : lineCost != null ? formatMoney(lineCost.toFixed(2), currency) : "—"}
+        {isFullySubstituted ? dash : lineCost != null ? formatMoney(lineCost.toFixed(2), currency) : "-"}
       </td>
       <td className="p-2">
         <div className="flex flex-col items-start gap-1">
@@ -913,7 +913,7 @@ function SubstituteLineControl({ line }: { line: OrderLine }) {
         <div className="absolute right-0 top-full z-20 mt-2 w-64 rounded-lg border border-slate-200 bg-white p-3 text-xs shadow-lg">
           <div className="mb-2 text-[11px] font-semibold text-slate-500">
             Substitute · {line.product_name ?? "Product"}
-            {line.variant_name ? ` — ${line.variant_name}` : ""}
+            {line.variant_name ? ` (${line.variant_name})` : ""}
           </div>
           {targets.length === 0 ? (
             <span className="text-slate-500">No other variations to substitute.</span>

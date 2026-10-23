@@ -224,7 +224,7 @@ async def match_value_merge(
             relabel_only.append(loser)
         elif not counterpart.is_active:
             raise AttributeValueError(
-                f'"{counterpart.variant_name}" is disabled — reactivate it (or disable "{loser.variant_name}" '
+                f'"{counterpart.variant_name}" is disabled: reactivate it (or disable "{loser.variant_name}" '
                 "too) before merging these values."
             )
         else:

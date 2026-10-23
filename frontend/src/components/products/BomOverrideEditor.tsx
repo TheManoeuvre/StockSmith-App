@@ -213,10 +213,10 @@ export function BomOverrideEditor({
     return { mat, qty, inherited: o.mode === "inherit" };
   };
   const effectiveLabel = (mat: Material | undefined, qty: string): string => {
-    if (!mat) return "—";
+    if (!mat) return "-";
     const n = Number(qty);
     const unit = mat.unit === "each" ? "" : ` ${mat.unit}`;
-    const cost = Number.isFinite(n) ? formatMoney(String(n * Number(mat.avg_unit_cost)), "GBP") : "—";
+    const cost = Number.isFinite(n) ? formatMoney(String(n * Number(mat.avg_unit_cost)), "GBP") : "-";
     return `${qty}${unit} · ${cost}`;
   };
 
@@ -388,7 +388,7 @@ export function BomOverrideEditor({
               <span className="w-20 shrink-0 text-right text-[11px] tabular-nums text-slate-500">
                 {mat && Number.isFinite(n)
                   ? formatMoney(String(n * Number(mat.avg_unit_cost)), "GBP")
-                  : "—"}
+                  : "-"}
               </span>
               <button
                 type="button"

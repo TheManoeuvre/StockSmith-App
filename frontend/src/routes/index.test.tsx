@@ -282,5 +282,5 @@ it("shows ranked fallback suggestions on a packaging shortfall and logs the pick
   await user.click(await screen.findByText("Confirm"));
 
   await waitFor(() => expect(usagePosted).toMatchObject({ material_id: 15, substitute_material_id: 16, order_id: 102 }));
-  expect(await screen.findByText(/Logged — using Medium box instead/)).toBeInTheDocument();
+  expect(await screen.findByText(/Logged. Using Medium box instead/)).toBeInTheDocument();
 });

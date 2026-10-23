@@ -533,7 +533,7 @@ async def platform_callback(
     if error:
         return _html(f"{label} connection failed", f"{label} returned an error: {error}")
     if not code or not state or state not in _PENDING:
-        return _html(f"{label} connection failed", "Missing or expired authorization state — please try connecting again.")
+        return _html(f"{label} connection failed", "Missing or expired authorization state. Please try connecting again.")
 
     code_verifier, _, environment = _PENDING.pop(state)
     adapter = await get_adapter(session, platform, environment)
@@ -1492,7 +1492,7 @@ async def _get_ebay_adapter(session: AsyncSession) -> tuple[EbayAdapter, Platfor
         # contract (the Trading-API-only methods below don't exist on other adapters).
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="eBay adapter unavailable — the platform registry returned an unexpected adapter type",
+            detail="eBay adapter unavailable: the platform registry returned an unexpected adapter type",
         )
     return adapter, connection
 
@@ -1759,7 +1759,7 @@ async def _get_etsy_adapter(session: AsyncSession) -> tuple[EtsyAdapter, Platfor
     if not isinstance(adapter, EtsyAdapter):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Etsy adapter unavailable — the platform registry returned an unexpected adapter type",
+            detail="Etsy adapter unavailable: the platform registry returned an unexpected adapter type",
         )
     return adapter, connection
 
@@ -1871,7 +1871,7 @@ async def adopt_etsy_listing(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
-                    "Cannot link an Etsy listing to a product/variant with no SKU — set a SKU in StockSmith first, "
+                    "Cannot link an Etsy listing to a product/variant with no SKU: set a SKU in StockSmith first, "
                     "since that's the value written to Etsy."
                 ),
             )

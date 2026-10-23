@@ -37,8 +37,8 @@ export function PlatformCompatibilityPanel({ platform }: { platform: ListingPlat
         limits
         {blocked_count > 0 && (
           <>
-            {" "}
-            — <strong className="text-red-700">{blocked_count} blocked</strong>
+            :{" "}
+            <strong className="text-red-700">{blocked_count} blocked</strong>
           </>
         )}
         {warning_count > 0 && <> · {warning_count} need adjusting</>}.

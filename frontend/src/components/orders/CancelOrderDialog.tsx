@@ -106,7 +106,7 @@ export function CancelOrderDialog({
       {isLoading && <p className="text-sm text-slate-500">Loading…</p>}
       {preview && preview.lines.length === 0 && (
         <p className="text-sm text-slate-600">
-          Nothing allocated or shipped on this order — it'll just be marked
+          Nothing allocated or shipped on this order: it'll just be marked
           cancelled.
         </p>
       )}
@@ -118,7 +118,7 @@ export function CancelOrderDialog({
           >
             <p className="font-medium">
               {line.product_name ?? `Product #${line.product_id}`}
-              {line.variant_name ? ` — ${line.variant_name}` : ""}
+              {line.variant_name ? ` (${line.variant_name})` : ""}
             </p>
 
             {line.pending_qty > 0 && (
@@ -130,8 +130,8 @@ export function CancelOrderDialog({
                   name={`product-pending-${line.order_line_id}`}
                   value={decisions[line.order_line_id]?.product_disposition}
                   onChange={(v) => setProductDisposition(line.order_line_id, v)}
-                  returnLabel="Return to stock — release the reservation (default)"
-                  scrapLabel="Scrap — release the reservation and write off the stock"
+                  returnLabel="Return to stock (releases the reservation, default)"
+                  scrapLabel="Scrap (releases the reservation and writes off the stock)"
                 />
               </div>
             )}
@@ -145,8 +145,8 @@ export function CancelOrderDialog({
                   name={`product-shipped-${line.order_line_id}`}
                   value={decisions[line.order_line_id]?.product_disposition}
                   onChange={(v) => setProductDisposition(line.order_line_id, v)}
-                  returnLabel="Return to stock — resellable (default)"
-                  scrapLabel="Scrap — damaged/unsellable, no stock credit"
+                  returnLabel="Return to stock (resellable, default)"
+                  scrapLabel="Scrap (damaged or unsellable, no stock credit)"
                 />
                 {line.kitting_materials.length > 0 && (
                   <div className="mt-2 rounded bg-slate-50 p-2">
@@ -162,8 +162,8 @@ export function CancelOrderDialog({
                       onChange={(v) =>
                         setKittingDisposition(line.order_line_id, v)
                       }
-                      returnLabel="Return to stock — came back reusable"
-                      scrapLabel="Scrap — already consumed, can't be un-used (default)"
+                      returnLabel="Return to stock (came back reusable)"
+                      scrapLabel="Scrap (already consumed, can't be un-used, default)"
                     />
                   </div>
                 )}

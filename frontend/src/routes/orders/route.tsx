@@ -73,12 +73,12 @@ function orderMarginPct(order: Order): number | null {
 }
 
 // The marketplace's due date — ship-by for most orders, collect-by for a Square collect
-// order (see effectiveDueDate) — or "—" when nothing was reported (manual orders, and any
+// order (see effectiveDueDate) — or "-" when nothing was reported (manual orders, and any
 // synced order predating this field). A done order shows the date plain — the deadline no
 // longer matters once it's shipped, collected, or cancelled.
 function dueLabel(order: Order): string {
   const due = effectiveDueDate(order);
-  if (!due) return "—";
+  if (!due) return "-";
   return formatDayMonth(due);
 }
 
@@ -335,7 +335,7 @@ function OrderRow({
           {order.external_order_id ? `#${order.external_order_id}` : `#${order.id}`}
         </div>
         <div className="text-[11px] text-slate-400">
-          {maskBuyerName(order.buyer_name) ?? "—"}
+          {maskBuyerName(order.buyer_name) ?? "-"}
         </div>
       </td>
       <td className="p-2 align-top">
@@ -366,8 +366,8 @@ function OrderRow({
               </span>
               <span>
                 {l.needs_mapping
-                  ? `Unmapped: ${l.sku ?? "—"}`
-                  : (l.product_name ?? "—")}
+                  ? `Unmapped: ${l.sku ?? "-"}`
+                  : (l.product_name ?? "-")}
               </span>
               {l.variation_text && (
                 <span
