@@ -12,6 +12,22 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Builds that use a fallback material are now costed at what was actually used.** Recording a build
+  with a fallback swapped in (e.g. a different box or filament) blends that build's real material
+  cost into the product's, or variant's, running average cost. Orders placed against that stock take
+  their cost of goods from the average, so margins reflect the pricier or cheaper fallback instead of
+  the primary material's price. Products that have never used a fallback cost exactly as before.
+
+### Fixed
+
+- **An empty material no longer hides from the dashboard.** A material at zero stock that an active
+  product's build or packaging list uses now always shows as critical in low stock, even with little
+  sales history and no reorder threshold set. This matters most for primary materials with a fallback,
+  which keep the product sellable and so used to run out unnoticed. Materials with stock already on
+  order are unchanged.
+
 ## [0.23.0] - 2026-10-21
 
 ### Added

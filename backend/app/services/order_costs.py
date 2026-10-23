@@ -33,6 +33,16 @@ async def compute_line_cost_snapshot(
     if product_id is None:
         return None
 
+    # Finished stock that has had a fallback built into it carries its own running average
+    # cost (see services/builds.py) — what was actually consumed, which the BOM can't say.
+    owner = (
+        await session.get(ProductVariant, variant_id)
+        if variant_id is not None
+        else await session.get(Product, product_id)
+    )
+    if owner is not None and owner.avg_unit_cost is not None:
+        return Decimal(owner.avg_unit_cost)
+
     if variant_id is not None:
         _, cost_per_unit, _ = await compute_variant_buildability(session, product_id, variant_id)
     else:
