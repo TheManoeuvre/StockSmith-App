@@ -12,6 +12,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **See what a stock-take variance is worth.** The count sheet has a new Value column that prices each
+  line's difference at today's unit cost (materials at their average cost, products and variants at
+  their bill-of-materials cost), updating as you type. Items with no bill of materials show a dash
+  rather than a zero.
+- **Settle flagged lines without leaving the stock take.** On a closed take, lines held back for review
+  now have Use count / Keep system / Recount buttons right in the sheet. The Unresolved variances page
+  still shows them across every take.
+
 ## [0.23.0] - 2026-10-21
 
 ### Added

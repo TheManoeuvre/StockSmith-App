@@ -237,6 +237,9 @@ export interface StockTakeLine {
   system_qty_at_approval: string | null;
   conflict_reason: string | null;
   delta: string | null;
+  /** What one unit costs today — a material's average cost, or a product/variant's BOM
+   * build cost. Null when cost isn't tracked (no BOM), which is not the same as free. */
+  unit_cost: string | null;
 }
 
 export interface StockTake {
