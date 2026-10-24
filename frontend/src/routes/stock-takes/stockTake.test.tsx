@@ -51,6 +51,7 @@ function line(overrides: Record<string, unknown> = {}) {
     system_qty_at_approval: null,
     conflict_reason: null,
     delta: null,
+    unit_cost: null,
     ...overrides,
   };
 }
@@ -203,6 +204,83 @@ describe("count sheet", () => {
     await renderAt("/stock-takes/1");
 
     expect(screen.queryByText(/no movement since/)).not.toBeInTheDocument();
+  });
+});
+
+describe("variance value", () => {
+  it("prices the typed variance at the line's unit cost", async () => {
+    const user = userEvent.setup();
+    setRoutes(baseRoutes(take([line({ unit_cost: "2.5000" })])));
+    await renderAt("/stock-takes/1");
+
+    // Expected 10, counting 8 → delta -2 × £2.50.
+    await user.type(screen.getByRole("spinbutton"), "8");
+
+    expect(screen.getByText("\u2212\u00a35.00")).toBeInTheDocument();
+  });
+
+  it("shows no value for a line with no cost to price it with", async () => {
+    const user = userEvent.setup();
+    await renderAt("/stock-takes/1");
+
+    await user.type(screen.getByRole("spinbutton"), "8");
+
+    expect(screen.queryByText(/£/)).not.toBeInTheDocument();
+  });
+});
+
+describe("settling flagged lines on the sheet", () => {
+  const closedWithConflict = () =>
+    take(
+      [
+        line({
+          status: "conflict",
+          counted_qty: "8.0000",
+          conflict_reason: "Stock moved since the take started",
+        }),
+      ],
+      { status: "closed", closed_at: "2026-08-17T09:00:00Z", conflict_count: 1 },
+    );
+
+  it("offers the three actions on a flagged line of a closed take", async () => {
+    setRoutes(baseRoutes(closedWithConflict()));
+    await renderAt("/stock-takes/1");
+
+    expect(screen.getByRole("button", { name: "Use count" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Keep system" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Recount" })).toBeInTheDocument();
+  });
+
+  it("resolves the line against this take", async () => {
+    const user = userEvent.setup();
+    setRoutes([
+      {
+        method: "POST" as const,
+        path: "/stock-takes/1/lines/1/resolve",
+        respond: () => take(),
+      },
+      ...baseRoutes(closedWithConflict()),
+    ]);
+    await renderAt("/stock-takes/1");
+
+    await user.click(screen.getByRole("button", { name: "Keep system" }));
+
+    await waitFor(() =>
+      expect(
+        calls.some((c) => c.method === "POST" && c.path === "/stock-takes/1/lines/1/resolve"),
+      ).toBe(true),
+    );
+    const sent = calls.find((c) => c.method === "POST")!.body as { action: string };
+    expect(sent.action).toBe("accept_system");
+  });
+
+  it("offers nothing while the take is still open", async () => {
+    setRoutes(
+      baseRoutes(take([line({ status: "conflict" })], { conflict_count: 1 })),
+    );
+    await renderAt("/stock-takes/1");
+
+    expect(screen.queryByRole("button", { name: "Keep system" })).not.toBeInTheDocument();
   });
 });
 

@@ -88,6 +88,10 @@ class StockTakeLineRead(BaseModel):
     # counted_qty - expected_qty, or None when nothing was counted. Computed rather than
     # stored so it can't drift from the two numbers it's derived from.
     delta: Decimal | None
+    # What one unit costs today: a material's average unit cost, or a product/variant's build
+    # cost from its BOM. None when the item has no BOM, meaning cost isn't tracked — which is
+    # not the same as free. The sheet multiplies it by the delta to show the money at stake.
+    unit_cost: Decimal | None = None
 
 
 class StockTakeRead(BaseModel):

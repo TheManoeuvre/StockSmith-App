@@ -18,7 +18,7 @@ from sqlalchemy import select
 from app.models.general_settings import GeneralSettings
 from app.models.material import Material, MaterialAdjustment, MaterialUnit
 from app.models.material_category import MaterialCategory
-from app.models.product import Product, ProductBundleItem
+from app.models.product import Product, ProductBundleItem, ProductMaterial
 from app.models.product_stock_event import ProductStockEvent, ProductStockEventType
 from app.models.stock_take import StockTake, StockTakeLine, StockTakeLineStatus, StockTakeStatus
 from app.models.variant import ProductVariant
@@ -93,6 +93,28 @@ async def _lines(session, take_id) -> list[StockTakeLine]:
 
 async def _count(session, take_id, line_id, qty):
     await stock_takes.set_line_counts(session, take_id, [BulkLineCount(line_id=line_id, counted_qty=qty)])
+
+
+async def test_lines_carry_a_unit_cost_so_a_variance_can_be_priced(session):
+    from app.routers.stock_takes import _read_take
+
+    await _settings(session)
+    resin = await _material(session, qty=Decimal(7), avg_unit_cost=Decimal("0.5"))
+    costed = await _product(session, name="Costed")
+    await _product(session, name="No BOM")
+    # A blended running average, as left by a build that used a fallback, beats the BOM.
+    await _product(session, name="Blended", avg_unit_cost=Decimal("3.25"))
+    session.add(ProductMaterial(product_id=costed.id, material_id=resin.id, qty_required=Decimal(4)))
+    await session.commit()
+
+    take, _ = await stock_takes.create_stock_take(session, EVERYTHING)
+
+    by_name = {line.name: line for line in (await _read_take(session, take)).lines}
+    assert by_name["Grey Resin"].unit_cost == Decimal("0.5")
+    assert by_name["Costed"].unit_cost == Decimal(2)
+    assert by_name["Blended"].unit_cost == Decimal("3.25")
+    # No BOM means cost isn't tracked — None, not zero.
+    assert by_name["No BOM"].unit_cost is None
 
 
 # --- scoping and start -----------------------------------------------------------------

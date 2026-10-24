@@ -873,6 +873,63 @@ def _material_category_sort(material) -> tuple[int, str]:
     return (_LEGACY_ORDER.get(legacy, len(_LEGACY_ORDER)), (legacy or "").lower())
 
 
+async def line_unit_costs(
+    session: AsyncSession, lines: list[StockTakeLine], materials: dict, products: dict, variants: dict
+) -> dict[int, Decimal | None]:
+    """What one unit of each line costs today, keyed by line id — the basis for putting a
+    money figure on a variance.
+
+    Materials use their average unit cost. Finished stock uses its running average build
+    cost once a build has blended one in (the same figure order COGS reads), and otherwise
+    the BOM as written: a variant's resolved BOM, a plain product's base BOM, both priced
+    at current material cost. None means there is no
+    figure to give: a product or variant with no BOM, which is "cost not tracked" rather
+    than free.
+    """
+    # Local import: buildability pulls in the schemas, which this module otherwise avoids.
+    from app.services import buildability
+
+    base_costs = await buildability.get_cost_per_unit_by_product(session)
+
+    variant_costs: dict[int, Decimal] = {}
+    boms_by_product = {
+        product_id: await buildability.get_resolved_variant_boms_by_variant(session, product_id)
+        for product_id in {v.product_id for v in variants.values()}
+    }
+    bom_material_ids = {
+        bom_line.material_id
+        for boms in boms_by_product.values()
+        for bom in boms.values()
+        for bom_line in bom
+    }
+    bom_materials = (
+        {
+            m.id: m
+            for m in (await session.execute(select(Material).where(Material.id.in_(bom_material_ids)))).scalars()
+        }
+        if bom_material_ids
+        else {}
+    )
+    for boms in boms_by_product.values():
+        for variant_id, bom in boms.items():
+            variant_costs[variant_id] = sum(
+                (Decimal(bom_materials[bl.material_id].avg_unit_cost) * bl.qty_required for bl in bom),
+                start=Decimal(0),
+            )
+
+    costs: dict[int, Decimal | None] = {}
+    for line in lines:
+        if line.material_id is not None:
+            costs[line.id] = Decimal(materials[line.material_id].avg_unit_cost)
+        elif line.variant_id is not None:
+            blended = variants[line.variant_id].avg_unit_cost
+            costs[line.id] = Decimal(blended) if blended is not None else variant_costs.get(line.variant_id)
+        else:
+            blended = products[line.product_id].avg_unit_cost
+            costs[line.id] = Decimal(blended) if blended is not None else base_costs.get(line.product_id)
+    return costs
+
+
 @dataclass(frozen=True)
 class GroupedLine:
     """A stock take line with the headings it sits under, and the key it sorts by."""
