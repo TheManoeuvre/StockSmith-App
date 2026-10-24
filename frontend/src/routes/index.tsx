@@ -104,7 +104,7 @@ function awaitingProductRows(data: DashboardSummary): FulfillmentRow[] {
       orderIds: [o.order_id],
       shortOn: "Stock",
       item:
-        (o.product_name ?? "—") + (o.variant_name ? ` — ${o.variant_name}` : ""),
+        (o.product_name ?? "-") + (o.variant_name ? ` (${o.variant_name})` : ""),
       shortBy: String(o.short_by),
       placedAt: o.order_placed_at,
       dueDates: o.due_date ? [o.due_date] : [],
@@ -163,7 +163,7 @@ function blockedRows(data: DashboardSummary): FulfillmentRow[] {
       orderIds: [o.order_id],
       shortOn: "No BOM defined",
       item:
-        (o.product_name ?? "—") + (o.variant_name ? ` — ${o.variant_name}` : ""),
+        (o.product_name ?? "-") + (o.variant_name ? ` (${o.variant_name})` : ""),
       shortBy: String(o.short_by),
       placedAt: o.order_placed_at,
       dueDates: o.due_date ? [o.due_date] : [],
@@ -312,7 +312,7 @@ function Dashboard() {
       {blocked.length > 0 && (
         <Card
           title="Blocked orders"
-          hint="No BOM defined to build more from — this won't resolve on its own."
+          hint="No BOM defined to build more from: this won't resolve on its own."
           action={
             <Link to="/orders" className="text-xs text-blue-700 hover:underline">
               Open Orders →
@@ -397,7 +397,7 @@ function Dashboard() {
       >
         {rows.length === 0 ? (
           <p className="text-sm text-slate-500">
-            Nothing waiting — everything on order can be fulfilled from stock.
+            Nothing waiting: everything on order can be fulfilled from stock.
           </p>
         ) : (
           <table className="w-full border-collapse text-left text-[12.5px]">
@@ -506,7 +506,7 @@ function Dashboard() {
       >
         <Card
           title="Time to stockout"
-          hint="Weeks until on-hand stock runs out — finished-goods cover included, on-order stock not. Grouped by supplier."
+          hint="Weeks until on-hand stock runs out: finished-goods cover included, on-order stock not. Grouped by supplier."
         >
           {data.low_stock_materials.length === 0 ? (
             <p className="text-sm text-slate-500">
@@ -569,7 +569,7 @@ function Dashboard() {
                       <td className="p-2 text-right tabular-nums">
                         {m.consumption_rate_per_week != null
                           ? `${roundQty(m.consumption_rate_per_week)}/wk`
-                          : "—"}
+                          : "-"}
                       </td>
                       <td
                         className={`p-2 text-right tabular-nums ${STOCKOUT_TEXT_CLASS[m.status]}`}
@@ -579,7 +579,7 @@ function Dashboard() {
                       <td className="p-2 text-right tabular-nums">
                         {Number(m.on_order_qty) > 0
                           ? roundQty(m.on_order_qty)
-                          : "—"}
+                          : "-"}
                       </td>
                       <td className="p-2">
                         <button

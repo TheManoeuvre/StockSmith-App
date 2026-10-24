@@ -184,7 +184,7 @@ class TestOrderUnfulfillableDedup:
         result = await session.execute(select(Notification))
         [notification] = result.scalars().all()
         assert notification.category == NotificationCategory.order_unfulfillable
-        assert notification.title == "Order #103 — 1 item short"
+        assert notification.title == "Order #103: 1 item short"
 
 
 class TestOrderBlockedDedup:
@@ -214,7 +214,7 @@ class TestOrderBlockedDedup:
         result = await session.execute(select(Notification))
         [notification] = result.scalars().all()
         assert notification.category == NotificationCategory.order_blocked
-        assert notification.title == "Order #201 blocked — 1 item with no BOM"
+        assert notification.title == "Order #201 blocked: 1 item with no BOM"
 
     async def test_fires_once_then_stays_quiet_while_still_blocked(self, session, monkeypatch):
         await _set_type(session, NotificationCategory.order_blocked)
@@ -274,7 +274,7 @@ class TestOrderShortfallGrouping:
 
         result = await session.execute(select(Notification))
         [notification] = result.scalars().all()
-        assert notification.title == "Order #242 — 3 items short"
+        assert notification.title == "Order #242: 3 items short"
         # The title identifies the order; the body is what says which items.
         assert "4 Stud / Dark Blue" in notification.body
         assert "6 Stud / Silver" in notification.body
@@ -288,8 +288,8 @@ class TestOrderShortfallGrouping:
         await notification_alerts.check_order_unfulfillable_alerts(session)
 
         assert sorted(await _notification_titles(session)) == [
-            "Order #242 — 1 item short",
-            "Order #243 — 1 item short",
+            "Order #242: 1 item short",
+            "Order #243: 1 item short",
         ]
 
     async def test_a_later_line_on_an_alerted_order_notifies_again_with_context(self, session, monkeypatch):
@@ -305,8 +305,8 @@ class TestOrderShortfallGrouping:
         result = await session.execute(select(Notification).order_by(Notification.id))
         notifications_rows = result.scalars().all()
         assert [n.title for n in notifications_rows] == [
-            "Order #242 — 2 items short",
-            "Order #242 — 1 item short",
+            "Order #242: 2 items short",
+            "Order #242: 1 item short",
         ]
         # The newly-short line is the news; the two already flagged are context, not a re-alert.
         assert "Bronze" in notifications_rows[1].body
@@ -321,7 +321,7 @@ class TestOrderShortfallGrouping:
 
         result = await session.execute(select(Notification))
         [notification] = result.scalars().all()
-        assert notification.title == "Order #300 blocked — 2 items with no BOM"
+        assert notification.title == "Order #300 blocked: 2 items with no BOM"
 
     async def test_awaiting_and_blocked_lines_on_one_order_stay_separate_notifications(self, session, monkeypatch):
         await _set_type(session, NotificationCategory.order_unfulfillable)
@@ -332,8 +332,8 @@ class TestOrderShortfallGrouping:
         await notification_alerts.check_order_unfulfillable_alerts(session)
 
         assert sorted(await _notification_titles(session)) == [
-            "Order #400 blocked — 1 item with no BOM",
-            "Order #400 — 1 item short",
+            "Order #400 blocked: 1 item with no BOM",
+            "Order #400: 1 item short",
         ]
 
 
@@ -495,7 +495,7 @@ class TestDigestRouting:
             session,
             category=NotificationCategory.order_unfulfillable,
             urgency=NotificationUrgency.digest,
-            title="Order #242 — 3 items short",
+            title="Order #242: 3 items short",
             body="body",
             delivery_mode=NotificationDeliveryMode.immediate,
         )
@@ -511,7 +511,7 @@ class TestDigestRouting:
             session,
             category=NotificationCategory.order_blocked,
             urgency=NotificationUrgency.immediate,
-            title="Order #300 blocked — 2 items with no BOM",
+            title="Order #300 blocked: 2 items with no BOM",
             body="body",
             delivery_mode=NotificationDeliveryMode.digest,
         )
@@ -534,7 +534,7 @@ class TestDigestRouting:
         assert await self._flush_recording(session, monkeypatch) == []
 
     async def test_digest_body_lines_carry_each_notification_title(self, session, monkeypatch):
-        for title in ("Order #242 — 3 items short", "Order #243 — 1 item short"):
+        for title in ("Order #242: 3 items short", "Order #243: 1 item short"):
             await notifications.dispatch_notification(
                 session,
                 category=NotificationCategory.order_unfulfillable,
@@ -548,7 +548,7 @@ class TestDigestRouting:
         assert title == "Order Alert: 2 items"
         # Distinguishable lines — the whole point of the roll-up. Generic per-alert titles
         # used to render this as the same string repeated.
-        assert body == "- Order #242 — 3 items short\n- Order #243 — 1 item short"
+        assert body == "- Order #242: 3 items short\n- Order #243: 1 item short"
 
 
 class TestDigestSchedule:
@@ -602,7 +602,7 @@ class TestDigestSchedule:
             session,
             category=NotificationCategory.order_unfulfillable,
             urgency=NotificationUrgency.digest,
-            title="Order #242 — 1 item short",
+            title="Order #242: 1 item short",
             body="body",
             delivery_mode=NotificationDeliveryMode.digest,
         )
@@ -799,7 +799,7 @@ class TestPushoverExpiry:
             session,
             category=NotificationCategory.order_unfulfillable,
             urgency=NotificationUrgency.digest,
-            title="Order #242 — 1 item short",
+            title="Order #242: 1 item short",
             body="body",
             delivery_mode=NotificationDeliveryMode.immediate,
         )
@@ -807,7 +807,7 @@ class TestPushoverExpiry:
             session,
             category=NotificationCategory.order_blocked,
             urgency=NotificationUrgency.immediate,
-            title="Order #300 blocked — 1 item with no BOM",
+            title="Order #300 blocked: 1 item with no BOM",
             body="body",
             delivery_mode=NotificationDeliveryMode.immediate,
         )
@@ -854,7 +854,7 @@ class TestPushoverExpiry:
             session,
             category=NotificationCategory.order_unfulfillable,
             urgency=NotificationUrgency.digest,
-            title="Order #242 — 1 item short",
+            title="Order #242: 1 item short",
             body="body",
             delivery_mode=NotificationDeliveryMode.digest,
         )

@@ -92,7 +92,7 @@ it("re-pairing an attribute re-requests the proposal and drops manual row picks"
   await userEvent.selectOptions(rowSelect("Black"), "OLD-1");
   expect(rowSelect("Black").value).toBe("OLD-1");
 
-  // Unpair it: "— not on listing —" sends null.
+  // Unpair it: "(not on listing)" sends null.
   await userEvent.selectOptions(screen.getByRole("combobox", { name: "eBay attribute for Colour" }), "");
 
   await waitFor(() => expect(screen.getByText("(pick one)")).toBeTruthy());

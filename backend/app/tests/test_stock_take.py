@@ -762,8 +762,8 @@ async def test_the_sheet_is_arranged_the_way_the_stock_is(session):
     assert [(g.section, g.group, g.subgroup, g.name) for g in grouped] == [
         # Products first. Coaster before Keyring by category; the coaster's variants sit
         # together under its parent SKU, alphabetically.
-        ("Products", "Coaster", "COA-1", "Slate Coaster — Round"),
-        ("Products", "Coaster", "COA-1", "Slate Coaster — Square"),
+        ("Products", "Coaster", "COA-1", "Slate Coaster (Round)"),
+        ("Products", "Coaster", "COA-1", "Slate Coaster (Square)"),
         ("Products", "Keyring", "KEY-1", "Round Keyring"),
         # Then materials, in the configured category order rather than alphabetically:
         # filament sorts before packaging because that is how the categories are ordered

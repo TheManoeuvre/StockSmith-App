@@ -1195,7 +1195,7 @@ export interface Order {
   financials_synced_at: string | null;
   // The two halves of cost of goods. materials_cogs is per line (build BOM x shipped qty,
   // frozen at first allocation); kitting_cogs is per order (what the kitting ledger actually
-  // consumed, frozen at ship). Both null when there is nothing to report — render "—".
+  // consumed, frozen at ship). Both null when there is nothing to report — render "-".
   materials_cogs: string | null;
   kitting_cogs: string | null;
   net_profit: string | null;

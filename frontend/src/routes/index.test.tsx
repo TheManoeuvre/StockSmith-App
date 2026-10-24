@@ -282,7 +282,7 @@ it("shows ranked fallback suggestions on a packaging shortfall and logs the pick
   await user.click(await screen.findByText("Confirm"));
 
   await waitFor(() => expect(usagePosted).toMatchObject({ material_id: 15, substitute_material_id: 16, order_id: 102 }));
-  expect(await screen.findByText(/Logged — using Medium box instead/)).toBeInTheDocument();
+  expect(await screen.findByText(/Logged. Using Medium box instead/)).toBeInTheDocument();
 });
 
 it("collapses stock-short lines for one variation into a row with a due-date range", async () => {
@@ -307,10 +307,10 @@ it("collapses stock-short lines for one variation into a row with a due-date ran
     orders_awaiting_packaging: [],
   });
 
-  const blue = (await screen.findByText("Pencil Pot — 6 Stud / Blue")).closest("tr")!;
+  const blue = (await screen.findByText("Pencil Pot (6 Stud / Blue)")).closest("tr")!;
   expect(within(blue).getByText("#394")).toBeInTheDocument();
   expect(within(blue).getByText("#395")).toBeInTheDocument();
   expect(within(blue).getByText("15–18 Aug")).toBeInTheDocument();
   // Exactly one row per variation.
-  expect(screen.getAllByText(/Pencil Pot — 6 Stud/)).toHaveLength(2);
+  expect(screen.getAllByText(/Pencil Pot \(6 Stud/)).toHaveLength(2);
 });

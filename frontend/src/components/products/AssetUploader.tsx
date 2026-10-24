@@ -211,7 +211,7 @@ function AssetSection({
                 <span className="shrink-0 text-xs tabular-nums text-slate-400">
                   {asset.width_px && asset.height_px
                     ? `${asset.width_px}×${asset.height_px}`
-                    : "—"}
+                    : "-"}
                 </span>
                 <DownloadButton
                   assetId={asset.id}

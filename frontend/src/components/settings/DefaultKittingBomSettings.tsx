@@ -68,7 +68,7 @@ export function DefaultKittingBomSettings() {
       help={
         <>
           Packaging materials (box, label, tape) automatically added to every new product's kitting BOM when
-          it's created — pick materials you already track stock for. This is a one-time snapshot: changing it
+          it's created: pick materials you already track stock for. This is a one-time snapshot: changing it
           here only affects products created afterward, not ones that already exist. Whether a material is
           consumed once per order rather than once per unit is set per material category, under Stock → Lists →
           Material categories ("Kitting: one per order, not per unit").

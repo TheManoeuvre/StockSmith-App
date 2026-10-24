@@ -175,7 +175,7 @@ function NewPurchase() {
     const measuredAt = expectedArrivalDate
       ? `measured at ${formatDayMonth(expectedArrivalDate)}`
       : "measured on arrival";
-    if (covers.length === 0) return { value: "—", sub: measuredAt };
+    if (covers.length === 0) return { value: "-", sub: measuredAt };
     const thin = covers.filter((c) => c < 4).length;
     return {
       value: thin ? "Thin" : "Healthy",

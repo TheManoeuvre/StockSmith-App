@@ -106,11 +106,11 @@ export function PurchaseLineEditor({
                     />
                   </td>
                   {showReceiving && (
-                    <td className="p-2 text-slate-500">{persisted ? roundQty(persisted.received_qty) : "—"}</td>
+                    <td className="p-2 text-slate-500">{persisted ? roundQty(persisted.received_qty) : "-"}</td>
                   )}
                   {showReceiving && (
                     <td className="p-2">
-                      {persisted ? roundQty(persisted.outstanding_qty) : "—"}
+                      {persisted ? roundQty(persisted.outstanding_qty) : "-"}
                       {closed && (
                         <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">
                           closed short

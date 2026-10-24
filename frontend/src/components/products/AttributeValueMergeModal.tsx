@@ -117,7 +117,7 @@ export function AttributeValueMergeModal({
       ) : (
         <div className="flex flex-col gap-4 text-sm">
           <label className="flex flex-col gap-1">
-            <span>Survivor — the {attributeName} value that stays</span>
+            <span>Survivor (the {attributeName} value that stays)</span>
             <select
               className="rounded border border-slate-300 px-2 py-1"
               value={survivor}
@@ -162,7 +162,7 @@ export function AttributeValueMergeModal({
                 />
               )}
               <p className="text-xs text-slate-500">
-                Merged variants are disabled, not deleted — their orders, builds and stock history stay as they are,
+                Merged variants are disabled, not deleted: their orders, builds and stock history stay as they are,
                 and their SKUs are remembered so future orders quoting them land on the survivor. No SKU is changed.
                 This can't be undone.
               </p>
@@ -247,7 +247,7 @@ function GlobalChoice({
   return (
     <fieldset className="flex flex-col gap-2 rounded border border-amber-200 bg-amber-50 p-2">
       <legend className="px-1 text-xs font-medium text-amber-900">
-        {title} differs on {pairs.length} pair{pairs.length === 1 ? "" : "s"} — which side should each survivor keep?
+        {title} differs on {pairs.length} pair{pairs.length === 1 ? "" : "s"}: which side should each survivor keep?
       </legend>
       <div className="flex gap-4">
         <label className="flex items-center gap-1 font-medium">

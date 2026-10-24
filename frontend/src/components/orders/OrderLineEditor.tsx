@@ -104,7 +104,7 @@ function OrderLineRow({
             ))}
           </select>
         ) : (
-          <span className="text-slate-400">—</span>
+          <span className="text-slate-400">-</span>
         )}
       </td>
       <td className="p-2">

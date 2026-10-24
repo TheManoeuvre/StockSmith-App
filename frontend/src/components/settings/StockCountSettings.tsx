@@ -170,7 +170,7 @@ export function StockCountSettings() {
   return (
     <SettingsCard
       title="Stock counting"
-      help="How often each thing should be physically counted. An item is counted at the cadence of its tier — A most often, C least — and anything past its cadence shows up as due on the dashboard. A tier set on an individual material or product wins over its category or type, which wins over the defaults below."
+      help="How often each thing should be physically counted. An item is counted at the cadence of its tier, A most often, C least, and anything past its cadence shows up as due on the dashboard. A tier set on an individual material or product wins over its category or type, which wins over the defaults below."
     >
       <div className="flex flex-col gap-3 rounded-[9px] border border-[#f1f5f9] p-3">
         <h3 className="text-sm font-medium">Materials</h3>
@@ -239,7 +239,7 @@ export function StockCountSettings() {
               </div>
             ) : (
               <p className="text-xs text-slate-500">
-                No product categories yet — add some under Stock → Lists to group products for counting.
+                No product categories yet: add some under Stock → Lists to group products for counting.
               </p>
             )}
           </div>

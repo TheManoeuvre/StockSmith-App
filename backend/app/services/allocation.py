@@ -20,7 +20,7 @@ from app.services.stock_events import record_stock_event
 
 """Core allocation engine: every stock-reservation state change for an order flows
 through here. Functions always re-query related rows via explicit select() rather than
-touching ORM relationship attributes lazily — AsyncSession relationships raise
+touching ORM relationship attributes lazily. AsyncSession relationships raise
 MissingGreenlet if accessed without eager-loading, a bug class this project has hit
 repeatedly elsewhere, so this module sidesteps it entirely by never relying on lazy
 attribute access."""
@@ -185,7 +185,7 @@ async def deallocate_line(session: AsyncSession, line: OrderLine, qty: int) -> N
     if qty <= 0 or qty > available:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot unassign {qty} — only {available} allocated-but-unshipped",
+            detail=f"Cannot unassign {qty}, only {available} allocated-but-unshipped",
         )
     owner = await _get_stock_owner(session, line)
     line.allocated_qty -= qty
@@ -215,7 +215,7 @@ async def ship_line(session: AsyncSession, line: OrderLine, qty: int) -> None:
     if qty <= 0 or qty > available:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot ship {qty} — only {available} allocated-but-unshipped",
+            detail=f"Cannot ship {qty}, only {available} allocated-but-unshipped",
         )
     owner = await _get_stock_owner(session, line)
     line.shipped_qty += qty

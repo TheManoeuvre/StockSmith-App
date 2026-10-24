@@ -38,9 +38,9 @@ interface WeeksInput {
 }
 
 /** Long form, for the dashboard and the detail panel: "3.2 wks", or with the finished-goods
- *  contribution spelled out when it's material. `—` when there's no forecast. */
+ *  contribution spelled out when it's material. `-` when there's no forecast. */
 export function formatWeeksOfSupply(m: WeeksInput): string {
-  if (m.weeks_of_supply == null) return "—";
+  if (m.weeks_of_supply == null) return "-";
   const weeks = Number(m.weeks_of_supply);
   const fgWeeks = m.fg_buffer_weeks != null ? Number(m.fg_buffer_weeks) : 0;
   if (fgWeeks > 0.05) {
@@ -49,9 +49,9 @@ export function formatWeeksOfSupply(m: WeeksInput): string {
   return `${weeks.toFixed(1)} wks`;
 }
 
-/** Compact form for the list column: "3.2 wk" or "—". */
+/** Compact form for the list column: "3.2 wk" or "-". */
 export function formatWeeksShort(weeksOfSupply: string | null): string {
-  if (weeksOfSupply == null) return "—";
+  if (weeksOfSupply == null) return "-";
   return `${Number(weeksOfSupply).toFixed(1)} wk`;
 }
 

@@ -771,7 +771,7 @@ async def reconcile_order_kitting(session: AsyncSession, order: Order) -> None:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=(
-                        f"Cannot ship — insufficient packaging material '{material.name}' "
+                        f"Cannot ship: insufficient packaging material '{material.name}' "
                         f"(need {consume_delta}, only {available} on hand and not reserved by other orders)"
                     ),
                 )
