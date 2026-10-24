@@ -67,6 +67,12 @@ class Product(Base):
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
     current_stock: Mapped[int] = mapped_column(default=0, nullable=False)
     allocated_qty: Mapped[int] = mapped_column(default=0, nullable=False)
+    # Running weighted-average build cost per unit of the finished stock (for a product with
+    # no active variants; variants carry their own). A build that swaps in a fallback
+    # material costs what was really consumed, which the BOM-as-written cost can't see, so
+    # builds blend it in here and an order's COGS snapshot reads it. NULL means "never
+    # blended" — COGS then resolves from the BOM, unchanged from before this column existed.
+    avg_unit_cost: Mapped[float | None] = mapped_column(Numeric(14, 6), nullable=True)
     is_bundle: Mapped[bool] = mapped_column(default=False, nullable=False)
     variant_attribute1_name: Mapped[str | None] = mapped_column(String, nullable=True)
     variant_attribute2_name: Mapped[str | None] = mapped_column(String, nullable=True)

@@ -132,6 +132,21 @@ async def create_build(
         ).scalars()
     }
 
+    # Priced now, before the consumption below moves the materials' stock and costs on.
+    # build_cost is what this build really draws (fallbacks included); bom_cost is the BOM as
+    # written, which is what stock built before the average existed was costed at.
+    build_cost = sum(
+        (
+            line.qty_required * Decimal(materials_by_id[consumed_material_id(line.material_id)].avg_unit_cost)
+            for line in bom
+        ),
+        start=Decimal(0),
+    )
+    bom_cost = sum(
+        (line.qty_required * Decimal(materials_by_id[line.material_id].avg_unit_cost) for line in bom),
+        start=Decimal(0),
+    )
+
     if qty_failed > 0 and failed_consumption is None:
         # Which materials a failed print still burns is a property of the category now, not a
         # hardcoded "filament". A user-created category can carry the same flag, and filament
@@ -219,6 +234,14 @@ async def create_build(
 
     owner = variant if variant is not None else product
     if qty_built > 0:
+        # Blend this build's real cost into the finished stock's running average. Only once a
+        # fallback has been drawn (or the average already exists): a plain build costs what
+        # the BOM says, which COGS already resolves, so those products are left untouched.
+        if substitutions or owner.avg_unit_cost is not None:
+            old_cost = Decimal(owner.avg_unit_cost) if owner.avg_unit_cost is not None else bom_cost
+            owner.avg_unit_cost = (
+                Decimal(owner.current_stock) * old_cost + Decimal(qty_built) * build_cost
+            ) / (Decimal(owner.current_stock) + Decimal(qty_built))
         owner.current_stock += qty_built
         listing_push.enqueue_for_owner(owner)
         record_stock_event(

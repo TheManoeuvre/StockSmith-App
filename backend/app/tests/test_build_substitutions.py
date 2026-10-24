@@ -17,8 +17,11 @@ from app.models.material import LegacyMaterialCategory, Material, MaterialAdjust
 from app.models.material_substitute import MaterialSubstitute, MaterialSubstituteUsage
 from app.models.product import Product, ProductMaterial
 from app.services import material_categories
+from app.services.buildability import get_cost_per_unit_by_product
 from app.services.builds import create_build
 from app.services.costing import recompute_material
+from app.services.order_costs import compute_line_cost_snapshot
+from app.tests.conftest import received_purchase
 
 
 async def _material(session, name: str, qty: Decimal) -> Material:
@@ -122,3 +125,68 @@ async def test_substituted_material_must_be_on_the_bom(session):
         await create_build(session, product.id, None, qty_built=1, notes=None, substitutions={other.id: pla.id})
     assert exc.value.status_code == 400
     assert "not on this BOM" in exc.value.detail
+
+
+async def _costed_setup(session) -> tuple[Product, Material, Material]:
+    """28 g of PETG White (0.01/g) per unit, with PLA Ivory (0.03/g) curated as its fallback.
+    Both are stocked through real purchases, since a material's cost is replayed from them."""
+    petg = await _material(session, "PETG White", Decimal(0))
+    pla = await _material(session, "PLA Ivory", Decimal(0))
+    await received_purchase(session, petg.id, 1000, 10)
+    await received_purchase(session, pla.id, 1000, 30)
+    await recompute_material(session, petg.id)
+    await recompute_material(session, pla.id)
+    session.add(MaterialSubstitute(material_id=petg.id, substitute_material_id=pla.id, rank=1))
+    product = Product(name="Widget", sku="SKU-C", current_stock=0, allocated_qty=0)
+    session.add(product)
+    await session.flush()
+    session.add(ProductMaterial(product_id=product.id, material_id=petg.id, qty_required=Decimal(28)))
+    await session.commit()
+    return product, petg, pla
+
+
+async def _snapshot_cost(session, product: Product) -> Decimal:
+    return await compute_line_cost_snapshot(session, product.id, None)
+
+
+async def test_plain_build_leaves_cost_on_the_bom(session):
+    product, _, _ = await _costed_setup(session)
+
+    await create_build(session, product.id, None, qty_built=2, notes=None)
+
+    await session.refresh(product)
+    assert product.avg_unit_cost is None
+    # Still resolved from the BOM as written, exactly as before the average existed.
+    assert await _snapshot_cost(session, product) == (await get_cost_per_unit_by_product(session))[product.id]
+
+
+async def test_substituted_build_is_costed_at_the_fallback_price(session):
+    product, petg, pla = await _costed_setup(session)
+
+    await create_build(session, product.id, None, qty_built=2, notes=None, substitutions={petg.id: pla.id})
+
+    await session.refresh(product)
+    assert Decimal(product.avg_unit_cost) == Decimal("0.84")  # 28 g x 0.03
+    assert await _snapshot_cost(session, product) == Decimal("0.84")
+
+
+async def test_average_blends_existing_stock_with_a_substituted_build(session):
+    product, petg, pla = await _costed_setup(session)
+    # Two units already on the shelf, built before any fallback was used: costed from the BOM.
+    product.current_stock = 2
+    await session.commit()
+
+    await create_build(session, product.id, None, qty_built=2, notes=None, substitutions={petg.id: pla.id})
+
+    await session.refresh(product)
+    assert Decimal(product.avg_unit_cost) == Decimal("0.56")  # (2 x 0.28 + 2 x 0.84) / 4
+
+
+async def test_average_keeps_blending_once_started_even_without_a_substitution(session):
+    product, petg, pla = await _costed_setup(session)
+    await create_build(session, product.id, None, qty_built=2, notes=None, substitutions={petg.id: pla.id})
+
+    await create_build(session, product.id, None, qty_built=2, notes=None)
+
+    await session.refresh(product)
+    assert Decimal(product.avg_unit_cost) == Decimal("0.56")  # (2 x 0.84 + 2 x 0.28) / 4
