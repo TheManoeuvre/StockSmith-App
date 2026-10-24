@@ -12,8 +12,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-24
+
 ### Added
 
+- **Orders with unmapped SKUs now show under "Orders awaiting products".** The dashboard lists them
+  with a Map order action, so they no longer sit unnoticed until someone spots them in Orders.
+- **Copy buttons in the order panel.** One next to the order number, and one on personalisation that
+  copies only the value, not its label.
+- **Non-filament materials can now drive variant substitutions**, not just filament.
 - **See what a stock-take variance is worth.** The count sheet has a new Value column that prices each
   line's difference at today's unit cost (materials at their average cost, products and variants at
   their running average build cost, or their bill-of-materials cost if none), updating as you type. Items with no bill of materials show a hyphen
