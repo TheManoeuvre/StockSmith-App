@@ -54,6 +54,7 @@ const ALERT_TYPE_LABELS: Record<NotificationCategory, string> = {
   backup_failed: "Backup failed",
   secondary_backup_unreachable: "Secondary backup location unreachable",
   daily_summary: "Order summary",
+  stock_take_due: "Items due for counting",
 };
 
 const DELIVERY_MODE_OPTIONS: { value: NotificationDeliveryMode; label: string }[] = [
@@ -83,6 +84,10 @@ interface Form {
   dailySummaryFrequency: SummaryFrequency;
   dailySummaryHourLocal: number;
   dailySummaryDayOfWeek: number;
+  stockTakeReminderEnabled: boolean;
+  stockTakeReminderFrequency: SummaryFrequency;
+  stockTakeReminderHourLocal: number;
+  stockTakeReminderDayOfWeek: number;
   pendingOrderThreshold: string;
   alertTypes: FormAlertType[];
 }
@@ -100,6 +105,10 @@ function toForm(settings: NotificationSettingsValue): Form {
     dailySummaryFrequency: settings.daily_summary_frequency,
     dailySummaryHourLocal: settings.daily_summary_hour_local,
     dailySummaryDayOfWeek: settings.daily_summary_day_of_week ?? 0,
+    stockTakeReminderEnabled: settings.stock_take_reminder_enabled,
+    stockTakeReminderFrequency: settings.stock_take_reminder_frequency,
+    stockTakeReminderHourLocal: settings.stock_take_reminder_hour_local,
+    stockTakeReminderDayOfWeek: settings.stock_take_reminder_day_of_week ?? 0,
     pendingOrderThreshold: String(settings.pending_order_threshold),
     alertTypes: settings.alert_types,
   };
@@ -150,6 +159,11 @@ export function NotificationSettings() {
         daily_summary_frequency: value.dailySummaryFrequency,
         daily_summary_hour_local: value.dailySummaryHourLocal,
         daily_summary_day_of_week: value.dailySummaryFrequency === "weekly" ? value.dailySummaryDayOfWeek : null,
+        stock_take_reminder_enabled: value.stockTakeReminderEnabled,
+        stock_take_reminder_frequency: value.stockTakeReminderFrequency,
+        stock_take_reminder_hour_local: value.stockTakeReminderHourLocal,
+        stock_take_reminder_day_of_week:
+          value.stockTakeReminderFrequency === "weekly" ? value.stockTakeReminderDayOfWeek : null,
         pending_order_threshold: Number(value.pendingOrderThreshold) || 1,
         alert_types: value.alertTypes,
       }),
@@ -429,6 +443,61 @@ export function NotificationSettings() {
               className="rounded border border-slate-300 px-2 py-1"
               value={form.dailySummaryHourLocal}
               onChange={(e) => setField("dailySummaryHourLocal", Number(e.target.value))}
+            >
+              {HOURS.map((hour) => (
+                <option key={hour} value={hour}>
+                  {hourLabel(hour)}
+                </option>
+              ))}
+            </select>
+          </FieldRow>
+        </div>
+      </SettingsCard>
+
+      <SettingsCard
+        title="Stock take reminder"
+        help="A nudge listing how many items in each category are due for counting. Nothing is sent when nothing is due."
+      >
+        <div className="flex items-center gap-2 text-sm">
+          <Switch
+            id="stock-take-reminder-toggle"
+            checked={form.stockTakeReminderEnabled}
+            onChange={(checked) => setField("stockTakeReminderEnabled", checked)}
+          />
+          <label htmlFor="stock-take-reminder-toggle">Send stock take reminder</label>
+        </div>
+        <div className="flex flex-col gap-2">
+          <FieldRow label="Frequency">
+            <SegmentedControl
+              ariaLabel="Stock take reminder frequency"
+              value={form.stockTakeReminderFrequency}
+              onChange={(next) => setField("stockTakeReminderFrequency", next)}
+              options={[
+                { value: "daily" as const, label: "Daily" },
+                { value: "weekly" as const, label: "Weekly" },
+              ]}
+            />
+          </FieldRow>
+          {form.stockTakeReminderFrequency === "weekly" && (
+            <FieldRow label="Day">
+              <select
+                className="rounded border border-slate-300 px-2 py-1"
+                value={form.stockTakeReminderDayOfWeek}
+                onChange={(e) => setField("stockTakeReminderDayOfWeek", Number(e.target.value))}
+              >
+                {WEEKDAYS.map((day, index) => (
+                  <option key={day} value={index}>
+                    {day}
+                  </option>
+                ))}
+              </select>
+            </FieldRow>
+          )}
+          <FieldRow label="Time">
+            <select
+              className="rounded border border-slate-300 px-2 py-1"
+              value={form.stockTakeReminderHourLocal}
+              onChange={(e) => setField("stockTakeReminderHourLocal", Number(e.target.value))}
             >
               {HOURS.map((hour) => (
                 <option key={hour} value={hour}>

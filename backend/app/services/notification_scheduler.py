@@ -17,6 +17,7 @@ from app.db import async_session_factory
 from app.models.listing import ListingPlatform
 from app.services import notification_alerts
 from app.services.notification_summary import maybe_fire_order_summary
+from app.services.stock_take_reminder import maybe_fire_stock_take_reminder
 from app.services.notifications import flush_digest, get_notification_settings
 
 logger = logging.getLogger("stocksmith.notification_scheduler")
@@ -38,6 +39,7 @@ async def _tick() -> None:
 
         settings = await get_notification_settings(session)
         await maybe_fire_order_summary(session, settings)
+        await maybe_fire_stock_take_reminder(session, settings)
 
 
 async def _loop() -> None:
