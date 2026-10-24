@@ -696,31 +696,31 @@ function MaterialDetail() {
                     </select>
                   </FieldRow>
                   {editedCategory?.tracks_colour && (
-                    <>
-                      <FieldRow label="Colour">
-                        {/* Backed by the colours reference table now, so the same colour on two materials
+                    <FieldRow label="Colour">
+                      {/* Backed by the colours reference table now, so the same colour on two materials
                     is one row that can be renamed once. onResolved is unused deliberately: the
                     backend matches the name case-insensitively and find-or-creates, which is
                     more reliable than trusting an id the client resolved from a stale list. */}
-                        <CreatableSelect
-                          className="rounded border border-slate-300 px-2 py-1"
-                          options={colourOptions ?? []}
-                          value={colour}
-                          onChange={setColour}
-                          onResolved={() => {}}
-                        />
-                      </FieldRow>
-                      <FieldRow label="Material type">
-                        <CreatableSelect
-                          className="rounded border border-slate-300 px-2 py-1"
-                          options={materialTypes ?? []}
-                          value={materialType}
-                          onChange={setMaterialType}
-                          onResolved={setMaterialTypeId}
-                          placeholder="PLA, PETG…"
-                        />
-                      </FieldRow>
-                    </>
+                      <CreatableSelect
+                        className="rounded border border-slate-300 px-2 py-1"
+                        options={colourOptions ?? []}
+                        value={colour}
+                        onChange={setColour}
+                        onResolved={() => {}}
+                      />
+                    </FieldRow>
+                  )}
+                  {editedCategory?.tracks_material_type && (
+                    <FieldRow label="Material type">
+                      <CreatableSelect
+                        className="rounded border border-slate-300 px-2 py-1"
+                        options={materialTypes ?? []}
+                        value={materialType}
+                        onChange={setMaterialType}
+                        onResolved={setMaterialTypeId}
+                        placeholder={editedCategory.tracks_colour ? "PLA, PETG…" : "Coasters, Keyrings…"}
+                      />
+                    </FieldRow>
                   )}
                   <FieldRow label="Manufacturer">
                     <CreatableSelect

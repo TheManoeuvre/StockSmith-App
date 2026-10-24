@@ -433,33 +433,33 @@ function MaterialsListContent() {
             />
           </label>
           {tracksColour && (
-            <>
-              <label className="flex flex-col gap-1">
-                <span className="text-sm">Colour</span>
-                {/* Backed by the colours reference table now, so the same colour on two materials
-                    is one row that can be renamed once. onResolved is unused deliberately: the
-                    backend matches the name case-insensitively and find-or-creates, which is
-                    more reliable than trusting an id the client resolved from a stale list. */}
-                <CreatableSelect
-                  className="rounded border border-slate-300 px-2 py-1"
-                  options={colourOptions ?? []}
-                  value={colour}
-                  onChange={setColour}
-                  onResolved={() => {}}
-                />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-sm">Material type</span>
-                <CreatableSelect
-                  className="rounded border border-slate-300 px-2 py-1"
-                  options={materialTypes ?? []}
-                  value={materialType}
-                  onChange={setMaterialType}
-                  onResolved={setMaterialTypeId}
-                  placeholder="PLA, PETG…"
-                />
-              </label>
-            </>
+            <label className="flex flex-col gap-1">
+              <span className="text-sm">Colour</span>
+              {/* Backed by the colours reference table now, so the same colour on two materials
+                  is one row that can be renamed once. onResolved is unused deliberately: the
+                  backend matches the name case-insensitively and find-or-creates, which is
+                  more reliable than trusting an id the client resolved from a stale list. */}
+              <CreatableSelect
+                className="rounded border border-slate-300 px-2 py-1"
+                options={colourOptions ?? []}
+                value={colour}
+                onChange={setColour}
+                onResolved={() => {}}
+              />
+            </label>
+          )}
+          {tracksMaterialType && (
+            <label className="flex flex-col gap-1">
+              <span className="text-sm">Material type</span>
+              <CreatableSelect
+                className="rounded border border-slate-300 px-2 py-1"
+                options={materialTypes ?? []}
+                value={materialType}
+                onChange={setMaterialType}
+                onResolved={setMaterialTypeId}
+                placeholder={tracksColour ? "PLA, PETG…" : "Coasters, Keyrings…"}
+              />
+            </label>
           )}
           <label className="flex flex-col gap-1">
             <span className="text-sm">Barcode</span>

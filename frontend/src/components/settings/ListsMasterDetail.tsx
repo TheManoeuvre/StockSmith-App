@@ -152,7 +152,7 @@ export function ListsMasterDetail() {
               ],
             },
             { key: "tracks_colour", label: "Has a colour", type: "checkbox" },
-            { key: "tracks_material_type", label: "Has a material type", type: "checkbox" },
+            { key: "tracks_material_type", label: "Has a material type (groups substitutable materials)", type: "checkbox" },
             { key: "cost_per_kg_display", label: "Show cost per kg", type: "checkbox" },
             { key: "consumed_on_failed_build", label: "Consumed by failed builds", type: "checkbox" },
             { key: "auto_kitting_per_order", label: "Kitting: one per order, not per unit", type: "checkbox" },
