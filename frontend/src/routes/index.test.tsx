@@ -307,10 +307,10 @@ it("collapses stock-short lines for one variation into a row with a due-date ran
     orders_awaiting_packaging: [],
   });
 
-  const blue = (await screen.findByText("Pencil Pot — 6 Stud / Blue")).closest("tr")!;
+  const blue = (await screen.findByText("Pencil Pot (6 Stud / Blue)")).closest("tr")!;
   expect(within(blue).getByText("#394")).toBeInTheDocument();
   expect(within(blue).getByText("#395")).toBeInTheDocument();
   expect(within(blue).getByText("15–18 Aug")).toBeInTheDocument();
   // Exactly one row per variation.
-  expect(screen.getAllByText(/Pencil Pot — 6 Stud/)).toHaveLength(2);
+  expect(screen.getAllByText(/Pencil Pot \(6 Stud/)).toHaveLength(2);
 });

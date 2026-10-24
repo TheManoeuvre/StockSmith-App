@@ -136,11 +136,11 @@ function ChannelCell({
 
   let marker: { className: string; title: string } | null = null;
   if (linked && remote?.is_calculated) {
-    marker = { className: "bg-slate-300", title: `Calculated per buyer on ${label} — no fixed price to sync` };
+    marker = { className: "bg-slate-300", title: `Calculated per buyer on ${label}: no fixed price to sync` };
   } else if (linked && own != null) {
     const drifted = remote?.domestic_price != null && Number(own) !== Number(remote.domestic_price);
     marker = drifted
-      ? { className: "bg-amber-500", title: `${label} now charges ${money(remote.domestic_price)} — open the row to pull it` }
+      ? { className: "bg-amber-500", title: `${label} now charges ${money(remote.domestic_price)}: open the row to pull it` }
       : {
           className: "bg-emerald-500",
           title: lastRefreshed

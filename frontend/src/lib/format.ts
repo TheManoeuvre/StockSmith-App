@@ -59,7 +59,7 @@ export function formatDayMonthRange(isos: (string | null | undefined)[]): string
     .filter((v): v is string => !!v)
     .map((v) => new Date(v))
     .sort((a, b) => a.getTime() - b.getTime());
-  if (times.length === 0) return "—";
+  if (times.length === 0) return "-";
   const first = times[0];
   const last = times[times.length - 1];
   const start = formatDayMonth(first.toISOString());
