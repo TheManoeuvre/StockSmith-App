@@ -205,12 +205,12 @@ function PurchaseRow({
           placed {formatDayMonth(purchase.order_date)}
         </div>
       </td>
-      <td className="p-2 align-top">{purchase.supplier_name ?? "—"}</td>
+      <td className="p-2 align-top">{purchase.supplier_name ?? "-"}</td>
       <td className="p-2 align-top">
         <div className={late ? "text-red-600" : "text-slate-500"}>
           {purchase.expected_arrival_date
             ? formatDayMonth(purchase.expected_arrival_date)
-            : "—"}
+            : "-"}
         </div>
         {late && <div className="text-[11px] font-semibold text-red-600">late</div>}
       </td>

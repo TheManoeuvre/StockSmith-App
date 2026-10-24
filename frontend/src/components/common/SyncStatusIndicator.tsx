@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { platformsApi, type PlatformSyncSummary } from "../../api/platforms";
 import { PLATFORM_LABELS } from "../../lib/platforms";
 import { SyncIcon } from "./NavIcons";
+import { NavTip } from "./NavTip";
 
 // Slow on purpose. Nothing here changes faster than the sync interval (15 min by
 // default), and this sits in the root layout, so it runs on every page in the app.
@@ -91,7 +92,18 @@ export function SyncStatusIndicator() {
       ),
   ];
 
+  const statusLabel = hasProblem
+    ? "Sync problem"
+    : needsAttention
+      ? "Listings need attention"
+      : syncing
+        ? "Syncing…"
+        : latest
+          ? `Synced ${formatRelative(latest)}`
+          : "Never synced";
+
   return (
+    <div className="group relative">
     <Link
       to="/settings"
       search={{ page: "stores-sync", ...(target ? { store: target } : {}) }}
@@ -105,7 +117,7 @@ export function SyncStatusIndicator() {
               )
               .join("\n")
       }
-      className="flex w-full items-center gap-2 rounded-md px-[9px] py-[7px] text-[12.5px] hover:bg-slate-100"
+      className="flex w-full items-center gap-2 rounded-md px-[9px] py-[7px] text-[12.5px] hover:bg-slate-100 max-lg:justify-center"
     >
       <span className={hasProblem ? "text-red-600" : needsAttention ? "text-amber-600" : "text-green-600"}>
         <SyncIcon />
@@ -113,18 +125,15 @@ export function SyncStatusIndicator() {
       {/* Not colour alone — the label changes too, for anyone who can't distinguish red from
           green; this is the app's only passive failure signal. */}
       <span
-        className={`flex-1 ${hasProblem ? "font-medium text-red-700" : needsAttention ? "font-medium text-amber-700" : "text-slate-600"}`}
+        className={`flex-1 max-lg:hidden ${hasProblem ? "font-medium text-red-700" : needsAttention ? "font-medium text-amber-700" : "text-slate-600"}`}
       >
-        {hasProblem
-          ? "Sync problem"
-          : needsAttention
-            ? "Listings need attention"
-            : syncing
-              ? "Syncing…"
-              : latest
-                ? `Synced ${formatRelative(latest)}`
-                : "Never synced"}
+        {statusLabel}
       </span>
     </Link>
+    <NavTip
+      label={statusLabel}
+      hint={problems.length > 0 ? problems.join("\n") : "Store sync status — click for details"}
+    />
+    </div>
   );
 }

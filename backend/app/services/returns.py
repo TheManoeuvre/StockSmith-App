@@ -21,7 +21,7 @@ from app.schemas.order_return import (
 from app.services import allocation, listing_push
 from app.services.costing import recompute_material
 
-"""Cancellation and return handling — the per-line scrap/return-to-stock workflow from
+"""Cancellation and return handling: the per-line scrap/return-to-stock workflow from
 docs/plan-marketplace-integrations.md Section 4. Supersedes allocation.cancel_order,
 which only ever handled the not-yet-shipped, everything-returns-to-stock case and
 hard-blocked (409) anything with shipped units. See OrderLineReturn's own docstring for
@@ -196,7 +196,7 @@ async def _process_kitting_returns(
                 MaterialAdjustment(
                     material_id=row.material_id,
                     qty_delta=qty,
-                    reason=f"Order #{order.id} returned — kitting material returned to stock",
+                    reason=f"Order #{order.id} returned: kitting material returned to stock",
                     order_id=order.id,
                 )
             )
@@ -239,7 +239,7 @@ async def process_cancellation(
         if line.shipped_qty > 0 and decision.kitting_disposition is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Line {line.id} has shipped units — kitting_disposition is required",
+                detail=f"Line {line.id} has shipped units: kitting_disposition is required",
             )
 
         owner = await _get_stock_owner(session, line)
@@ -253,7 +253,7 @@ async def process_cancellation(
             await allocation.deallocate_line(session, line, pending_qty)
             if decision.product_disposition == ReturnDisposition.scrap:
                 await _adjust_product_stock(
-                    session, owner, line, -pending_qty, f"Order #{order.id} cancelled — unshipped units scrapped"
+                    session, owner, line, -pending_qty, f"Order #{order.id} cancelled: unshipped units scrapped"
                 )
             session.add(
                 OrderLineReturn(
@@ -269,7 +269,7 @@ async def process_cancellation(
         if line.shipped_qty > 0:
             if decision.product_disposition == ReturnDisposition.return_to_stock:
                 await _adjust_product_stock(
-                    session, owner, line, line.shipped_qty, f"Order #{order.id} returned — unit returned to stock"
+                    session, owner, line, line.shipped_qty, f"Order #{order.id} returned: unit returned to stock"
                 )
             session.add(
                 OrderLineReturn(

@@ -943,6 +943,17 @@ export interface BuildableProduct {
   expected_max_buildable: number | null;
 }
 
+export interface OrderAwaitingMapping {
+  line_id: number;
+  order_id: number;
+  /** Raw marketplace SKU — all an unmapped line has to identify it. */
+  sku: string | null;
+  short_by: number;
+  order_placed_at: string;
+  due_date: string | null;
+  platform: ListingPlatform | null;
+}
+
 export interface OrderAwaitingInventory {
   line_id: number;
   order_id: number;
@@ -1040,6 +1051,8 @@ export interface DashboardSummary {
   margin_alerts: MarginAlert[];
   orders_awaiting_inventory: OrderAwaitingInventory[];
   orders_awaiting_packaging: OrderAwaitingPackaging[];
+  /** Optional: absent on older payloads. */
+  orders_awaiting_mapping?: OrderAwaitingMapping[];
   /** Capped at 10 by the backend; the _total is the uncapped figure, so the section can say
    * how many it isn't showing. */
   items_due_for_count: DueForCountItem[];
@@ -1195,7 +1208,7 @@ export interface Order {
   financials_synced_at: string | null;
   // The two halves of cost of goods. materials_cogs is per line (build BOM x shipped qty,
   // frozen at first allocation); kitting_cogs is per order (what the kitting ledger actually
-  // consumed, frozen at ship). Both null when there is nothing to report — render "—".
+  // consumed, frozen at ship). Both null when there is nothing to report — render "-".
   materials_cogs: string | null;
   kitting_cogs: string | null;
   net_profit: string | null;

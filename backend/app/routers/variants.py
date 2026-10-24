@@ -76,7 +76,7 @@ async def _validate_substitution_categories(
                 detail=(
                     f"Material {line.material_id} ({names_by_id.get(sub_category, '?')}) cannot substitute "
                     f"material {line.replaces_material_id} ({names_by_id.get(base_category, '?')}) "
-                    f"— categories must match"
+                    f"because their categories must match"
                 ),
             )
 

@@ -25,7 +25,7 @@ type CoverInput = Pick<
  * plus this PO's `extraInboundQty`) added back.
  *
  * `null` when there's no consumption rate to divide by (thin sales history, or a mutation
- * response that omits the forecast fields). Callers must render "—", never "NaN wk".
+ * response that omits the forecast fields). Callers must render "-", never "NaN wk".
  */
 export function coverOnArrival(
   m: CoverInput,

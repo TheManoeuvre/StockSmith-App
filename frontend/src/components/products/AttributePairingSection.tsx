@@ -58,7 +58,7 @@ export function AttributePairingSection({
                 onChange(pair.stocksmith_name, e.target.value || null)
               }
             >
-              <option value="">— not on listing —</option>
+              <option value="">(not on listing)</option>
               {platformNames.map((name) => (
                 <option key={name} value={name}>
                   {name}

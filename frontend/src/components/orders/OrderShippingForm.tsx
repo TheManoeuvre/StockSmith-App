@@ -118,7 +118,7 @@ export function OrderShippingForm({ order, onSaved }: { order: Order; onSaved: (
       ) : (
         <>
           <FieldRow label="Shipping profile" align="right">
-            <span className="text-slate-600">{order.shipping_profile_name ?? "—"}</span>
+            <span className="text-slate-600">{order.shipping_profile_name ?? "-"}</span>
           </FieldRow>
           <FieldRow label="Postage charged" align="right">
             <span className="tabular-nums text-slate-600">
@@ -152,7 +152,7 @@ export function OrderShippingForm({ order, onSaved }: { order: Order; onSaved: (
             ? `−${formatMoney(order.shipping_cost_snapshot, order.currency)}`
             : order.postage_cost_missing
               ? "Not recorded"
-              : "—"}
+              : "-"}
         </span>
       </FieldRow>
       {firstLabel && (

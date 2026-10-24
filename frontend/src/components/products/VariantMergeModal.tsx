@@ -92,7 +92,7 @@ export function VariantMergeModal({
       ) : (
         <div className="flex flex-col gap-4 text-sm">
           <label className="flex flex-col gap-1">
-            <span>Survivor — the variant that keeps everything</span>
+            <span>Survivor (the variant that keeps everything)</span>
             <select
               className="rounded border border-slate-300 px-2 py-1"
               value={targetId ?? ""}
@@ -139,7 +139,7 @@ export function VariantMergeModal({
                 />
               )}
               <p className="text-xs text-slate-500">
-                "{plan.loser.variant_name}" will be disabled, not deleted — its orders, builds and stock history stay
+                "{plan.loser.variant_name}" will be disabled, not deleted: its orders, builds and stock history stay
                 as they are. Its SKU
                 {plan.loser.full_sku ? ` (${plan.loser.full_sku})` : ""} is remembered so future orders quoting it
                 land on "{plan.survivor.variant_name}". This can't be undone.
@@ -179,7 +179,7 @@ function PlanSummary({ plan }: { plan: VariantMergePlan }) {
       </li>
       {plan.live_listings.length > 0 && (
         <li className="text-amber-800">
-          Live on {plan.live_listings.map((l) => l.platform).join(", ")} — you'll be asked to confirm setting
+          Live on {plan.live_listings.map((l) => l.platform).join(", ")}: you'll be asked to confirm setting
           that variation to 0.
         </li>
       )}
@@ -206,7 +206,7 @@ function BomChoice({
   const name = `merge-${title.replace(/\s+/g, "-").toLowerCase()}`;
   return (
     <fieldset className="flex flex-col gap-2 rounded border border-amber-200 bg-amber-50 p-2">
-      <legend className="px-1 text-xs font-medium text-amber-900">{title} differs — which one should the survivor keep?</legend>
+      <legend className="px-1 text-xs font-medium text-amber-900">{title} differs: which one should the survivor keep?</legend>
       <div className="grid grid-cols-2 gap-2">
         <label className="flex flex-col gap-1 rounded border border-slate-200 bg-white p-2">
           <span className="flex items-center gap-1 font-medium">

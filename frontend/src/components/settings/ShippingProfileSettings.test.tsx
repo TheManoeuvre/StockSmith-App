@@ -113,7 +113,7 @@ it("shows a read failure as nothing changed rather than as a crash", async () =>
   refreshResult = { ...refreshResult, changed: [], error: "rate limited", refreshed_at: null };
   renderPanel();
   await userEvent.click(await screen.findByRole("button", { name: "Refresh from Etsy" }));
-  expect(await screen.findByText(/couldn't be read — nothing was changed: rate limited/)).toBeTruthy();
+  expect(await screen.findByText(/couldn't be read, so nothing was changed: rate limited/)).toBeTruthy();
 });
 
 it("saves a new refresh interval on blur", async () => {

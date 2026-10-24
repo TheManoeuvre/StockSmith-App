@@ -130,7 +130,7 @@ async def _product_candidates(session: AsyncSession, scope: StockTakeScope, due_
         variants = sorted(variants_by_product.get(p.id, []), key=lambda v: v.variant_name)
         owners = (
             [
-                (v.id, f"{p.name} — {v.variant_name}", v.current_stock, v.allocated_qty, v.last_stock_take_at)
+                (v.id, f"{p.name} ({v.variant_name})", v.current_stock, v.allocated_qty, v.last_stock_take_at)
                 for v in variants
             ]
             if variants
@@ -354,7 +354,7 @@ async def create_stock_take(session: AsyncSession, scope: StockTakeScope) -> tup
     if not candidates:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Nothing to count — no items match that scope",
+            detail="Nothing to count: no items match that scope",
         )
 
     description = await describe_scope(session, scope)
@@ -551,7 +551,7 @@ def _decide(line: StockTakeLine, current_qty: Decimal, allocated: Decimal) -> _L
     if current_qty != expected:
         return _LineOutcome(
             StockTakeLineStatus.conflict,
-            f"Stock moved since this take started — was {_qty(expected)}, now {_qty(current_qty)}",
+            f"Stock moved since this take started: was {_qty(expected)}, now {_qty(current_qty)}",
             current_qty,
         )
 
@@ -563,7 +563,7 @@ def _decide(line: StockTakeLine, current_qty: Decimal, allocated: Decimal) -> _L
         return _LineOutcome(
             StockTakeLineStatus.conflict,
             f"{_qty(allocated)} {units} allocated to open orders and may be picked and boxed "
-            f"rather than on the shelf — counted {_qty(counted)} against {_qty(expected)} expected",
+            f"rather than on the shelf: counted {_qty(counted)} against {_qty(expected)} expected",
             current_qty,
         )
 
@@ -765,7 +765,7 @@ async def resolve_line(
     if line.counted_qty is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="There is no counted value to accept — re-count this line instead",
+            detail="There is no counted value to accept: re-count this line instead",
         )
 
     # Its own session for the same reason approve uses one per line: this call can refuse
@@ -837,7 +837,7 @@ def line_display_name(line: StockTakeLine, materials: dict, products: dict, vari
     base = product.name if product else "(deleted product)"
     if line.variant_id is not None:
         variant = variants.get(line.variant_id)
-        return (f"{base} — {variant.variant_name}" if variant else f"{base} — (deleted variant)", "each")
+        return (f"{base} ({variant.variant_name})" if variant else f"{base} (deleted variant)", "each")
     return (base, "each")
 
 

@@ -241,8 +241,8 @@ function StockTakesListContent() {
                 {preview.candidate_count === 1 ? "" : "s"} to count
                 {preview.material_count > 0 && preview.product_count > 0 && (
                   <>
-                    {" "}
-                    — {preview.material_count} material
+                    {": "}
+                    {preview.material_count} material
                     {preview.material_count === 1 ? "" : "s"},{" "}
                     {preview.product_count} finished
                   </>
@@ -262,7 +262,7 @@ function StockTakesListContent() {
                   <ul className="mt-1 list-disc pl-5">
                     {preview.warnings.slice(0, 5).map((w, i) => (
                       <li key={i}>
-                        {w.name} — take #{w.other_stock_take_id}, started{" "}
+                        {w.name}: take #{w.other_stock_take_id}, started{" "}
                         {new Date(w.other_started_at).toLocaleDateString()}
                       </li>
                     ))}
@@ -356,7 +356,7 @@ function StockTakesListContent() {
                         {t.conflict_count}
                       </span>
                     ) : (
-                      <span className="text-slate-400">—</span>
+                      <span className="text-slate-400">-</span>
                     )}
                   </td>
                 </tr>

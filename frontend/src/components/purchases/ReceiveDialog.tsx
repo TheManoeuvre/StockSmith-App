@@ -171,7 +171,7 @@ export function ReceiveDialog({
         </div>
 
         <p className="text-sm text-slate-500">
-          Leave the cost blank and this delivery takes its share of the line total — the greyed
+          Leave the cost blank and this delivery takes its share of the line total: the greyed
           figure. Fill it in only when the supplier billed this delivery for something else.
         </p>
 

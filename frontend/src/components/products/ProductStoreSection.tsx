@@ -52,7 +52,7 @@ export function ProductStoreSection({
         <h3 className="text-md font-semibold">{label}</h3>
         <label className="flex items-center gap-2 text-sm text-slate-600">
           {state.is_locked
-            ? "Live — end the listing to turn off"
+            ? "Live: end the listing to turn off"
             : state.is_on
               ? `Sold on ${label}`
               : `Not sold on ${label}`}

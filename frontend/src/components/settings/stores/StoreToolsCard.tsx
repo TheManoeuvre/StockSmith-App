@@ -146,13 +146,13 @@ function UnlinkedListingsRow({
                 <>
                   <strong>{report.count}</strong> eBay{" "}
                   {report.count === 1 ? "listing isn't" : "listings aren't"} visible to the Inventory API yet
-                  ({report.eligible} look eligible to migrate) — StockSmith can't sync stock to them until
+                  ({report.eligible} look eligible to migrate). StockSmith can't sync stock to them until
                   they are.
                 </>
               ) : (
                 <>
                   <strong>{report.count}</strong> Etsy {report.count === 1 ? "listing has" : "listings have"}{" "}
-                  no matching StockSmith SKU — stock changes here never reach them.
+                  no matching StockSmith SKU: stock changes here never reach them.
                 </>
               )}
             </span>

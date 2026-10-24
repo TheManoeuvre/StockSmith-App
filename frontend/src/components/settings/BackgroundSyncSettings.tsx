@@ -85,7 +85,7 @@ export function BackgroundSyncSettings() {
             <span className="font-medium">Start StockSmith when I sign in to Windows</span>
             <span className="block text-slate-500">
               It opens straight to the tray without a window. Note this happens at sign-in, not at
-              power-on — after a Windows Update restart it only runs once someone signs in, unless
+              power-on: after a Windows Update restart it only runs once someone signs in, unless
               Windows is set to sign you back in automatically.
             </span>
           </label>
@@ -94,7 +94,7 @@ export function BackgroundSyncSettings() {
 
       {writeDidNotTake && (
         <p className="text-sm text-amber-700">
-          Windows didn't keep that setting. Check Startup Apps in Windows Settings — something may
+          Windows didn't keep that setting. Check Startup Apps in Windows Settings: something may
           be turning it off.
         </p>
       )}
@@ -108,7 +108,7 @@ export function BackgroundSyncSettings() {
 
         {health?.measurable && health.gaps.length === 0 && (
           <p className="mt-1 text-sm text-slate-600">
-            No gaps — StockSmith has been syncing throughout.
+            No gaps. StockSmith has been syncing throughout.
           </p>
         )}
 

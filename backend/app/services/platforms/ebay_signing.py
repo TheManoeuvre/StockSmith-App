@@ -83,11 +83,11 @@ def _load_private_key(raw: str) -> Ed25519PrivateKey:
             key = load_der_private_key(base64.b64decode("".join(text.split())), password=None)
     except Exception as e:  # binascii, ValueError, UnsupportedAlgorithm — all mean the same thing here
         raise PlatformSyncError(
-            "Stored eBay signing key could not be read — mint a new one in Settings > Integrations"
+            "Stored eBay signing key could not be read: mint a new one in Settings > Integrations"
         ) from e
     if not isinstance(key, Ed25519PrivateKey):
         raise PlatformSyncError(
-            f"Stored eBay signing key is {type(key).__name__}, not Ed25519 — mint a new one with "
+            f"Stored eBay signing key is {type(key).__name__}, not Ed25519: mint a new one with "
             "signingKeyCipher ED25519"
         )
     return key
