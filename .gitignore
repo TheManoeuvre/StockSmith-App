@@ -17,7 +17,6 @@ dist/
 
 # Rust / Tauri
 frontend/src-tauri/target/
-frontend/src-tauri/Cargo.lock
 
 # Editors/OS
 .vscode/

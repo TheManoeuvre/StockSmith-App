@@ -54,7 +54,7 @@ export function PlatformSyncBadge({
     ? [sentence, ebayNotFoundHint].filter(Boolean).join(": ")
     : ebayNotFoundHint;
   return (
-    <span className={`rounded px-2 py-0.5 text-xs ${colorClass}`} title={title}>
+    <span className={`whitespace-nowrap rounded px-2 py-0.5 text-xs ${colorClass}`} title={title}>
       {text}
     </span>
   );

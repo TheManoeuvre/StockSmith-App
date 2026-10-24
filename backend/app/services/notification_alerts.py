@@ -393,7 +393,10 @@ async def check_material_forecast_alerts(session: AsyncSession) -> None:
     if not critical_on and not warning_on:
         return
 
-    forecasts = await compute_material_forecasts(session)
+    # include_all: by default the forecast omits healthy materials, so a material that
+    # recovered (stock arrived, a purchase was raised) would simply vanish from the list and
+    # its "back to healthy" transition below would never be seen — leaving the alert unread.
+    forecasts = await compute_material_forecasts(session, include_all=True)
     previous = await _load_alert_state_map(session, _MATERIAL_FORECAST_KEY)
     seen_keys: set[str] = set()
 
@@ -456,6 +459,10 @@ async def check_material_forecast_alerts(session: AsyncSession) -> None:
     # status so a reactivated material starts from a clean slate rather than an alert
     # silently never firing again because it "already" transitioned once, years ago.
     for stale_key in set(previous) - seen_keys:
+        for category in (NotificationCategory.material_forecast_critical, NotificationCategory.material_forecast_warning):
+            await resolve_alerts(
+                session, category=category, related_entity_type="material", related_entity_id=int(stale_key)
+            )
         await _clear_alert_state(session, _MATERIAL_FORECAST_KEY, stale_key)
 
 

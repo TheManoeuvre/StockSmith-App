@@ -1,4 +1,5 @@
 import { createFileRoute, Link, Outlet, useNavigate } from "@tanstack/react-router";
+import { LayersIcon } from "../../components/products/ProductImage";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useRef, useState, type MouseEvent } from "react";
 import { materialsApi } from "../../api/materials";
@@ -622,8 +623,8 @@ function MaterialRow({
       <td className="py-2 pl-3 pr-1">
         {/* Fixed 80px box. An uploaded photo fills it; a colour chip sits at 75% (60px)
             centred, so a swatch reads as a swatch rather than a cropped image; a material
-            with neither is left as an empty tile. */}
-        <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded border border-slate-200 bg-slate-50">
+            with neither shows the layers icon. */}
+        <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded border border-slate-200 bg-slate-50 text-slate-300">
           {imageUrl ? (
             <img
               src={imageUrl}
@@ -636,7 +637,9 @@ function MaterialRow({
               style={{ backgroundColor: m.colour_hex }}
               title={m.colour ?? undefined}
             />
-          ) : null}
+          ) : (
+            <LayersIcon />
+          )}
         </div>
       </td>
       <td className="px-2 py-2">

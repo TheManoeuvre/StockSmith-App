@@ -52,6 +52,12 @@ export interface ReferenceField {
   adornment?: (row: ReferenceRow, form: Record<string, string>) => React.ReactNode;
 }
 
+export interface ReferenceColumn<T extends ReferenceRow> {
+  header: string;
+  render: (row: T) => React.ReactNode;
+  align?: "left" | "right";
+}
+
 /** What `expandedExtras` gets to work with: the row as stored, the form as being edited,
  *  and a way to accept a server-returned row as the new saved baseline (for an action that
  *  writes the row itself, such as pulling a price from a marketplace). */
@@ -122,6 +128,8 @@ export function ReferenceDataTable<T extends ReferenceRow>({
   allowDelete = true,
   extraRowActions,
   rowLeading,
+  columns,
+  nameHeader = "Name",
   expandedExtras,
 }: {
   title: string;
@@ -138,6 +146,12 @@ export function ReferenceDataTable<T extends ReferenceRow>({
   /** Small visual rendered before the row's name in the collapsed header — e.g. a colour
    *  swatch. Omit for tables with nothing to show there. */
   rowLeading?: (row: T) => React.ReactNode;
+  /** Columns shown in the collapsed row between the name and the usage count, under a header
+   *  row, so entries can be read and compared without expanding them. Omit for tables where the
+   *  name says it all — those keep the plain name-and-usage row. */
+  columns?: ReferenceColumn<T>[];
+  /** Header over the name column when `columns` is given. */
+  nameHeader?: string;
   /** Extra content under the field grid of an expanded row, with access to the working
    *  copy — for actions and read-only detail that belong to the row but aren't fields. */
   expandedExtras?: (ctx: ExpandedRowContext<T>) => React.ReactNode;
@@ -146,6 +160,11 @@ export function ReferenceDataTable<T extends ReferenceRow>({
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const guard = useGuard();
   const queryClient = useQueryClient();
+
+  // Name | …columns | usage. The same template drives the header and every row so they align.
+  const gridStyle = columns
+    ? { gridTemplateColumns: `minmax(8rem,1.2fr) repeat(${columns.length}, minmax(7rem,1fr)) minmax(4.5rem,auto)` }
+    : undefined;
 
   const toggle = (id: number) => {
     const next = expandedId === id ? null : id;
@@ -187,7 +206,20 @@ export function ReferenceDataTable<T extends ReferenceRow>({
         {rows && rows.length === 0 && <p className="text-sm text-slate-500">Nothing here yet.</p>}
 
         {rows && rows.length > 0 && (
-          <ul className="flex flex-col divide-y divide-slate-100 rounded border border-slate-200 bg-white">
+          <ul className="flex flex-col divide-y divide-slate-100 overflow-x-auto rounded border border-slate-200 bg-white">
+            {columns && (
+              <li aria-hidden className="bg-slate-50/60 text-[11px] font-medium uppercase tracking-wide text-slate-400">
+                <div className="grid items-center gap-3 px-3 py-1.5" style={gridStyle}>
+                  <span>{nameHeader}</span>
+                  {columns.map((column) => (
+                    <span key={column.header} className={column.align === "right" ? "text-right" : ""}>
+                      {column.header}
+                    </span>
+                  ))}
+                  <span className="text-right">Used by</span>
+                </div>
+              </li>
+            )}
             {rows.map((row, index) => (
               <li key={row.id}>
                 {/* The arrows sit beside the expand control, not inside it: a button nested in a
@@ -198,13 +230,19 @@ export function ReferenceDataTable<T extends ReferenceRow>({
                     type="button"
                     aria-expanded={expandedId === row.id}
                     onClick={() => toggle(row.id)}
-                    className="flex flex-1 items-center justify-between gap-3 px-3 py-2 text-left text-sm hover:bg-slate-50"
+                    style={gridStyle}
+                    className={`flex-1 items-center gap-3 px-3 py-2 text-left text-sm hover:bg-slate-50 ${columns ? "grid" : "flex justify-between"}`}
                   >
-                    <span className="flex items-center gap-2 font-medium">
+                    <span className="flex min-w-0 items-center gap-2 font-medium">
                       {rowLeading?.(row)}
-                      {row.name}
+                      <span className="truncate">{row.name}</span>
                     </span>
-                    <span className="text-xs text-slate-400">
+                    {columns?.map((column) => (
+                      <span key={column.header} className={`min-w-0 ${column.align === "right" ? "text-right" : ""}`}>
+                        {column.render(row)}
+                      </span>
+                    ))}
+                    <span className={`text-xs text-slate-400 ${columns ? "text-right" : ""}`}>
                       {row.usage_count > 0 ? usageLabel(row.usage_count) : "unused"}
                     </span>
                   </button>

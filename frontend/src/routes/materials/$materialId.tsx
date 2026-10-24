@@ -1,4 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { LayersIcon, ProductImage } from "../../components/products/ProductImage";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 import { materialsApi } from "../../api/materials";
@@ -488,15 +489,12 @@ function MaterialDetail() {
         {/* Identity + the three headline figures — shown on every tab. */}
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-3">
-            <div className="h-16 w-16 shrink-0 overflow-hidden rounded border border-slate-200 bg-slate-50">
-              {imageUrl && (
-                <img
-                  src={imageUrl}
-                  alt={material.name}
-                  className="h-full w-full object-cover"
-                />
-              )}
-            </div>
+            <ProductImage
+              src={imageUrl}
+              alt={material.name}
+              className="h-16 w-16 rounded border"
+              fallback={<LayersIcon />}
+            />
             <div className="min-w-0">
               <p className="truncate text-sm font-medium text-slate-700">
                 {material.material_type_name
@@ -782,9 +780,12 @@ function MaterialDetail() {
                             title={material.colour ?? undefined}
                           />
                         ) : (
-                          <span className="text-[10px] text-slate-400">
-                            no image
-                          </span>
+                          <div className="flex flex-col items-center gap-1 text-slate-300">
+                            <LayersIcon className="h-8 w-8" />
+                            <span className="text-[10px] text-slate-400">
+                              no image
+                            </span>
+                          </div>
                         )}
                       </div>
                       <div className="flex flex-1 flex-col gap-2">
@@ -981,7 +982,7 @@ function MaterialDetail() {
                         },
                       })
                     }
-                    className="rounded border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm text-amber-800"
+                    className="whitespace-nowrap rounded border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm text-amber-800"
                   >
                     Create draft purchase
                   </button>
