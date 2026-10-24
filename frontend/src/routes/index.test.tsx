@@ -314,3 +314,28 @@ it("collapses stock-short lines for one variation into a row with a due-date ran
   // Exactly one row per variation.
   expect(screen.getAllByText(/Pencil Pot \(6 Stud/)).toHaveLength(2);
 });
+
+it("lists unmapped-SKU orders as awaiting products with a Map order link instead of Build now", async () => {
+  await renderDashboard({
+    orders_awaiting_inventory: [],
+    orders_awaiting_packaging: [],
+    orders_awaiting_mapping: [
+      {
+        line_id: 900,
+        order_id: 777,
+        sku: "MYSTERY-1",
+        short_by: 2,
+        order_placed_at: "2026-08-18T09:00:00Z",
+        due_date: null,
+        platform: null,
+      },
+    ],
+  });
+  const row = (await screen.findByText("MYSTERY-1")).closest("tr")!;
+  expect(within(row).getByText("Unmapped SKU")).toBeInTheDocument();
+  expect(within(row).getByRole("link", { name: "Map order" })).toHaveAttribute(
+    "href",
+    "/orders/777",
+  );
+  expect(within(row).queryByText("Build now")).not.toBeInTheDocument();
+});
