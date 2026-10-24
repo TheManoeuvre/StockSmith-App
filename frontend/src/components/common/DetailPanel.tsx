@@ -18,6 +18,7 @@ export function DetailPanel({
   tabs,
   activeTab,
   onTabChange,
+  titleExtra,
   headerExtra,
   footer,
   children,
@@ -29,6 +30,8 @@ export function DetailPanel({
   tabs?: TabDef[];
   activeTab?: string;
   onTabChange?: (id: string) => void;
+  /** Controls sitting right after the title, e.g. a copy button. */
+  titleExtra?: ReactNode;
   /** Extra controls in the header row, e.g. an active/inactive badge. */
   headerExtra?: ReactNode;
   /** A persistent bar below the scroll area, e.g. the product slide-over's Save/Revert. */
@@ -54,7 +57,11 @@ export function DetailPanel({
           to both screen readers and role-based test queries. */}
       <div role="dialog" aria-modal="true" aria-labelledby={headingId} className="flex h-full w-full max-w-3xl flex-col bg-white shadow-xl">
         <div className="flex flex-none items-center gap-2 border-b border-slate-200 p-4">
-          <h1 id={headingId} className="flex-1 truncate text-lg font-semibold">{title}</h1>
+          <div className="flex min-w-0 flex-1 items-center gap-1">
+            <h1 id={headingId} className="truncate text-lg font-semibold">{title}</h1>
+            {/* Beside the heading rather than inside it, so it doesn't leak into the dialog's name. */}
+            {titleExtra}
+          </div>
           {headerExtra}
           {(onPrev || onNext) && (
             <div className="flex gap-1">

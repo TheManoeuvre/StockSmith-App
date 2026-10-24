@@ -50,5 +50,5 @@ it("keeps the colour naming for colour categories", () => {
   const c = mat(42, "Blue PLA", 1, { colour: "Blue", material_type_id: 1 });
   const label = groupLabeller([a, b, c], cats);
   expect(label(c)).toBe("Blue");
-  expect(label(a)).toBe("Red — Brand A Red");
+  expect(label(a)).toBe("Red: Brand A Red");
 });

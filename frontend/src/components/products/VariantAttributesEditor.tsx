@@ -181,7 +181,7 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
           {isExpanded ? "▾" : "▸"}
         </span>
         Variant attributes
-        <span className="font-normal text-slate-500">— define attributes and generate variants</span>
+        <span className="font-normal text-slate-500">: define attributes and generate variants</span>
       </button>
 
       {isExpanded && (
@@ -202,7 +202,7 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
               </label>
               <label className="flex flex-col gap-1 flex-1">
                 <span className="text-sm">
-                  Values (comma-separated){row.materialRules.length > 0 && " — derived from checked materials below"}
+                  Values (comma-separated){row.materialRules.length > 0 && ": derived from checked materials below"}
                 </span>
                 <input
                   className="w-full rounded border border-slate-300 px-2 py-1 disabled:bg-slate-50 disabled:text-slate-500"

@@ -14,7 +14,7 @@ export function VariantMatchLabel({
   return (
     <span>
       {entry.variant_name ?? "(product)"}
-      {attrs && <span className="text-slate-500"> — {attrs}</span>}
+      {attrs && <span className="text-slate-500"> · {attrs}</span>}
       {entry.match_confidence !== "exact" && (
         <span className="ml-1 text-xs text-amber-600">
           ({entry.match_confidence === "count_only" ? "check this" : "pick one"})

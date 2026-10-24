@@ -88,7 +88,7 @@ export function MaterialSubstitutesSection({ materialId }: { materialId: number 
     <div className="mt-3">
       <h4 className="mb-1 text-sm font-medium text-slate-600">Fallback materials</h4>
       <p className="mb-2 text-xs text-slate-400">
-        Ranked, human-picked alternatives for when this material runs out. Suggested only —
+        Ranked, human-picked alternatives for when this material runs out. Suggested only:
         nothing here is ever substituted automatically.
       </p>
 

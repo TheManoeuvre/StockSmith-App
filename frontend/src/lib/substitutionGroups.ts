@@ -31,8 +31,8 @@ export function noGroupReason(base: Material, categories: MaterialCategory[]): s
   if (substitutionGroupKey(base, categories) != null) return null;
   const category = categories.find((c) => c.id === base.category_id);
   return category == null
-    ? `"${base.name}" has no category — assign one (in Materials) before this can drive substitutions.`
-    : `"${base.name}" has no Material Type set — assign one (in Materials) to group its variants before this can drive substitutions.`;
+    ? `"${base.name}" has no category. Assign one (in Materials) before this can drive substitutions.`
+    : `"${base.name}" has no Material Type set. Assign one (in Materials) to group its variants before this can drive substitutions.`;
 }
 
 function colourLabel(m: Material): string {
@@ -54,7 +54,7 @@ function sharedSegmentPrefix(names: string[]): string[] {
  * How each material in a pool is shown and keyed as an attribute value.
  *
  * Colour materials keep the colour-name logic: the colour where it identifies the material,
- * "Colour — full name" where another material in the list shares it. Everything else has no
+ * "Colour: full name" where another material in the list shares it. Everything else has no
  * colour to name, so it is labelled by its own name with the family prefix dropped — "Round
  * Natural Edge | 10x10cm" rather than a value (and a SKU suffix) that repeats "Slate Coaster"
  * on every variant.
@@ -66,7 +66,7 @@ export function groupLabeller(members: Material[], categories: MaterialCategory[
     for (const m of members) counts.set(colourLabel(m), (counts.get(colourLabel(m)) ?? 0) + 1);
     return (m) => {
       const colour = colourLabel(m);
-      return (counts.get(colour) ?? 0) > 1 && m.name !== colour ? `${colour} — ${m.name}` : colour;
+      return (counts.get(colour) ?? 0) > 1 && m.name !== colour ? `${colour}: ${m.name}` : colour;
     };
   }
   const prefix = members.length > 1 ? sharedSegmentPrefix(members.map((m) => m.name)) : [];

@@ -179,7 +179,7 @@ async def import_price(session: AsyncSession, profile: ShippingProfile, platform
         )
     if match.is_calculated:
         raise CalculatedProfileError(
-            f"'{match.title}' is a calculated profile on {PLATFORM_LABELS[platform]} — postage is worked out per "
+            f"'{match.title}' is a calculated profile on {PLATFORM_LABELS[platform]}: postage is worked out per "
             "buyer at checkout, so there is no fixed price to import."
         )
 

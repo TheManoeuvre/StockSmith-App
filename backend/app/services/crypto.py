@@ -8,7 +8,7 @@ from app.config import settings
 def _fernet() -> Fernet:
     if not settings.token_encryption_key:
         raise RuntimeError(
-            "token_encryption_key is not configured — required to store or read encrypted "
+            "token_encryption_key is not configured: required to store or read encrypted "
             "platform tokens. Generate one with: python -c \"from cryptography.fernet import "
             'Fernet; print(Fernet.generate_key().decode())"'
         )
@@ -39,6 +39,6 @@ class EncryptedString(TypeDecorator):
             return _fernet().decrypt(value.encode("ascii")).decode("utf-8")
         except InvalidToken as e:
             raise RuntimeError(
-                "Failed to decrypt a stored platform token — token_encryption_key is missing, "
+                "Failed to decrypt a stored platform token: token_encryption_key is missing, "
                 "wrong, or was rotated. Reconnect the platform to store a fresh token."
             ) from e

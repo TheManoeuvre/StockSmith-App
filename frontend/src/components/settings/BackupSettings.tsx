@@ -129,7 +129,7 @@ export function BackupSettings() {
           <ErrorBanner error={settingsError} />
         ) : (
           <p className="text-sm text-slate-500">
-            Couldn't load backup settings — check the connection to the backend.
+            Couldn't load backup settings: check the connection to the backend.
           </p>
         )}
       </SettingsCard>
@@ -150,7 +150,7 @@ export function BackupSettings() {
 
       <SettingsCard
         title="Backups"
-        help="A backup is a single zip holding your database and every product image. Marketplace connections are deliberately left out, so restoring onto a different computer means reconnecting Etsy and eBay — nothing else is lost."
+        help="A backup is a single zip holding your database and every product image. Marketplace connections are deliberately left out, so restoring onto a different computer means reconnecting Etsy and eBay. Nothing else is lost."
       >
         <div className="flex items-center gap-3">
           <button
@@ -162,7 +162,7 @@ export function BackupSettings() {
           </button>
           <span className="text-sm text-slate-500">
             Last backup: {formatWhen(settings.last_run_at)}
-            {settings.last_run_status === "error" && " — failed"}
+            {settings.last_run_status === "error" && ": failed"}
           </span>
         </div>
         {settings.last_run_error && (
@@ -230,7 +230,7 @@ export function BackupSettings() {
         </label>
         <p className="text-xs text-slate-500">
           Point this at a OneDrive or Dropbox folder and your backups end up somewhere other than
-          this machine — which is the copy that still helps if this computer is the thing that fails.
+          this machine: which is the copy that still helps if this computer is the thing that fails.
           Leave blank to keep backups here only.
         </p>
         {settings.secondary_dir_last_error && (

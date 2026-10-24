@@ -660,7 +660,7 @@ function MaterialRow({
         )}
       </td>
       <td className="px-2 py-2 text-slate-500">
-        {m.material_type_name ?? "—"}
+        {m.material_type_name ?? "-"}
       </td>
       <td
         className={`px-2 py-2 tabular-nums ${atRisk ? `font-medium ${STOCKOUT_TEXT_CLASS[status]}` : ""}`}
@@ -673,7 +673,7 @@ function MaterialRow({
             +{formatQty(m.on_order_qty, m.unit)}
           </span>
         ) : (
-          <span className="text-slate-400">—</span>
+          <span className="text-slate-400">-</span>
         )}
       </td>
       <td className="px-2 py-2 tabular-nums text-slate-500">
@@ -690,7 +690,7 @@ function MaterialRow({
         {formatWeeksShort(m.weeks_of_supply)}
       </td>
       <td className="px-2 py-2 text-slate-500">
-        {m.default_supplier_name ?? "—"}
+        {m.default_supplier_name ?? "-"}
         {formatLeadTime(m.lead_time_days) && (
           <span className="block text-xs text-slate-400">{formatLeadTime(m.lead_time_days)}</span>
         )}

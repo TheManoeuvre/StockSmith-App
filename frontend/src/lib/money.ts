@@ -1,5 +1,5 @@
 export function formatMoney(value: string | null, currency: string | null): string {
-  if (value == null) return "—";
+  if (value == null) return "-";
   const symbol = currency === "GBP" ? "£" : currency === "EUR" ? "€" : currency === "USD" || !currency ? "$" : `${currency} `;
   return `${symbol}${Number(value).toFixed(2)}`;
 }
@@ -12,6 +12,6 @@ export function ceilToPenny(value: number): number {
 }
 
 export function formatUnitCost(value: string | number | null | undefined): string {
-  if (value == null) return "—";
+  if (value == null) return "-";
   return `£${ceilToPenny(Number(value)).toFixed(2)}`;
 }

@@ -163,7 +163,7 @@ async def _validate_attribute_rules(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=(
                             f"Material {candidate_id} is not the same material type as base "
-                            f"material {rule.base_material_id} — can't auto-substitute across types"
+                            f"material {rule.base_material_id}: can't auto-substitute across types"
                         ),
                     )
 
@@ -315,7 +315,7 @@ def _shared_material_messages(
             continue
         material = _name(name_by_material_id, material_id)
         listed = ", ".join(phrases[:-1]) + f", and {phrases[-1]}"
-        messages.append(f"Variant '{variant_name}': {material} would be used by {len(phrases)} BOM lines — {listed}.")
+        messages.append(f"Variant '{variant_name}': {material} would be used by {len(phrases)} BOM lines: {listed}.")
     return messages
 
 
@@ -365,7 +365,7 @@ def _detect_rule_ambiguities(
                     messages.append(
                         f"Both '{name_a}' and '{name_b}' set the {kind} for the "
                         f"{_name(name_by_material_id, base_id)} BOM line{detail}. Only one attribute can drive a "
-                        f"given BOM line's {kind} — remove one of the rules."
+                        f"given BOM line's {kind}: remove one of the rules."
                     )
 
     _check("material", "material_rules", "value_to_material_id")
@@ -559,7 +559,7 @@ def _resolve_attribute_slot(product: Product, attribute_name: str) -> str:
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=(
             f"'{attribute_name}' is not an attribute of this product"
-            + (f" — it has {', '.join(repr(k) for k in known)}" if known else " (it has no variant attributes)")
+            + (f": it has {', '.join(repr(k) for k in known)}" if known else " (it has no variant attributes)")
         ),
     )
 
@@ -642,7 +642,7 @@ async def amend_attribute_bom_overrides(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
                     f"Material {line.material_id} is not the same material type as base "
-                    f"material {line.base_material_id} — can't auto-substitute across types"
+                    f"material {line.base_material_id}: can't auto-substitute across types"
                 ),
             )
 

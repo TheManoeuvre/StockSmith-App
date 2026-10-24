@@ -224,7 +224,7 @@ async def replace_purchase_lines(
     if has_receipts and any(l.id is None for l in payload) and payload_ids != existing.keys():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="This purchase order has been received against — reload the page before editing its lines",
+            detail="This purchase order has been received against: reload the page before editing its lines",
         )
 
     removed = [line for line_id, line in existing.items() if line_id not in payload_ids]

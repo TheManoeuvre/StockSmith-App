@@ -477,7 +477,7 @@ function ProductDetail() {
             <div className="grid grid-cols-3 gap-3">
               <Stat
                 label="Ready to ship"
-                value={String(product.ready_to_ship ?? "—")}
+                value={String(product.ready_to_ship ?? "-")}
                 sub="assembled on demand"
                 tone="highlight"
               />
@@ -492,7 +492,7 @@ function ProductDetail() {
               <Stat
                 label="Buildable"
                 value={
-                  sellable.buildable == null ? "—" : String(sellable.buildable)
+                  sellable.buildable == null ? "-" : String(sellable.buildable)
                 }
                 sub={
                   sellable.buildable == null
@@ -508,7 +508,7 @@ function ProductDetail() {
               <Stat
                 label="Sellable"
                 value={
-                  sellable.headline == null ? "—" : String(sellable.headline)
+                  sellable.headline == null ? "-" : String(sellable.headline)
                 }
                 sub={
                   sellable.expected != null &&
@@ -531,7 +531,7 @@ function ProductDetail() {
                 ? "not costed"
                 : `${econ.marginPct.toFixed(0)}%${econ.missingPostage ? " (excl. postage)" : ""}`}
               {" · "}
-              COGS {econ.cogs == null ? "—" : `£${econ.cogs.toFixed(2)}`}
+              COGS {econ.cogs == null ? "-" : `£${econ.cogs.toFixed(2)}`}
             </p>
             {/* Toggleable from any tab, and through the guard, because flipping it rewrites
                 the tab set — a dirty editor on another tab still gets to warn. */}
@@ -658,7 +658,7 @@ function ProductDetail() {
                         toggleMadeToOrderMutation.mutate(e.target.checked)
                       }
                     />
-                    Built against an order — excluded from stock takes
+                    Built against an order: excluded from stock takes
                   </label>
                 </div>
               )}
@@ -903,7 +903,7 @@ function SlideOverFooter({
           ? "not costed"
           : `${econ.marginPct.toFixed(0)}%${econ.missingPostage ? " (excl. postage)" : ""}`}
         {" · "}
-        COGS {econ.cogs == null ? "—" : `£${econ.cogs.toFixed(2)}`}
+        COGS {econ.cogs == null ? "-" : `£${econ.cogs.toFixed(2)}`}
       </p>
       <div className="flex items-center gap-2">
         <span className="text-[12px] text-slate-500">

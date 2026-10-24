@@ -21,7 +21,7 @@ from app.services.variants import compute_full_sku
 logger = logging.getLogger("stocksmith.listing_push")
 
 """Pushes a product/variant's current max_sellable to every connected marketplace
-listing for it, whenever local stock actually changes — the outbound half of the
+listing for it, whenever local stock actually changes: the outbound half of the
 allocated/consumed-means-unavailable rule; kitting.compute_max_sellable (the existing
 "what's actually sellable right now" computation) already implements the rule itself, so
 this module is purely the "tell the marketplace" leg. See
@@ -99,7 +99,7 @@ _PRODUCTS_USING_MATERIAL_SQL = text(
     UNION
     SELECT product_id, NULL AS variant_id FROM product_kitting_materials WHERE material_id = :material_id
     -- Every active variant of a product matched above inherits the base BOM unless it
-    -- overrides this specific material away — included unconditionally rather than
+    -- overrides this specific material away: included unconditionally rather than
     -- resolving each variant's effective BOM here (a debounced, idempotent recompute is
     -- cheap; an occasional redundant push for a variant that substituted this material
     -- away is a fine trade for not silently under-notifying).

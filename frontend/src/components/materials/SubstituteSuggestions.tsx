@@ -48,7 +48,7 @@ export function SubstituteSuggestions({
     const used = suggestions.find((s) => s.material_id === mutation.variables);
     return (
       <p className="text-[11px] font-medium text-teal-700">
-        ✓ Logged — using {used?.material_name ?? "fallback"} instead
+        ✓ Logged. Using {used?.material_name ?? "fallback"} instead
       </p>
     );
   }

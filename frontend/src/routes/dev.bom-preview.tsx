@@ -34,7 +34,7 @@ const MATERIALS: Material[] = [
   material(1, "PLA+ Filament", "0.024", "4500", "500", "g"),
   material(2, "M3x8 Socket Head Cap Screw", "0.031", "800", "120"),
   material(3, "Neodymium Magnet 6x2mm", "0.088", "300", "40"),
-  material(4, "Prem Postal Box — 217x108x50 mm", "0.295", "140", "20"),
+  material(4, "Prem Postal Box: 217x108x50 mm", "0.295", "140", "20"),
   material(5, "4x6 Direct Thermal Label", "0.011", "2000", "0"),
 ];
 
@@ -65,7 +65,7 @@ function BomPreview() {
       <div>
         <h1 className="text-xl font-semibold">BomLineTable preview</h1>
         <p className="text-sm text-slate-500">
-          Dev-only fixture page — no backend. The two tables below must have identical column
+          Dev-only fixture page: no backend. The two tables below must have identical column
           edges despite very different content widths.
         </p>
       </div>

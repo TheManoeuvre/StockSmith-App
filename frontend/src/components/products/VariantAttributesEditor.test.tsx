@@ -270,15 +270,15 @@ it("tells two live colours of the same name apart, and lets both be ticked", asy
 
   // Only the clashing colour gets the long form; Black stays as it was.
   await screen.findByLabelText("Black");
-  expect(screen.getByLabelText("White — Sunlu | PETG | Matte White (original)")).toBeChecked();
-  const bambu = screen.getByLabelText("White — Bambu Lab | PETG Basic | White");
+  expect(screen.getByLabelText("White: Sunlu | PETG | Matte White (original)")).toBeChecked();
+  const bambu = screen.getByLabelText("White: Bambu Lab | PETG Basic | White");
   expect(bambu).not.toBeChecked();
 
   await userEvent.click(bambu);
 
   // Ticking the second must not replace the first.
   expect(bambu).toBeChecked();
-  expect(screen.getByLabelText("White — Sunlu | PETG | Matte White (original)")).toBeChecked();
+  expect(screen.getByLabelText("White: Sunlu | PETG | Matte White (original)")).toBeChecked();
 });
 
 it("pools non-colour materials by category and labels them without the shared name prefix", async () => {
