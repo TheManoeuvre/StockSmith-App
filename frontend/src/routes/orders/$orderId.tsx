@@ -790,7 +790,8 @@ function OrderLineRow({
         {line.variation_text && (
           <div className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-slate-500">
             <span>{line.variation_text}</span>
-            <CopyButton value={line.variation_text} label="Copy personalization" />
+            {/* variation_text is stored as "Label: value"; only the value is pasteable. */}
+            <CopyButton value={line.variation_text.replace(/^[^:]*:\s*/, "")} label="Copy personalization" />
           </div>
         )}
         {line.substituted_from && (
