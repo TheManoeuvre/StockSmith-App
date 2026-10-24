@@ -16,11 +16,28 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **See what a stock-take variance is worth.** The count sheet has a new Value column that prices each
   line's difference at today's unit cost (materials at their average cost, products and variants at
-  their bill-of-materials cost), updating as you type. Items with no bill of materials show a dash
+  their running average build cost, or their bill-of-materials cost if none), updating as you type. Items with no bill of materials show a hyphen
   rather than a zero.
 - **Settle flagged lines without leaving the stock take.** On a closed take, lines held back for review
   now have Use count / Keep system / Recount buttons right in the sheet. The Unresolved variances page
   still shows them across every take.
+
+### Changed
+
+- **The sidebar collapses to icons when the window is narrow.** Below 1024px wide it shrinks to an icon rail so the page gets more room. Hovering an icon shows the page name and what it is for, and items with a count (orders awaiting shipment, low stock and so on) show a coloured dot instead of the number.
+- **Builds that use a fallback material are now costed at what was actually used.** Recording a build
+  with a fallback swapped in (e.g. a different box or filament) blends that build's real material
+  cost into the product's, or variant's, running average cost. Orders placed against that stock take
+  their cost of goods from the average, so margins reflect the pricier or cheaper fallback instead of
+  the primary material's price. Products that have never used a fallback cost exactly as before.
+
+### Fixed
+
+- **An empty material no longer hides from the dashboard.** A material at zero stock that an active
+  product's build or packaging list uses now always shows as critical in low stock, even with little
+  sales history and no reorder threshold set. This matters most for primary materials with a fallback,
+  which keep the product sellable and so used to run out unnoticed. Materials with stock already on
+  order are unchanged.
 
 ## [0.23.0] - 2026-10-21
 

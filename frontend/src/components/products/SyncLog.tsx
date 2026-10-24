@@ -43,7 +43,7 @@ export function SyncLog({
               })}
             </span>
             <span className="min-w-0 flex-1 truncate">
-              {r.variant_name ?? r.product_name ?? "—"} · qty {r.attempted_qty}
+              {r.variant_name ?? r.product_name ?? "-"} · qty {r.attempted_qty}
             </span>
             <span
               className={`rounded px-2 py-0.5 text-xs ${

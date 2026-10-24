@@ -102,6 +102,8 @@ async def test_lines_carry_a_unit_cost_so_a_variance_can_be_priced(session):
     resin = await _material(session, qty=Decimal(7), avg_unit_cost=Decimal("0.5"))
     costed = await _product(session, name="Costed")
     await _product(session, name="No BOM")
+    # A blended running average, as left by a build that used a fallback, beats the BOM.
+    await _product(session, name="Blended", avg_unit_cost=Decimal("3.25"))
     session.add(ProductMaterial(product_id=costed.id, material_id=resin.id, qty_required=Decimal(4)))
     await session.commit()
 
@@ -110,6 +112,7 @@ async def test_lines_carry_a_unit_cost_so_a_variance_can_be_priced(session):
     by_name = {line.name: line for line in (await _read_take(session, take)).lines}
     assert by_name["Grey Resin"].unit_cost == Decimal("0.5")
     assert by_name["Costed"].unit_cost == Decimal(2)
+    assert by_name["Blended"].unit_cost == Decimal("3.25")
     # No BOM means cost isn't tracked — None, not zero.
     assert by_name["No BOM"].unit_cost is None
 
@@ -781,8 +784,8 @@ async def test_the_sheet_is_arranged_the_way_the_stock_is(session):
     assert [(g.section, g.group, g.subgroup, g.name) for g in grouped] == [
         # Products first. Coaster before Keyring by category; the coaster's variants sit
         # together under its parent SKU, alphabetically.
-        ("Products", "Coaster", "COA-1", "Slate Coaster — Round"),
-        ("Products", "Coaster", "COA-1", "Slate Coaster — Square"),
+        ("Products", "Coaster", "COA-1", "Slate Coaster (Round)"),
+        ("Products", "Coaster", "COA-1", "Slate Coaster (Square)"),
         ("Products", "Keyring", "KEY-1", "Round Keyring"),
         # Then materials, in the configured category order rather than alphabetically:
         # filament sorts before packaging because that is how the categories are ordered

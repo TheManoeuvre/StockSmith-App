@@ -95,7 +95,7 @@ export function StockTakeCsvPanel({ stockTakeId, onImported }: { stockTakeId: nu
                 disabled={applyMutation.isPending}
                 className="rounded border border-slate-300 px-4 py-1.5 text-sm"
               >
-                Apply nothing — I'll fix the file
+                Apply nothing. I'll fix the file
               </button>
             )}
             <button onClick={() => setPending(null)} className="rounded border border-slate-300 px-4 py-1.5 text-sm">
@@ -123,7 +123,7 @@ export function StockTakeCsvPanel({ stockTakeId, onImported }: { stockTakeId: nu
           </p>
           {(pending?.result.skipped_blank ?? 0) > 0 && (
             <p className="text-slate-500">
-              Blank rows are left exactly as they were — they aren't treated as a count of zero.
+              Blank rows are left exactly as they were: they aren't treated as a count of zero.
             </p>
           )}
           {failed.length > 0 && (

@@ -190,7 +190,7 @@ def build_archive(
     archive at all. A missing *database* is not survivable and does raise.
     """
     if not snapshot.exists():
-        raise BackupError("Database snapshot is missing — refusing to write an archive without it.")
+        raise BackupError("Database snapshot is missing: refusing to write an archive without it.")
 
     revision, counts, instance_id = read_snapshot_facts(snapshot)
     asset_files = list(_iter_asset_files(asset_root))

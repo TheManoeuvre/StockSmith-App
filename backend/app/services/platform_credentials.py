@@ -9,10 +9,10 @@ from app.models.platform_credential import PlatformAppCredential, PlatformEnviro
 from app.services.platforms.ebay_signing import EbaySigningKey
 
 """Resolves the app-level marketplace credentials (Client ID/Secret, redirect config)
-adapters and the OAuth flow need — DB-stored rows (Settings > Integrations) take
+adapters and the OAuth flow need. DB-stored rows (Settings > Integrations) take
 priority, falling back to the .env-based Settings singleton so the `uv run uvicorn` dev
 loop keeps working unchanged without ever needing a DB row. The packaged desktop app has
-no .env, so the DB is the only path there — see docs/plan-marketplace-integrations.md
+no .env, so the DB is the only path there: see docs/plan-marketplace-integrations.md
 Section 1a for why."""
 
 

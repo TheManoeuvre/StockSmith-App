@@ -76,3 +76,18 @@ async def test_due_date_is_collect_by_for_collect_orders_else_ship_by(session):
     due = {line.order_id: line.due_date.replace(tzinfo=timezone.utc) for line in lines}
     assert due[shipped.id] == ship_by
     assert due[collected.id] == collect_by
+
+
+async def test_unmapped_line_is_awaiting_mapping_not_inventory(session):
+    from app.services.buildability import get_orders_awaiting_mapping
+
+    order = Order(status=OrderStatus.pending, order_placed_at=datetime.now(timezone.utc))
+    order.lines = [OrderLine(ordered_qty=2, allocated_qty=0, sku="MYSTERY-1", needs_mapping=True)]
+    cancelled = Order(status=OrderStatus.cancelled, order_placed_at=datetime.now(timezone.utc))
+    cancelled.lines = [OrderLine(ordered_qty=1, allocated_qty=0, sku="OLD", needs_mapping=True)]
+    session.add_all([order, cancelled])
+    await session.commit()
+
+    assert await get_orders_awaiting_inventory(session) == []
+    [line] = await get_orders_awaiting_mapping(session)
+    assert (line.order_id, line.sku, line.short_by) == (order.id, "MYSTERY-1", 2)

@@ -407,7 +407,7 @@ class PlatformAdapter(Protocol):
         enrich_skus: set[str] | None = None,
     ) -> dict[str, ExternalListingRef]: ...
     """`enrich`/`enrich_skus` are fidelity hints, not filters: the index must always
-    contain every SKU the marketplace reports, whatever they're set to — callers rely on
+    contain every SKU the marketplace reports, whatever they're set to: callers rely on
     it for membership tests. They exist because some adapters need extra per-SKU calls to
     fill a ref completely (eBay's listing state lives on a separate Offer object), and a
     caller that only needs membership shouldn't pay for them. An adapter whose single

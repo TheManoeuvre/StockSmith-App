@@ -20,7 +20,7 @@ export function SplashScreen() {
         <div className="splash-progress-bar h-full rounded-full bg-slate-900" />
       </div>
       <p className="text-sm text-slate-500">
-        {slow ? "Still starting up — first launch can take a little longer…" : "Starting up…"}
+        {slow ? "Still starting up: first launch can take a little longer…" : "Starting up…"}
       </p>
     </div>
   );

@@ -72,7 +72,7 @@ export function PlatformSyncSection({ productId, platform }: { productId: number
               title={
                 readiness?.can_create
                   ? undefined
-                  : "Something is still missing — open the listing setup above to see what."
+                  : "Something is still missing: open the listing setup above to see what."
               }
               className="rounded border border-slate-300 px-3 py-1.5 text-sm disabled:opacity-50"
             >
@@ -220,25 +220,25 @@ function UnitSyncRow({ unit, platform }: { unit: UnitSyncResult; platform: Listi
   return (
     <tr className={`border-b border-slate-100 ${mismatch ? "bg-amber-50" : ""}`}>
       <td className="truncate p-1">{unit.variant_name ?? "(product)"}</td>
-      <td className="truncate p-1 font-mono text-xs">{unit.sku ?? "—"}</td>
+      <td className="truncate p-1 font-mono text-xs">{unit.sku ?? "-"}</td>
       <td className="p-1">
         <PlatformSyncBadge platform={platform} status={unit.status} />
       </td>
       <td className="truncate p-1" title={unit.external_title ?? undefined}>
-        {unit.external_title ?? "—"}
+        {unit.external_title ?? "-"}
       </td>
       <td className="truncate p-1" title={unit.external_variation ?? undefined}>
-        {unit.external_variation ?? "—"}
+        {unit.external_variation ?? "-"}
       </td>
-      <td className="truncate p-1">{unit.external_state ?? "—"}</td>
+      <td className="truncate p-1">{unit.external_state ?? "-"}</td>
       {/* Both quantities carry the emphasis on a mismatch, not just one — the point is
           the difference between them, and colouring a single cell reads as "this number
           is wrong" rather than "these two disagree". */}
       <td className={`truncate p-1 ${mismatch ? "font-medium text-amber-800" : ""}`}>
-        {unit.external_quantity ?? "—"}
+        {unit.external_quantity ?? "-"}
       </td>
       <td className={`truncate p-1 ${mismatch ? "font-medium text-amber-800" : "text-slate-500"}`}>
-        {unit.expected_quantity ?? "—"}
+        {unit.expected_quantity ?? "-"}
       </td>
     </tr>
   );

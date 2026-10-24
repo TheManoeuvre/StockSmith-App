@@ -61,7 +61,7 @@ it("requires a confirm step before logging usage, and posts the right ids", asyn
     path: "/material-substitute-usage",
     body: { material_id: 1, substitute_material_id: 2, order_id: 42, build_id: null },
   });
-  expect(await screen.findByText(/Logged — using Medium box instead/)).toBeInTheDocument();
+  expect(await screen.findByText(/Logged. Using Medium box instead/)).toBeInTheDocument();
 });
 
 it("cancelling a pending pick leaves nothing logged", async () => {

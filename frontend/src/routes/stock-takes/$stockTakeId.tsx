@@ -227,7 +227,7 @@ function StockTakeDetailPage() {
         `${plural(pendingApproval, "line", "lines")}, ${changingLines} ` +
         `${plural(changingLines, "adjusts", "adjust")} the recorded quantity and ${confirmingLines} ` +
         `${plural(confirmingLines, "confirms", "confirm")} it unchanged. ${blanks} blank ` +
-        `${plural(blanks, "line is", "lines are")} left alone — not adjusted, not marked counted. ` +
+        `${plural(blanks, "line is", "lines are")} left alone: not adjusted, not marked counted. ` +
         `Any line whose system stock has moved since the take started, or that has units allocated ` +
         `to open orders, is flagged for you to settle rather than adjusted automatically. The take ` +
         `closes either way.`;
@@ -325,10 +325,11 @@ function StockTakeDetailPage() {
             to="/stock-takes/unresolved"
             className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800"
           >
-            {take.conflict_count} line{take.conflict_count === 1 ? "" : "s"} flagged for review
+            {take.conflict_count} line{take.conflict_count === 1 ? "" : "s"} flagged for review.{" "}
             {isOpen
-              ? " — they'll need settling once this take is approved →"
-              : " — settle them in the sheet below, or on Unresolved variances →"}
+              ? "They'll need settling once this take is approved"
+              : "Settle them in the sheet below, or on Unresolved variances"}{" "}
+            →
           </Link>
         )}
 
@@ -418,7 +419,7 @@ function StockTakeDetailPage() {
                                   {unmoved && (
                                     <span
                                       className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[11px] text-emerald-800"
-                                      title="Nothing has moved this since it was last counted — no adjustment, delivery, build or order. Expect it to confirm the figure rather than change it."
+                                      title="Nothing has moved this since it was last counted: no adjustment, delivery, build or order. Expect it to confirm the figure rather than change it."
                                     >
                                       no movement since {formatDate(unmoved)}
                                     </span>
@@ -442,7 +443,7 @@ function StockTakeDetailPage() {
                                     min="0"
                                     disabled={!isOpen}
                                     className="w-20 rounded border border-slate-300 px-2 py-1 text-right tabular-nums disabled:bg-slate-100"
-                                    placeholder="—"
+                                    placeholder="-"
                                     value={counts[line.id] ?? ""}
                                     onChange={(e) =>
                                       setCounts((prev) => ({
@@ -460,7 +461,7 @@ function StockTakeDetailPage() {
                                   }`}
                                 >
                                   {liveDelta == null
-                                    ? "—"
+                                    ? "-"
                                     : liveDelta > 0
                                       ? `+${roundQty(String(liveDelta))}`
                                       : roundQty(String(liveDelta))}
@@ -475,12 +476,12 @@ function StockTakeDetailPage() {
                                   }`}
                                   title={
                                     line.unit_cost == null
-                                      ? "No cost to value this with — it has no bill of materials"
+                                      ? "No cost to value this with: it has no bill of materials"
                                       : undefined
                                   }
                                 >
                                   {liveValue == null
-                                    ? "—"
+                                    ? "-"
                                     : `${liveValue < 0 ? "−" : liveValue > 0 ? "+" : ""}${formatMoney(String(Math.abs(liveValue)), "GBP")}`}
                                 </td>
                                 <td className="p-2">

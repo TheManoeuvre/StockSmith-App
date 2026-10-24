@@ -17,7 +17,7 @@ from app.services.platforms.errors import PlatformAuthError, PlatformRateLimitEr
 
 logger = logging.getLogger("stocksmith.sync_scheduler")
 
-"""Background auto-sync — one asyncio task per platform, each independently reading its
+"""Background auto-sync: one asyncio task per platform, each independently reading its
 own connection's auto_sync_enabled/sync_interval_minutes fresh on every cycle (so an
 interval change or a disconnect takes effect on the next tick without needing a live
 reload signal). Deliberately not a shared cron-style poller: with only two platforms this

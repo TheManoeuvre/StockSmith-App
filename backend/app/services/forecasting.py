@@ -44,6 +44,28 @@ _MATERIALS_SQL = text(
     """
 )
 
+# Every material some active product's build or packaging BOM draws on. An empty one of
+# these is an outage whatever its sales history says — see compute_material_forecasts.
+_LIVE_BOM_MATERIAL_IDS_SQL = text(
+    """
+    SELECT pm.material_id FROM product_materials pm
+    JOIN products p ON p.id = pm.product_id WHERE p.is_active = true
+    UNION
+    SELECT pkm.material_id FROM product_kitting_materials pkm
+    JOIN products p ON p.id = pkm.product_id WHERE p.is_active = true
+    UNION
+    SELECT pvm.material_id FROM product_variant_materials pvm
+    JOIN product_variants v ON v.id = pvm.variant_id
+    JOIN products p ON p.id = v.product_id
+    WHERE v.is_active = true AND p.is_active = true AND pvm.qty_required > 0
+    UNION
+    SELECT pvk.material_id FROM product_variant_kitting_materials pvk
+    JOIN product_variants v ON v.id = pvk.variant_id
+    JOIN products p ON p.id = v.product_id
+    WHERE v.is_active = true AND p.is_active = true AND pvk.qty_required > 0
+    """
+)
+
 _BUSINESS_DAYS_PER_WEEK = Decimal(5)
 
 
@@ -328,6 +350,7 @@ async def compute_material_forecasts(
     builds = await _get_builds_by_entity(session, cutoff)
     scrap = await _get_scrap_by_entity_material(session, cutoff)
     materials = list(await session.execute(_MATERIALS_SQL))
+    live_bom_material_ids = {row.material_id for row in await session.execute(_LIVE_BOM_MATERIAL_IDS_SQL)}
     # The lead time each material is judged against: its default supplier's own figure where
     # set, else the shop-wide default. Used both for on-order arrival timing and, below, to
     # push the reorder point out — a 10-business-day lead makes 8 weeks of cover as urgent as 6.
@@ -387,8 +410,17 @@ async def compute_material_forecasts(
         sufficient_history = len(active_weeks.get(m.id, set())) >= _MIN_ACTIVE_WEEKS_FOR_FORECAST
         lead_time_days = lead_days_by_material.get(m.id, default_lead_time_days)
 
+        # Out of stock on a product's live BOM with nothing on order is worth an alert however
+        # little sales history there is to forecast from, and whether or not a reorder
+        # threshold was ever set — otherwise a new or slow material can sit at zero without
+        # ever surfacing. Fallbacks make this easy to miss: they keep the product sellable,
+        # so nothing else flags that the primary material has run out. Where there IS a
+        # forecast, it already treats an empty shelf as critical and credits inbound stock,
+        # so this only fills the no-forecast gap.
+        out_of_stock_on_bom = current_qty <= 0 and on_order_qty <= 0 and m.id in live_bom_material_ids
+
         if not pieces or not sufficient_history:
-            if include_all or (reorder_threshold > 0 and current_qty <= reorder_threshold):
+            if include_all or out_of_stock_on_bom or (reorder_threshold > 0 and current_qty <= reorder_threshold):
                 forecasts.append(
                     MaterialForecast(
                         material_id=m.id,
@@ -404,7 +436,7 @@ async def compute_material_forecasts(
                         weeks_of_supply_on_hand=None,
                         fg_buffer_weeks=None,
                         lead_time_days=lead_time_days,
-                        status="insufficient_data",
+                        status="critical" if out_of_stock_on_bom else "insufficient_data",
                     )
                 )
             continue

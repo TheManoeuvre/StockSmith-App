@@ -282,7 +282,7 @@ it("shows ranked fallback suggestions on a packaging shortfall and logs the pick
   await user.click(await screen.findByText("Confirm"));
 
   await waitFor(() => expect(usagePosted).toMatchObject({ material_id: 15, substitute_material_id: 16, order_id: 102 }));
-  expect(await screen.findByText(/Logged — using Medium box instead/)).toBeInTheDocument();
+  expect(await screen.findByText(/Logged. Using Medium box instead/)).toBeInTheDocument();
 });
 
 it("collapses stock-short lines for one variation into a row with a due-date range", async () => {
@@ -307,10 +307,35 @@ it("collapses stock-short lines for one variation into a row with a due-date ran
     orders_awaiting_packaging: [],
   });
 
-  const blue = (await screen.findByText("Pencil Pot — 6 Stud / Blue")).closest("tr")!;
+  const blue = (await screen.findByText("Pencil Pot (6 Stud / Blue)")).closest("tr")!;
   expect(within(blue).getByText("#394")).toBeInTheDocument();
   expect(within(blue).getByText("#395")).toBeInTheDocument();
   expect(within(blue).getByText("15–18 Aug")).toBeInTheDocument();
   // Exactly one row per variation.
-  expect(screen.getAllByText(/Pencil Pot — 6 Stud/)).toHaveLength(2);
+  expect(screen.getAllByText(/Pencil Pot \(6 Stud/)).toHaveLength(2);
+});
+
+it("lists unmapped-SKU orders as awaiting products with a Map order link instead of Build now", async () => {
+  await renderDashboard({
+    orders_awaiting_inventory: [],
+    orders_awaiting_packaging: [],
+    orders_awaiting_mapping: [
+      {
+        line_id: 900,
+        order_id: 777,
+        sku: "MYSTERY-1",
+        short_by: 2,
+        order_placed_at: "2026-08-18T09:00:00Z",
+        due_date: null,
+        platform: null,
+      },
+    ],
+  });
+  const row = (await screen.findByText("MYSTERY-1")).closest("tr")!;
+  expect(within(row).getByText("Unmapped SKU")).toBeInTheDocument();
+  expect(within(row).getByRole("link", { name: "Map order" })).toHaveAttribute(
+    "href",
+    "/orders/777",
+  );
+  expect(within(row).queryByText("Build now")).not.toBeInTheDocument();
 });

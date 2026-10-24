@@ -132,13 +132,13 @@ def _align_new_skus(candidate: ClassicListingCandidate, new_skus: list[str]) -> 
     if candidate.variation_specifics is None:
         if len(new_skus) != 1:
             raise PlatformSyncError(
-                f"Listing {candidate.external_listing_id} has no variations — expected exactly 1 SKU, "
+                f"Listing {candidate.external_listing_id} has no variations: expected exactly 1 SKU, "
                 f"got {len(new_skus)}"
             )
     elif len(new_skus) != len(candidate.variation_specifics):
         raise PlatformSyncError(
             f"Listing {candidate.external_listing_id} has {len(candidate.variation_specifics)} variation(s) but "
-            f"{len(new_skus)} SKU(s) were supplied — every variation must be included or eBay would delete the "
+            f"{len(new_skus)} SKU(s) were supplied: every variation must be included or eBay would delete the "
             "omitted ones."
         )
     if any(not sku or not sku.strip() for sku in new_skus):
@@ -189,12 +189,12 @@ def _evaluate_eligibility(
 
     non_empty_skus = [s for s in skus if s]
     if not non_empty_skus:
-        reasons.append("Listing has no SKU set — add a Custom Label (SKU) in Seller Hub before migrating.")
+        reasons.append("Listing has no SKU set: add a Custom Label (SKU) in Seller Hub before migrating.")
     elif variation_specifics is not None:
         missing_variation_skus = sum(1 for sku in skus if not sku)
         if missing_variation_skus:
             reasons.append(
-                f"{missing_variation_skus} of {len(skus)} variation(s) have no SKU — every variation needs one "
+                f"{missing_variation_skus} of {len(skus)} variation(s) have no SKU: every variation needs one "
                 "before the whole listing can migrate."
             )
         if not listing_sku:
@@ -203,7 +203,7 @@ def _evaluate_eligibility(
             # enabled sets it from the product's own SKU; this reason is what tells the
             # user why an otherwise-ready listing still won't go.
             reasons.append(
-                "The listing itself has no SKU (Custom Label) — eBay needs one to migrate a multi-variation "
+                "The listing itself has no SKU (Custom Label): eBay needs one to migrate a multi-variation "
                 "listing. Adopt with 'align SKUs' enabled, or set a Custom Label on the listing in Seller Hub."
             )
 
@@ -548,7 +548,7 @@ class EbayAdapter:
                 # a transient fault. Raise as auth so the scheduler's consecutive-failure
                 # counter engages instead of retrying a dead connection every cycle.
                 raise PlatformAuthError(
-                    f"eBay rejected the access token on {method} {url} even after a refresh — reconnect required."
+                    f"eBay rejected the access token on {method} {url} even after a refresh. Reconnect required."
                 )
 
             # Separate budgets, so a call that hits a rate limit and then a server error
@@ -560,8 +560,8 @@ class EbayAdapter:
                     delay = self._retry_delay(response, rate_limit_attempts)
                     if delay > _RATE_LIMIT_MAX_SLEEP_SECONDS:
                         raise PlatformRateLimitError(
-                            f"eBay asked for a {delay:.0f}s back-off on {method} {url} (call limit) — "
-                            "not sleeping on it; will retry next cycle"
+                            f"eBay asked for a {delay:.0f}s back-off on {method} {url} (call limit). "
+                            "Not sleeping on it; will retry next cycle"
                         )
                     logger.warning(
                         "eBay API rate limited on %s %s (retry %d/%d in %.1fs)",
@@ -680,7 +680,7 @@ class EbayAdapter:
     async def _ensure_fresh(self, session, connection: PlatformConnection) -> None:
         expires_at = ensure_utc(connection.access_token_expires_at)
         if expires_at is None or connection.refresh_token is None:
-            raise PlatformAuthError("eBay connection has no stored tokens — reconnect required")
+            raise PlatformAuthError("eBay connection has no stored tokens. Reconnect required")
         if datetime.now(timezone.utc) + _REFRESH_SKEW >= expires_at:
             await self._do_refresh(session, connection)
 
@@ -702,7 +702,7 @@ class EbayAdapter:
 
     async def _refresh_now(self, session, connection: PlatformConnection) -> None:
         if connection.refresh_token is None:
-            raise PlatformAuthError("eBay connection has no refresh token — reconnect required")
+            raise PlatformAuthError("eBay connection has no refresh token. Reconnect required")
         tokens = await self.refresh(connection.refresh_token)
         connection.access_token = tokens.access_token
         connection.refresh_token = tokens.refresh_token
@@ -1141,7 +1141,7 @@ class EbayAdapter:
                         posted_at=cls._parse_timestamp(tx.get("transactionDate")),
                         description=(
                             f"Bulk label purchase of {abs(float(amount)):.2f}{' ' + currency if currency else ''} "
-                            "across several orders — eBay doesn't report this order's share, so the profile "
+                            "across several orders: eBay doesn't report this order's share, so the profile "
                             "estimate is used"
                         ),
                     )
@@ -1771,8 +1771,8 @@ class EbayAdapter:
             response = await _send()
         if response.status_code == 401:
             raise PlatformAuthError(
-                f"eBay rejected the access token on Trading call {call_name} even after a refresh — "
-                "reconnect required."
+                f"eBay rejected the access token on Trading call {call_name} even after a refresh. "
+                "Reconnect required."
             )
         return response
 
@@ -1804,7 +1804,7 @@ class EbayAdapter:
                     if delay > _RATE_LIMIT_MAX_SLEEP_SECONDS:
                         raise PlatformRateLimitError(
                             f"eBay Trading API asked for a {delay:.0f}s back-off on {call_name} (daily "
-                            "budget) — not sleeping on it; will retry next cycle"
+                            "budget). Not sleeping on it; will retry next cycle"
                         )
                     logger.warning(
                         "eBay Trading API rate limited on %s (retry %d/%d in %.1fs)",
@@ -2016,7 +2016,7 @@ class EbayAdapter:
         UNVERIFIED against a live account — same caveat as fetch_classic_listings."""
         if candidate.is_migrated:
             raise PlatformSyncError(
-                f"Listing {candidate.external_listing_id} is already migrated — its SKUs can no longer be safely "
+                f"Listing {candidate.external_listing_id} is already migrated: its SKUs can no longer be safely "
                 "revised through this path (see this method's docstring)."
             )
         aligned = _align_new_skus(candidate, new_skus)
@@ -2031,7 +2031,7 @@ class EbayAdapter:
             # already match (see listing_adoption.plan_sku_alignment).
             raise PlatformSyncError(
                 f"eBay did not respond within {int(_REVISE_TIMEOUT)}s while rewriting SKUs on listing "
-                f"{candidate.external_listing_id}. The change may still have applied — run this again to "
+                f"{candidate.external_listing_id}. The change may still have applied: run this again to "
                 "check. Re-running is safe: it does nothing if the SKUs already match."
             ) from e
         if response.status_code != 200:
@@ -2076,8 +2076,8 @@ class EbayAdapter:
             # method's docstring), which is precisely what makes a timeout recoverable.
             raise PlatformSyncError(
                 f"eBay did not respond within {int(_MIGRATION_TIMEOUT)}s while migrating listing "
-                f"{external_listing_id}. The migration may still have completed on eBay's side — "
-                "run this again to check and finish linking. Migrating twice is safe."
+                f"{external_listing_id}. The migration may still have completed on eBay's side. "
+                "Run this again to check and finish linking. Migrating twice is safe."
             ) from e
         if response.status_code != 200:
             raise PlatformSyncError(f"Failed to migrate eBay listing: {response.status_code} {response.text}")

@@ -90,7 +90,7 @@ export function MaterialMergeModal({
     >
       <div className="flex flex-col gap-4 text-sm">
         <div className="flex flex-col gap-1">
-          <span>Survivor — the material that keeps everything</span>
+          <span>Survivor (the material that keeps everything)</span>
           <input
             className="rounded border border-slate-300 px-2 py-1"
             placeholder="Filter…"
@@ -146,7 +146,7 @@ export function MaterialMergeModal({
                       {e.repointed > 0 && e.summed > 0 && "; "}
                       {e.summed > 0 && (
                         <span className="text-amber-800">
-                          {e.summed} {singular(e.label, e.summed)} already had "{plan.target_name}" — quantities will
+                          {e.summed} {singular(e.label, e.summed)} already had "{plan.target_name}": quantities will
                           be added together
                         </span>
                       )}

@@ -143,7 +143,7 @@ export function EtsyProfileProposalsPanel() {
 
       {previewMutation.data && proposals.length === 0 && shippingProposals.length === 0 && existingAssignments.length === 0 && (
         <p className="text-slate-600">
-          Nothing to suggest — no linked Etsy listing carries the details a profile needs.
+          Nothing to suggest: no linked Etsy listing carries the details a profile needs.
         </p>
       )}
 
@@ -191,7 +191,7 @@ export function EtsyProfileProposalsPanel() {
             <p className="text-xs text-slate-500">
               Etsy shipping profiles your listings use that no StockSmith shipping profile is linked to.
               Drafts take their Etsy shipping profile from the product's shipping profile, so each needs a
-              local one — new, or an existing one linked to it.
+              local one: new, or an existing one linked to it.
             </p>
           </div>
           {shippingProposals.map((proposal) => (
@@ -305,7 +305,7 @@ function ProposalRow({
       <p className="text-xs text-slate-500">{proposal.product_names.join(", ")}</p>
       {!proposal.is_complete && (
         <p className="mt-1 text-xs text-amber-800">
-          Missing something Etsy requires — you'll need to fill it in before drafting with this.
+          Missing something Etsy requires: you'll need to fill it in before drafting with this.
         </p>
       )}
     </div>

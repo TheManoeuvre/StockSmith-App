@@ -209,7 +209,7 @@ export function BulkBomAmendModal({
     >
       <div className="flex flex-col gap-3">
         <p className="text-sm text-slate-600">
-          Applies to every variant with the attribute value you choose — for
+          Applies to every variant with the attribute value you choose: for
           example every "Large" variant, regardless of its other attributes.
         </p>
 
@@ -457,5 +457,5 @@ function describeSide(
 ): string | null {
   if (materialId === null && qty === null) return null;
   const name = materials?.find((m) => m.id === materialId)?.name;
-  return name ? `${name} × ${qty ?? "—"}` : `× ${qty ?? "—"}`;
+  return name ? `${name} × ${qty ?? "-"}` : `× ${qty ?? "-"}`;
 }

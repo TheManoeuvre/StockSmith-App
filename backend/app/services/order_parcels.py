@@ -268,7 +268,7 @@ async def _consume_product(
         name = getattr(owner, "variant_name", None) or getattr(owner, "name", "product")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot send {qty} × {name} — only {free} free (the rest is allocated to other orders)",
+            detail=f"Cannot send {qty} × {name}, only {free} free (the rest is allocated to other orders)",
         )
     owner.current_stock -= qty
     record_stock_event(
@@ -307,7 +307,7 @@ async def _consume_material(
     if qty > free:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot send {qty} × {material.name} — only {free} on hand and not reserved by other orders",
+            detail=f"Cannot send {qty} × {material.name}, only {free} on hand and not reserved by other orders",
         )
     # Read before the adjustment for clarity only — recompute_material derives
     # avg_unit_cost from purchases alone, so a negative adjustment can't move it.
@@ -382,7 +382,7 @@ async def delete_parcel(session: AsyncSession, parcel: OrderReplacementParcel) -
                 MaterialAdjustment(
                     material_id=item.material_id,
                     qty_delta=Decimal(item.qty),
-                    reason=f"Order #{order_id} replacement parcel #{parcel.id} deleted — restocked",
+                    reason=f"Order #{order_id} replacement parcel #{parcel.id} deleted: restocked",
                     order_id=order_id,
                 )
             )
@@ -398,7 +398,7 @@ async def delete_parcel(session: AsyncSession, parcel: OrderReplacementParcel) -
                 event_type=ProductStockEventType.replacement_parcel_reversal,
                 qty_delta=qty,
                 running_balance=owner.current_stock,
-                reason=f"Order #{order_id} replacement parcel #{parcel.id} deleted — restocked",
+                reason=f"Order #{order_id} replacement parcel #{parcel.id} deleted: restocked",
                 source_replacement_parcel_id=parcel.id,
             )
             listing_push.enqueue_for_owner(owner)

@@ -43,7 +43,7 @@ export function EbaySigningKeyPanel({ environment }: { environment: PlatformEnvi
                 {data?.expires_at ? ` · expires ${new Date(data.expires_at).toLocaleDateString()}` : ""}
               </>
             ) : (
-              "Not set up — eBay will not report platform fees for your orders until it is."
+              "Not set up: eBay will not report platform fees for your orders until it is."
             )}
           </span>
         </div>

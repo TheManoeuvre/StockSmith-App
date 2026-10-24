@@ -177,7 +177,7 @@ async def test_set_adjustment_dates_the_variant_not_its_product(session, pushes)
     assert counted.last_stock_take_at is not None
     assert untouched.last_stock_take_at is None
     assert product.last_stock_take_at is None
-    assert [d.name for d in await compute_due_for_count(session)] == ["Oak Coaster — Blue"]
+    assert [d.name for d in await compute_due_for_count(session)] == ["Oak Coaster (Blue)"]
 
 
 async def test_adjust_adjustment_does_not_date_the_product(session, pushes):

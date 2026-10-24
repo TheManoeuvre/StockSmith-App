@@ -85,12 +85,12 @@ export function DraftListingModal({
           <>
             <p>
               Listing <span className="font-mono">{result.external_listing_id}</span> was created as a{" "}
-              <strong>{result.state}</strong>. It isn't visible to buyers — finish it in {label} and publish
+              <strong>{result.state}</strong>. It isn't visible to buyers: finish it in {label} and publish
               from there.
             </p>
             {result.shipping_source === "listing_profile" && (
               <p className="text-xs text-slate-500">
-                Shipping was taken from the listing profile's fallback — the product's shipping profile
+                Shipping was taken from the listing profile's fallback: the product's shipping profile
                 isn't linked to {label}.
               </p>
             )}
@@ -121,9 +121,9 @@ export function DraftListingModal({
                 <dt className="text-slate-500">Description</dt>
                 <dd>{readiness.description_chars} characters</dd>
                 <dt className="text-slate-500">Profile</dt>
-                <dd>{readiness.profile_name ?? "—"}</dd>
+                <dd>{readiness.profile_name ?? "-"}</dd>
                 <dt className="text-slate-500">Shipping</dt>
-                <dd>{readiness.shipping_source_label ?? "—"}</dd>
+                <dd>{readiness.shipping_source_label ?? "-"}</dd>
                 <dt className="text-slate-500">Variations</dt>
                 <dd>
                   {readiness.priced_unit_count} of {readiness.unit_count} priced
@@ -157,7 +157,7 @@ export function DraftListingModal({
               />
               <span>
                 I understand this creates a real draft in my {label} shop. It won't be visible to buyers,
-                but it <strong>can't be deleted from StockSmith</strong> — only from {label}.
+                but it <strong>can't be deleted from StockSmith</strong>: only from {label}.
               </span>
             </label>
           </>

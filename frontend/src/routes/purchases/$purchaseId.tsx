@@ -518,7 +518,7 @@ function PurchaseDetail() {
                   onChange={(e) => setCloseApportion(e.target.checked)}
                 />
                 <span>
-                  The supplier charged for the full quantity anyway — put the whole
+                  The supplier charged for the full quantity anyway: put the whole
                   line cost on what actually arrived, rather than only its share.
                 </span>
               </label>

@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { notificationsApi, type Notification } from "../../api/notifications";
 import { AlertsIcon } from "./NavIcons";
+import { NavTip } from "./NavTip";
 
 // Fast enough to feel live for something the user is meant to notice soon, cheap enough (one
 // COUNT(*) query) to poll from every page — this sits in the root layout like
@@ -122,26 +123,34 @@ export function NotificationCenter() {
   const count = unread?.count ?? 0;
 
   return (
-    <div ref={boxRef} className="relative">
+    <div ref={boxRef} className="group relative">
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
         aria-label={count > 0 ? `${count} unread notifications` : "Notifications"}
-        className={`flex w-full items-center gap-2 rounded-md px-[9px] py-[7px] text-left text-[13px] font-medium hover:bg-slate-100 ${
+        className={`flex w-full items-center gap-2 rounded-md px-[9px] py-[7px] text-left text-[13px] font-medium hover:bg-slate-100 max-lg:justify-center ${
           open ? "bg-slate-100 text-slate-900" : "text-slate-600"
         }`}
       >
         <AlertsIcon />
-        <span className="flex-1">Alerts</span>
+        <span className="flex-1 max-lg:hidden">Alerts</span>
         {count > 0 && (
-          <span className="rounded px-1.5 py-0.5 text-[10.5px] font-semibold tabular-nums text-red-800 bg-red-100">
+          <span className="rounded px-1.5 py-0.5 text-[10.5px] font-semibold tabular-nums text-red-800 bg-red-100 max-lg:hidden">
             {count}
           </span>
         )}
+        {/* Collapsed: a dot on the icon's corner in place of the count. */}
+        {count > 0 && (
+          <span
+            aria-hidden="true"
+            className="absolute right-1.5 top-1 h-2 w-2 rounded-full bg-red-600 ring-2 ring-white lg:hidden"
+          />
+        )}
       </button>
+      {!open && <NavTip label="Alerts" hint="Notifications about orders, stock and syncing" badge={count} />}
 
       {open && (
-        <div className="absolute bottom-full left-0 z-30 mb-1 w-[340px] rounded-md border border-slate-200 bg-white shadow-lg">
+        <div className="absolute bottom-full left-0 z-30 mb-1 w-[340px] max-w-[calc(100vw-1rem)] rounded-md border border-slate-200 bg-white shadow-lg">
           <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
             <span className="text-[12.5px] font-semibold text-slate-900">Notifications</span>
             <button
