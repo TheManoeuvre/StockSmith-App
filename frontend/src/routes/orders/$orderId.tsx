@@ -217,6 +217,11 @@ function OrderDetail() {
   return (
     <DetailPanel
       title={order.buyer_name ?? order.external_order_id ?? `Order #${order.id}`}
+      titleExtra={
+        order.external_order_id ? (
+          <CopyButton value={order.external_order_id} label="Copy order number" />
+        ) : undefined
+      }
       onClose={closePanel}
       onPrev={prevId ? goPrev : undefined}
       onNext={nextId ? goNext : undefined}
