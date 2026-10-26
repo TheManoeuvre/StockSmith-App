@@ -21,6 +21,14 @@ it("reports only the chip that was flipped", async () => {
   expect(onChange).toHaveBeenCalledWith({ ebay: true });
 });
 
+it("colours each chip by its store, solid when on and outlined when off", () => {
+  render(<NewProductStoreChips stores={STORES} choices={{}} onChange={() => {}} />);
+  expect(screen.getByRole("switch", { name: "Etsy" })).toHaveClass("bg-orange-600");
+  const ebay = screen.getByRole("switch", { name: "eBay" });
+  expect(ebay).toHaveClass("border-blue-200", "bg-white");
+  expect(ebay).not.toHaveClass("bg-blue-600");
+});
+
 it("renders nothing when no store is connected", () => {
   const { container } = render(<NewProductStoreChips stores={[]} choices={{}} onChange={() => {}} />);
   expect(container).toBeEmptyDOMElement();
