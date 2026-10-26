@@ -208,6 +208,12 @@ class OrderLine(Base):
     # matching every other field on a marketplace-sourced line.
     variation_text: Mapped[str | None] = mapped_column(String, nullable=True)
 
+    # The marketplace listing this line was sold from (Etsy transaction.listing_id). Set
+    # once at import, attribution only: stock matching stays by SKU so that several
+    # listings sharing a SKU all draw on one pool. NULL for lines imported before this
+    # was captured and for marketplaces that don't report it.
+    external_listing_id: Mapped[str | None] = mapped_column(String, nullable=True)
+
     # Build-BOM cost per unit, snapshotted once at the line's first allocation (see
     # order_costs.compute_line_cost_snapshot, called from allocation._allocate_line) —
     # deliberately frozen at that point, not recomputed later, so a historical order's

@@ -56,6 +56,7 @@ async def substitute_line(
         sku=None,
         needs_mapping=False,
         variation_text=line.variation_text,
+        external_listing_id=line.external_listing_id,
     )
     session.add(new_line)
     await session.flush()

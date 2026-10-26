@@ -663,6 +663,7 @@ class EtsyAdapter:
             unit_price=unit_price,
             currency=price.get("currency_code"),
             variation_text=self._format_variations(tx.get("variations")),
+            external_listing_id=str(tx["listing_id"]) if tx.get("listing_id") else None,
         )
 
     @staticmethod
