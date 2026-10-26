@@ -140,6 +140,9 @@ export interface MaterialCategory {
 export interface MaterialType {
   id: number;
   name: string;
+  /** Orders whose items use two or more different materials of this type are held for a
+   *  manual box check before they can ship. */
+  duplicates_in_kitting_check: boolean;
   /** How many records reference this. Computed per request — see the backend's list_with_usage. */
   usage_count: number;
   created_at: string;
@@ -1235,6 +1238,10 @@ export interface Order {
   replacement_parcels: ReplacementParcel[];
   sync_issue: string | null;
   pending_marketplace_cancellation: boolean;
+  // Two or more different parcel boxes on the order that nobody has confirmed: blocks shipping,
+  // or on a shipped order means "shipped with several boxes, not yet reviewed".
+  needs_box_check: boolean;
+  box_check_confirmed_at: string | null;
   tracking_number: string | null;
   carrier: string | null;
   lines: OrderLine[];
@@ -1243,6 +1250,50 @@ export interface Order {
 export interface OrderPage {
   items: Order[];
   total: number;
+}
+
+export interface BoxCheckBox {
+  material_id: number;
+  material_name: string;
+  /** False for a box added by hand rather than resolved from one of the order's items. */
+  is_candidate: boolean;
+  /** Effective kitting qty before shipping; qty actually consumed once shipped. */
+  qty: string;
+  unit_cost: string;
+  free_stock: string;
+}
+
+export interface BoxCheck {
+  mode: "pre_ship" | "shipped" | "none";
+  applies: boolean;
+  needs_check: boolean;
+  confirmed_at: string | null;
+  boxes: BoxCheckBox[];
+}
+
+export interface BoxSelection {
+  material_id: number;
+  qty: string;
+}
+
+export interface BoxCheckConfirmInput {
+  boxes: BoxSelection[];
+  return_to_stock: boolean;
+}
+
+export interface BoxCheckPreview {
+  changes: {
+    material_id: number;
+    material_name: string;
+    current_qty: string;
+    new_qty: string;
+    /** Positive: goes back into stock. Negative: taken out of stock. */
+    stock_effect: string;
+  }[];
+  kitting_cost_before: string;
+  kitting_cost_after: string;
+  net_profit_delta: string;
+  warnings: string[];
 }
 
 export interface OrderKittingOverrideLine {

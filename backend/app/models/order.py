@@ -127,6 +127,14 @@ class Order(Base):
     # never the other way.
     pending_marketplace_cancellation: Mapped[bool] = mapped_column(default=False, nullable=False)
 
+    # Box check (services/box_check.py): a person's confirmation of which parcel box(es) an order
+    # used, required when its items point at two or more different boxes. The signature is the
+    # set of candidate box material ids at confirmation time (sorted, comma-joined), so a later
+    # change to the order's items that alters the candidates no longer matches it and the order
+    # needs checking again. On a shipped order, confirmed_at alone marks it as reviewed.
+    box_check_signature: Mapped[str | None] = mapped_column(String, nullable=True)
+    box_check_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     # The shipping method used for this order (one profile per order — a single parcel,
     # not per line). For synced orders this defaults from the first resolvable line's
     # product/variant shipping_profile_id at import time (order_sync); for manual orders

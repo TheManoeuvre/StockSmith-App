@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict
 
 class MaterialTypeBase(BaseModel):
     name: str
+    duplicates_in_kitting_check: bool = False
 
 
 class MaterialTypeCreate(MaterialTypeBase):
@@ -16,7 +17,10 @@ class MaterialTypeFindOrCreate(BaseModel):
 
 
 class MaterialTypeUpdate(BaseModel):
+    """Flag is `bool | None` so patch_row's exclude_unset leaves it alone when only renaming."""
+
     name: str
+    duplicates_in_kitting_check: bool | None = None
 
 
 class MaterialTypeRead(MaterialTypeBase):

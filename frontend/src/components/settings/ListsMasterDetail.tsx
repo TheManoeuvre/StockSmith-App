@@ -103,7 +103,7 @@ export function ListsMasterDetail() {
       render: () => (
         <ReferenceDataTable
           title="Material types"
-          description="What a material is made of. Renaming one updates every material that uses it."
+          description="What a material is made of. Renaming one updates every material that uses it. A material can only be given a type if its category has 'Has a material type' ticked (Material categories)."
           segment="material-types"
           queryKey={["material-types"]}
           api={{
@@ -113,7 +113,16 @@ export function ListsMasterDetail() {
             remove: materialTypesApi.remove,
             merge: materialTypesApi.merge,
           }}
-          fields={[{ key: "name", label: "Name" }]}
+          fields={[
+            { key: "name", label: "Name" },
+            {
+              key: "duplicates_in_kitting_check",
+              label: "Duplicates in Kitting Check",
+              type: "checkbox",
+              tooltip:
+                "When an order's items use two or more different materials of this type (e.g. two different box sizes), the order must be manually checked before it can ship. Use it for parcel boxes.",
+            },
+          ]}
           usageLabel={(n) => `${n} material${n === 1 ? "" : "s"}`}
         />
       ),

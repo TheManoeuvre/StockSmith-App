@@ -176,6 +176,11 @@ class OrderRead(BaseModel):
     replacement_parcels: list[ReplacementParcelRead] = []
     sync_issue: str | None = None
     pending_marketplace_cancellation: bool = False
+    # Two or more different parcel boxes on the order that nobody has confirmed yet — blocks
+    # shipping; on a shipped order it means "shipped with several boxes, not yet reviewed".
+    # See services/box_check.py.
+    needs_box_check: bool = False
+    box_check_confirmed_at: datetime | None = None
     tracking_number: str | None = None
     carrier: str | None = None
     lines: list[OrderLineRead] = []

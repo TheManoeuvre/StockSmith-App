@@ -12,6 +12,27 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Orders with more than one parcel box are held until you confirm which was used.** A multi-item
+  order whose products need different box sizes used to keep every box and use them all up. Mark your
+  box type in Settings > Lists > Material types by ticking **Duplicates in Kitting Check**, and give
+  your box materials that type. An order whose items then point at two or more different boxes can't be
+  shipped, by the Ship button or by a marketplace sync, until you pick the box(es) used in the new
+  **Parcel box** section of the order. You can approve more than one. If the order's items change
+  afterwards, it asks again. Orders waiting on a check show a **Box check** badge and a filter in the
+  orders list.
+- **Correct the boxes on an order that already shipped.** The same section fixes an order that went out
+  with the wrong boxes recorded: boxes you remove go back into stock (or are written off if you untick
+  that), and the order's packaging cost and net profit update. A preview shows the stock and profit
+  effect before you save, and **Mark reviewed, no change** clears an order you've checked and found right.
+
+### Changed
+
+- **To use this on Packaging, tick "Has a material type" on the Packaging category** (Settings > Lists >
+  Material categories) so its materials can be given a type. Be aware that, for that category,
+  packaging materials without a type are then no longer grouped together as interchangeable substitutes.
+
 ## [0.24.0] - 2026-10-24
 
 ### Added

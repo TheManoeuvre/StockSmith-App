@@ -119,6 +119,9 @@ function OrdersListContent() {
   const [page, setPage] = useState(0);
   const [searchInput, setSearchInput] = useState("");
   const [q, setQ] = useState("");
+  // Orders with several parcel boxes nobody has confirmed — held from shipping, or already
+  // shipped and awaiting review. Across every tab, so it overrides the tab's own status filter.
+  const [boxCheckOnly, setBoxCheckOnly] = useState(false);
 
   // Debounce the search box into the query key so a keystroke isn't a request, same as the
   // products list. A change to the effective term sends us back to page 0 — a later page of
@@ -133,8 +136,9 @@ function OrdersListContent() {
   }, [searchInput]);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["orders", tab, page, q],
-    queryFn: () => ordersApi.list(ORDERS_PAGE_SIZE, page * ORDERS_PAGE_SIZE, tab, q),
+    queryKey: ["orders", boxCheckOnly ? "box-check" : tab, page, q],
+    queryFn: () =>
+      ordersApi.list(ORDERS_PAGE_SIZE, page * ORDERS_PAGE_SIZE, boxCheckOnly ? undefined : tab, q, boxCheckOnly),
     placeholderData: keepPreviousData,
   });
 
@@ -153,6 +157,11 @@ function OrdersListContent() {
   const countFor = (id: OrderTab) =>
     ({ awaiting: awaitingCount, shipped: shippedCount, cancelled: cancelledCount })[id];
   const total = data?.total ?? 0;
+  // Cheap count for the filter chip, off the ["orders", …] key like the tab counts above.
+  const { data: boxCheckCount } = useQuery({
+    queryKey: ["order-counts", "box-check"],
+    queryFn: () => ordersApi.list(1, 0, undefined, undefined, true).then((p) => p.total),
+  });
 
   const actionMutation = useMutation({
     mutationFn: ({ id, kind }: { id: number; kind: "allocate" | "ship" }) =>
@@ -221,6 +230,23 @@ function OrdersListContent() {
           active={tab}
           onChange={changeTab}
         />
+        {((boxCheckCount ?? 0) > 0 || boxCheckOnly) && (
+          <button
+            type="button"
+            aria-pressed={boxCheckOnly}
+            onClick={() => {
+              setBoxCheckOnly((v) => !v);
+              setPage(0);
+            }}
+            className={`rounded border px-2.5 py-1.5 text-sm ${
+              boxCheckOnly
+                ? "border-amber-400 bg-amber-100 text-amber-900"
+                : "border-slate-300 bg-white text-slate-700"
+            }`}
+          >
+            Needs box check{boxCheckCount != null ? ` (${boxCheckCount})` : ""}
+          </button>
+        )}
         <input
           className="w-64 rounded border border-slate-300 px-2.5 py-1.5 text-sm"
           placeholder="Search order no., item, SKU, notes…"
@@ -330,6 +356,18 @@ function OrderRow({
       <td className="p-2 align-top">
         <div className="font-medium">
           {order.external_order_id ? `#${order.external_order_id}` : `#${order.id}`}
+          {order.needs_box_check && (
+            <span
+              title={
+                order.status === "shipped"
+                  ? "Shipped with more than one parcel box recorded. Open the order to check it."
+                  : "More than one parcel box. Shipping is blocked until you confirm which was used."
+              }
+              className="ml-1.5 rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10.5px] font-semibold text-amber-800"
+            >
+              Box check
+            </span>
+          )}
         </div>
         <div className="text-[11px] text-slate-400">
           {maskBuyerName(order.buyer_name) ?? "-"}

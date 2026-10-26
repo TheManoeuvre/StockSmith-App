@@ -46,6 +46,8 @@ export interface ReferenceField {
    *  marketplace that isn't connected. */
   disabled?: boolean;
   hint?: string;
+  /** Explanatory text shown on hover over the field's label (and a small "i" beside it). */
+  tooltip?: string;
   /** For type "money": a blank is sent as null (the column is `Decimal | None`) instead of "". */
   nullable?: boolean;
   /** Rendered beside the field's label — a drift marker, a "calculated" badge. */
@@ -473,7 +475,7 @@ function ExpandedRow<T extends ReferenceRow>({
             // puts a tick box under its own caption, which reads as a different question.
             const fieldId = `reference-row-${row.id}-${field.key}`;
             return (
-              <div key={field.key} className="flex items-center gap-2 text-sm">
+              <div key={field.key} className="flex items-center gap-2 text-sm" title={field.tooltip}>
                 <Switch
                   id={fieldId}
                   ariaLabel={`${row.name} ${field.label}`}
@@ -483,6 +485,11 @@ function ExpandedRow<T extends ReferenceRow>({
                   }
                 />
                 <label htmlFor={fieldId}>{field.label}</label>
+                {field.tooltip && (
+                  <span aria-hidden="true" className="cursor-help text-xs text-slate-400">
+                    ⓘ
+                  </span>
+                )}
               </div>
             );
           }
