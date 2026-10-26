@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { listingProfilesApi, type ListingProfile } from "../../api/listingProfiles";
-import { EBAY_CONDITION, ETSY_IS_SUPPLY, ETSY_WHEN_MADE, ETSY_WHO_MADE, type Option } from "../../lib/listingOptions";
+import { EBAY_CONDITION, ETSY_IS_SUPPLY, ETSY_RENEWAL, ETSY_WHEN_MADE, ETSY_WHO_MADE, type Option } from "../../lib/listingOptions";
 
 /**
  * What choosing this listing profile commits a product to: the category, processing
@@ -68,6 +68,10 @@ function EtsyRows({ profile }: { profile: ListingProfile }) {
         value={option(ETSY_IS_SUPPLY, profile.etsy_is_supply === null ? null : String(profile.etsy_is_supply))}
       />
       <Row
+        label="Renewal"
+        value={option(ETSY_RENEWAL, profile.etsy_auto_renew === null ? null : String(profile.etsy_auto_renew))}
+      />
+      <Row
         label="Returns"
         value={remote(profile.etsy_return_policy_id, lookup(returnPolicies, profile.etsy_return_policy_id), returnsFailed || !!returnPolicies)}
       />
@@ -92,6 +96,10 @@ function EbayRows({ profile }: { profile: ListingProfile }) {
       <Row label="Payment policy" value={profile.ebay_payment_policy_id} />
       <Row label="Returns policy" value={profile.ebay_return_policy_id} />
       <Row label="Location" value={profile.ebay_merchant_location_key} />
+      <Row
+        label="Handling time"
+        value={profile.ebay_handling_time_days === null ? null : `${profile.ebay_handling_time_days} business days`}
+      />
       {profile.ebay_fulfillment_policy_id !== null && (
         <Row label="Postage (fallback)" value={profile.ebay_fulfillment_policy_id} />
       )}

@@ -21,6 +21,7 @@ import { useAppUpdate } from "../hooks/useAppUpdate";
 import { SettingsNav, type SettingsNavGroup } from "../components/settings/SettingsNav";
 import { StoresHub } from "../components/settings/stores/StoresHub";
 import { StorePage } from "../components/settings/stores/StorePage";
+import { STORE_PANEL_IDS, type StorePanelId } from "../components/settings/stores/storePanels";
 
 const PAGE_IDS = [
   "stores-sync",
@@ -76,21 +77,28 @@ export const Route = createFileRoute("/settings")({
   // `store` narrows Stores & sync to one store's page. It lives in the URL for the same
   // reasons as `page`: switching stores is then a navigation the guard sees, and a store
   // page is linkable — the sidebar's sync indicator deep-links to the store with the problem.
-  validateSearch: (search: Record<string, unknown>): { page?: PageId; store?: ListingPlatform } => {
+  // `panel` names a section on that store's page to scroll to (and open, for a collapsed row) on
+  // load — the mockup's "Open listing profiles" link. Only meaningful alongside `store`; changing
+  // page or store navigates without it, so it never outlives the view it pointed into.
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { page?: PageId; store?: ListingPlatform; panel?: StorePanelId } => {
     const page = search.page;
     const store = search.store;
+    const panel = search.panel;
     return {
       ...(PAGE_IDS.includes(page as PageId) ? { page: page as PageId } : {}),
       ...(CONNECTABLE_PLATFORMS.includes(store as ListingPlatform)
         ? { store: store as ListingPlatform }
         : {}),
+      ...(STORE_PANEL_IDS.includes(panel as StorePanelId) ? { panel: panel as StorePanelId } : {}),
     };
   },
 });
 
 function Settings() {
   const navigate = Route.useNavigate();
-  const { page: pageFromUrl, store } = Route.useSearch();
+  const { page: pageFromUrl, store, panel } = Route.useSearch();
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [hasConnection, setHasConnection] = useState(true);
   const { available: updateAvailable } = useAppUpdate();
@@ -129,6 +137,7 @@ function Settings() {
           {activePage === "stores-sync" && (
             <StoresSyncPage
               store={store}
+              panel={panel}
               onStoreChange={(next) => navigate({ search: { page: "stores-sync", store: next } })}
             />
           )}
@@ -172,9 +181,11 @@ function ShippingPackagingPage() {
 
 function StoresSyncPage({
   store,
+  panel,
   onStoreChange,
 }: {
   store: ListingPlatform | undefined;
+  panel: StorePanelId | undefined;
   onStoreChange: (store: ListingPlatform | undefined) => void;
 }) {
   return (
@@ -192,7 +203,7 @@ function StoresSyncPage({
         ]}
       />
       <div className="w-full">
-        {store ? <StorePage key={store} platform={store} /> : <StoresHub onOpenStore={onStoreChange} />}
+        {store ? <StorePage key={store} platform={store} panel={panel} /> : <StoresHub onOpenStore={onStoreChange} />}
       </div>
     </div>
   );

@@ -16,6 +16,7 @@ class ListingProfileBase(BaseModel):
     etsy_shop_section_id: int | None = None
     etsy_processing_min: int | None = None
     etsy_processing_max: int | None = None
+    etsy_auto_renew: bool | None = None
 
     ebay_category_id: str | None = None
     ebay_condition: str | None = None
@@ -24,6 +25,7 @@ class ListingProfileBase(BaseModel):
     ebay_return_policy_id: str | None = None
     ebay_merchant_location_key: str | None = None
     ebay_marketplace_id: str | None = None
+    ebay_handling_time_days: int | None = None
 
 
 class ListingProfileCreate(ListingProfileBase):
@@ -53,6 +55,7 @@ class ListingProfileUpdate(BaseModel):
     etsy_shop_section_id: int | None = None
     etsy_processing_min: int | None = None
     etsy_processing_max: int | None = None
+    etsy_auto_renew: bool | None = None
 
     ebay_category_id: str | None = None
     ebay_condition: str | None = None
@@ -61,6 +64,7 @@ class ListingProfileUpdate(BaseModel):
     ebay_return_policy_id: str | None = None
     ebay_merchant_location_key: str | None = None
     ebay_marketplace_id: str | None = None
+    ebay_handling_time_days: int | None = None
 
 
 class ListingProfileRead(ListingProfileBase):

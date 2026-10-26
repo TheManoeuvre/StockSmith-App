@@ -78,6 +78,7 @@ _ETSY_METADATA = {
     "etsy.readiness_state_id": "etsy_readiness_state_id",
     "etsy.return_policy_id": "etsy_return_policy_id",
     "etsy.shop_section_id": "etsy_shop_section_id",
+    "etsy.should_auto_renew": "etsy_auto_renew",
 }
 
 _SHIPPING_METADATA_KEY = {
@@ -93,6 +94,7 @@ _EBAY_METADATA = {
     "ebay.return_policy_id": "ebay_return_policy_id",
     "ebay.merchant_location_key": "ebay_merchant_location_key",
     "ebay.marketplace_id": "ebay_marketplace_id",
+    "ebay.handling_time_days": "ebay_handling_time_days",
 }
 
 

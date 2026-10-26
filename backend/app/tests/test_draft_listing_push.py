@@ -102,6 +102,26 @@ async def test_builds_a_draft_from_the_product_and_its_profile(session):
 
 
 @pytest.mark.asyncio
+async def test_renewal_choice_travels_in_the_metadata_including_an_explicit_false(session):
+    """False is a decision (manual renewal), not an absence, so it must not be dropped by
+    the omit rule that exists for unset fields."""
+    await _profile(session, etsy_auto_renew=False)
+    product = await _product(session)
+
+    draft = await build_draft(session, product.id, ETSY)
+    assert draft.metadata["etsy.should_auto_renew"] is False
+
+
+@pytest.mark.asyncio
+async def test_unset_renewal_contributes_no_key(session):
+    await _profile(session)
+    product = await _product(session)
+
+    draft = await build_draft(session, product.id, ETSY)
+    assert "etsy.should_auto_renew" not in draft.metadata
+
+
+@pytest.mark.asyncio
 async def test_unset_optional_metadata_contributes_no_key_at_all(session):
     """The omit rule. An empty string would be stored by Etsy as a real value and would
     then satisfy checks it shouldn't."""

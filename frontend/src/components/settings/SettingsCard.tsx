@@ -7,11 +7,14 @@ import type { ReactNode } from "react";
  * to a card with `heading.closest("section")`.
  */
 export function SettingsCard({
+  id,
   title,
   help,
   action,
   children,
 }: {
+  /** DOM id, so a deep link can scroll to this card. */
+  id?: string;
   title: string;
   help?: ReactNode;
   /** Rendered top-right — a Save button, a toggle, a link out. */
@@ -20,6 +23,7 @@ export function SettingsCard({
 }) {
   return (
     <section
+      id={id}
       className="flex flex-col gap-3 rounded-[9px] border border-slate-200 bg-white p-4"
       style={{ boxShadow: "0 1px 2px rgba(15,23,42,.04)" }}
     >

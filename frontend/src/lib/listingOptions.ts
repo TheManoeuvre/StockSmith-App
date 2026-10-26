@@ -43,6 +43,12 @@ export const ETSY_WHEN_MADE: Option[] = [
   { value: "before_1700", label: "Before 1700" },
 ];
 
+/** Etsy's should_auto_renew. Each automatic renewal costs a listing fee, hence the explicit choice. */
+export const ETSY_RENEWAL: Option[] = [
+  { value: "true", label: "Automatic" },
+  { value: "false", label: "Manual" },
+];
+
 export const ETSY_IS_SUPPLY: Option[] = [
   { value: "false", label: "A finished product" },
   { value: "true", label: "A supply or tool for making things" },

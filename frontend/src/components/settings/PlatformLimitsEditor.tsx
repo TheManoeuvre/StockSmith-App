@@ -6,6 +6,7 @@ import type { ListingPlatform } from "../../api/types";
 import { PLATFORM_LABELS } from "../../lib/platforms";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { Disclosure } from "./Disclosure";
+import { STORE_PANEL_DOM_IDS } from "./stores/storePanels";
 
 /**
  * Lets a marketplace's field limits be corrected without waiting for a release.
@@ -18,8 +19,14 @@ import { Disclosure } from "./Disclosure";
  * Collapsed by default: it is a repair tool, not a routine setting, and the defaults are
  * right almost always.
  */
-export function PlatformLimitsEditor({ platform }: { platform: ListingPlatform }) {
-  const [open, setOpen] = useState(false);
+export function PlatformLimitsEditor({
+  platform,
+  defaultOpen = false,
+}: {
+  platform: ListingPlatform;
+  defaultOpen?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
   const { data, error } = useQuery({
     queryKey: ["settings", "platform-limits", platform],
     queryFn: () => platformConfigApi.listLimits(platform),
@@ -30,6 +37,7 @@ export function PlatformLimitsEditor({ platform }: { platform: ListingPlatform }
 
   return (
     <Disclosure
+      id={STORE_PANEL_DOM_IDS["listing-limits"]}
       title={`${PLATFORM_LABELS[platform]} listing limits`}
       summary={overrideCount > 0 ? `${overrideCount} overridden` : "built-in values"}
       tone={overrideCount > 0 ? "warning" : "normal"}

@@ -7,6 +7,7 @@ import { useEditableCopy } from "../../hooks/useEditableCopy";
 import {
   EBAY_CONDITION,
   ETSY_IS_SUPPLY,
+  ETSY_RENEWAL,
   ETSY_WHEN_MADE,
   ETSY_WHO_MADE,
   type Option,
@@ -15,6 +16,7 @@ import { PLATFORM_LABELS } from "../../lib/platforms";
 import { ConfirmDialog } from "../common/ConfirmDialog";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { SettingsCard } from "./SettingsCard";
+import { STORE_PANEL_DOM_IDS } from "./stores/storePanels";
 import { TaxonomyPicker } from "./TaxonomyPicker";
 
 /**
@@ -59,6 +61,7 @@ export function ListingProfiles({ platform, children }: { platform: ListingPlatf
 
   return (
     <SettingsCard
+      id={STORE_PANEL_DOM_IDS["listing-profiles"]}
       title="Listing profiles"
       help="The category, policies and making details a new listing needs. Each product picks one on its own listing setup."
       action={
@@ -158,6 +161,7 @@ export function ProfileForm({
     etsy_return_policy_id: profile?.etsy_return_policy_id ?? null,
     etsy_processing_min: profile?.etsy_processing_min ?? null,
     etsy_processing_max: profile?.etsy_processing_max ?? null,
+    etsy_auto_renew: profile?.etsy_auto_renew ?? null,
     ebay_category_id: profile?.ebay_category_id ?? null,
     ebay_condition: profile?.ebay_condition ?? null,
     ebay_fulfillment_policy_id: profile?.ebay_fulfillment_policy_id ?? null,
@@ -165,6 +169,7 @@ export function ProfileForm({
     ebay_return_policy_id: profile?.ebay_return_policy_id ?? null,
     ebay_merchant_location_key: profile?.ebay_merchant_location_key ?? null,
     ebay_marketplace_id: profile?.ebay_marketplace_id ?? null,
+    ebay_handling_time_days: profile?.ebay_handling_time_days ?? null,
   };
   // Buffered through useEditableCopy so a half-filled profile prompts on navigate instead of
   // vanishing silently. seedKey is constant — one form is open at a time and it's remounted
@@ -304,6 +309,17 @@ export function ProfileForm({
               onChange={(v) => set({ etsy_is_supply: v === null ? null : v === "true" })}
             />
           </Field>
+          <Field label="Renewal">
+            <OptionSelect
+              options={ETSY_RENEWAL}
+              value={
+                draft.etsy_auto_renew === null || draft.etsy_auto_renew === undefined
+                  ? null
+                  : String(draft.etsy_auto_renew)
+              }
+              onChange={(v) => set({ etsy_auto_renew: v === null ? null : v === "true" })}
+            />
+          </Field>
           <Field label="Return policy">
             <RemoteSelect
               options={returnPolicies}
@@ -348,6 +364,17 @@ export function ProfileForm({
               className="w-full rounded border border-slate-300 px-2 py-1"
               value={draft.ebay_return_policy_id ?? ""}
               onChange={(e) => set({ ebay_return_policy_id: text(e.target.value) })}
+            />
+          </Field>
+          <Field label="Handling time (business days)">
+            <input
+              type="number"
+              min={0}
+              className="w-full rounded border border-slate-300 px-2 py-1"
+              value={draft.ebay_handling_time_days ?? ""}
+              onChange={(e) =>
+                set({ ebay_handling_time_days: e.target.value === "" ? null : Number(e.target.value) })
+              }
             />
           </Field>
           <Field label="Location key" required>

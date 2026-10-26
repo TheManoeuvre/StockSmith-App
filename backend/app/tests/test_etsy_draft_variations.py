@@ -13,6 +13,7 @@ The transport is faked; the payload is the thing under test.
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import select
 
 from app.models.listing import ListingPlatform
 from app.models.listing_profile import ListingProfile, ProductPlatformSettings
@@ -323,3 +324,19 @@ async def test_attribute_names_reach_the_draft_in_slot_order(session):
     )
     draft = await build_draft(session, product.id, ETSY)
     assert draft.attribute_names == ["Studs", "Colour"]
+
+
+@pytest.mark.asyncio
+async def test_the_renewal_choice_is_sent_as_should_auto_renew_including_false(session):
+    """Manual renewal is an explicit False, which a naive truthiness filter would drop and
+    leave Etsy to apply its own default."""
+    product = await _setup(session, variants=[("4 Stud Teal", ("4 Stud", "Teal"), Decimal("12.50"), 5)])
+    profile = (await session.execute(select(ListingProfile))).scalars().one()
+    profile.etsy_auto_renew = False
+    await session.commit()
+
+    adapter = RecordingEtsy()
+    await push_draft(session, adapter, FakeConnection(), product.id, ETSY)
+
+    form = next(kw["data"] for m, p, kw in adapter.requests if m == "POST" and p.endswith("/listings"))
+    assert form["should_auto_renew"] is False
