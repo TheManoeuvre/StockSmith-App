@@ -247,13 +247,12 @@ function Dashboard() {
   const dueByClass = { A: 0, B: 0, C: 0 };
   for (const item of data.items_due_for_count) dueByClass[item.abc_class] += 1;
 
-  // Mirrors the null-returns in StockTakeCard and MarginMovedCard: when neither has anything
-  // to say, the stockout table takes the full width instead of sitting beside a blank column.
+  // Mirrors the null-return in StockTakeCard: when it has nothing to say, the stockout table
+  // takes the full width instead of sitting beside a blank column.
   const hasSideCards =
     data.open_stock_take != null ||
     data.unresolved_variance_count > 0 ||
-    data.items_due_for_count.length > 0 ||
-    data.margin_alerts.length > 0;
+    data.items_due_for_count.length > 0;
 
   return (
     <div className="flex flex-col gap-6">
@@ -633,7 +632,6 @@ function Dashboard() {
         {hasSideCards && (
           <div className="flex flex-col gap-6">
             <StockTakeCard data={data} />
-            <MarginMovedCard data={data} />
           </div>
         )}
       </div>
@@ -746,53 +744,6 @@ function StockTakeCard({ data }: { data: DashboardSummary }) {
           )}
         </div>
       )}
-    </Card>
-  );
-}
-
-function MarginMovedCard({ data }: { data: DashboardSummary }) {
-  if (data.margin_alerts.length === 0) return null;
-  const top = [...data.margin_alerts]
-    .sort(
-      (a, b) =>
-        Math.abs(
-          Number(b.current_margin_percent) - Number(b.previous_margin_percent),
-        ) -
-        Math.abs(
-          Number(a.current_margin_percent) - Number(a.previous_margin_percent),
-        ),
-    )
-    .slice(0, 3);
-
-  return (
-    <Card title="Margin moved" hint="Largest swings since the last snapshot.">
-      <ul className="flex flex-col gap-2 text-[12.5px]">
-        {top.map((a) => {
-          const prev = Number(a.previous_margin_percent);
-          const cur = Number(a.current_margin_percent);
-          const diff = cur - prev;
-          return (
-            <li key={a.product_id} className="flex items-center justify-between gap-2">
-              <Link
-                to="/products/$productId"
-                params={{ productId: String(a.product_id) }}
-                search={{ tab: "pricing" }}
-                className="flex-1 truncate text-slate-900 hover:underline"
-              >
-                {a.name}
-              </Link>
-              <span
-                className={
-                  diff < 0 ? "text-red-600 tabular-nums" : "text-green-700 tabular-nums"
-                }
-              >
-                {prev.toFixed(1)}% → {cur.toFixed(1)}% ({diff > 0 ? "+" : ""}
-                {diff.toFixed(1)} pts)
-              </span>
-            </li>
-          );
-        })}
-      </ul>
     </Card>
   );
 }
