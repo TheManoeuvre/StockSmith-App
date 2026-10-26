@@ -1413,14 +1413,14 @@ async def check_product_sync(
     try:
         # Scoped to this product's own SKUs so a single-product check doesn't pay for a
         # per-SKU offer lookup across the whole catalogue.
-        index = await adapter.build_listing_sku_index(
-            session, connection, enrich_skus=await listing_sync.product_skus(session, product_id)
+        index, extra_index = await listing_sync.fetch_sku_index(
+            adapter, session, connection, enrich_skus=await listing_sync.product_skus(session, product_id)
         )
         # Read-only: this reports a quantity drift, it does not correct it. Pushing from
         # a "test" action would make a diagnostic silently mutate the live marketplace —
         # correcting is the separate, explicitly-confirmed push-corrections endpoint.
         return await listing_sync.check_product_sku_sync(
-            session, product_id, index, platform, with_expected_quantity=True
+            session, product_id, index, platform, with_expected_quantity=True, extra_index=extra_index
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
@@ -1502,10 +1502,10 @@ async def check_all_listings(
     connection = await _require_connection(session, platform)
     adapter = await get_adapter(session, platform)
     try:
-        index = await adapter.build_listing_sku_index(
-            session, connection, enrich_skus=await listing_sync.tracked_skus(session)
+        index, extra_index = await listing_sync.fetch_sku_index(
+            adapter, session, connection, enrich_skus=await listing_sync.tracked_skus(session)
         )
-        return await listing_sync.check_all_products_sku_sync(session, index, platform)
+        return await listing_sync.check_all_products_sku_sync(session, index, platform, extra_index=extra_index)
     except PlatformError as e:
         raise _map_platform_error(e)
 

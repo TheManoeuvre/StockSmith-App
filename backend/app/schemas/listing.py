@@ -18,6 +18,23 @@ class ProductSyncStatus(str, enum.Enum):
     not_tested = "not_tested"
 
 
+class AdditionalListingResult(BaseModel):
+    """A second (or later) marketplace listing that holds the same SKU as the unit's
+    primary listing — A/B tests, a free-shipping variant. Quantity pushes reach every one;
+    the unit's sync status and rollup stay about the primary alone."""
+
+    listing_id: int
+    external_listing_id: str | None
+    role: str | None = None
+    status: ListingSyncStatus
+    external_title: str | None
+    external_variation: str | None
+    external_state: str | None
+    external_quantity: int | None
+    last_checked_at: datetime | None
+    quantity_mismatch: bool = False
+
+
 class UnitSyncResult(BaseModel):
     variant_id: int | None
     variant_name: str | None
@@ -38,6 +55,9 @@ class UnitSyncResult(BaseModel):
     # that isn't on the marketplace at all is a "not found" problem, not a mismatch —
     # conflating them would offer to "correct" a listing that doesn't exist.
     quantity_mismatch: bool = False
+    # Other listings sharing this unit's SKU. quantity_mismatch above is True if the
+    # primary OR any of these has drifted, since one "Push corrections" fixes them all.
+    additional_listings: list[AdditionalListingResult] = []
 
 
 class ProductListingSyncSummary(BaseModel):

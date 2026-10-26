@@ -87,6 +87,7 @@ async def _push_problem_counts(
         PlatformListingPush.platform.label("platform"),
         PlatformListingPush.product_id.label("product_id"),
         PlatformListingPush.variant_id.label("variant_id"),
+        PlatformListingPush.listing_id.label("listing_id"),
         PlatformListingPush.status.label("status"),
         func.row_number()
         .over(
@@ -94,6 +95,7 @@ async def _push_problem_counts(
                 PlatformListingPush.platform,
                 PlatformListingPush.product_id,
                 PlatformListingPush.variant_id,
+                PlatformListingPush.listing_id,
             ),
             order_by=(PlatformListingPush.attempted_at.desc(), PlatformListingPush.id.desc()),
         )
@@ -107,7 +109,7 @@ async def _push_problem_counts(
     # services/listing_units). Counting those would promise "the next stock change
     # retries automatically" for a listing no push path will ever touch again.
     live = (
-        select(Listing.platform, Listing.product_id, Listing.variant_id)
+        select(Listing.id, Listing.platform, Listing.product_id, Listing.variant_id)
         .where(Listing.external_listing_id.is_not(None), current_unit_filter())
         .subquery()
     )
@@ -118,7 +120,11 @@ async def _push_problem_counts(
             live,
             (ranked.c.platform == live.c.platform)
             & (ranked.c.product_id == live.c.product_id)
-            & (func.coalesce(ranked.c.variant_id, -1) == func.coalesce(live.c.variant_id, -1)),
+            & (func.coalesce(ranked.c.variant_id, -1) == func.coalesce(live.c.variant_id, -1))
+            # An attempt logged against a listing counts for that listing alone; one logged
+            # before listings were tracked individually (listing_id NULL) counts for the
+            # unit, as it always did.
+            & ((ranked.c.listing_id == live.c.id) | ranked.c.listing_id.is_(None)),
         )
         .where(
             ranked.c.rn == 1,
