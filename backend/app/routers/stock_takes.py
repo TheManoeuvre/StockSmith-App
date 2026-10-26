@@ -26,6 +26,7 @@ from app.schemas.stock_take import (
     BulkLineCountRequest,
     LineCountUpdate,
     LineResolution,
+    ScopeItemRead,
     ScopePreview,
     StockTakeProgress,
     StockTakeCreated,
@@ -272,6 +273,13 @@ async def list_unresolved_variances(session: AsyncSession = Depends(get_db)) -> 
 async def preview_scope(scope: StockTakeScope, session: AsyncSession = Depends(get_db)) -> ScopePreview:
     """What a take with this scope would contain. Writes nothing."""
     return await stock_takes.preview_scope(session, scope)
+
+
+@router.post("/scope-items", response_model=list[ScopeItemRead])
+async def scope_items(scope: StockTakeScope, session: AsyncSession = Depends(get_db)) -> list[ScopeItemRead]:
+    """Every item the scope's filters match, with its last-counted date — the picker behind
+    "Select items". Ignores any selection already on the scope. Writes nothing."""
+    return await stock_takes.list_scope_items(session, scope)
 
 
 @router.post("", response_model=StockTakeCreated, status_code=status.HTTP_201_CREATED)

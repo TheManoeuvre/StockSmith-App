@@ -282,6 +282,23 @@ export interface StockTakeScope {
   material_category_ids: number[];
   product_category_ids: number[];
   overdue_only: boolean;
+  /** A hand-picked subset of what the filters match; omit (or null) for all of it. */
+  selected_items?: ScopeItemRef[] | null;
+}
+
+export interface ScopeItemRef {
+  material_id: number | null;
+  product_id: number | null;
+  variant_id: number | null;
+}
+
+export interface ScopeItem extends ScopeItemRef {
+  name: string;
+  section: "Materials" | "Products";
+  group: string;
+  /** When it was last counted; null if it never has been. */
+  last_stock_take_at: string | null;
+  is_due: boolean;
 }
 
 export interface ScopePreview {

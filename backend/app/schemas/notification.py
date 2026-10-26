@@ -44,6 +44,11 @@ class NotificationSettingsRead(BaseModel):
     daily_summary_hour_local: int
     daily_summary_day_of_week: int | None
 
+    stock_take_reminder_enabled: bool
+    stock_take_reminder_frequency: SummaryFrequency
+    stock_take_reminder_hour_local: int
+    stock_take_reminder_day_of_week: int | None
+
     pending_order_threshold: int
 
     alert_types: list[NotificationTypeSettingRead]
@@ -71,6 +76,12 @@ class NotificationSettingsUpdate(BaseModel):
     daily_summary_frequency: SummaryFrequency
     daily_summary_hour_local: int = Field(ge=0, le=23)
     daily_summary_day_of_week: int | None = Field(default=None, ge=0, le=6)
+
+    # Optional so a client that predates the reminder keeps working; omitted leaves it off.
+    stock_take_reminder_enabled: bool = False
+    stock_take_reminder_frequency: SummaryFrequency = SummaryFrequency.weekly
+    stock_take_reminder_hour_local: int = Field(default=9, ge=0, le=23)
+    stock_take_reminder_day_of_week: int | None = Field(default=None, ge=0, le=6)
 
     pending_order_threshold: int = Field(ge=1)
 

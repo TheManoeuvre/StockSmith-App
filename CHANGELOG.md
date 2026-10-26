@@ -23,11 +23,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a link to the full history on GitHub.
 - **Ignore an update.** Choosing Ignore this version hides the notice, and it stays hidden across
   restarts. A newer release brings the notice back. An ignored version can still be installed from About.
+- **Pick exactly which items to count.** Starting a stock take now has a Select items button next
+  to Start counting. It lists everything the current filters match, with the date each item was
+  last counted and whether it is due, so you can tick just the ones you want.
+- **Stock take reminder.** Settings › Notifications can now send a daily or weekly reminder saying
+  how many items in each category are due for counting. Nothing is sent when nothing is due.
 
 ### Changed
 
 - **The update prompt at launch has been removed.** Updates are now offered from Settings > About, so
   "Later" no longer asks again on every start.
+- **"Only what's due for counting" is now on by default** when you start a stock take. Untick it
+  to count everything.
 
 ## [0.24.0] - 2026-10-24
 

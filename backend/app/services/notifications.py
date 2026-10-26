@@ -56,6 +56,7 @@ _DIGEST_GROUP_LABELS: dict[NotificationCategory, str] = {
     NotificationCategory.replacement_parcel_review: "Parcels to review",
     NotificationCategory.order_cancellation_pending: "Cancellations to process",
     NotificationCategory.daily_summary: "Summaries",
+    NotificationCategory.stock_take_due: "Counting reminders",
 }
 
 # How far back the in-app notification window (list_notifications, unread_only=False) shows
