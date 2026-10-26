@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { materialsApi } from "../../api/materials";
-import { materialTypesApi } from "../../api/materialTypes";
+import { materialCategoriesApi } from "../../api/materialCategories";
 import { ordersApi } from "../../api/orders";
 import type { BoxCheck, BoxCheckConfirmInput, BoxCheckPreview } from "../../api/types";
 import { formatMoney } from "../../lib/money";
@@ -15,7 +15,7 @@ interface Pick {
 // Which parcel box(es) an order used. Two jobs, one panel:
 //
 // Before shipping, an order whose items resolve to two or more different boxes (any material
-// whose type is marked "Duplicates in Kitting Check") is blocked until someone picks the box(es)
+// whose category is marked "Kitting: check when an order has more than one") is blocked until someone picks the box(es)
 // actually used. Nothing is pre-ticked on purpose: the point is that a person looks.
 //
 // After shipping, the same panel corrects an order that already went out with the wrong boxes
@@ -28,7 +28,7 @@ export function OrderBoxCheckSection({ orderId, currency }: { orderId: number; c
     queryFn: () => ordersApi.getBoxCheck(orderId),
   });
   const { data: materials } = useQuery({ queryKey: ["materials"], queryFn: materialsApi.list });
-  const { data: materialTypes } = useQuery({ queryKey: ["material-types"], queryFn: materialTypesApi.list });
+  const { data: categories } = useQuery({ queryKey: ["material-categories"], queryFn: materialCategoriesApi.list });
 
   const [picks, setPicks] = useState<Record<number, Pick>>({});
   const [extraIds, setExtraIds] = useState<number[]>([]);
@@ -50,13 +50,13 @@ export function OrderBoxCheckSection({ orderId, currency }: { orderId: number; c
     setReturnToStock(true);
   }, [data, orderId]);
 
-  const flaggedTypeIds = useMemo(
-    () => new Set((materialTypes ?? []).filter((t) => t.duplicates_in_kitting_check).map((t) => t.id)),
-    [materialTypes],
+  const flaggedCategoryIds = useMemo(
+    () => new Set((categories ?? []).filter((c) => c.kitting_check_duplicates).map((c) => c.id)),
+    [categories],
   );
   const knownIds = new Set([...(data?.boxes ?? []).map((b) => b.material_id), ...extraIds]);
   const addable = (materials ?? []).filter(
-    (m) => m.material_type_id != null && flaggedTypeIds.has(m.material_type_id) && !knownIds.has(m.id),
+    (m) => m.category_id != null && flaggedCategoryIds.has(m.category_id) && !knownIds.has(m.id),
   );
 
   const selected = useMemo(

@@ -103,7 +103,7 @@ export function ListsMasterDetail() {
       render: () => (
         <ReferenceDataTable
           title="Material types"
-          description="What a material is made of. Renaming one updates every material that uses it. A material can only be given a type if its category has 'Has a material type' ticked (Material categories)."
+          description="What a material is made of. Renaming one updates every material that uses it."
           segment="material-types"
           queryKey={["material-types"]}
           api={{
@@ -113,16 +113,7 @@ export function ListsMasterDetail() {
             remove: materialTypesApi.remove,
             merge: materialTypesApi.merge,
           }}
-          fields={[
-            { key: "name", label: "Name" },
-            {
-              key: "duplicates_in_kitting_check",
-              label: "Duplicates in Kitting Check",
-              type: "checkbox",
-              tooltip:
-                "When an order's items use two or more different materials of this type (e.g. two different box sizes), the order must be manually checked before it can ship. Use it for parcel boxes.",
-            },
-          ]}
+          fields={[{ key: "name", label: "Name" }]}
           usageLabel={(n) => `${n} material${n === 1 ? "" : "s"}`}
         />
       ),
@@ -166,6 +157,13 @@ export function ListsMasterDetail() {
             { key: "consumed_on_failed_build", label: "Consumed by failed builds", type: "checkbox" },
             { key: "auto_kitting_per_order", label: "Kitting: one per order, not per unit", type: "checkbox" },
             { key: "show_in_kitting_bom_list", label: "Show in Kitting BOM list", type: "checkbox" },
+            {
+              key: "kitting_check_duplicates",
+              label: "Kitting: check when an order has more than one",
+              type: "checkbox",
+              tooltip:
+                "When an order's items use two or more different materials from this category (e.g. two different box sizes), the order must be manually checked before it can ship. Use it for parcel boxes, and keep labels and tape in a category of their own.",
+            },
           ]}
           usageLabel={(n) => `${n} material${n === 1 ? "" : "s"}`}
         />

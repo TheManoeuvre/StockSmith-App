@@ -129,6 +129,9 @@ export interface MaterialCategory {
    *  order kitting overrides). Off for everything but packaging by default, to keep those
    *  pickers from listing filament and hardware nobody packs. */
   show_in_kitting_bom_list: boolean;
+  /** An order whose items use two or more different materials from this category (e.g. two box
+   *  sizes) is held from shipping until a person confirms which were used. */
+  kitting_check_duplicates: boolean;
   tracks_colour: boolean;
   tracks_material_type: boolean;
   /** Bought by the kilo, stocked by the gram, so average cost reads x1000. */
@@ -140,9 +143,6 @@ export interface MaterialCategory {
 export interface MaterialType {
   id: number;
   name: string;
-  /** Orders whose items use two or more different materials of this type are held for a
-   *  manual box check before they can ship. */
-  duplicates_in_kitting_check: boolean;
   /** How many records reference this. Computed per request — see the backend's list_with_usage. */
   usage_count: number;
   created_at: string;

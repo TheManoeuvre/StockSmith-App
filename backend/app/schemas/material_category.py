@@ -14,6 +14,7 @@ class MaterialCategoryBase(BaseModel):
     consumed_on_failed_build: bool = False
     auto_kitting_per_order: bool = False
     show_in_kitting_bom_list: bool = False
+    kitting_check_duplicates: bool = False
     tracks_colour: bool = False
     tracks_material_type: bool = False
     cost_per_kg_display: bool = False
@@ -42,6 +43,7 @@ class MaterialCategoryUpdate(BaseModel):
     consumed_on_failed_build: bool | None = None
     auto_kitting_per_order: bool | None = None
     show_in_kitting_bom_list: bool | None = None
+    kitting_check_duplicates: bool | None = None
     tracks_colour: bool | None = None
     tracks_material_type: bool | None = None
     cost_per_kg_display: bool | None = None

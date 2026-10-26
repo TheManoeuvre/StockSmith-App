@@ -15,12 +15,12 @@ from sqlalchemy import select
 from app.models.kitting import OrderKittingAllocation, OrderKittingOverride, ProductKittingMaterial
 from app.models.listing import ListingPlatform
 from app.models.material import Material, MaterialAdjustment, MaterialUnit
-from app.models.material_type import MaterialType
+from app.models.material_category import MaterialCategory
 from app.models.order import Order, OrderLine, OrderStatus
 from app.models.product import Product
 from app.routers._reference_crud import patch_row
 from app.schemas.box_check import BoxCheckConfirm, BoxSelection
-from app.schemas.material_type import MaterialTypeUpdate
+from app.schemas.material_category import MaterialCategoryUpdate
 from app.services import allocation, box_check, listing_push, material_categories, order_sync
 from app.services.kitting import get_kitting_cogs_by_order
 
@@ -41,20 +41,23 @@ def _async_material_push(monkeypatch, pushes):
     monkeypatch.setattr(listing_push, "enqueue_for_material", _noop)
 
 
-async def _type(session, name: str = "Parcel Box", flagged: bool = True) -> MaterialType:
-    row = MaterialType(name=name, duplicates_in_kitting_check=flagged)
-    session.add(row)
+async def _category(session, name: str = "Boxes", flagged: bool = True) -> MaterialCategory:
+    """A packaging-style category: capped to one per order, optionally flagged for the box check."""
+    category = await material_categories.find_or_create(session, name)
+    category.auto_kitting_per_order = True
+    category.kitting_check_duplicates = flagged
     await session.commit()
-    return row
+    return category
 
 
-async def _packaging(session, name: str, material_type: MaterialType | None, cost: str = "1.00") -> Material:
-    category = await material_categories.find_or_create(session, "packaging")
+async def _packaging(session, name: str, category: MaterialCategory | None, cost: str = "1.00") -> Material:
+    """A material in `category`, or in the stock Packaging category (unflagged — where labels and
+    tape live) when None."""
+    category = category or await material_categories.find_or_create(session, "packaging")
     material = Material(
         name=name,
         category=material_categories.legacy_value_for(category.name),
         category_id=category.id,
-        material_type_id=material_type.id if material_type else None,
         unit=MaterialUnit.each,
     )
     session.add(material)
@@ -93,9 +96,9 @@ async def _sync(session, use_adapter, external_id: str, skus: list[str], shipped
 
 
 async def _two_box_order(session, use_adapter, *, shipped: bool = False, flagged: bool = True):
-    box_type = await _type(session, flagged=flagged)
-    small = await _packaging(session, "Small Box", box_type, "0.40")
-    large = await _packaging(session, "Large Box", box_type, "0.90")
+    boxes = await _category(session, flagged=flagged)
+    small = await _packaging(session, "Small Box", boxes, "0.40")
+    large = await _packaging(session, "Large Box", boxes, "0.90")
     await _product(session, "SKU-A", small)
     await _product(session, "SKU-B", large)
     order = await _sync(session, use_adapter, "R-TWO", ["SKU-A", "SKU-B"], shipped=shipped)
@@ -139,8 +142,8 @@ async def test_two_different_boxes_need_a_check_and_block_shipping(session, sess
 
 
 async def test_same_box_on_both_items_needs_no_check(session, session_factory, connection, use_adapter):
-    box_type = await _type(session)
-    box = await _packaging(session, "Shared Box", box_type)
+    boxes = await _category(session)
+    box = await _packaging(session, "Shared Box", boxes)
     await _product(session, "SKU-A", box)
     await _product(session, "SKU-B", box)
     order = await _sync(session, use_adapter, "R-SAME", ["SKU-A", "SKU-B"])
@@ -150,11 +153,13 @@ async def test_same_box_on_both_items_needs_no_check(session, session_factory, c
     assert order.status == OrderStatus.shipped
 
 
-@pytest.mark.parametrize("typed", [True, False])
-async def test_boxes_whose_type_is_not_flagged_are_ignored(session, session_factory, connection, use_adapter, typed):
-    box_type = await _type(session, flagged=False) if typed else None
-    a = await _packaging(session, "Box A", box_type)
-    b = await _packaging(session, "Box B", box_type)
+@pytest.mark.parametrize("own_category", [True, False])
+async def test_boxes_in_an_unflagged_category_are_ignored(
+    session, session_factory, connection, use_adapter, own_category
+):
+    category = await _category(session, "Unchecked Boxes", flagged=False) if own_category else None
+    a = await _packaging(session, "Box A", category)
+    b = await _packaging(session, "Box B", category)
     await _product(session, "SKU-A", a)
     await _product(session, "SKU-B", b)
     order = await _sync(session, use_adapter, "R-UNFLAGGED", ["SKU-A", "SKU-B"])
@@ -165,8 +170,8 @@ async def test_boxes_whose_type_is_not_flagged_are_ignored(session, session_fact
 async def test_flagged_box_alongside_a_label_still_needs_only_one_box(
     session, session_factory, connection, use_adapter
 ):
-    box_type = await _type(session)
-    box = await _packaging(session, "Only Box", box_type)
+    boxes = await _category(session)
+    box = await _packaging(session, "Only Box", boxes)
     label_a = await _packaging(session, "Label A", None)
     label_b = await _packaging(session, "Label B", None)
     await _product(session, "SKU-A", box, label_a)
@@ -177,16 +182,16 @@ async def test_flagged_box_alongside_a_label_still_needs_only_one_box(
 
 
 async def test_flag_can_be_set_through_the_reference_data_patch(session):
-    row = await _type(session, flagged=False)
+    row = await _category(session, "Boxes", flagged=False)
 
     updated = await patch_row(
-        session, MaterialType, row.id, MaterialTypeUpdate(name="Parcel Box", duplicates_in_kitting_check=True)
+        session, MaterialCategory, row.id, MaterialCategoryUpdate(name="Boxes", kitting_check_duplicates=True)
     )
-    assert updated.duplicates_in_kitting_check is True
+    assert updated.kitting_check_duplicates is True
 
     # Renaming alone must not clear it.
-    renamed = await patch_row(session, MaterialType, row.id, MaterialTypeUpdate(name="Parcel Boxes"))
-    assert renamed.duplicates_in_kitting_check is True
+    renamed = await patch_row(session, MaterialCategory, row.id, MaterialCategoryUpdate(name="Parcel boxes"))
+    assert renamed.kitting_check_duplicates is True
 
 
 # --- Confirming before shipping -----------------------------------------------------------------
@@ -261,8 +266,8 @@ async def test_changing_the_items_after_confirming_asks_again(session, session_f
     assert await box_check.order_needs_box_check(session, order) is False
 
     # A third item arrives that needs a third box: the candidates no longer match what was confirmed.
-    box_type = (await session.execute(select(MaterialType))).scalar_one()
-    huge = await _packaging(session, "Huge Box", box_type)
+    boxes = (await session.execute(select(MaterialCategory).where(MaterialCategory.name == "Boxes"))).scalar_one()
+    huge = await _packaging(session, "Huge Box", boxes)
     third = await _product(session, "SKU-C", huge)
     session.add(OrderLine(order_id=order.id, product_id=third.id, sku="SKU-C", ordered_qty=1, currency="GBP"))
     await session.commit()
@@ -474,8 +479,8 @@ async def test_cancelled_order_cannot_be_changed(session, session_factory, conne
 
 
 async def test_single_unit_order_is_unaffected(session, session_factory, connection, use_adapter):
-    box_type = await _type(session)
-    box = await _packaging(session, "Box", box_type)
+    boxes = await _category(session)
+    box = await _packaging(session, "Box", boxes)
     await _product(session, "SKU-A", box)
     use_adapter([make_order("R-ONE", sku="SKU-A", qty=1)])
     await order_sync.commit_sync(ListingPlatform.etsy)

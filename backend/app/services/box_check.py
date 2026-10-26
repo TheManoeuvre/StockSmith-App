@@ -6,7 +6,7 @@ different box sizes keeps both, and both get reserved and consumed. Rather than 
 was really used, an order whose items resolve to two or more different boxes is held until a
 person picks.
 
-A material is a "box" when its Material Type has duplicates_in_kitting_check. The candidates
+A material is a "box" when its Material Category has kitting_check_duplicates. The candidates
 for an order are the flagged materials in its auto-computed kitting requirement (before any
 override), so they stay stable however the person edits quantities.
 
@@ -33,7 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.kitting import OrderKittingAllocation, OrderKittingOverride
 from app.models.material import Material, MaterialAdjustment
-from app.models.material_type import MaterialType
+from app.models.material_category import MaterialCategory
 from app.models.order import Order, OrderLine, OrderStatus
 from app.schemas.box_check import (
     BoxCheckBoxRead,
@@ -61,11 +61,11 @@ def signature(box_ids: set[int]) -> str:
 
 
 async def flagged_material_ids(session: AsyncSession) -> set[int]:
-    """Every material whose type carries the kitting-check flag."""
+    """Every material whose category carries the kitting-check flag."""
     rows = await session.execute(
         select(Material.id)
-        .join(MaterialType, Material.material_type_id == MaterialType.id)
-        .where(MaterialType.duplicates_in_kitting_check.is_(True))
+        .join(MaterialCategory, Material.category_id == MaterialCategory.id)
+        .where(MaterialCategory.kitting_check_duplicates.is_(True))
     )
     return set(rows.scalars())
 
@@ -124,11 +124,11 @@ async def _shipped_multi_box_order_ids(session: AsyncSession, order_ids: list[in
     rows = await session.execute(
         select(OrderKittingAllocation.order_id)
         .join(Material, Material.id == OrderKittingAllocation.material_id)
-        .join(MaterialType, MaterialType.id == Material.material_type_id)
+        .join(MaterialCategory, MaterialCategory.id == Material.category_id)
         .where(
             OrderKittingAllocation.order_id.in_(order_ids),
             OrderKittingAllocation.consumed_qty > 0,
-            MaterialType.duplicates_in_kitting_check.is_(True),
+            MaterialCategory.kitting_check_duplicates.is_(True),
         )
         .group_by(OrderKittingAllocation.order_id)
         .having(func.count(distinct(OrderKittingAllocation.material_id)) >= 2)
@@ -269,7 +269,7 @@ async def _validate_selection(session: AsyncSession, payload: BoxCheckConfirm, f
     if not_boxes:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Only materials whose type is marked 'Duplicates in Kitting Check' can be chosen as boxes",
+            detail="Only materials in a category marked 'Kitting: check when an order has more than one' can be chosen as boxes",
         )
     return selected
 
