@@ -994,12 +994,12 @@ async def sync_listing_ceiling_qty(
             Listing.platform == ListingPlatform.etsy,
         )
     )
-    listing = result.scalar_one_or_none()
-    if listing is None:
-        return
-    listing.ceiling_qty = ceiling_qty
-    listing.last_synced_qty = ceiling_qty
-    listing.last_synced_at = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
+    # Every listing sharing the unit's SKU draws on the same stock, so each gets the figure.
+    for listing in result.scalars():
+        listing.ceiling_qty = ceiling_qty
+        listing.last_synced_qty = ceiling_qty
+        listing.last_synced_at = now
 
 
 async def get_orders_awaiting_packaging(session: AsyncSession) -> list[OrderAwaitingPackaging]:

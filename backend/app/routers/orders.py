@@ -372,6 +372,7 @@ def _serialize_order(
             needs_mapping=line.needs_mapping,
             cost_per_unit_snapshot=line.cost_per_unit_snapshot,
             variation_text=line.variation_text,
+            external_listing_id=line.external_listing_id,
             substituted_from=(
                 _ref(subs_by_new[line.id], subs_by_new[line.id].original_line_id) if line.id in subs_by_new else None
             ),
