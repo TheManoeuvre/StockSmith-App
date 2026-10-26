@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, column, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, column, func, true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, portable_enum
@@ -15,8 +15,8 @@ class ListingPlatform(str, enum.Enum):
 
 
 class Listing(Base):
-    """Per-product/variant marketplace listing state, one row per (product/variant,
-    platform). external_title/external_state/external_quantity/last_checked_at are
+    """Per-product/variant marketplace listing state: one primary row per (product/variant,
+    platform), plus one additional row for each further listing sharing the SKU. external_title/external_state/external_quantity/last_checked_at are
     populated by the Stage 1 SKU sync-verification check (services/listing_sync.py) — a
     read-only "does this SKU match a real listing" test. last_pushed_qty/last_pushed_at
     are the outbound quantity-push watermark (services/listing_push.py); last_synced_qty/
@@ -24,16 +24,31 @@ class Listing(Base):
 
     __tablename__ = "listings"
     __table_args__ = (
-        # One row per (product/variant, platform) — a NULL variant_id means "the product
-        # itself has no variants". Coalesced so two no-variant rows for the same product
-        # collide instead of being treated as distinct (plain UNIQUE would let NULLs
-        # duplicate freely).
+        # One *primary* row per (product/variant, platform) — a NULL variant_id means "the
+        # product itself has no variants". Coalesced so two no-variant rows for the same
+        # product collide instead of being treated as distinct (plain UNIQUE would let
+        # NULLs duplicate freely). Partial on is_primary because a unit can also carry
+        # additional rows, one per further marketplace listing that holds the same SKU
+        # (A/B-test and free-shipping variants sharing one stock pool).
         Index(
             "uq_listings_product_variant_platform",
             "product_id",
             func.coalesce(column("variant_id"), -1),
             "platform",
             unique=True,
+            sqlite_where=column("is_primary") == true(),
+            postgresql_where=column("is_primary") == true(),
+        ),
+        # A marketplace listing can be linked to a given unit once, primary or not.
+        Index(
+            "uq_listings_unit_platform_external_listing",
+            "product_id",
+            func.coalesce(column("variant_id"), -1),
+            "platform",
+            "external_listing_id",
+            unique=True,
+            sqlite_where=column("external_listing_id").is_not(None),
+            postgresql_where=column("external_listing_id").is_not(None),
         ),
     )
 
@@ -46,6 +61,14 @@ class Listing(Base):
         portable_enum(ListingPlatform, name="listing_platform"), nullable=False
     )
     external_listing_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # False for the second and later marketplace listings that hold this unit's SKU. The
+    # primary row is the one every single-listing code path reads (status badges, ceiling
+    # bookkeeping, draft linking); quantity pushes go to every linked row. Maintained by
+    # listing_sync.check_product_sku_sync, which is the only place rows are linked.
+    is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=true())
+    # Free-text seller label for telling listings of one unit apart ("free shipping",
+    # "test B"). Display only.
+    role: Mapped[str | None] = mapped_column(String, nullable=True)
     # The SKU this marketplace has actually acknowledged, as distinct from the one
     # StockSmith would compute today. Needed because external_listing_id means the
     # listing id on Etsy and the SKU on eBay, and because re-deriving the SKU to ask

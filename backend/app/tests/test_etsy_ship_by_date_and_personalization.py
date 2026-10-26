@@ -109,3 +109,12 @@ async def test_ship_by_date_is_none_when_no_transaction_reports_one():
     parsed = await _adapter()._parse_receipt(None, _CONNECTION, receipt)
 
     assert parsed.ship_by_date is None
+
+
+def test_parse_transaction_captures_listing_id_for_attribution():
+    """Several listings may share a SKU, so the listing a sale came from is kept on the
+    line (as a string, like every other external id) without affecting SKU matching."""
+    adapter = EtsyAdapter("id", "secret")
+    tx = {"transaction_id": 7, "listing_id": 1234567890, "sku": "SKU-BLUE", "quantity": 1}
+    assert adapter._parse_transaction(tx).external_listing_id == "1234567890"
+    assert adapter._parse_transaction({"transaction_id": 8, "sku": "X", "quantity": 1}).external_listing_id is None

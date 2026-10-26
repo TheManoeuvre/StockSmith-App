@@ -663,6 +663,7 @@ class EtsyAdapter:
             unit_price=unit_price,
             currency=price.get("currency_code"),
             variation_text=self._format_variations(tx.get("variations")),
+            external_listing_id=str(tx["listing_id"]) if tx.get("listing_id") else None,
         )
 
     @staticmethod
@@ -1186,6 +1187,20 @@ class EtsyAdapter:
         for listing in await self._crawl_shop_listings(session, connection, includes="Inventory"):
             self._index_listing_skus(listing, index)
         return index
+
+    async def build_listing_sku_multi_index(
+        self, session, connection: PlatformConnection, *, enrich: bool = True, enrich_skus: set[str] | None = None
+    ) -> dict[str, list[ExternalListingRef]]:
+        """Like build_listing_sku_index, but keeps every listing holding a SKU instead of
+        letting the last one crawled overwrite the rest. Sellers run several listings over
+        the same SKUs (A/B tests, a free-shipping variant) that draw on one stock pool, and
+        a quantity push has to reach all of them. Same crawl, so the same API cost; refs
+        are in crawl order (state order, then Etsy's own order within a state)."""
+        multi: dict[str, list[ExternalListingRef]] = {}
+        for listing in await self._crawl_shop_listings(session, connection, includes="Inventory"):
+            for ref in self._listing_sku_refs(listing):
+                multi.setdefault(ref.sku, []).append(ref)
+        return multi
 
     async def _crawl_shop_listings(self, session, connection: PlatformConnection, *, includes: str) -> list[dict]:
         """Every listing in the shop, across every state in _LISTING_STATES, in state
@@ -1799,11 +1814,12 @@ class EtsyAdapter:
         return f"{label} within {deadline} days" if deadline else label
 
     @staticmethod
-    def _index_listing_skus(listing: dict, index: dict[str, ExternalListingRef]) -> None:
+    def _listing_sku_refs(listing: dict) -> list[ExternalListingRef]:
         listing_id = str(listing.get("listing_id"))
         title = listing.get("title") or None
         state = listing.get("state") or "unknown"
         inventory = listing.get("inventory") or {}
+        refs = []
         for product in inventory.get("products", []):
             sku = product.get("sku")
             if not sku or product.get("is_deleted"):
@@ -1813,14 +1829,22 @@ class EtsyAdapter:
                 for offering in product.get("offerings", [])
                 if offering.get("is_enabled") and not offering.get("is_deleted")
             )
-            index[sku] = ExternalListingRef(
-                external_listing_id=listing_id,
-                title=title,
-                sku=sku,
-                state=state,
-                quantity=qty,
-                variation=EtsyAdapter._format_variation(product.get("property_values", [])),
+            refs.append(
+                ExternalListingRef(
+                    external_listing_id=listing_id,
+                    title=title,
+                    sku=sku,
+                    state=state,
+                    quantity=qty,
+                    variation=EtsyAdapter._format_variation(product.get("property_values", [])),
+                )
             )
+        return refs
+
+    @staticmethod
+    def _index_listing_skus(listing: dict, index: dict[str, ExternalListingRef]) -> None:
+        for ref in EtsyAdapter._listing_sku_refs(listing):
+            index[ref.sku] = ref
 
     @staticmethod
     def _format_variation(property_values: list[dict]) -> str | None:

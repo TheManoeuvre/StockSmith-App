@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { platformsApi, type UnitSyncResult } from "../../api/platforms";
+import { Fragment, useState, type ReactNode } from "react";
+import { platformsApi, type AdditionalListingResult, type UnitSyncResult } from "../../api/platforms";
 import type { ListingPlatform } from "../../api/types";
 import { ApiError } from "../../api/client";
 import { PLATFORM_LABELS } from "../../lib/platforms";
@@ -35,6 +35,16 @@ export function PlatformSyncSection({ productId, platform }: { productId: number
     mutationFn: () => platformsApi.pushCorrections(platform, productId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["platforms", platform, "products", productId, "sync-status"] });
+    },
+  });
+
+  // Label / make-primary: local bookkeeping, so the response (the refreshed status) is
+  // written straight into the cache rather than refetched.
+  const updateListingMutation = useMutation({
+    mutationFn: ({ listingId, body }: { listingId: number; body: { role?: string | null; is_primary?: true } }) =>
+      platformsApi.updateListing(platform, listingId, body),
+    onSuccess: (summary) => {
+      queryClient.setQueryData(["platforms", platform, "products", productId, "sync-status"], summary);
     },
   });
 
@@ -133,6 +143,7 @@ export function PlatformSyncSection({ productId, platform }: { productId: number
       {notConnected && <p className="text-sm text-slate-500">Connect {label} in Settings to test SKU sync.</p>}
       <ErrorBanner error={checkMutation.error} />
       <ErrorBanner error={pushCorrectionsMutation.error} />
+      <ErrorBanner error={updateListingMutation.error} />
       {mismatchedUnits.length > 0 && (
         // Testing sync deliberately doesn't correct anything on its own — pushing writes
         // to a live marketplace, so it stays behind an explicit click.
@@ -172,14 +183,15 @@ export function PlatformSyncSection({ productId, platform }: { productId: number
                 two tables' columns line up vertically when stacked, regardless of how long either
                 platform's listing title happens to be. */}
             <colgroup>
+              <col className="w-[11%]" />
               <col className="w-[13%]" />
-              <col className="w-[15%]" />
+              <col className="w-[10%]" />
+              <col className="w-[21%]" />
+              <col className="w-[11%]" />
+              <col className="w-[7%]" />
+              <col className="w-[7%]" />
+              <col className="w-[8%]" />
               <col className="w-[12%]" />
-              <col className="w-[24%]" />
-              <col className="w-[12%]" />
-              <col className="w-[8%]" />
-              <col className="w-[8%]" />
-              <col className="w-[8%]" />
             </colgroup>
             <thead>
               <tr className="border-b border-slate-200 text-slate-500">
@@ -193,11 +205,20 @@ export function PlatformSyncSection({ productId, platform }: { productId: number
                 <th className="p-1" title="What StockSmith would push for this unit">
                   Expected
                 </th>
+                <th className="p-1" title="Name listings that share a SKU, or choose which one is primary">
+                  Label
+                </th>
               </tr>
             </thead>
             <tbody>
               {(showAllUnits ? data.units : data.units.slice(0, INITIAL_UNIT_LIMIT)).map((unit) => (
-                <UnitSyncRow key={unit.variant_id ?? "product"} unit={unit} platform={platform} />
+                <UnitSyncRows
+                  key={unit.variant_id ?? "product"}
+                  unit={unit}
+                  platform={platform}
+                  onUpdate={(listingId, body) => updateListingMutation.mutate({ listingId, body })}
+                  busy={updateListingMutation.isPending}
+                />
               ))}
             </tbody>
           </table>
@@ -215,7 +236,62 @@ export function PlatformSyncSection({ productId, platform }: { productId: number
   );
 }
 
-function UnitSyncRow({ unit, platform }: { unit: UnitSyncResult; platform: ListingPlatform }) {
+type ListingUpdateBody = { role?: string | null; is_primary?: true };
+
+// A unit's primary row, then one indented row per further listing that holds its SKU. The
+// label column only has content when there is something to tell apart, so a unit with a
+// single listing looks exactly as it always did.
+function UnitSyncRows({
+  unit,
+  platform,
+  onUpdate,
+  busy,
+}: {
+  unit: UnitSyncResult;
+  platform: ListingPlatform;
+  onUpdate: (listingId: number, body: ListingUpdateBody) => void;
+  busy: boolean;
+}) {
+  const shared = unit.additional_listings.length > 0;
+  return (
+    <Fragment>
+      <UnitSyncRow
+        unit={unit}
+        platform={platform}
+        action={
+          shared && unit.listing_id !== null ? (
+            <ListingLabel
+              role={unit.role}
+              placeholder="Primary"
+              disabled={busy}
+              onSave={(role) => onUpdate(unit.listing_id as number, { role })}
+            />
+          ) : null
+        }
+      />
+      {unit.additional_listings.map((extra) => (
+        <AdditionalListingRow
+          key={extra.listing_id}
+          extra={extra}
+          expected={unit.expected_quantity}
+          platform={platform}
+          busy={busy}
+          onUpdate={onUpdate}
+        />
+      ))}
+    </Fragment>
+  );
+}
+
+function UnitSyncRow({
+  unit,
+  platform,
+  action,
+}: {
+  unit: UnitSyncResult;
+  platform: ListingPlatform;
+  action: ReactNode;
+}) {
   const mismatch = unit.quantity_mismatch;
   return (
     <tr className={`border-b border-slate-100 ${mismatch ? "bg-amber-50" : ""}`}>
@@ -240,6 +316,102 @@ function UnitSyncRow({ unit, platform }: { unit: UnitSyncResult; platform: Listi
       <td className={`truncate p-1 ${mismatch ? "font-medium text-amber-800" : "text-slate-500"}`}>
         {unit.expected_quantity ?? "-"}
       </td>
+      <td className="p-1">{action}</td>
     </tr>
+  );
+}
+
+function AdditionalListingRow({
+  extra,
+  expected,
+  platform,
+  busy,
+  onUpdate,
+}: {
+  extra: AdditionalListingResult;
+  expected: number | null;
+  platform: ListingPlatform;
+  busy: boolean;
+  onUpdate: (listingId: number, body: ListingUpdateBody) => void;
+}) {
+  const mismatch = extra.quantity_mismatch;
+  return (
+    <tr className={`border-b border-slate-100 ${mismatch ? "bg-amber-50" : "bg-slate-50"}`}>
+      <td className="truncate p-1 pl-4 text-slate-500" title="Another listing with the same SKU">
+        ↳ also listed
+      </td>
+      <td className="p-1" />
+      <td className="p-1">
+        <PlatformSyncBadge platform={platform} status={extra.status} />
+      </td>
+      <td className="truncate p-1" title={extra.external_title ?? undefined}>
+        {extra.external_title ?? "-"}
+      </td>
+      <td className="truncate p-1" title={extra.external_variation ?? undefined}>
+        {extra.external_variation ?? "-"}
+      </td>
+      <td className="truncate p-1">{extra.external_state ?? "-"}</td>
+      <td className={`truncate p-1 ${mismatch ? "font-medium text-amber-800" : ""}`}>
+        {extra.external_quantity ?? "-"}
+      </td>
+      <td className={`truncate p-1 ${mismatch ? "font-medium text-amber-800" : "text-slate-500"}`}>
+        {expected ?? "-"}
+      </td>
+      <td className="p-1">
+        <div className="flex flex-col gap-1">
+          <ListingLabel
+            role={extra.role}
+            placeholder="Add label"
+            disabled={busy}
+            onSave={(role) => onUpdate(extra.listing_id, { role })}
+          />
+          <button
+            onClick={() => onUpdate(extra.listing_id, { is_primary: true })}
+            disabled={busy}
+            title="The primary listing is the one this unit's status and badge describe. Stock is pushed to every listing either way."
+            className="self-start text-xs text-slate-600 underline disabled:opacity-50"
+          >
+            Make primary
+          </button>
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+// Saves on blur or Enter, and only when the text actually changed, so tabbing through the
+// table doesn't write anything.
+function ListingLabel({
+  role,
+  placeholder,
+  disabled,
+  onSave,
+}: {
+  role: string | null;
+  placeholder: string;
+  disabled: boolean;
+  onSave: (role: string | null) => void;
+}) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const value = draft ?? role ?? "";
+  const commit = () => {
+    if (draft !== null && draft.trim() !== (role ?? "")) onSave(draft.trim() || null);
+    setDraft(null);
+  };
+  return (
+    <input
+      aria-label="Listing label"
+      value={value}
+      maxLength={60}
+      placeholder={placeholder}
+      disabled={disabled}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") e.currentTarget.blur();
+        if (e.key === "Escape") setDraft(null);
+      }}
+      className="w-full rounded border border-slate-200 px-1 py-0.5 text-xs"
+    />
   );
 }

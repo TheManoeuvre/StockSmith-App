@@ -38,6 +38,10 @@ def _settings_read(settings_row, type_rows: list[NotificationTypeSettings]) -> N
         daily_summary_frequency=settings_row.daily_summary_frequency,
         daily_summary_hour_local=settings_row.daily_summary_hour_local,
         daily_summary_day_of_week=settings_row.daily_summary_day_of_week,
+        stock_take_reminder_enabled=settings_row.stock_take_reminder_enabled,
+        stock_take_reminder_frequency=settings_row.stock_take_reminder_frequency,
+        stock_take_reminder_hour_local=settings_row.stock_take_reminder_hour_local,
+        stock_take_reminder_day_of_week=settings_row.stock_take_reminder_day_of_week,
         pending_order_threshold=settings_row.pending_order_threshold,
         alert_types=[NotificationTypeSettingRead.model_validate(row) for row in type_rows],
     )
@@ -91,6 +95,12 @@ async def update_notification_settings(
     settings_row.daily_summary_hour_local = payload.daily_summary_hour_local
     settings_row.daily_summary_day_of_week = (
         payload.daily_summary_day_of_week if payload.daily_summary_frequency.value == "weekly" else None
+    )
+    settings_row.stock_take_reminder_enabled = payload.stock_take_reminder_enabled
+    settings_row.stock_take_reminder_frequency = payload.stock_take_reminder_frequency
+    settings_row.stock_take_reminder_hour_local = payload.stock_take_reminder_hour_local
+    settings_row.stock_take_reminder_day_of_week = (
+        payload.stock_take_reminder_day_of_week if payload.stock_take_reminder_frequency.value == "weekly" else None
     )
     settings_row.pending_order_threshold = payload.pending_order_threshold
 

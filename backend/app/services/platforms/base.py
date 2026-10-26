@@ -57,6 +57,10 @@ class ExternalOrderLine:
     # transaction.variations "Personalization" entry). None when the listing has no
     # personalization option or the buyer left it blank. eBay has no equivalent concept.
     variation_text: str | None = None
+    # The marketplace listing this line was sold from (Etsy transaction.listing_id), for
+    # attribution only — line matching stays SKU-based, since several listings may share
+    # a SKU and draw on one stock pool. None where the marketplace doesn't report it.
+    external_listing_id: str | None = None
 
 
 @dataclass

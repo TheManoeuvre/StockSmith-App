@@ -27,6 +27,7 @@ from decimal import Decimal
 from fastapi import HTTPException, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.db import async_session_factory
 from app.models.material import LegacyMaterialCategory, Material, MaterialAdjustment, MaterialAdjustmentMode
@@ -38,7 +39,7 @@ from app.models.purchase import MaterialPurchase, MaterialPurchaseReceipt
 from app.models.stock_adjustment import StockAdjustment, StockAdjustmentMode
 from app.models.stock_take import StockTake, StockTakeLine, StockTakeLineStatus, StockTakeStatus
 from app.models.variant import ProductVariant
-from app.schemas.stock_take import ScopePreview, ScopeWarning, StockTakeScope
+from app.schemas.stock_take import ScopeItemRead, ScopePreview, ScopeWarning, StockTakeScope
 from app.services import abc
 from app.services.costing import create_adjustment
 from app.services.platforms.base import ensure_utc
@@ -173,7 +174,57 @@ async def resolve_candidates(session: AsyncSession, scope: StockTakeScope) -> li
         candidates += await _material_candidates(session, scope, due_keys)
     if scope.include_products:
         candidates += await _product_candidates(session, scope, due_keys)
+    if scope.selected_items is not None:
+        picked = {(i.material_id, i.product_id, i.variant_id) for i in scope.selected_items}
+        candidates = [c for c in candidates if c.key in picked]
     return candidates
+
+
+async def list_scope_items(session: AsyncSession, scope: StockTakeScope) -> list[ScopeItemRead]:
+    """Every row the scope's filters match (ignoring any existing selection), with when each
+    was last counted and whether it is due — what the "Select items" picker shows."""
+    filters = scope.model_copy(update={"selected_items": None})
+    candidates = await resolve_candidates(session, filters)
+    due_keys = {(d.material_id, d.product_id, d.variant_id) for d in await abc.compute_due_for_count(session)}
+
+    material_ids = [c.material_id for c in candidates if c.material_id is not None]
+    product_ids = [c.product_id for c in candidates if c.product_id is not None]
+    materials = (
+        {m.id: m for m in (await session.execute(select(Material).where(Material.id.in_(material_ids)))).scalars()}
+        if material_ids
+        else {}
+    )
+    products = (
+        {
+            p.id: p
+            for p in (
+                await session.execute(
+                    select(Product).options(selectinload(Product.product_category)).where(Product.id.in_(product_ids))
+                )
+            ).scalars()
+        }
+        if product_ids
+        else {}
+    )
+    out = []
+    for c in candidates:
+        if c.material_id is not None:
+            section, group = "Materials", materials[c.material_id].category_name or ""
+        else:
+            section, group = "Products", products[c.product_id].product_category_name or ""
+        out.append(
+            ScopeItemRead(
+                material_id=c.material_id,
+                product_id=c.product_id,
+                variant_id=c.variant_id,
+                name=c.name,
+                section=section,
+                group=group,
+                last_stock_take_at=c.last_stock_take_at,
+                is_due=c.key in due_keys,
+            )
+        )
+    return out
 
 
 async def describe_scope(session: AsyncSession, scope: StockTakeScope) -> str:
@@ -208,6 +259,9 @@ async def describe_scope(session: AsyncSession, scope: StockTakeScope) -> str:
     description = " and ".join(parts) if parts else "nothing"
     if scope.overdue_only:
         description += ", due for counting only"
+    if scope.selected_items is not None:
+        n = len(scope.selected_items)
+        description += f", {n} hand-picked item{'s' if n != 1 else ''}"
     return description[0].upper() + description[1:]
 
 
@@ -363,14 +417,18 @@ async def create_stock_take(session: AsyncSession, scope: StockTakeScope) -> tup
     # start flow — on 2026-09-02 two takes with the same scope were created six seconds
     # apart, and the duplicate could only be cleared by hand. Refuse it and point at the
     # take already open; a deliberate re-count means closing or narrowing that one first.
-    duplicate = (
-        await session.execute(
-            select(StockTake)
-            .where(StockTake.status == StockTakeStatus.open)
-            .where(StockTake.scope_description == description)
-            .order_by(StockTake.id)
-        )
-    ).scalars().first()
+    # A hand-picked scope renders as a count, so two different picks of the same size would
+    # look identical; there the open-take warning in the preview is the only guard.
+    duplicate = None
+    if scope.selected_items is None:
+        duplicate = (
+            await session.execute(
+                select(StockTake)
+                .where(StockTake.status == StockTakeStatus.open)
+                .where(StockTake.scope_description == description)
+                .order_by(StockTake.id)
+            )
+        ).scalars().first()
     if duplicate is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,

@@ -579,6 +579,7 @@ async def _upsert_lines(session: AsyncSession, order: Order, ext_order: External
                 sku=ext_line.sku,
                 needs_mapping=needs_mapping,
                 variation_text=ext_line.variation_text,
+                external_listing_id=ext_line.external_listing_id,
             )
         )
     await default_order_shipping_profile(session, order)

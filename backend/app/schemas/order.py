@@ -100,6 +100,7 @@ class OrderLineRead(BaseModel):
     needs_mapping: bool
     cost_per_unit_snapshot: Decimal | None = None
     variation_text: str | None = None
+    external_listing_id: str | None = None
     # Substitution provenance — see app.models.order_substitution.OrderLineSubstitution.
     # substituted_from is set when this line was itself created by a substitution;
     # substituted_to lists the still-active (not undone) substitutions made FROM this line.

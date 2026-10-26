@@ -252,10 +252,16 @@ async def push_units_now(
                 # StockSmith. This path is also the manual retry for a blocked listing:
                 # the sweep backs those off, but a user who has just fixed the listing on
                 # the marketplace and clicked "Push corrections" gets an answer now.
-                errors.append(f"{listing.platform.value} listing for variant {variant_id}: {message}")
+                errors.append(f"{_describe_listing(listing, variant_id)}: {message}")
             elif status == ListingPushStatus.error:
-                errors.append(f"{listing.platform.value} listing for variant {variant_id}: push failed")
+                errors.append(f"{_describe_listing(listing, variant_id)}: push failed")
     return pushed, errors
+
+
+def _describe_listing(listing: Listing, variant_id: int | None) -> str:
+    # The listing id only when the unit has several, so the single-listing wording is unchanged.
+    label = f"{listing.platform.value} listing for variant {variant_id}"
+    return label if listing.is_primary else f"{label} (additional listing {listing.external_listing_id})"
 
 
 async def _resolve_max_sellable(session: AsyncSession, product_id: int, variant_id: int | None) -> int | None:
@@ -433,6 +439,7 @@ async def _push_one(
                 platform=listing.platform,
                 attempted_qty=qty,
                 status=ListingPushStatus.blocked,
+                listing_id=listing.id,
                 error_message=str(e)[:2000],
             )
         )
@@ -453,6 +460,7 @@ async def _push_one(
                 platform=listing.platform,
                 attempted_qty=qty,
                 status=ListingPushStatus.error,
+                listing_id=listing.id,
                 error_message=str(e)[:2000],
             )
         )
@@ -478,6 +486,7 @@ async def _push_one(
             platform=listing.platform,
             attempted_qty=qty,
             status=ListingPushStatus.success,
+            listing_id=listing.id,
         )
     )
     await session.commit()

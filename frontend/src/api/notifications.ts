@@ -16,7 +16,8 @@ export type NotificationCategory =
   | "shipping_profile_missing"
   | "replacement_parcel_review"
   | "order_cancellation_pending"
-  | "daily_summary";
+  | "daily_summary"
+  | "stock_take_due";
 
 export type NotificationUrgency = "immediate" | "digest";
 export type NotificationDeliveryMode = "immediate" | "digest" | "off";
@@ -69,6 +70,10 @@ export interface NotificationSettings {
   daily_summary_frequency: SummaryFrequency;
   daily_summary_hour_local: number;
   daily_summary_day_of_week: number | null;
+  stock_take_reminder_enabled: boolean;
+  stock_take_reminder_frequency: SummaryFrequency;
+  stock_take_reminder_hour_local: number;
+  stock_take_reminder_day_of_week: number | null;
   pending_order_threshold: number;
   alert_types: NotificationTypeSetting[];
 }
@@ -88,6 +93,10 @@ export interface NotificationSettingsUpdate {
   daily_summary_frequency: SummaryFrequency;
   daily_summary_hour_local: number;
   daily_summary_day_of_week: number | null;
+  stock_take_reminder_enabled: boolean;
+  stock_take_reminder_frequency: SummaryFrequency;
+  stock_take_reminder_hour_local: number;
+  stock_take_reminder_day_of_week: number | null;
   pending_order_threshold: number;
   alert_types: NotificationTypeSetting[];
 }
