@@ -7,11 +7,9 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 use tauri::{Manager, State, WindowEvent};
 use tauri_plugin_autostart::ManagerExt;
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogResult};
-use tauri_plugin_opener::OpenerExt;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 use tauri_plugin_shell::process::CommandEvent;
 use tauri_plugin_shell::ShellExt;
-use tauri_plugin_updater::UpdaterExt;
 
 const BACKEND_HEALTH_URL: &str = "http://127.0.0.1:8000/healthz";
 const BACKEND_STATUS_URL: &str = "http://127.0.0.1:8000/system/status";
@@ -73,6 +71,29 @@ fn greet(name: &str) -> String {
 #[tauri::command]
 fn restart_app(app: tauri::AppHandle) {
     app.request_restart();
+}
+
+/// Stop this machine's backend so the updater can replace its executable.
+///
+/// Windows cannot overwrite a running exe, and an update applied over a live sidecar is
+/// exactly how a new UI ends up talking to an old API (see `version_matches`). The update used
+/// to run before the sidecar was spawned, which made this a non-issue; now it is installed from
+/// the Settings page with the backend up, so the frontend downloads first, calls this, then
+/// installs.
+///
+/// Sets `QUITTING` so the supervisor treats the dead backend as deliberate rather than
+/// respawning it under the installer's feet. If the install then fails, the frontend calls
+/// `restart_app`, which brings a fresh shell (and backend) up. A thin client owns no sidecar,
+/// so this is a no-op there.
+#[tauri::command]
+fn stop_backend_for_update(app: tauri::AppHandle) {
+    QUITTING.store(true, Ordering::SeqCst);
+    let state: State<SidecarState> = app.state();
+    let mut guard = state.0.lock().unwrap();
+    if let Some(pid) = guard.take() {
+        kill_process_tree(pid);
+        clear_recorded_pid();
+    }
 }
 
 async fn is_backend_healthy() -> bool {
@@ -348,136 +369,11 @@ async fn spawn_sidecar_if_needed(app: &tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// The GitHub repo release notes are published under, used to build a "view full notes"
-/// link for the update dialog. Kept in sync with the updater endpoint in tauri.conf.json.
-const GITHUB_REPO: &str = "TheManoeuvre/StockSmith-App";
-
-/// Upper bound on the release notes shown in the update dialog, as a safety net. The
-/// per-bullet summary below is normally well under this, but a native message dialog
-/// doesn't scroll, so an unusually long list of changes could still push the buttons out
-/// of reach.
-const MAX_NOTES_CHARS: usize = 1200;
-
-/// Trims release notes to `limit` characters, cutting at a line boundary so the result
-/// never ends mid-sentence. Counts chars rather than bytes so a multi-byte character
-/// can't be split (which would panic on a slice).
-fn truncate_notes(notes: &str, limit: usize) -> String {
-    if notes.chars().count() <= limit {
-        return notes.to_string();
-    }
-    let clipped: String = notes.chars().take(limit).collect();
-    let cut = clipped.rfind('\n').unwrap_or(clipped.len());
-    format!("{}\n(…see the full release notes on GitHub)", clipped[..cut].trim_end())
-}
-
-/// Reduces CHANGELOG.md prose to a one-line-per-feature bullet list for the update dialog.
-/// Every changelog entry is written as `- **Headline.** paragraph of wrapped detail...`
-/// (see CHANGELOG.md's own header comment), so pulling out just the bold headline — plus
-/// each `### Section` heading — gives a concise summary without having to actually
-/// summarize free text. A bullet with no bold headline falls back to its raw first line.
-fn summarize_notes(notes: &str) -> String {
-    let mut out = String::new();
-    for line in notes.lines() {
-        let line = line.trim();
-        if let Some(heading) = line.strip_prefix("### ") {
-            if !out.is_empty() {
-                out.push('\n');
-            }
-            out.push_str(heading.trim());
-            out.push('\n');
-        } else if let Some(rest) = line.strip_prefix("- ") {
-            let headline = if let Some(bold) = rest.strip_prefix("**") {
-                bold.find("**").map(|end| bold[..end].trim()).unwrap_or_else(|| rest.trim())
-            } else {
-                rest.trim()
-            };
-            out.push_str("• ");
-            out.push_str(headline);
-            out.push('\n');
-        }
-        // Wrapped continuation prose isn't a new bullet or heading, so it's dropped —
-        // the headline alone is the "1-2 lines per feature" summary.
-    }
-    truncate_notes(out.trim(), MAX_NOTES_CHARS)
-}
-
-/// Checks GitHub Releases (via the endpoint configured in tauri.conf.json) for a newer
-/// signed release. Silently does nothing if the check fails (e.g. no release published
-/// yet, no network) or the user declines — either way, normal startup continues. Never
-/// returns if the user accepts and the install succeeds: `app.restart()` diverges.
-async fn check_for_update_and_maybe_install(app: &tauri::AppHandle) {
-    let updater = match app.updater() {
-        Ok(u) => u,
-        Err(_) => return,
-    };
-    let update = match updater.check().await {
-        Ok(Some(update)) => update,
-        _ => return,
-    };
-
-    // Release notes come from the `notes` field in latest.json, which the release
-    // workflow fills from the matching CHANGELOG.md section. Older releases (and any
-    // build where the section was missing) have none, so the version-only wording stays
-    // as the fallback rather than leaving an empty gap in the dialog.
-    let notes = update.body.as_deref().unwrap_or("").trim();
-    let summary = if notes.is_empty() { String::new() } else { summarize_notes(notes) };
-    let message = if summary.is_empty() {
-        format!(
-            "A new version ({}) is available. Install it now? The app will restart.",
-            update.version
-        )
-    } else {
-        format!(
-            "A new version ({}) is available.\n\nWhat's new:\n{}\nInstall it now? The app will restart.",
-            update.version,
-            summary
-        )
-    };
-
-    // A native message dialog can't render a clickable hyperlink, so "view the full notes"
-    // is its own button instead of inline text; pressing it opens the release page and
-    // leaves the update prompt unanswered (checked again next launch).
-    let release_url =
-        format!("https://github.com/{GITHUB_REPO}/releases/tag/v{}", update.version);
-
-    let result = app
-        .dialog()
-        .message(message)
-        .title("StockSmith Update Available")
-        .buttons(MessageDialogButtons::YesNoCancelCustom(
-            "Install".into(),
-            "Later".into(),
-            "View on GitHub".into(),
-        ))
-        .blocking_show_with_result();
-
-    let confirmed = match result {
-        MessageDialogResult::Custom(label) if label == "Install" => true,
-        MessageDialogResult::Custom(label) if label == "View on GitHub" => {
-            let _ = app.opener().open_url(release_url, None::<&str>);
-            false
-        }
-        _ => false,
-    };
-
-    if !confirmed {
-        return;
-    }
-
-    if update.download_and_install(|_, _| {}, || {}).await.is_err() {
-        return;
-    }
-
-    app.restart();
-}
-
 /// The window itself is visible from the moment the app launches — the webview renders its
 /// own splash screen (see frontend `SplashScreen.tsx`) while it waits for the backend to
 /// answer. This just spawns the backend and, if it never comes up, surfaces an error dialog;
 /// it no longer needs to toggle window visibility.
 async fn start_backend(app: tauri::AppHandle) {
-    check_for_update_and_maybe_install(&app).await;
-
     if let Err(message) = spawn_sidecar_if_needed(&app).await {
         show_startup_error(&app, &message);
         return;
@@ -702,7 +598,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(SidecarState(Mutex::new(None)))
-        .invoke_handler(tauri::generate_handler![greet, restart_app, autostart_enabled, set_autostart])
+        .invoke_handler(tauri::generate_handler![greet, restart_app, stop_backend_for_update, autostart_enabled, set_autostart])
         .setup(|app| {
             // Cleared on every launch: the marker means "the user quit deliberately, stay
             // down", and starting the app is the user saying otherwise.
@@ -817,39 +713,5 @@ mod tests {
         // PID 0 is the system idle process on Windows and never ours; killing a tree rooted
         // there is not something to attempt on the strength of a stale file.
         assert_eq!(parse_pid("0"), None);
-    }
-
-    use super::{truncate_notes, MAX_NOTES_CHARS};
-
-    #[test]
-    fn short_notes_pass_through_unchanged() {
-        let notes = "### Fixed\n- Something small.";
-        assert_eq!(truncate_notes(notes, MAX_NOTES_CHARS), notes);
-    }
-
-    #[test]
-    fn long_notes_are_cut_at_a_line_boundary() {
-        let notes = "line one\nline two\nline three";
-        let out = truncate_notes(notes, 14); // lands inside "line two"
-        assert!(out.starts_with("line one"));
-        assert!(!out.contains("line two"));
-        assert!(out.contains("see the full release notes"));
-    }
-
-    #[test]
-    fn multibyte_characters_are_not_split() {
-        // Slicing by byte index here would panic — the em dashes are 3 bytes each.
-        let notes = "— — — — — — — — — —\nsecond line";
-        let out = truncate_notes(notes, 5);
-        assert!(out.contains("see the full release notes"));
-    }
-
-    #[test]
-    fn a_single_overlong_line_still_truncates() {
-        // No newline to cut at — must not panic or return the whole thing.
-        let notes = "a".repeat(100);
-        let out = truncate_notes(&notes, 10);
-        assert!(out.len() < notes.len());
-        assert!(out.contains("see the full release notes"));
     }
 }
