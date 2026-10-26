@@ -268,6 +268,7 @@ async def push_draft(
                         if unit.variant_id is not None
                         else Listing.variant_id.is_(None),
                         Listing.platform == platform,
+                        Listing.is_primary.is_(True),
                     )
                 )
             ).scalar_one_or_none()

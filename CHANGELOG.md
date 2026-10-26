@@ -14,6 +14,15 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **A new About page in Settings.** It shows the installed version, a link to the project on GitHub,
+  the licence, and the open-source packages StockSmith is built on with their licences.
+- **Updates are now checked while the app is open, not just at launch.** StockSmith looks for a new
+  release shortly after it starts, every six hours after that, and when you return to the window. When
+  one is found, Settings and its About entry show a dot, and the About page shows what's new and an
+  Install and restart button. If you're several releases behind you see the newest release's notes, with
+  a link to the full history on GitHub.
+- **Ignore an update.** Choosing Ignore this version hides the notice, and it stays hidden across
+  restarts. A newer release brings the notice back. An ignored version can still be installed from About.
 - **Pick exactly which items to count.** Starting a stock take now has a Select items button next
   to Start counting. It lists everything the current filters match, with the date each item was
   last counted and whether it is due, so you can tick just the ones you want.
@@ -22,6 +31,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **The update prompt at launch has been removed.** Updates are now offered from Settings > About, so
+  "Later" no longer asks again on every start.
 - **"Only what's due for counting" is now on by default** when you start a stock take. Untick it
   to count everything.
 

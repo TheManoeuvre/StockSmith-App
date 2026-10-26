@@ -6,7 +6,7 @@ once switched on. The new `stock_take_due` notification category needs no column
 category column is a VARCHAR already wide enough for it.
 
 Revision ID: b4d8f2a6c139
-Revises: e2b7c4a91d58
+Revises: a8d4e2f61c93
 Create Date: 2026-10-24 00:00:00.000000
 
 """
@@ -18,7 +18,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'b4d8f2a6c139'
-down_revision: Union[str, Sequence[str], None] = 'e2b7c4a91d58'
+down_revision: Union[str, Sequence[str], None] = 'a8d4e2f61c93'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
