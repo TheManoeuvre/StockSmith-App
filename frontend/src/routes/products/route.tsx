@@ -517,16 +517,20 @@ function ProductRow({
         >
           {p.name}
         </Link>
-        {p.made_to_order && (
-          <span
-            title="Built against an order, so it is never counted"
-            className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600"
-          >
-            made to order
-          </span>
-        )}
-        {!p.is_active && (
-          <Badge className="ml-2 bg-slate-100 text-slate-600">Inactive</Badge>
+        {(p.made_to_order || !p.is_active) && (
+          <div className="mt-1 flex flex-wrap gap-1">
+            {p.made_to_order && (
+              <span
+                title="Built against an order, so it is never counted"
+                className="whitespace-nowrap rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600"
+              >
+                made to order
+              </span>
+            )}
+            {!p.is_active && (
+              <Badge className="bg-slate-100 text-slate-600">Inactive</Badge>
+            )}
+          </div>
         )}
       </td>
       <td className="p-2">
