@@ -23,7 +23,9 @@ from app.models.platform_api_usage import PlatformApiUsage
 
 logger = logging.getLogger("stocksmith.platform_api_usage")
 
-# Provider-published daily request ceilings. Etsy documents 10,000/day. eBay varies by
+# Fallback daily request ceilings, used only until the provider reports its own (Etsy
+# sends x-limit-per-day / x-remaining-today on every response — see observe_limits) and
+# for platforms that never do. Etsy documents 10,000/day. eBay varies by
 # call family; 5,000 is the conservative working figure this app already uses for the
 # Trading API's tight budget (docs/plan-ebay-existing-store-onboarding.md). These are API
 # facts, not deployment config, so they live in code rather than Settings.
@@ -55,6 +57,9 @@ _HARD_LIMIT_FRACTION = 0.95
 _pending_deltas: dict[tuple[ListingPlatform, date], int] = defaultdict(int)
 _flush_lock = asyncio.Lock()
 
+# Latest provider-reported quota per platform: (UTC date seen, daily limit, remaining).
+_observed: dict[ListingPlatform, tuple[date, int, int]] = {}
+
 
 def _today() -> date:
     return datetime.now(timezone.utc).date()
@@ -65,6 +70,30 @@ def record(platform: ListingPlatform, count: int = 1) -> None:
     inside an adapter's request helper without a session or an await."""
     if count:
         _pending_deltas[(platform, _today())] += count
+
+
+def observe_limits(platform: ListingPlatform, daily_limit: int, remaining: int) -> None:
+    """Record the provider's own view of today's quota (Etsy's x-limit-per-day /
+    x-remaining-today response headers). Once seen, it replaces both the hard-coded
+    budget and our local call tally for the rest of the UTC day — it is authoritative
+    and also counts calls made by anything else sharing the API key.
+
+    Responses can complete out of order under concurrency, so within a day (and while the
+    limit is unchanged) the lowest `remaining` wins. Held in memory only: after a restart
+    the fallbacks apply until the next response carries the headers again."""
+    today = _today()
+    previous = _observed.get(platform)
+    if previous is not None and previous[0] == today and previous[1] == daily_limit:
+        remaining = min(remaining, previous[2])
+    _observed[platform] = (today, daily_limit, remaining)
+
+
+def _observed_today(platform: ListingPlatform) -> tuple[int, int] | None:
+    """(daily_limit, remaining) from today's provider headers, or None if not seen yet."""
+    seen = _observed.get(platform)
+    if seen is None or seen[0] != _today():
+        return None
+    return seen[1], seen[2]
 
 
 async def flush() -> None:
@@ -93,13 +122,23 @@ async def flush() -> None:
 
 
 async def usage_today(session, platform: ListingPlatform) -> int:
-    """Calls made to `platform` so far today, including deltas not yet flushed."""
+    """Calls made to `platform` so far today. Uses the provider's own count (limit minus
+    remaining) when it has reported one today, else our local tally including deltas not
+    yet flushed."""
+    observed = _observed_today(platform)
+    if observed is not None:
+        limit, remaining = observed
+        return max(limit - remaining, 0)
     await flush()
     row = await session.get(PlatformApiUsage, (platform, _today()))
     return row.call_count if row is not None else 0
 
 
 def daily_budget(platform: ListingPlatform) -> int:
+    """Today's call ceiling: the provider-reported limit if seen, else the static fallback."""
+    observed = _observed_today(platform)
+    if observed is not None:
+        return observed[0]
     return _DAILY_BUDGET.get(platform, _DEFAULT_BUDGET)
 
 
@@ -123,3 +162,4 @@ async def over_hard_limit(session, platform: ListingPlatform) -> bool:
 
 def _reset_for_tests() -> None:
     _pending_deltas.clear()
+    _observed.clear()
