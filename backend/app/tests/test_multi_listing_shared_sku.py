@@ -257,3 +257,69 @@ async def test_stored_status_reads_back_the_additional_listings(session, product
     unit = summary.units[0]
     assert unit.external_listing_id == "A"
     assert [a.external_listing_id for a in unit.additional_listings] == ["B"]
+
+
+# --- Seller edits ---------------------------------------------------------------------
+
+
+async def test_a_listing_can_be_labelled_and_the_label_clears(session, product):
+    await _check(session, {"SKU-1": [_ref("A"), _ref("B")]})
+    b = next(r for r in await _rows(session) if r.external_listing_id == "B")
+
+    await listing_sync.update_listing(session, b.id, True, "  Free shipping  ", False)
+    summary = await listing_sync.get_stored_product_sync_status(session, 1, ListingPlatform.etsy)
+    assert summary.units[0].additional_listings[0].role == "Free shipping"
+
+    await listing_sync.update_listing(session, b.id, True, "", False)
+    summary = await listing_sync.get_stored_product_sync_status(session, 1, ListingPlatform.etsy)
+    assert summary.units[0].additional_listings[0].role is None
+
+
+async def test_leaving_the_label_out_keeps_it(session, product):
+    await _check(session, {"SKU-1": [_ref("A")]})
+    a = (await _rows(session))[0]
+    await listing_sync.update_listing(session, a.id, True, "Control", False)
+
+    await listing_sync.update_listing(session, a.id, False, None, False)
+
+    assert (await _rows(session))[0].role == "Control"
+
+
+async def test_promoting_an_additional_listing_swaps_the_primary(session, product):
+    await _check(session, {"SKU-1": [_ref("A"), _ref("B")]})
+    b = next(r for r in await _rows(session) if r.external_listing_id == "B")
+
+    await listing_sync.update_listing(session, b.id, False, None, True)
+
+    assert {r.external_listing_id: r.is_primary for r in await _rows(session)} == {"A": False, "B": True}
+    # And the choice survives the next check even though the crawl still lists A first.
+    await _check(session, {"SKU-1": [_ref("A"), _ref("B")]})
+    assert {r.external_listing_id: r.is_primary for r in await _rows(session)} == {"A": False, "B": True}
+
+
+async def test_an_overlong_label_or_unknown_listing_is_refused(session, product):
+    await _check(session, {"SKU-1": [_ref("A")]})
+    a = (await _rows(session))[0]
+
+    with pytest.raises(ValueError):
+        await listing_sync.update_listing(session, a.id, True, "x" * 61, False)
+    with pytest.raises(ValueError):
+        await listing_sync.update_listing(session, 9999, True, "x", False)
+
+
+async def test_the_endpoint_refuses_a_listing_on_another_platform(session, product):
+    from fastapi import HTTPException
+
+    from app.routers import platforms
+    from app.schemas.listing import ListingUpdate
+
+    await _check(session, {"SKU-1": [_ref("A")]})
+    a = (await _rows(session))[0]
+
+    with pytest.raises(HTTPException) as refused:
+        await platforms.update_linked_listing(ListingPlatform.ebay, a.id, ListingUpdate(role="x"), session)
+    assert refused.value.status_code == 404
+
+    summary = await platforms.update_linked_listing(ListingPlatform.etsy, a.id, ListingUpdate(role="Control"), session)
+    assert summary.units[0].role == "Control"
+    assert summary.units[0].listing_id == a.id

@@ -1,5 +1,6 @@
 import enum
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -35,7 +36,20 @@ class AdditionalListingResult(BaseModel):
     quantity_mismatch: bool = False
 
 
+class ListingUpdate(BaseModel):
+    """What a seller can change about one linked listing. Fields left out are untouched, so
+    `role: null` clears the label while omitting it keeps it."""
+
+    role: str | None = None
+    # Only ever "make this the primary" — there is no way to un-primary a listing except by
+    # promoting a sibling, since a unit always has exactly one.
+    is_primary: Literal[True] | None = None
+
+
 class UnitSyncResult(BaseModel):
+    # The primary listing's row id and label, for editing them. None before a first check.
+    listing_id: int | None = None
+    role: str | None = None
     variant_id: int | None
     variant_name: str | None
     sku: str | None

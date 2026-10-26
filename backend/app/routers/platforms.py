@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db, require_auth
-from app.models.listing import ListingPlatform
+from app.models.listing import Listing, ListingPlatform
 from app.models.platform_connection import PlatformConnection
 from app.models.platform_credential import PlatformAppCredential, PlatformEnvironment
 from app.models.platform_listing_push import PlatformListingPush
@@ -20,7 +20,12 @@ from app.models.platform_sync_run import PlatformSyncRun, SyncRunMode, SyncRunSt
 from app.models.product import Product
 from app.schemas.product import ProductStoreState
 from app.models.variant import ProductVariant
-from app.schemas.listing import BulkListingSyncResult, ProductListingSyncSummary, PushCorrectionsResult
+from app.schemas.listing import (
+    BulkListingSyncResult,
+    ListingUpdate,
+    ProductListingSyncSummary,
+    PushCorrectionsResult,
+)
 from app.schemas.platform import (
     EbaySigningKeyStatus,
     NewProductDefaultRequest,
@@ -1458,6 +1463,32 @@ async def push_product_corrections(
     except PlatformError as e:
         raise _map_platform_error(e)
     return PushCorrectionsResult(pushed_count=pushed, failed_count=len(errors), errors=errors)
+
+
+@router.patch(
+    "/{platform}/listings/{listing_id}",
+    response_model=ProductListingSyncSummary,
+    dependencies=[Depends(require_auth)],
+)
+async def update_linked_listing(
+    platform: ListingPlatform, listing_id: int, body: ListingUpdate, session: AsyncSession = Depends(get_db)
+) -> ProductListingSyncSummary:
+    """Labels a linked listing or makes it its unit's primary — local bookkeeping only, no
+    marketplace call. Returns the product's stored sync status so the panel can redraw."""
+    listing = await session.get(Listing, listing_id)
+    if listing is None or listing.platform != platform:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Listing not found")
+    try:
+        await listing_sync.update_listing(
+            session,
+            listing_id,
+            role_given="role" in body.model_fields_set,
+            role=body.role,
+            make_primary=bool(body.is_primary),
+        )
+        return await listing_sync.get_stored_product_sync_status(session, listing.product_id, platform)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
 
 
 @router.get(

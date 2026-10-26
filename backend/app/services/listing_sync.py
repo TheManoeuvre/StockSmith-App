@@ -327,6 +327,8 @@ async def check_product_sku_sync(
 
         units.append(
             UnitSyncResult(
+                listing_id=await _id_of(session, listing),
+                role=listing.role,
                 variant_id=variant_id,
                 variant_name=variant_name,
                 sku=sku,
@@ -349,6 +351,45 @@ async def check_product_sku_sync(
     await session.commit()
     status = rollup_product_status([u.status for u in units])
     return ProductListingSyncSummary(product_id=product_id, product_status=status, units=units)
+
+
+_MAX_ROLE_LENGTH = 60
+
+
+async def update_listing(
+    session: AsyncSession, listing_id: int, role_given: bool, role: str | None, make_primary: bool
+) -> Listing:
+    """Edits a seller-controlled field of one listings row: its label, and which of a unit's
+    listings is the primary. Raises ValueError for an unknown row or an over-long label.
+
+    Promotion swaps the flag with the unit's current primary in two flushes — the partial
+    unique index allows one primary per unit, so the demotion has to land first."""
+    listing = await session.get(Listing, listing_id)
+    if listing is None:
+        raise ValueError(f"Listing {listing_id} not found")
+
+    if role_given:
+        cleaned = (role or "").strip() or None
+        if cleaned is not None and len(cleaned) > _MAX_ROLE_LENGTH:
+            raise ValueError(f"A listing label can be at most {_MAX_ROLE_LENGTH} characters")
+        listing.role = cleaned
+
+    if make_primary and not listing.is_primary:
+        current = next(
+            (
+                r
+                for r in await _unit_rows(session, listing.product_id, listing.variant_id, listing.platform)
+                if r.is_primary
+            ),
+            None,
+        )
+        if current is not None:
+            current.is_primary = False
+            await session.flush()
+        listing.is_primary = True
+
+    await session.commit()
+    return listing
 
 
 async def _unlink_stale_unit_rows(
@@ -466,6 +507,8 @@ async def get_stored_product_sync_status(
         ]
         units.append(
             UnitSyncResult(
+                listing_id=listing.id if listing else None,
+                role=listing.role if listing else None,
                 variant_id=variant_id,
                 variant_name=variant_name,
                 sku=sku,

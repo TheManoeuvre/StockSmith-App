@@ -1,6 +1,6 @@
 # Multi-listing support for shared SKUs (Etsy)
 
-Status: draft design, nothing built. Scope: Etsy first; the model change is platform-neutral, eBay/Square behaviour is untouched.
+Status: stages 1-3 built (order attribution; model, discovery and push fan-out; sync-panel display, labels and primary choice). Stage 4 and the points marked open below remain. Scope: Etsy first; the model change is platform-neutral, eBay/Square behaviour is untouched.
 
 ## Why
 
@@ -81,3 +81,42 @@ Stage 2 is the safety fix and should not wait on UI.
 - `ExternalListingRef`'s single-listing assumption leaks into `base.py`; keep the multi-index additive to avoid touching eBay/Square.
 - Draft/inactive listings sharing the SKU: decide whether pushes skip non-active listings (suggested: push to `active` and `inactive` as today, skip `draft`/`sold_out`/`expired` only if Etsy rejects them).
 - Etsy ToS/policy on duplicate listings is the seller's concern; StockSmith only keeps stock consistent.
+
+## API budget research (2026-10-26)
+
+**Etsy's real limit is not what the code assumes.** Etsy's rate-limit guide says the daily
+limit (QPD) is per application key, shown in the developer portal, and is a *rolling 24-hour
+sliding window* rather than a midnight reset; every response carries `x-limit-per-day` and
+`x-remaining-today`. StockSmith hardcodes 10,000 per UTC day (`platform_api_usage._DAILY_BUDGET`)
+and never reads those headers. Worth fixing independently: record the headers and use
+`x-remaining-today` as the source of truth for the soft/hard limits.
+
+**Measured baseline (prod install, 14 days to 2026-10-26):** Etsy uses 500-800 calls a day,
+roughly 7% of 10,000. Pushes are ~600 a day, and every one is a single no-op GET: the hourly
+reconcile sweep (`_MAX_PER_RUN` = 25, `_STALE_AFTER` = 12h) accounts for 24 x 25 = 600. There
+are 744 linked units across only 26 distinct Etsy listings, about 29 variations per listing.
+
+**What a second listing costs:**
+- Event-driven pushes are gated by the per-row `last_pushed_qty` watermark, so a stock change
+  costs 2 calls (GET + PUT) per listing per *changed* unit. Two listings double that.
+- The sweep is capped at 25 rows an hour, so extra rows cannot raise its cost; they only
+  stretch each row's re-check interval. 744 rows already overshoot the 12h staleness window
+  (300 per 12h), so the sweep is saturated today. Doubling the rows roughly doubles a row's
+  time between re-checks (about 1.2 days to about 2.5 days).
+- A bad day, such as a shared material change touching 100 units across two listings, is
+  about 400 calls, well under the 8,000 soft limit.
+
+**Conclusion:** the budget is not a blocker for a handful of shared-SKU listings. The risk
+is slower drift correction, not exhaustion.
+
+**Open optimisation (not built):** pushes and reconcile do a GET+PUT *per variation*, though
+Etsy's inventory endpoint returns and replaces a whole listing. Grouping a push by Etsy
+listing id would cut calls by up to ~29x for this catalogue and make a second listing nearly
+free. It changes the push unit from variant to listing, so it deserves its own stage.
+
+## Stage 3 notes
+
+- The sync check links duplicates automatically, so no separate "link as additional listing"
+  picker was needed: running "Test Etsy Sync" finds every listing holding a unit's SKU.
+- Draft creation still refuses a product that already has a listing. Creating a second
+  listing from StockSmith would need the draft path to write a non-primary row; left open.
