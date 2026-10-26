@@ -16,6 +16,8 @@ import { DefaultKittingBomSettings } from "../components/settings/DefaultKitting
 import { BackupSettings } from "../components/settings/BackupSettings";
 import { NotificationSettings } from "../components/settings/NotificationSettings";
 import { ConnectionSettings } from "../components/settings/ConnectionSettings";
+import { AboutSettings } from "../components/settings/AboutSettings";
+import { useAppUpdate } from "../hooks/useAppUpdate";
 import { SettingsNav, type SettingsNavGroup } from "../components/settings/SettingsNav";
 import { StoresHub } from "../components/settings/stores/StoresHub";
 import { StorePage } from "../components/settings/stores/StorePage";
@@ -30,35 +32,39 @@ const PAGE_IDS = [
   "backup-restore",
   "notifications",
   "connection",
+  "about",
 ] as const;
 type PageId = (typeof PAGE_IDS)[number];
 
-const NAV_GROUPS: SettingsNavGroup[] = [
-  {
-    label: "Selling",
-    items: [
-      { id: "stores-sync", label: "Stores & sync" },
-      { id: "pricing-fees", label: "Pricing & fees" },
-      { id: "shipping-packaging", label: "Shipping & packaging" },
-    ],
-  },
-  {
-    label: "Stock",
-    items: [
-      { id: "forecasting", label: "Forecasting" },
-      { id: "stock-counts", label: "Stock counts" },
-      { id: "lists", label: "Lists" },
-    ],
-  },
-  {
-    label: "App",
-    items: [
-      { id: "backup-restore", label: "Backup & restore" },
-      { id: "notifications", label: "Notifications" },
-      { id: "connection", label: "Connection" },
-    ],
-  },
-];
+function navGroups(updateAvailable: boolean): SettingsNavGroup[] {
+  return [
+    {
+      label: "Selling",
+      items: [
+        { id: "stores-sync", label: "Stores & sync" },
+        { id: "pricing-fees", label: "Pricing & fees" },
+        { id: "shipping-packaging", label: "Shipping & packaging" },
+      ],
+    },
+    {
+      label: "Stock",
+      items: [
+        { id: "forecasting", label: "Forecasting" },
+        { id: "stock-counts", label: "Stock counts" },
+        { id: "lists", label: "Lists" },
+      ],
+    },
+    {
+      label: "App",
+      items: [
+        { id: "backup-restore", label: "Backup & restore" },
+        { id: "notifications", label: "Notifications" },
+        { id: "connection", label: "Connection" },
+        { id: "about", label: "About", badge: updateAvailable },
+      ],
+    },
+  ];
+}
 
 export const Route = createFileRoute("/settings")({
   component: Settings,
@@ -87,6 +93,7 @@ function Settings() {
   const { page: pageFromUrl, store } = Route.useSearch();
   const [settingsLoaded, setSettingsLoaded] = useState(false);
   const [hasConnection, setHasConnection] = useState(true);
+  const { available: updateAvailable } = useAppUpdate();
 
   useEffect(() => {
     getSettings().then((s) => {
@@ -116,7 +123,7 @@ function Settings() {
       <h1 className="text-xl font-semibold tracking-[-.35px]">Settings</h1>
 
       <div className="flex items-start gap-6">
-        <SettingsNav groups={NAV_GROUPS} active={activePage} onChange={setActivePage} />
+        <SettingsNav groups={navGroups(updateAvailable)}active={activePage} onChange={setActivePage} />
 
         <div className="min-w-0 max-w-[840px] flex-1">
           {activePage === "stores-sync" && (
@@ -133,6 +140,7 @@ function Settings() {
           {activePage === "backup-restore" && <BackupSettings />}
           {activePage === "notifications" && <NotificationSettings />}
           {activePage === "connection" && <ConnectionSettings />}
+          {activePage === "about" && <AboutSettings />}
         </div>
       </div>
     </div>
