@@ -17,7 +17,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Orders with more than one parcel box are held until you confirm which was used.** A multi-item
   order whose products need different box sizes used to keep every box and use them all up. In
   Settings > Lists > Material categories, tick **Kitting: check when an order has more than one** on
-  your boxes category (keep labels and tape in a category of their own). An order whose items then
+  your boxes category (keep labels and tape in a category of their own). It needs **Show in Kitting
+  BOM list** and **Kitting: one per order** on first; those switches now unlock one another in that order,
+  and turning one off turns off the ones after it. An order whose items then
   point at two or more different boxes from that category can't be shipped, by the Ship button or by a
   marketplace sync, until you pick the box(es) used in the new **Parcel box** section of the order.
   You can approve more than one. If the order's items change afterwards, it asks again. Orders waiting

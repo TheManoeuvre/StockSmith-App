@@ -554,3 +554,83 @@ async def test_shipped_correction_through_the_endpoint_updates_profit(
     assert after.kitting_cogs == Decimal("0.90")
     box = await orders_router.get_order_box_check(order_id, session=session)
     assert box.mode == "shipped" and [b.material_name for b in box.boxes if Decimal(b.qty) > 0] == ["Large Box"]
+
+
+# --- Kitting flag chain on categories -----------------------------------------------------------
+
+
+async def _chain_category(session, show: bool, auto: bool, check: bool) -> MaterialCategory:
+    category = await material_categories.find_or_create(session, "Chain")
+    category.show_in_kitting_bom_list = show
+    category.auto_kitting_per_order = auto
+    category.kitting_check_duplicates = check
+    await session.commit()
+    return category
+
+
+def _patch(**fields) -> MaterialCategoryUpdate:
+    return MaterialCategoryUpdate(name="Chain", **fields)
+
+
+async def _save(session, category: MaterialCategory, payload: MaterialCategoryUpdate) -> MaterialCategory:
+    from app.routers.material_categories import update_material_category
+
+    return await update_material_category(category.id, payload, session=session)
+
+
+async def test_turning_off_show_in_kitting_bom_list_switches_both_dependents_off(session):
+    category = await _chain_category(session, True, True, True)
+
+    saved = await _save(session, category, _patch(show_in_kitting_bom_list=False))
+
+    assert (saved.show_in_kitting_bom_list, saved.auto_kitting_per_order, saved.kitting_check_duplicates) == (
+        False,
+        False,
+        False,
+    )
+
+
+async def test_turning_off_one_per_order_switches_the_box_check_off(session):
+    category = await _chain_category(session, True, True, True)
+
+    saved = await _save(session, category, _patch(auto_kitting_per_order=False))
+
+    assert saved.show_in_kitting_bom_list is True
+    assert saved.auto_kitting_per_order is False and saved.kitting_check_duplicates is False
+
+
+async def test_box_check_cannot_be_turned_on_without_one_per_order(session):
+    category = await _chain_category(session, True, False, False)
+
+    with pytest.raises(HTTPException) as exc:
+        await _save(session, category, _patch(kitting_check_duplicates=True))
+    assert exc.value.status_code == 400
+
+
+async def test_one_per_order_cannot_be_turned_on_without_the_kitting_bom_list(session):
+    category = await _chain_category(session, False, False, False)
+
+    with pytest.raises(HTTPException) as exc:
+        await _save(session, category, _patch(auto_kitting_per_order=True))
+    assert exc.value.status_code == 400
+
+
+async def test_turning_the_whole_chain_on_in_one_save_is_allowed(session):
+    category = await _chain_category(session, False, False, False)
+
+    saved = await _save(
+        session,
+        category,
+        _patch(show_in_kitting_bom_list=True, auto_kitting_per_order=True, kitting_check_duplicates=True),
+    )
+
+    assert saved.kitting_check_duplicates is True
+
+
+async def test_an_unrelated_edit_leaves_an_existing_inconsistent_category_alone(session):
+    # Data that predates the rule: capped to one per order but not shown in the kitting BOM list.
+    category = await _chain_category(session, False, True, False)
+
+    saved = await _save(session, category, _patch(tracks_colour=True))
+
+    assert saved.auto_kitting_per_order is True
