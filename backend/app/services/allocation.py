@@ -11,7 +11,7 @@ from app.models.product import Product
 from app.models.product_stock_event import ProductStockEventType
 from app.models.shipping_profile import ShippingProfile
 from app.models.variant import ProductVariant
-from app.services import listing_push
+from app.services import box_check, listing_push
 from app.services.kitting import auto_apply_multiunit_kitting_override, reconcile_order_kitting
 from app.services.notifications import resolve_alerts
 from app.services.order_costs import compute_line_cost_snapshot, default_order_shipping_profile
@@ -252,6 +252,11 @@ async def ship_line(session: AsyncSession, line: OrderLine, qty: int) -> None:
 async def ship_order(session: AsyncSession, order: Order) -> None:
     if order.status == OrderStatus.cancelled:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot ship a cancelled order")
+
+    # Held until a person confirms which parcel box was used — see services/box_check.py. Placed
+    # here because every ship path (the Ship button and the marketplace sync) goes through this
+    # function. Raised before any line ships so nothing is half-applied.
+    await box_check.assert_can_ship(session, order)
 
     lines = await _get_lines(session, order.id)
     shippable = [(line, line.allocated_qty - line.shipped_qty) for line in lines]

@@ -9,6 +9,7 @@ still exists and still carries a CHECK constraint listing the original seven val
 material assigned to a user-created category has nothing legal to put there. See that function.
 """
 
+from fastapi import HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -82,6 +83,39 @@ def category_flag(material: Material, flag: str) -> bool:
         return bool(getattr(material.category_ref, flag))
     legacy = _LEGACY_FLAGS.get(material.category.value if material.category is not None else "", {})
     return bool(legacy.get(flag, False))
+
+
+def enforce_kitting_flag_chain(current: MaterialCategory, payload) -> None:
+    """Keeps the three kitting flags a chain: show_in_kitting_bom_list -> auto_kitting_per_order
+    -> kitting_check_duplicates. Each only means something while the one before it is on (a
+    category that isn't kitting material can't be capped to one per order, and only a capped one
+    has duplicates worth checking).
+
+    Applied to a PATCH payload before it's written, and deliberately lenient about what is already
+    stored: turning a parent OFF switches its dependents off, but a dependent left on over an off
+    parent by data that predates this rule is not touched by an unrelated edit — only turning one
+    ON against an off parent is refused. The settings screen enforces the same chain, so this is
+    what stops another client doing it.
+    """
+    sent = payload.model_fields_set
+    show = payload.show_in_kitting_bom_list if "show_in_kitting_bom_list" in sent else current.show_in_kitting_bom_list
+    if "show_in_kitting_bom_list" in sent and not show:
+        payload.auto_kitting_per_order = False
+        payload.kitting_check_duplicates = False
+    auto = payload.auto_kitting_per_order if "auto_kitting_per_order" in sent else current.auto_kitting_per_order
+    if "auto_kitting_per_order" in sent and not auto:
+        payload.kitting_check_duplicates = False
+
+    if payload.auto_kitting_per_order and not current.auto_kitting_per_order and not show:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail='"Kitting: one per order" needs "Show in Kitting BOM list" turned on first.',
+        )
+    if payload.kitting_check_duplicates and not current.kitting_check_duplicates and not auto:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            detail='"Kitting: check when an order has more than one" needs "Kitting: one per order" turned on first.',
+        )
 
 
 async def next_sort_order(session: AsyncSession) -> int:

@@ -28,6 +28,20 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   last counted and whether it is due, so you can tick just the ones you want.
 - **Stock take reminder.** Settings › Notifications can now send a daily or weekly reminder saying
   how many items in each category are due for counting. Nothing is sent when nothing is due.
+- **Orders with more than one parcel box are held until you confirm which was used.** A multi-item
+  order whose products need different box sizes used to keep every box and use them all up. In
+  Settings > Lists > Material categories, tick **Kitting: check when an order has more than one** on
+  your boxes category (keep labels and tape in a category of their own). It needs **Show in Kitting
+  BOM list** and **Kitting: one per order** on first; those switches now unlock one another in that order,
+  and turning one off turns off the ones after it. An order whose items then
+  point at two or more different boxes from that category can't be shipped, by the Ship button or by a
+  marketplace sync, until you pick the box(es) used in the new **Parcel box** section of the order.
+  You can approve more than one. If the order's items change afterwards, it asks again. Orders waiting
+  on a check show a **Box check** badge and a filter in the orders list.
+- **Correct the boxes on an order that already shipped.** The same section fixes an order that went out
+  with the wrong boxes recorded: boxes you remove go back into stock (or are written off if you untick
+  that), and the order's packaging cost and net profit update. A preview shows the stock and profit
+  effect before you save, and **Mark reviewed, no change** clears an order you've checked and found right.
 
 ### Changed
 

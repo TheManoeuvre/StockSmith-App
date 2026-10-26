@@ -18,6 +18,7 @@ from app.models.shipping_profile import ShippingProfile
 from app.models.sku_alias import SkuAlias
 from app.models.variant import ProductVariant
 from app.schemas.kitting import OrderKittingOverrideLine, OrderKittingSummary
+from app.schemas.box_check import BoxCheckConfirm, BoxCheckPreview, BoxCheckRead
 from app.schemas.order import (
     CreateProductAndMapRequest,
     DeallocateRequest,
@@ -39,7 +40,7 @@ from app.schemas.order_parcel import (
     ReplacementParcelUpdate,
 )
 from app.schemas.order_return import CancellationPreview, OrderCancelRequest
-from app.services import allocation, order_parcels, order_substitution, returns
+from app.services import allocation, box_check, order_parcels, order_substitution, returns
 from app.services.notification_alerts import resolve_order_cancellation_pending_alert
 from app.services.order_parcels import ReplacementCosts, get_replacement_costs_by_order
 from app.services.shipping_profiles import resolve_shipping_price_for_platform
@@ -322,11 +323,13 @@ def _serialize_order(
     kitting_cogs: Decimal | None,
     substitutions: list[OrderLineSubstitution] = (),
     replacement: ReplacementCosts | None = None,
+    needs_box_check: bool = False,
 ) -> OrderRead:
     """kitting_cogs is passed in rather than computed here because it needs a DB round-trip
     and this stays synchronous — list_orders fetches one aggregate for its whole page. Single
     order? Use _serialize_one. `replacement` (get_replacement_costs_by_order) is batched the
-    same way; None means the order has no labels and no parcels.
+    same way; None means the order has no labels and no parcels. needs_box_check comes from
+    box_check.get_box_check_flags (a page at a time) for the same reason.
 
     substitutions is likewise pre-fetched (see _load_substitutions) rather than queried
     here — it's scoped to whatever batch of orders the caller is serializing, filtered
@@ -432,6 +435,8 @@ def _serialize_order(
         replacement_parcels=replacement_parcels,
         sync_issue=order.sync_issue,
         pending_marketplace_cancellation=order.pending_marketplace_cancellation,
+        needs_box_check=needs_box_check,
+        box_check_confirmed_at=order.box_check_confirmed_at,
         tracking_number=order.tracking_number,
         carrier=order.carrier,
         lines=lines,
@@ -456,7 +461,10 @@ async def _serialize_one(session: AsyncSession, order: Order) -> OrderRead:
     kitting = await get_kitting_cogs_by_order(session, [order.id])
     substitutions = await _load_substitutions(session, [line.id for line in order.lines])
     replacement = await get_replacement_costs_by_order(session, [order.id])
-    return _serialize_order(order, kitting.get(order.id), substitutions, replacement.get(order.id))
+    box_flags = await box_check.get_box_check_flags(session, [order])
+    return _serialize_order(
+        order, kitting.get(order.id), substitutions, replacement.get(order.id), box_flags.get(order.id, False)
+    )
 
 
 # Symbols the search box ignores on both sides of the comparison — the ones that turn up in
@@ -521,6 +529,7 @@ def _order_search_clause(needle: str):
 async def list_orders(
     status_filter: str | None = None,
     q: str | None = None,
+    needs_box_check: bool = False,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_db),
@@ -595,6 +604,12 @@ async def list_orders(
         search = _order_search_clause(needle)
         count_query = count_query.where(search)
         query = query.where(search)
+    if needs_box_check:
+        # Resolved up front, not in SQL: which boxes an active order needs comes from each line's
+        # kitting BOM. Sized by the number of orders awaiting shipment, which is small.
+        box_clause = Order.id.in_(await box_check.order_ids_needing_box_check(session))
+        count_query = count_query.where(box_clause)
+        query = query.where(box_clause)
     total = await session.scalar(count_query)
     result = await session.execute(query)
     orders = list(result.scalars())
@@ -603,9 +618,16 @@ async def list_orders(
     kitting_by_order = await get_kitting_cogs_by_order(session, [o.id for o in orders])
     substitutions = await _load_substitutions(session, [line.id for o in orders for line in o.lines])
     replacement_by_order = await get_replacement_costs_by_order(session, [o.id for o in orders])
+    box_flags = await box_check.get_box_check_flags(session, orders)
     return OrderPage(
         items=[
-            _serialize_order(o, kitting_by_order.get(o.id), substitutions, replacement_by_order.get(o.id))
+            _serialize_order(
+                o,
+                kitting_by_order.get(o.id),
+                substitutions,
+                replacement_by_order.get(o.id),
+                box_flags.get(o.id, False),
+            )
             for o in orders
         ],
         total=total or 0,
@@ -1004,3 +1026,41 @@ async def replace_kitting_overrides(
     await session.commit()
 
     return await get_order_kitting_summary(session, order_id)
+
+
+@router.get("/{order_id}/box-check", response_model=BoxCheckRead)
+async def get_order_box_check(order_id: int, session: AsyncSession = Depends(get_db)) -> BoxCheckRead:
+    order = await _get_order_with_lines(session, order_id)
+    return await box_check.get_box_check(session, order)
+
+
+@router.post("/{order_id}/box-check/preview", response_model=BoxCheckPreview)
+async def preview_order_box_check(
+    order_id: int, payload: BoxCheckConfirm, session: AsyncSession = Depends(get_db)
+) -> BoxCheckPreview:
+    """What confirming these boxes would do — stock moved, packaging cost, net profit — without
+    saving anything."""
+    order = await _get_order_with_lines(session, order_id)
+    return await box_check.preview_box_change(session, order, payload)
+
+
+@router.put("/{order_id}/box-check", response_model=OrderRead)
+async def confirm_order_box_check(
+    order_id: int, payload: BoxCheckConfirm, session: AsyncSession = Depends(get_db)
+) -> OrderRead:
+    """Before shipping this unblocks the order; once shipped it corrects the order's packaging
+    and stock to the boxes actually used. Returns the whole order so the client's one refetch
+    covers the new profit figures."""
+    order = await _get_order_with_lines(session, order_id)
+    await box_check.confirm_boxes(session, order, payload)
+    await session.commit()
+    return await _serialize_one(session, await _get_order_with_lines(session, order_id))
+
+
+@router.post("/{order_id}/box-check/reviewed", response_model=OrderRead)
+async def mark_order_box_check_reviewed(order_id: int, session: AsyncSession = Depends(get_db)) -> OrderRead:
+    """A shipped order whose boxes were right as recorded: clears it from the needs-check list."""
+    order = await _get_order_with_lines(session, order_id)
+    await box_check.mark_reviewed(session, order)
+    await session.commit()
+    return await _serialize_one(session, await _get_order_with_lines(session, order_id))

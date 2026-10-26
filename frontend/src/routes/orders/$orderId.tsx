@@ -19,6 +19,7 @@ import {
   useManagedSave,
 } from "../../hooks/useDirtyRegistry";
 import { CancelOrderDialog } from "../../components/orders/CancelOrderDialog";
+import { OrderBoxCheckSection } from "../../components/orders/OrderBoxCheckSection";
 import { OrderKittingSection } from "../../components/orders/OrderKittingSection";
 import { OrderReplacementParcelsSection } from "../../components/orders/OrderReplacementParcelsSection";
 import { OrderShippingForm } from "../../components/orders/OrderShippingForm";
@@ -246,7 +247,12 @@ function OrderDetail() {
               {canShip && (
                 <button
                   onClick={() => shipMutation.mutate()}
-                  disabled={!anyAllocated || shipMutation.isPending}
+                  disabled={!anyAllocated || shipMutation.isPending || order.needs_box_check}
+                  title={
+                    order.needs_box_check
+                      ? "This order uses more than one parcel box. Confirm which was used in the Parcel box section first."
+                      : undefined
+                  }
                   className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
                 >
                   Ship
@@ -422,6 +428,8 @@ function OrderDetail() {
               Value and cost cover all ordered units; the Financials tab counts
               only shipped units.
             </p>
+
+            <OrderBoxCheckSection orderId={id} currency={order.currency} />
 
             <OrderKittingSection orderId={id} currency={order.currency} />
 
