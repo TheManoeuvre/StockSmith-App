@@ -17,8 +17,10 @@ from app.models.product import Product
 from app.models.shipping_profile import ShippingProfile
 from app.services.listing_profile_backfill import (
     ShippingSelection,
+    apply_existing_assignments,
     apply_proposals,
     apply_shipping_proposals,
+    propose_existing_assignments,
     propose_profiles,
     propose_shipping_profiles,
 )
@@ -146,11 +148,50 @@ async def test_an_incomplete_combination_is_still_proposed_but_flagged(session):
 
 
 @pytest.mark.asyncio
-async def test_suggested_name_leads_with_the_making_details(session):
+async def test_suggested_name_uses_the_category_in_words(session):
     """Etsy's taxonomy id is a number nobody recognises on sight."""
     await _matched(session, "Pot", 1)
-    proposals = await propose_profiles(session, [listing(1)])
-    assert proposals[0].suggested_name.startswith("Handmade")
+    proposals = await propose_profiles(session, [listing(1)], {1234: "Desk Organisers"})
+    assert proposals[0].suggested_name == "Desk Organisers – Handmade"
+    assert "1234" not in proposals[0].suggested_name
+
+
+@pytest.mark.asyncio
+async def test_suggested_names_are_unique(session):
+    await _matched(session, "Pot", 1)
+    await _matched(session, "Old pot", 2)
+    proposals = await propose_profiles(
+        session, [listing(1), listing(2, when_made="2007_2009")], {1234: "Desk Organisers"}
+    )
+    names = [p.suggested_name for p in proposals]
+    assert len(set(names)) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_combination_an_existing_profile_covers_is_not_proposed(session):
+    await _matched(session, "Pot", 1)
+    await _matched(session, "Mount", 2)
+    session.add(
+        ListingProfile(
+            platform=ETSY,
+            name="Mine",
+            etsy_taxonomy_id=1234,
+            etsy_who_made="i_did",
+            etsy_when_made="made_to_order",
+        )
+    )
+    await session.commit()
+    proposals = await propose_profiles(session, [listing(1), listing(2, taxonomy_id=5678)])
+    assert [p.signature.taxonomy_id for p in proposals] == [5678]
+
+
+@pytest.mark.asyncio
+async def test_a_suggested_name_never_collides_with_an_existing_profile(session):
+    await _matched(session, "Pot", 1)
+    session.add(ListingProfile(platform=ETSY, name="Desk Organisers – Handmade", etsy_taxonomy_id=1))
+    await session.commit()
+    proposals = await propose_profiles(session, [listing(1)], {1234: "Desk Organisers"})
+    assert proposals[0].suggested_name != "Desk Organisers – Handmade"
 
 
 @pytest.mark.asyncio
@@ -333,3 +374,28 @@ async def test_a_calculated_etsy_profile_is_created_without_a_price(session):
     )
     profile = (await session.execute(select(ShippingProfile))).scalar_one()
     assert profile.price_etsy is None and Decimal(profile.price) == 0
+
+
+@pytest.mark.asyncio
+async def test_products_matching_an_existing_profile_can_be_assigned_to_it(session):
+    pot = await _matched(session, "Pot", 1)
+    mount = await _matched(session, "Mount", 2)
+    await _matched(session, "Other", 3)
+    profile = ListingProfile(
+        platform=ETSY, name="Mine", etsy_taxonomy_id=1234, etsy_who_made="i_did", etsy_when_made="made_to_order"
+    )
+    session.add(profile)
+    await session.commit()
+    session.add(ProductPlatformSettings(product_id=mount.id, platform=ETSY, listing_profile_id=profile.id))
+    await session.commit()
+    listings = [listing(1), listing(2), listing(3, taxonomy_id=5678)]
+
+    groups = await propose_existing_assignments(session, listings)
+    assert [(g.profile_id, g.product_ids) for g in groups] == [(profile.id, [pot.id])]
+
+    assert await apply_existing_assignments(session, listings, [profile.id]) == 1
+    settings = (
+        await session.execute(select(ProductPlatformSettings).where(ProductPlatformSettings.product_id == pot.id))
+    ).scalar_one()
+    assert settings.listing_profile_id == profile.id
+    assert await propose_existing_assignments(session, listings) == []

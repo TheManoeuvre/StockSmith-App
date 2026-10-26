@@ -372,6 +372,7 @@ def _serialize_order(
             needs_mapping=line.needs_mapping,
             cost_per_unit_snapshot=line.cost_per_unit_snapshot,
             variation_text=line.variation_text,
+            external_listing_id=line.external_listing_id,
             substituted_from=(
                 _ref(subs_by_new[line.id], subs_by_new[line.id].original_line_id) if line.id in subs_by_new else None
             ),
@@ -719,7 +720,7 @@ async def update_order(order_id: int, payload: OrderUpdate, session: AsyncSessio
     if order.status == OrderStatus.shipped and changed_fields & {"shipping_profile_id", "shipping_charged"}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot change shipping once the order has shipped — its cost is already frozen",
+            detail="Cannot change shipping once the order has shipped: its cost is already frozen",
         )
 
     if "shipping_profile_id" in changed_fields and payload.shipping_profile_id is not None:
@@ -746,14 +747,14 @@ async def delete_order(order_id: int, session: AsyncSession = Depends(get_db)) -
         if line.allocated_qty > 0 or line.shipped_qty > 0:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Cannot delete an order with allocated or shipped units — cancel it first",
+                detail="Cannot delete an order with allocated or shipped units: cancel it first",
             )
     # Parcels took stock the moment they were recorded; the cascade would erase the
     # record of that without putting anything back (order_parcels.delete_parcel does).
     if order.replacement_parcels:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Cannot delete an order with replacement parcels — delete the parcels first",
+            detail="Cannot delete an order with replacement parcels: delete the parcels first",
         )
     await session.delete(order)
     await session.commit()

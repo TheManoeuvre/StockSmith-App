@@ -33,24 +33,28 @@ export function EtsyProfileProposalsPanel() {
   const [shippingNames, setShippingNames] = useState<Record<number, string>>({});
   const [shippingLinks, setShippingLinks] = useState<Record<number, number | null>>({});
   const [shippingAccepted, setShippingAccepted] = useState<Set<number>>(new Set());
+  // Existing profiles (by id) whose matching unassigned products should be assigned.
+  const [existingAccepted, setExistingAccepted] = useState<Set<number>>(new Set());
 
   const previewMutation = useMutation({
     mutationFn: () => etsyProfileProposalsApi.preview(),
     onSuccess: (data) => {
       setNames(Object.fromEntries(data.proposals.map((p) => [p.index, p.suggested_name])));
-      // Only complete combinations are pre-accepted. An incomplete one is still worth
-      // showing — it tells you which field to go and set — but creating it would produce a
+      // Opt in: nothing is ticked until you choose it. An incomplete combination is still
+      // shown — it tells you which field to go and set — but creating it would produce a
       // profile that can't draft anything.
-      setAccepted(new Set(data.proposals.filter((p) => p.is_complete).map((p) => p.index)));
+      setAccepted(new Set());
       const shipping = data.shipping_profiles ?? [];
       setShippingNames(Object.fromEntries(shipping.map((p) => [p.etsy_shipping_profile_id, p.title])));
       setShippingLinks({});
-      setShippingAccepted(new Set(shipping.map((p) => p.etsy_shipping_profile_id)));
+      setShippingAccepted(new Set());
+      setExistingAccepted(new Set());
     },
   });
 
   const proposals = previewMutation.data?.proposals ?? [];
   const shippingProposals = previewMutation.data?.shipping_profiles ?? [];
+  const existingAssignments = previewMutation.data?.existing_assignments ?? [];
 
   // Local profiles not yet linked to Etsy, offered as "link this one instead".
   const localProfiles = useQuery({
@@ -70,6 +74,8 @@ export function EtsyProfileProposalsPanel() {
             ? { etsy_shipping_profile_id: id, link_shipping_profile_id: link }
             : { etsy_shipping_profile_id: id, name: shippingNames[id] ?? "" };
         }),
+        true,
+        [...existingAccepted],
       ),
     onSuccess: () => {
       queryClient.invalidateQueries({
@@ -102,7 +108,16 @@ export function EtsyProfileProposalsPanel() {
     });
   }
 
-  const acceptedCount = accepted.size + shippingAccepted.size;
+  function toggleExisting(id: number) {
+    setExistingAccepted((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  const acceptedCount = accepted.size + shippingAccepted.size + existingAccepted.size;
   const result = applyMutation.data;
 
   return (
@@ -126,10 +141,36 @@ export function EtsyProfileProposalsPanel() {
       <ErrorBanner error={previewMutation.error} />
       <ErrorBanner error={applyMutation.error} />
 
-      {previewMutation.data && proposals.length === 0 && shippingProposals.length === 0 && (
+      {previewMutation.data && proposals.length === 0 && shippingProposals.length === 0 && existingAssignments.length === 0 && (
         <p className="text-slate-600">
-          Nothing to suggest — no linked Etsy listing carries the details a profile needs.
+          Nothing to suggest: no linked Etsy listing carries the details a profile needs.
         </p>
+      )}
+
+      {existingAssignments.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <div>
+            <p className="font-medium">Existing profiles</p>
+            <p className="text-xs text-slate-500">
+              Products whose Etsy listing already matches one of your profiles but haven't been assigned to it.
+            </p>
+          </div>
+          {existingAssignments.map((group) => (
+            <div key={group.profile_id} className="rounded border border-slate-200 p-2">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={existingAccepted.has(group.profile_id)}
+                  onChange={() => toggleExisting(group.profile_id)}
+                  aria-label={`Assign to ${group.profile_name}`}
+                />
+                <span className="flex-1">{group.profile_name}</span>
+                <span className="shrink-0 text-xs text-slate-500">{group.product_count} product(s)</span>
+              </label>
+              <p className="text-xs text-slate-500">{group.product_names.join(", ")}</p>
+            </div>
+          ))}
+        </div>
       )}
 
       {proposals.map((proposal) => (
@@ -150,7 +191,7 @@ export function EtsyProfileProposalsPanel() {
             <p className="text-xs text-slate-500">
               Etsy shipping profiles your listings use that no StockSmith shipping profile is linked to.
               Drafts take their Etsy shipping profile from the product's shipping profile, so each needs a
-              local one — new, or an existing one linked to it.
+              local one: new, or an existing one linked to it.
             </p>
           </div>
           {shippingProposals.map((proposal) => (
@@ -179,7 +220,7 @@ export function EtsyProfileProposalsPanel() {
         </div>
       )}
 
-      {(proposals.length > 0 || shippingProposals.length > 0) && (
+      {(proposals.length > 0 || shippingProposals.length > 0 || existingAssignments.length > 0) && (
         <button
           onClick={() => applyMutation.mutate()}
           disabled={applyMutation.isPending || acceptedCount === 0}
@@ -192,7 +233,7 @@ export function EtsyProfileProposalsPanel() {
       {result && (
         <div className="rounded bg-slate-50 p-2">
           Created <strong>{result.profiles_created}</strong> profile(s) and assigned{" "}
-          <strong>{result.products_assigned}</strong> product(s).
+          <strong>{result.products_assigned + (result.existing_products_assigned ?? 0)}</strong> product(s).
           {(result.shipping_profiles_created > 0 || result.shipping_profiles_linked > 0) && (
             <>
               {" "}
@@ -206,6 +247,20 @@ export function EtsyProfileProposalsPanel() {
     </div>
   );
 }
+
+const WHO_MADE: Record<string, string> = {
+  i_did: "Made by you",
+  someone_else: "Made by someone else",
+  collective: "Made by a collective",
+};
+
+const WHEN_MADE: Record<string, string> = {
+  made_to_order: "Made to order",
+  "2020_2026": "Made 2020–2026",
+  "2010_2019": "Made 2010–2019",
+  "2007_2009": "Made 2007–2009",
+  before_2007: "Made before 2007",
+};
 
 function ProposalRow({
   proposal,
@@ -223,7 +278,12 @@ function ProposalRow({
   return (
     <div className={`rounded border p-2 ${proposal.is_complete ? "border-slate-200" : "border-amber-300"}`}>
       <div className="flex items-center gap-2">
-        <input type="checkbox" checked={accepted} onChange={onToggle} />
+        <input
+          type="checkbox"
+          checked={accepted}
+          onChange={onToggle}
+          aria-label={`Create ${name}`}
+        />
         <input
           className="flex-1 rounded border border-slate-300 px-2 py-1 text-sm"
           value={name}
@@ -232,13 +292,20 @@ function ProposalRow({
         <span className="shrink-0 text-xs text-slate-500">{proposal.product_count} product(s)</span>
       </div>
       <p className="mt-1 text-xs text-slate-500">
-        {proposal.taxonomy_id !== null && <>Category {proposal.taxonomy_id} · </>}
-        {proposal.who_made} · {proposal.when_made}
+        {proposal.category_path
+          ? proposal.category_path
+          : proposal.taxonomy_id !== null
+            ? `Category ${proposal.taxonomy_id}`
+            : "No category"}
+        {" · "}
+        {WHO_MADE[proposal.who_made ?? ""] ?? proposal.who_made ?? "Maker not set"}
+        {" · "}
+        {WHEN_MADE[proposal.when_made ?? ""] ?? proposal.when_made ?? "Date not set"}
       </p>
       <p className="text-xs text-slate-500">{proposal.product_names.join(", ")}</p>
       {!proposal.is_complete && (
         <p className="mt-1 text-xs text-amber-800">
-          Missing something Etsy requires — you'll need to fill it in before drafting with this.
+          Missing something Etsy requires: you'll need to fill it in before drafting with this.
         </p>
       )}
     </div>

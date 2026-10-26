@@ -101,12 +101,12 @@ function MarginSummary({ margin }: { margin: MarginResult }) {
     <span className="text-sm">
       Profit: <strong>£{margin.profit.toFixed(2)}</strong> · Margin: <strong>{margin.marginPercent.toFixed(1)}%</strong>
       {margin.shippingPrice > 0 && (
-        <span className="ml-2 text-xs text-slate-400" title="Margin is on the full amount the buyer pays — sale price plus postage charged — the same base an order's net profit uses.">
+        <span className="ml-2 text-xs text-slate-400" title="Margin is on the full amount the buyer pays, sale price plus postage charged. This is the same base an order's net profit uses.">
           on £{margin.revenue.toFixed(2)} incl. £{margin.shippingPrice.toFixed(2)} postage
         </span>
       )}
       {margin.postageMissing && (
-        <span className="ml-2 rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800" title="No shipping profile is assigned, so postage is not deducted here — and an order for this product will ship with no postage cost recorded at all.">
+        <span className="ml-2 rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800" title="No shipping profile is assigned, so postage is not deducted here, and an order for this product will ship with no postage cost recorded at all.">
           excludes postage
         </span>
       )}
@@ -236,7 +236,7 @@ function ShippingProfileLink({ profile, platform }: { profile: ShippingProfile; 
   if (linkId == null) {
     return (
       <span className="text-amber-700">
-        Not linked to {label} — drafts fall back to the listing profile's shipping. Link it in Settings ›
+        Not linked to {label}: drafts fall back to the listing profile's shipping. Link it in Settings ›
         Shipping profiles.
       </span>
     );
@@ -286,7 +286,7 @@ function CogsBreakdown({ product }: { product: Product }) {
       ? ((revenue - totalCogs) / revenue) * 100
       : null;
 
-  const money = (n: number | null) => (n == null ? "—" : `£${n.toFixed(2)}`);
+  const money = (n: number | null) => (n == null ? "-" : `£${n.toFixed(2)}`);
 
   return (
     <div className="flex flex-col gap-1 rounded bg-white p-4 text-sm shadow-sm">
@@ -318,7 +318,7 @@ function CogsBreakdown({ product }: { product: Product }) {
         label="Margin before fees"
         value={
           <strong className={marginToneClass(marginBeforeFees)}>
-            {marginBeforeFees == null ? "—" : `${marginBeforeFees.toFixed(1)}%`}
+            {marginBeforeFees == null ? "-" : `${marginBeforeFees.toFixed(1)}%`}
           </strong>
         }
       />
@@ -453,7 +453,7 @@ function ChannelFeeComparison({
                 <td
                   className={`py-1 text-right tabular-nums ${marginToneClass(margin)}`}
                 >
-                  {margin == null ? "—" : `${margin.toFixed(1)}%`}
+                  {margin == null ? "-" : `${margin.toFixed(1)}%`}
                 </td>
               </tr>
             );
@@ -560,7 +560,7 @@ export function PricingSection({ product }: { product: Product }) {
 
   // The price-history table only ever snapshots the product's own sale_price/margin, which
   // stay null once pricing moves to variable/line — a variant never gets a snapshot of its
-  // own. For the latest row, showing today's live variant range beats a permanent "—".
+  // own. For the latest row, showing today's live variant range beats a permanent "-".
   const isVariantPriced = product.pricing_mode !== "product";
   const liveVariantMargins = isVariantPriced
     ? computeVariantMargins(activeVariants, product, profiles, feeConfig?.fee_source)
@@ -636,7 +636,7 @@ export function PricingSection({ product }: { product: Product }) {
       <ErrorBanner error={modeMutation.error ?? attributeMutation.error} />
       {isCalculatedFee && (
         <p className="text-sm text-slate-500">
-          Platform fee is calculated from {feeConfig?.fee_source} fee components (Settings → Pricing) — the manual
+          Platform fee is calculated from {feeConfig?.fee_source} fee components (Settings → Pricing): the manual
           fee field below is ignored while this is active.
         </p>
       )}
@@ -692,7 +692,7 @@ export function PricingSection({ product }: { product: Product }) {
           <tbody>
             {history.map((h, index) => {
               // Only the newest row can borrow today's live variant range — older rows have
-              // no per-variant history to fall back on, so they stay "—" as before.
+              // no per-variant history to fall back on, so they stay "-" as before.
               const isLatest = index === 0;
               const salePriceLabel = h.sale_price
                 ? `£${Number(h.sale_price).toFixed(2)}`
@@ -700,14 +700,14 @@ export function PricingSection({ product }: { product: Product }) {
                   ? liveSalePriceRange.min === liveSalePriceRange.max
                     ? `£${liveSalePriceRange.min.toFixed(2)}`
                     : `£${liveSalePriceRange.min.toFixed(2)}–£${liveSalePriceRange.max.toFixed(2)}`
-                  : "—";
+                  : "-";
               const marginLabel = h.margin_percent
                 ? `${Number(h.margin_percent).toFixed(1)}%`
                 : isLatest && liveMarginRange
                   ? liveMarginRange.min === liveMarginRange.max
                     ? `${liveMarginRange.min.toFixed(1)}%`
                     : `${liveMarginRange.min.toFixed(1)}%–${liveMarginRange.max.toFixed(1)}%`
-                  : "—";
+                  : "-";
               return (
                 <tr key={h.id} className="border-b border-slate-100">
                   <td className="p-2">{new Date(h.recorded_at).toLocaleString()}</td>
@@ -871,7 +871,7 @@ function ProductPriceForm({
             <span className="text-sm text-slate-500">
               {product.effective_platform_fee_percent
                 ? `${Number(product.effective_platform_fee_percent).toFixed(2)}%`
-                : "—"}
+                : "-"}
             </span>
           ) : (
             <input
@@ -973,7 +973,7 @@ function VariableGroupRow({
     revert,
   } = usePriceFields({
     key: `group-${label}`,
-    label: `Pricing — ${label}`,
+    label: `Pricing: ${label}`,
     seedKey: first.id,
     source: first,
     isCalculatedFee,
@@ -1143,7 +1143,7 @@ function LineRow({
     revert,
   } = usePriceFields({
     key: "price",
-    label: `Pricing — ${variant.variant_name}`,
+    label: `Pricing: ${variant.variant_name}`,
     seedKey: variant.id,
     source: variant,
     isCalculatedFee,

@@ -139,7 +139,7 @@ export function StockCountFields({
           <p className="text-sm text-slate-600">
             {classification
               ? `Every ${classification.interval_days} days · ${describeIntervalSource(classification)}`
-              : "—"}
+              : "-"}
           </p>
         </FieldRow>
         <FieldRow label="Last counted">
@@ -149,7 +149,7 @@ export function StockCountFields({
         </FieldRow>
         <FieldRow label="Next due">
           {classification == null ? (
-            <p className="text-sm text-slate-600">—</p>
+            <p className="text-sm text-slate-600">-</p>
           ) : classification.days_overdue === null ? (
             // Never counted, but only due once there has been stock to count — a row
             // created ahead of its first delivery isn't nagged about a count of nothing.
@@ -188,7 +188,7 @@ export function StockCountFields({
         <p className="text-xs text-slate-500">
           Tier <strong>{classification.abc_class}</strong> ({describeSource(classification, groupLabel)}), counted
           every {classification.interval_days} days. Last counted {formatDate(classification.last_stock_take_at)}
-          {classification.last_stock_take_at && ` — next due ${formatDate(classification.next_due_at)}`}
+          {classification.last_stock_take_at && `: next due ${formatDate(classification.next_due_at)}`}
           {classification.is_due && (
             <span className="ml-1 rounded bg-amber-100 px-1.5 py-0.5 text-amber-800">
               {classification.days_overdue === null

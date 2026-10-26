@@ -420,7 +420,7 @@ async def compute_due_for_count(session: AsyncSession, now: datetime | None = No
         # product itself. A product with active variants never accumulates its own
         # current_stock, so counting it as well would be counting a number nothing writes.
         owners: list[tuple[ProductVariant | None, str]] = (
-            [(v, f"{product.name} — {v.variant_name}") for v in variants] if variants else [(None, product.name)]
+            [(v, f"{product.name} ({v.variant_name})") for v in variants] if variants else [(None, product.name)]
         )
         for variant, name in owners:
             last_at = variant.last_stock_take_at if variant is not None else product.last_stock_take_at

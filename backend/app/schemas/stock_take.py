@@ -23,6 +23,14 @@ class StockTakeProgress(str, enum.Enum):
     closed = "closed"
 
 
+class ScopeItemRef(BaseModel):
+    """One countable row: a material, or a product with or without a variant."""
+
+    material_id: int | None = None
+    product_id: int | None = None
+    variant_id: int | None = None
+
+
 class StockTakeScope(BaseModel):
     """What to count. Shared by preview-scope and create, so the preview is guaranteed to
     describe the same candidate set the take would actually contain."""
@@ -34,6 +42,20 @@ class StockTakeScope(BaseModel):
     # Narrows to items whose cadence says they're due (services/abc.py). Combines with the
     # category/type filters rather than replacing them.
     overdue_only: bool = False
+    # A hand-picked subset of whatever the filters above match. None means "everything the
+    # filters match"; a list (even an empty one) means only those rows.
+    selected_items: list[ScopeItemRef] | None = None
+
+
+class ScopeItemRead(ScopeItemRef):
+    """A row the filters match, for the "Select items" picker."""
+
+    name: str
+    section: str  # "Materials" or "Products"
+    group: str  # material category / product category, "" when ungrouped
+    # When it was last counted, or None if it never has been.
+    last_stock_take_at: datetime | None
+    is_due: bool
 
 
 class ScopeWarning(BaseModel):
@@ -88,6 +110,10 @@ class StockTakeLineRead(BaseModel):
     # counted_qty - expected_qty, or None when nothing was counted. Computed rather than
     # stored so it can't drift from the two numbers it's derived from.
     delta: Decimal | None
+    # What one unit costs today: a material's average unit cost, or a product/variant's build
+    # cost from its BOM. None when the item has no BOM, meaning cost isn't tracked — which is
+    # not the same as free. The sheet multiplies it by the delta to show the money at stake.
+    unit_cost: Decimal | None = None
 
 
 class StockTakeRead(BaseModel):

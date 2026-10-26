@@ -6,9 +6,12 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
+import { ProductImage } from "../../components/products/ProductImage";
 import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import { platformsApi, type ProductSyncStatus } from "../../api/platforms";
 import { productsApi } from "../../api/products";
+import { productCategoriesApi } from "../../api/productCategories";
+import { CreatableSelect } from "../../components/common/CreatableSelect";
 import type { ListingPlatform, Product } from "../../api/types";
 import { CONNECTABLE_PLATFORMS, PLATFORM_LABELS } from "../../lib/platforms";
 import { useAssetUrl } from "../../hooks/useAssetUrl";
@@ -100,7 +103,7 @@ function CostLine({
       <span className="inline-block w-8 text-xs text-slate-400">{label}</span>
       {value ?? (
         <span className={missingLabel ? "text-amber-700" : undefined}>
-          — {missingLabel ?? ""}
+          - {missingLabel ?? ""}
         </span>
       )}
     </span>
@@ -182,13 +185,29 @@ function ProductsListContent() {
   const newProductStores = useNewProductStores();
   const [storeChoices, setStoreChoices] = useState<StoreChoices>({});
 
+  const [category, setCategory] = useState("");
+  const [categoryId, setCategoryId] = useState<number | null>(null);
+  const { data: productCategories } = useQuery({
+    queryKey: ["product-categories"],
+    queryFn: productCategoriesApi.list,
+  });
+
   const createFormDirty =
-    showForm && (name.trim() !== "" || sku.trim() !== "");
+    showForm && (name.trim() !== "" || sku.trim() !== "" || category.trim() !== "");
   useDirtyRegistration("new-product", "New product", createFormDirty);
 
   const createMutation = useMutation({
     mutationFn: async () => {
-      const created = await productsApi.create({ name, sku: sku || null });
+      // A typed category that matches no existing one is created on the spot, same as the detail panel.
+      let resolvedCategoryId = categoryId;
+      if (!resolvedCategoryId && category.trim()) {
+        resolvedCategoryId = (await productCategoriesApi.findOrCreate(category.trim())).id;
+      }
+      const created = await productsApi.create({
+        name,
+        sku: sku || null,
+        product_category_id: category.trim() ? resolvedCategoryId : null,
+      });
       // The server already applied each store's default; only a chip the user flipped needs a write.
       for (const { platform, defaultOn } of newProductStores) {
         const chosen = storeChoices[platform];
@@ -201,9 +220,12 @@ function ProductsListContent() {
     onSuccess: () => {
       setStoreChoices({});
       queryClient.invalidateQueries({ queryKey: ["products"] });
+      queryClient.invalidateQueries({ queryKey: ["product-categories"] });
       setShowForm(false);
       setName("");
       setSku("");
+      setCategory("");
+      setCategoryId(null);
     },
   });
 
@@ -322,37 +344,62 @@ function ProductsListContent() {
 
       {showForm && (
         <form
-          className="flex flex-wrap items-end gap-2 rounded bg-white p-4 shadow-sm"
+          className="flex flex-col gap-3.5 rounded-md bg-white px-5 py-4 shadow-sm"
           onSubmit={(e) => {
             e.preventDefault();
             createMutation.mutate();
           }}
         >
-          <label className="flex flex-col gap-1">
-            <span className="text-sm">Name</span>
-            <input
-              required
-              className="rounded border border-slate-300 px-2 py-1"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          </label>
-          <label className="flex flex-col gap-1">
-            <span className="text-sm">SKU</span>
-            <input
-              className="rounded border border-slate-300 px-2 py-1"
-              placeholder="Auto-generated if left blank"
-              value={sku}
-              onChange={(e) => setSku(e.target.value)}
-            />
-          </label>
-          <NewProductStoreChips stores={newProductStores} choices={storeChoices} onChange={setStoreChoices} />
-          <button
-            type="submit"
-            className="rounded bg-slate-900 px-4 py-1.5 text-white"
-          >
-            Save
-          </button>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1.2fr_1fr_1fr]">
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-slate-600">Name</span>
+              <input
+                required
+                className="h-9 rounded-md border border-slate-300 px-2.5 text-sm"
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-slate-600">SKU</span>
+              <input
+                className="h-9 rounded-md border border-slate-300 px-2.5 text-sm"
+                placeholder="Auto-generated if left blank"
+                value={sku}
+                onChange={(e) => setSku(e.target.value)}
+              />
+            </label>
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-slate-600">Category</span>
+              <CreatableSelect
+                className="h-9 rounded-md border border-slate-300 px-2.5 text-sm"
+                options={productCategories ?? []}
+                value={category}
+                onChange={setCategory}
+                onResolved={setCategoryId}
+                placeholder="Keyring, Coaster…"
+              />
+            </label>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 pt-3.5">
+            <NewProductStoreChips stores={newProductStores} choices={storeChoices} onChange={setStoreChoices} />
+            <div className="ml-auto flex gap-2">
+              <button
+                type="button"
+                onClick={() => setShowForm(false)}
+                className="h-9 rounded-md border border-slate-300 bg-white px-4 text-sm text-slate-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={createMutation.isPending}
+                className="h-9 rounded-md bg-slate-900 px-6 text-sm font-medium text-white disabled:opacity-60"
+              >
+                Save product
+              </button>
+            </div>
+          </div>
           <ErrorBanner error={createMutation.error} />
         </form>
       )}
@@ -456,15 +503,11 @@ function ProductRow({
       className={`cursor-pointer border-b border-slate-100 last:border-0 hover:bg-slate-50 ${!p.is_active ? "opacity-60" : ""}`}
     >
       <td className="p-2">
-        <div className="h-20 w-20 overflow-hidden rounded border border-slate-200 bg-slate-50">
-          {imageUrl && (
-            <img
-              src={imageUrl}
-              alt={p.name}
-              className="h-full w-full object-cover"
-            />
-          )}
-        </div>
+        <ProductImage
+          src={imageUrl}
+          alt={p.name}
+          className="h-20 w-20 rounded border"
+        />
       </td>
       <td className="p-2">
         <Link
@@ -474,16 +517,20 @@ function ProductRow({
         >
           {p.name}
         </Link>
-        {p.made_to_order && (
-          <span
-            title="Built against an order, so it is never counted"
-            className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600"
-          >
-            made to order
-          </span>
-        )}
-        {!p.is_active && (
-          <Badge className="ml-2 bg-slate-100 text-slate-600">Inactive</Badge>
+        {(p.made_to_order || !p.is_active) && (
+          <div className="mt-1 flex flex-wrap gap-1">
+            {p.made_to_order && (
+              <span
+                title="Built against an order, so it is never counted"
+                className="whitespace-nowrap rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600"
+              >
+                made to order
+              </span>
+            )}
+            {!p.is_active && (
+              <Badge className="bg-slate-100 text-slate-600">Inactive</Badge>
+            )}
+          </div>
         )}
       </td>
       <td className="p-2">
@@ -493,12 +540,12 @@ function ProductRow({
             <CopyButton value={p.sku} label={`Copy ${p.sku}`} />
           </span>
         ) : (
-          "—"
+          "-"
         )}
       </td>
       <td className="p-2 tabular-nums">
         {p.is_bundle
-          ? `Ready to ship: ${p.ready_to_ship ?? "—"}`
+          ? `Ready to ship: ${p.ready_to_ship ?? "-"}`
           : p.current_stock}
       </td>
       {/* One column, and it's the figure that reaches the marketplaces — the three it
@@ -506,12 +553,12 @@ function ProductRow({
           inputs to it rather than answers in their own right. */}
       <td className="p-2 tabular-nums">
         {p.is_bundle ? (
-          "—"
+          "-"
         ) : (
           <>
             <span className="flex items-baseline gap-2">
               <strong className={sellable.headline === 0 ? "text-red-600" : ""}>
-                {sellable.headline ?? "—"}
+                {sellable.headline ?? "-"}
               </strong>
               {sellable.capLabel && (
                 <span className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800">
@@ -527,7 +574,7 @@ function ProductRow({
         )}
       </td>
       <td className="p-2 tabular-nums">
-        {p.sale_price ? formatUnitCost(p.sale_price) : "—"}
+        {p.sale_price ? formatUnitCost(p.sale_price) : "-"}
       </td>
       <td className="p-2">
         <CostLine

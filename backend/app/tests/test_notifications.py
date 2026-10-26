@@ -8,6 +8,8 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
+from app.models.material import LegacyMaterialCategory, Material, MaterialUnit
+from app.models.material_category import MaterialCategory
 from app.models.notification import (
     Notification,
     NotificationCategory,
@@ -65,7 +67,7 @@ class TestMaterialForecastDedup:
         await _set_type(session, NotificationCategory.material_forecast_critical)
         await _set_type(session, NotificationCategory.material_forecast_warning)
 
-        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s: _forecasts_stub(["critical"]))
+        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s, **kw: _forecasts_stub(["critical"]))
         await notification_alerts.check_material_forecast_alerts(session)
         assert len(await _notification_titles(session)) == 1
 
@@ -77,22 +79,50 @@ class TestMaterialForecastDedup:
         await _set_type(session, NotificationCategory.material_forecast_critical)
         await _set_type(session, NotificationCategory.material_forecast_warning)
 
-        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s: _forecasts_stub(["critical"]))
+        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s, **kw: _forecasts_stub(["critical"]))
         await notification_alerts.check_material_forecast_alerts(session)
 
-        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s: _forecasts_stub(["ok"]))
+        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s, **kw: _forecasts_stub(["ok"]))
         await notification_alerts.check_material_forecast_alerts(session)
 
-        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s: _forecasts_stub(["critical"]))
+        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s, **kw: _forecasts_stub(["critical"]))
         await notification_alerts.check_material_forecast_alerts(session)
 
         assert len(await _notification_titles(session)) == 2
+
+    async def test_recovery_marks_alert_read(self, session, monkeypatch):
+        await _set_type(session, NotificationCategory.material_forecast_critical)
+        await _set_type(session, NotificationCategory.material_forecast_warning)
+
+        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s, **kw: _forecasts_stub(["warning"]))
+        await notification_alerts.check_material_forecast_alerts(session)
+        unread = (await session.execute(select(Notification).where(Notification.read_at.is_(None)))).scalars().all()
+        assert len(unread) == 1
+
+        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s, **kw: _forecasts_stub(["ok"]))
+        await notification_alerts.check_material_forecast_alerts(session)
+        unread = (await session.execute(select(Notification).where(Notification.read_at.is_(None)))).scalars().all()
+        assert unread == []
+
+    async def test_real_forecast_requests_healthy_materials(self, session, monkeypatch):
+        """The real compute_material_forecasts omits healthy materials unless asked, which is
+        what stopped recovery being seen."""
+        await _set_type(session, NotificationCategory.material_forecast_critical)
+        seen: dict = {}
+
+        async def spy(s, **kw):
+            seen.update(kw)
+            return []
+
+        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", spy)
+        await notification_alerts.check_material_forecast_alerts(session)
+        assert seen.get("include_all") is True
 
     async def test_disabled_type_never_fires(self, session, monkeypatch):
         await _set_type(session, NotificationCategory.material_forecast_critical, enabled=False)
         await _set_type(session, NotificationCategory.material_forecast_warning, enabled=False)
 
-        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s: _forecasts_stub(["critical"]))
+        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s, **kw: _forecasts_stub(["critical"]))
         await notification_alerts.check_material_forecast_alerts(session)
         assert await _notification_titles(session) == []
 
@@ -154,7 +184,7 @@ class TestOrderUnfulfillableDedup:
         result = await session.execute(select(Notification))
         [notification] = result.scalars().all()
         assert notification.category == NotificationCategory.order_unfulfillable
-        assert notification.title == "Order #103 — 1 item short"
+        assert notification.title == "Order #103: 1 item short"
 
 
 class TestOrderBlockedDedup:
@@ -184,7 +214,7 @@ class TestOrderBlockedDedup:
         result = await session.execute(select(Notification))
         [notification] = result.scalars().all()
         assert notification.category == NotificationCategory.order_blocked
-        assert notification.title == "Order #201 blocked — 1 item with no BOM"
+        assert notification.title == "Order #201 blocked: 1 item with no BOM"
 
     async def test_fires_once_then_stays_quiet_while_still_blocked(self, session, monkeypatch):
         await _set_type(session, NotificationCategory.order_blocked)
@@ -244,7 +274,7 @@ class TestOrderShortfallGrouping:
 
         result = await session.execute(select(Notification))
         [notification] = result.scalars().all()
-        assert notification.title == "Order #242 — 3 items short"
+        assert notification.title == "Order #242: 3 items short"
         # The title identifies the order; the body is what says which items.
         assert "4 Stud / Dark Blue" in notification.body
         assert "6 Stud / Silver" in notification.body
@@ -258,8 +288,8 @@ class TestOrderShortfallGrouping:
         await notification_alerts.check_order_unfulfillable_alerts(session)
 
         assert sorted(await _notification_titles(session)) == [
-            "Order #242 — 1 item short",
-            "Order #243 — 1 item short",
+            "Order #242: 1 item short",
+            "Order #243: 1 item short",
         ]
 
     async def test_a_later_line_on_an_alerted_order_notifies_again_with_context(self, session, monkeypatch):
@@ -275,8 +305,8 @@ class TestOrderShortfallGrouping:
         result = await session.execute(select(Notification).order_by(Notification.id))
         notifications_rows = result.scalars().all()
         assert [n.title for n in notifications_rows] == [
-            "Order #242 — 2 items short",
-            "Order #242 — 1 item short",
+            "Order #242: 2 items short",
+            "Order #242: 1 item short",
         ]
         # The newly-short line is the news; the two already flagged are context, not a re-alert.
         assert "Bronze" in notifications_rows[1].body
@@ -291,7 +321,7 @@ class TestOrderShortfallGrouping:
 
         result = await session.execute(select(Notification))
         [notification] = result.scalars().all()
-        assert notification.title == "Order #300 blocked — 2 items with no BOM"
+        assert notification.title == "Order #300 blocked: 2 items with no BOM"
 
     async def test_awaiting_and_blocked_lines_on_one_order_stay_separate_notifications(self, session, monkeypatch):
         await _set_type(session, NotificationCategory.order_unfulfillable)
@@ -302,8 +332,8 @@ class TestOrderShortfallGrouping:
         await notification_alerts.check_order_unfulfillable_alerts(session)
 
         assert sorted(await _notification_titles(session)) == [
-            "Order #400 blocked — 1 item with no BOM",
-            "Order #400 — 1 item short",
+            "Order #400 blocked: 1 item with no BOM",
+            "Order #400: 1 item short",
         ]
 
 
@@ -348,13 +378,13 @@ class TestAutoResolve:
         await _set_type(session, NotificationCategory.material_forecast_critical)
         await _set_type(session, NotificationCategory.material_forecast_warning)
 
-        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s: _forecasts_stub(["critical"]))
+        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s, **kw: _forecasts_stub(["critical"]))
         await notification_alerts.check_material_forecast_alerts(session)
         result = await session.execute(select(Notification).where(Notification.category == NotificationCategory.material_forecast_critical))
         notification = result.scalar_one()
         assert notification.read_at is None
 
-        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s: _forecasts_stub(["ok"]))
+        monkeypatch.setattr(notification_alerts, "compute_material_forecasts", lambda s, **kw: _forecasts_stub(["ok"]))
         await notification_alerts.check_material_forecast_alerts(session)
 
         await session.refresh(notification)
@@ -465,7 +495,7 @@ class TestDigestRouting:
             session,
             category=NotificationCategory.order_unfulfillable,
             urgency=NotificationUrgency.digest,
-            title="Order #242 — 3 items short",
+            title="Order #242: 3 items short",
             body="body",
             delivery_mode=NotificationDeliveryMode.immediate,
         )
@@ -481,7 +511,7 @@ class TestDigestRouting:
             session,
             category=NotificationCategory.order_blocked,
             urgency=NotificationUrgency.immediate,
-            title="Order #300 blocked — 2 items with no BOM",
+            title="Order #300 blocked: 2 items with no BOM",
             body="body",
             delivery_mode=NotificationDeliveryMode.digest,
         )
@@ -504,7 +534,7 @@ class TestDigestRouting:
         assert await self._flush_recording(session, monkeypatch) == []
 
     async def test_digest_body_lines_carry_each_notification_title(self, session, monkeypatch):
-        for title in ("Order #242 — 3 items short", "Order #243 — 1 item short"):
+        for title in ("Order #242: 3 items short", "Order #243: 1 item short"):
             await notifications.dispatch_notification(
                 session,
                 category=NotificationCategory.order_unfulfillable,
@@ -515,10 +545,10 @@ class TestDigestRouting:
             )
 
         [(title, body)] = await self._flush_recording(session, monkeypatch)
-        assert title == "StockSmith: 2 updates"
+        assert title == "Order Alert: 2 items"
         # Distinguishable lines — the whole point of the roll-up. Generic per-alert titles
         # used to render this as the same string repeated.
-        assert body == "- Order #242 — 3 items short\n- Order #243 — 1 item short"
+        assert body == "- Order #242: 3 items short\n- Order #243: 1 item short"
 
 
 class TestDigestSchedule:
@@ -572,7 +602,7 @@ class TestDigestSchedule:
             session,
             category=NotificationCategory.order_unfulfillable,
             urgency=NotificationUrgency.digest,
-            title="Order #242 — 1 item short",
+            title="Order #242: 1 item short",
             body="body",
             delivery_mode=NotificationDeliveryMode.digest,
         )
@@ -599,6 +629,134 @@ class TestDigestSchedule:
 
 async def _noop_deliver(_session, _settings, _title, _body, _ttl=None):
     return None
+
+
+class TestDigestBodyFitsThePhone:
+    """iOS cuts a push off after ~7 lines, so a digest lists items only while the whole message
+    fits, and otherwise summarises by category — a long list was being cut mid-item."""
+
+    async def _flush(self, session, monkeypatch) -> tuple[str, str]:
+        sent: list[tuple[str, str]] = []
+
+        async def _record(_session, _settings, title, body, _ttl=None):
+            sent.append((title, body))
+
+        monkeypatch.setattr(notifications, "_deliver_external", _record)
+        settings = await notifications.get_notification_settings(session)
+        settings.digest_hours_local = ""
+        await session.commit()
+        await notifications.flush_digest(session)
+        assert len(sent) == 1
+        return sent[0]
+
+    async def _material(self, session, name: str, category: str) -> Material:
+        row = MaterialCategory(name=category, sort_order=1)
+        existing = await session.execute(select(MaterialCategory).where(MaterialCategory.name == category))
+        row = existing.scalar_one_or_none() or row
+        session.add(row)
+        await session.flush()
+        material = Material(
+            name=name, category=LegacyMaterialCategory.other, category_id=row.id, unit=MaterialUnit.each
+        )
+        session.add(material)
+        await session.commit()
+        return material
+
+    async def _warn(self, session, material: Material, name: str | None = None) -> None:
+        await notifications.dispatch_notification(
+            session,
+            category=NotificationCategory.material_forecast_warning,
+            urgency=NotificationUrgency.digest,
+            title=f"{name or material.name} is running low",
+            body="body",
+            delivery_mode=NotificationDeliveryMode.digest,
+            related_entity_type="material",
+            related_entity_id=material.id,
+        )
+
+    async def test_a_few_items_are_listed_in_full(self, session, monkeypatch):
+        for name in ("Bambu Lab | PLA Matte | Ice Blue", "Magnet | 6x3mm Disk"):
+            await self._warn(session, await self._material(session, name, "Filament"))
+
+        title, body = await self._flush(session, monkeypatch)
+
+        assert title == "Stock Alert: 2 items"
+        assert body == "- Bambu Lab | PLA Matte | Ice Blue\n- Magnet | 6x3mm Disk"
+
+    async def test_a_critical_material_keeps_a_marker_among_plain_names(self, session, monkeypatch):
+        await self._warn(session, await self._material(session, "Ice Blue", "Filament"))
+        black = await self._material(session, "Black", "Filament")
+        await notifications.dispatch_notification(
+            session,
+            category=NotificationCategory.material_forecast_critical,
+            urgency=NotificationUrgency.immediate,
+            title="Black is critically low",
+            body="body",
+            delivery_mode=NotificationDeliveryMode.digest,
+            related_entity_type="material",
+            related_entity_id=black.id,
+        )
+
+        _, body = await self._flush(session, monkeypatch)
+
+        assert body == "- Ice Blue\n- Black (critical)"
+
+    async def test_too_many_items_become_counts_by_material_category(self, session, monkeypatch):
+        for i in range(8):
+            await self._warn(session, await self._material(session, f"Bambu Lab | PLA Basic | Colour {i}", "Filament"))
+        await self._warn(session, await self._material(session, "Magnet | 6x3mm Disk", "Hardware"))
+        await self._warn(session, await self._material(session, "Bottle Opener Insert", "Hardware"))
+        await self._warn(session, await self._material(session, "Mailer Box", "Packaging"))
+
+        title, body = await self._flush(session, monkeypatch)
+
+        assert title == "Stock Alert: 11 items"
+        assert body == "8 × Filament low\n2 × Hardware low\n1 × Packaging low"
+        assert len(body) <= notifications._DIGEST_DETAIL_CHAR_BUDGET
+
+    async def test_counts_cover_non_material_alerts_and_critical_materials(self, session, monkeypatch):
+        for i in range(4):
+            await notifications.dispatch_notification(
+                session,
+                category=NotificationCategory.order_unfulfillable,
+                urgency=NotificationUrgency.digest,
+                title=f"Order #{240 + i} \u2014 3 items short on a very long product name here",
+                body="body",
+                delivery_mode=NotificationDeliveryMode.digest,
+            )
+        material = await self._material(session, "Bambu Lab | PETG HF | Black", "Filament")
+        await notifications.dispatch_notification(
+            session,
+            category=NotificationCategory.material_forecast_critical,
+            urgency=NotificationUrgency.immediate,
+            title="Bambu Lab | PETG HF | Black is critically low",
+            body="body",
+            delivery_mode=NotificationDeliveryMode.digest,
+            related_entity_type="material",
+            related_entity_id=material.id,
+        )
+
+        title, body = await self._flush(session, monkeypatch)
+
+        assert body == "4 × Orders short on stock\n1 × Filament critically low"
+        assert title == "Alerts: 5 items"
+
+    async def test_a_material_deleted_before_the_flush_falls_back_to_a_generic_label(self, session, monkeypatch):
+        for i in range(8):
+            await notifications.dispatch_notification(
+                session,
+                category=NotificationCategory.material_forecast_warning,
+                urgency=NotificationUrgency.digest,
+                title=f"Some Long Material Name Number {i} is running low",
+                body="body",
+                delivery_mode=NotificationDeliveryMode.digest,
+                related_entity_type="material",
+                related_entity_id=9999 + i,
+            )
+
+        _, body = await self._flush(session, monkeypatch)
+
+        assert body == "8 × Material low"
 
 
 class TestPushoverExpiry:
@@ -641,7 +799,7 @@ class TestPushoverExpiry:
             session,
             category=NotificationCategory.order_unfulfillable,
             urgency=NotificationUrgency.digest,
-            title="Order #242 — 1 item short",
+            title="Order #242: 1 item short",
             body="body",
             delivery_mode=NotificationDeliveryMode.immediate,
         )
@@ -649,7 +807,7 @@ class TestPushoverExpiry:
             session,
             category=NotificationCategory.order_blocked,
             urgency=NotificationUrgency.immediate,
-            title="Order #300 blocked — 1 item with no BOM",
+            title="Order #300 blocked: 1 item with no BOM",
             body="body",
             delivery_mode=NotificationDeliveryMode.immediate,
         )
@@ -696,7 +854,7 @@ class TestPushoverExpiry:
             session,
             category=NotificationCategory.order_unfulfillable,
             urgency=NotificationUrgency.digest,
-            title="Order #242 — 1 item short",
+            title="Order #242: 1 item short",
             body="body",
             delivery_mode=NotificationDeliveryMode.digest,
         )

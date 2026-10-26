@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.kitting import ProductKittingMaterial, ProductVariantKittingMaterial
 from app.models.listing import ListingPlatform
 from app.models.material import Material
+from app.models.material_category import MaterialCategory
 from app.models.product import Product, ProductMaterial
 from app.models.sku_alias import SkuAlias
 from app.models.variant import ProductVariant, ProductVariantMaterial
@@ -72,11 +73,43 @@ async def find_by_sku(
     return None
 
 
+async def substitution_groups(session: AsyncSession, material_ids: set[int]) -> dict[int, tuple[str, int] | None]:
+    """The pool of materials each one may be auto-substituted within, or None if it has none.
+
+    A material with a material type is grouped by that type — PLA with PLA, "Coasters" with
+    "Coasters". A material with no type falls back to its category, but only when the category
+    does not track material types: for Blanks or Packaging the category *is* the sensible pool
+    (any mailer bag for any other), whereas a filament with no type is unfinished data, and
+    substituting it across every filament would be exactly the PLA-for-PETG hazard the type
+    check exists to stop. Tracking types on a category therefore turns it into subcategories.
+
+    The two key kinds can never be equal, so a typed material never pools with an untyped one."""
+    if not material_ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(Material.id, Material.material_type_id, Material.category_id, MaterialCategory.tracks_material_type)
+            .outerjoin(MaterialCategory, MaterialCategory.id == Material.category_id)
+            .where(Material.id.in_(material_ids))
+        )
+    ).all()
+    groups: dict[int, tuple[str, int] | None] = {}
+    for material_id, type_id, category_id, tracks_type in rows:
+        if type_id is not None:
+            groups[material_id] = ("type", type_id)
+        elif category_id is not None and tracks_type is False:
+            groups[material_id] = ("category", category_id)
+        else:
+            groups[material_id] = None
+    return groups
+
+
 async def _validate_attribute_rules(
     session: AsyncSession, product_id: int, attributes: list[VariantAttributeSpec]
 ) -> tuple[dict[int, ProductMaterial], dict[int, str]]:
     """Checks every rule's base_material_id is actually on the product's build BOM, and
-    every material-rule candidate shares the base material's material_type_id — a
+    every material-rule candidate shares the base material's substitution group (see
+    substitution_groups: its material type, or its category where the category has no types) — a
     stricter check than the manual per-variant editor's category-only validation
     (_validate_substitution_categories in routers/variants.py), since here the "same
     material, different colour" grouping is the entire point, and a same-category-but-
@@ -113,25 +146,24 @@ async def _validate_attribute_rules(
     # Fetched unconditionally, not just when there are material rules: conflict messages
     # name materials, and a quantity-rule-only overlap needs those names just as much.
     result = await session.execute(
-        select(Material.id, Material.name, Material.material_type_id).where(
-            Material.id.in_(candidate_material_ids | base_material_ids)
-        )
+        select(Material.id, Material.name).where(Material.id.in_(candidate_material_ids | base_material_ids))
     )
-    rows = result.all()
-    name_by_material_id = {row.id: row.name for row in rows}
-    type_by_material_id = {row.id: row.material_type_id for row in rows}
+    name_by_material_id = {row.id: row.name for row in result.all()}
+    group_by_material_id = await substitution_groups(session, candidate_material_ids | base_material_ids)
 
     for spec in attributes:
         for rule in spec.material_rules:
-            base_type = type_by_material_id.get(rule.base_material_id)
+            base_group = group_by_material_id.get(rule.base_material_id)
             for candidate_id in rule.value_to_material_id.values():
-                candidate_type = type_by_material_id.get(candidate_id)
-                if candidate_type is None or base_type != candidate_type:
+                if candidate_id == rule.base_material_id:
+                    continue
+                candidate_group = group_by_material_id.get(candidate_id)
+                if candidate_group is None or base_group != candidate_group:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail=(
                             f"Material {candidate_id} is not the same material type as base "
-                            f"material {rule.base_material_id} — can't auto-substitute across types"
+                            f"material {rule.base_material_id}: can't auto-substitute across types"
                         ),
                     )
 
@@ -283,7 +315,7 @@ def _shared_material_messages(
             continue
         material = _name(name_by_material_id, material_id)
         listed = ", ".join(phrases[:-1]) + f", and {phrases[-1]}"
-        messages.append(f"Variant '{variant_name}': {material} would be used by {len(phrases)} BOM lines — {listed}.")
+        messages.append(f"Variant '{variant_name}': {material} would be used by {len(phrases)} BOM lines: {listed}.")
     return messages
 
 
@@ -333,7 +365,7 @@ def _detect_rule_ambiguities(
                     messages.append(
                         f"Both '{name_a}' and '{name_b}' set the {kind} for the "
                         f"{_name(name_by_material_id, base_id)} BOM line{detail}. Only one attribute can drive a "
-                        f"given BOM line's {kind} — remove one of the rules."
+                        f"given BOM line's {kind}: remove one of the rules."
                     )
 
     _check("material", "material_rules", "value_to_material_id")
@@ -527,7 +559,7 @@ def _resolve_attribute_slot(product: Product, attribute_name: str) -> str:
         status_code=status.HTTP_400_BAD_REQUEST,
         detail=(
             f"'{attribute_name}' is not an attribute of this product"
-            + (f" — it has {', '.join(repr(k) for k in known)}" if known else " (it has no variant attributes)")
+            + (f": it has {', '.join(repr(k) for k in known)}" if known else " (it has no variant attributes)")
         ),
     )
 
@@ -593,25 +625,24 @@ async def amend_attribute_bom_overrides(
     }
     material_rows = (
         await session.execute(
-            select(Material.id, Material.name, Material.material_type_id).where(
-                Material.id.in_(referenced | set(base_lines))
-            )
+            select(Material.id, Material.name).where(Material.id.in_(referenced | set(base_lines)))
         )
     ).all()
     name_by_material_id = {r.id: r.name for r in material_rows}
-    type_by_material_id = {r.id: r.material_type_id for r in material_rows}
+    group_by_material_id = await substitution_groups(session, referenced | set(base_lines))
 
     # Same strict material-type check generation applies, and for the same reason: this
     # fans out across many variants at once rather than being reviewed one at a time.
     for line in lines:
         if line.material_id is None or line.material_id == line.base_material_id:
             continue
-        if type_by_material_id.get(line.material_id) != type_by_material_id.get(line.base_material_id):
+        candidate_group = group_by_material_id.get(line.material_id)
+        if candidate_group is None or candidate_group != group_by_material_id.get(line.base_material_id):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
                     f"Material {line.material_id} is not the same material type as base "
-                    f"material {line.base_material_id} — can't auto-substitute across types"
+                    f"material {line.base_material_id}: can't auto-substitute across types"
                 ),
             )
 

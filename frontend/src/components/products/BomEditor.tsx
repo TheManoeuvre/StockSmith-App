@@ -73,7 +73,7 @@ export function BomEditor({ productId }: { productId: number }) {
         )}
       </div>
       <p className="text-sm text-slate-500">
-        Materials consumed to make one unit — drawn down when you record a build.
+        Materials consumed to make one unit: drawn down when you record a build.
       </p>
       {materials && materials.length > 8 && (
         <input

@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import { productsApi } from "../../api/products";
 import { assetsApi } from "../../api/assets";
 import { BomEditor } from "../../components/products/BomEditor";
+import { ParcelIcon, ProductImage } from "../../components/products/ProductImage";
 import { KittingBomEditor } from "../../components/products/KittingBomEditor";
 import { BundleItemsEditor } from "../../components/products/BundleItemsEditor";
 import { ProductStoresSettings } from "../../components/products/ProductStoresSettings";
@@ -443,15 +444,11 @@ function ProductDetail() {
         {/* Identity + the headline figures — shown on every tab. */}
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-3">
-            <div className="h-16 w-16 shrink-0 overflow-hidden rounded border border-slate-200 bg-slate-50">
-              {imageUrl && (
-                <img
-                  src={imageUrl}
-                  alt={product.name}
-                  className="h-full w-full object-cover"
-                />
-              )}
-            </div>
+            <ProductImage
+              src={imageUrl}
+              alt={product.name}
+              className="h-16 w-16 rounded border"
+            />
             <div className="min-w-0">
               <p className="truncate text-sm font-medium text-slate-700">
                 {product.product_category_name ?? "Uncategorised"}
@@ -480,7 +477,7 @@ function ProductDetail() {
             <div className="grid grid-cols-3 gap-3">
               <Stat
                 label="Ready to ship"
-                value={String(product.ready_to_ship ?? "—")}
+                value={String(product.ready_to_ship ?? "-")}
                 sub="assembled on demand"
                 tone="highlight"
               />
@@ -495,7 +492,7 @@ function ProductDetail() {
               <Stat
                 label="Buildable"
                 value={
-                  sellable.buildable == null ? "—" : String(sellable.buildable)
+                  sellable.buildable == null ? "-" : String(sellable.buildable)
                 }
                 sub={
                   sellable.buildable == null
@@ -511,7 +508,7 @@ function ProductDetail() {
               <Stat
                 label="Sellable"
                 value={
-                  sellable.headline == null ? "—" : String(sellable.headline)
+                  sellable.headline == null ? "-" : String(sellable.headline)
                 }
                 sub={
                   sellable.expected != null &&
@@ -534,7 +531,7 @@ function ProductDetail() {
                 ? "not costed"
                 : `${econ.marginPct.toFixed(0)}%${econ.missingPostage ? " (excl. postage)" : ""}`}
               {" · "}
-              COGS {econ.cogs == null ? "—" : `£${econ.cogs.toFixed(2)}`}
+              COGS {econ.cogs == null ? "-" : `£${econ.cogs.toFixed(2)}`}
             </p>
             {/* Toggleable from any tab, and through the guard, because flipping it rewrites
                 the tab set — a dirty editor on another tab still gets to warn. */}
@@ -661,7 +658,7 @@ function ProductDetail() {
                         toggleMadeToOrderMutation.mutate(e.target.checked)
                       }
                     />
-                    Built against an order — excluded from stock takes
+                    Built against an order: excluded from stock takes
                   </label>
                 </div>
               )}
@@ -706,9 +703,12 @@ function ProductDetail() {
                         className="h-full w-full object-cover"
                       />
                     ) : (
-                      <span className="text-[10px] text-slate-400">
-                        no image
-                      </span>
+                      <div className="flex flex-col items-center gap-1 text-slate-300">
+                        <ParcelIcon className="h-8 w-8" />
+                        <span className="text-[10px] text-slate-400">
+                          no image
+                        </span>
+                      </div>
                     )}
                   </div>
                   <div className="flex flex-col gap-2">
@@ -903,7 +903,7 @@ function SlideOverFooter({
           ? "not costed"
           : `${econ.marginPct.toFixed(0)}%${econ.missingPostage ? " (excl. postage)" : ""}`}
         {" · "}
-        COGS {econ.cogs == null ? "—" : `£${econ.cogs.toFixed(2)}`}
+        COGS {econ.cogs == null ? "-" : `£${econ.cogs.toFixed(2)}`}
       </p>
       <div className="flex items-center gap-2">
         <span className="text-[12px] text-slate-500">

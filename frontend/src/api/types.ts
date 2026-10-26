@@ -237,6 +237,9 @@ export interface StockTakeLine {
   system_qty_at_approval: string | null;
   conflict_reason: string | null;
   delta: string | null;
+  /** What one unit costs today — a material's average cost, or a product/variant's BOM
+   * build cost. Null when cost isn't tracked (no BOM), which is not the same as free. */
+  unit_cost: string | null;
 }
 
 export interface StockTake {
@@ -279,6 +282,23 @@ export interface StockTakeScope {
   material_category_ids: number[];
   product_category_ids: number[];
   overdue_only: boolean;
+  /** A hand-picked subset of what the filters match; omit (or null) for all of it. */
+  selected_items?: ScopeItemRef[] | null;
+}
+
+export interface ScopeItemRef {
+  material_id: number | null;
+  product_id: number | null;
+  variant_id: number | null;
+}
+
+export interface ScopeItem extends ScopeItemRef {
+  name: string;
+  section: "Materials" | "Products";
+  group: string;
+  /** When it was last counted; null if it never has been. */
+  last_stock_take_at: string | null;
+  is_due: boolean;
 }
 
 export interface ScopePreview {
@@ -943,6 +963,17 @@ export interface BuildableProduct {
   expected_max_buildable: number | null;
 }
 
+export interface OrderAwaitingMapping {
+  line_id: number;
+  order_id: number;
+  /** Raw marketplace SKU — all an unmapped line has to identify it. */
+  sku: string | null;
+  short_by: number;
+  order_placed_at: string;
+  due_date: string | null;
+  platform: ListingPlatform | null;
+}
+
 export interface OrderAwaitingInventory {
   line_id: number;
   order_id: number;
@@ -952,6 +983,8 @@ export interface OrderAwaitingInventory {
   variant_name: string | null;
   short_by: number;
   order_placed_at: string;
+  /** Effective due date — same figure as the Orders page's Due column. */
+  due_date: string | null;
   platform: ListingPlatform | null;
   /** False means there's no BOM (and it's not a bundle) to ever build more from — a genuine
    * blocker, not just a wait for stock. See the dashboard's "Blocked orders" section. */
@@ -965,6 +998,7 @@ export interface OrderAwaitingPackaging {
   short_by: string;
   platform: ListingPlatform | null;
   order_placed_at: string;
+  due_date: string | null;
   /** Ranked, human-curated fallbacks for material_id — suggested only, never auto-applied. */
   suggested_substitutes?: SubstituteSuggestion[];
 }
@@ -1037,6 +1071,8 @@ export interface DashboardSummary {
   margin_alerts: MarginAlert[];
   orders_awaiting_inventory: OrderAwaitingInventory[];
   orders_awaiting_packaging: OrderAwaitingPackaging[];
+  /** Optional: absent on older payloads. */
+  orders_awaiting_mapping?: OrderAwaitingMapping[];
   /** Capped at 10 by the backend; the _total is the uncapped figure, so the section can say
    * how many it isn't showing. */
   items_due_for_count: DueForCountItem[];
@@ -1192,7 +1228,7 @@ export interface Order {
   financials_synced_at: string | null;
   // The two halves of cost of goods. materials_cogs is per line (build BOM x shipped qty,
   // frozen at first allocation); kitting_cogs is per order (what the kitting ledger actually
-  // consumed, frozen at ship). Both null when there is nothing to report — render "—".
+  // consumed, frozen at ship). Both null when there is nothing to report — render "-".
   materials_cogs: string | null;
   kitting_cogs: string | null;
   net_profit: string | null;

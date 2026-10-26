@@ -23,6 +23,7 @@ import {
 } from "../../hooks/useDirtyRegistry";
 import { useSiblingNav } from "../../hooks/useSiblingNav";
 import { formatDayMonth, roundQty } from "../../lib/format";
+import { formatMoney } from "../../lib/money";
 
 export const Route = createFileRoute("/stock-takes/$stockTakeId")({
   component: StockTakeDetailRoute,
@@ -154,6 +155,24 @@ function StockTakeDetailPage() {
     },
   });
 
+  // Settling a flagged line moves real stock when "use the counted figure" is chosen, so
+  // everything that reads quantities is refreshed, not just this take.
+  const resolveMutation = useMutation({
+    mutationFn: ({
+      lineId,
+      action,
+    }: {
+      lineId: number;
+      action: "accept_counted" | "accept_system" | "reset";
+    }) => stockTakesApi.resolveLine(id, lineId, action),
+    onSuccess: () => {
+      invalidate();
+      queryClient.invalidateQueries({ queryKey: ["unresolved-variances"] });
+      queryClient.invalidateQueries({ queryKey: ["materials"] });
+      queryClient.invalidateQueries({ queryKey: ["products"] });
+    },
+  });
+
   const abandonMutation = useMutation({
     mutationFn: () => stockTakesApi.remove(id),
     onSuccess: () => {
@@ -174,6 +193,12 @@ function StockTakeDetailPage() {
   }
 
   const isOpen = take.status === "open";
+  // A closed take can still hold flagged lines. They are settled right on the sheet so a
+  // just-approved take can be cleared without leaving it; the Unresolved page stays as the
+  // cross-take view.
+  const showSettle =
+    !isOpen && take.lines.some((l) => l.status === "conflict");
+  const columnCount = 6 + (showSettle ? 1 : 0);
   const countedLines = take.lines.filter((l) => l.status === "counted");
   const pendingApproval = countedLines.length;
   // Split the counted lines by whether the number entered differs from the snapshot, so the
@@ -202,7 +227,7 @@ function StockTakeDetailPage() {
         `${plural(pendingApproval, "line", "lines")}, ${changingLines} ` +
         `${plural(changingLines, "adjusts", "adjust")} the recorded quantity and ${confirmingLines} ` +
         `${plural(confirmingLines, "confirms", "confirm")} it unchanged. ${blanks} blank ` +
-        `${plural(blanks, "line is", "lines are")} left alone — not adjusted, not marked counted. ` +
+        `${plural(blanks, "line is", "lines are")} left alone: not adjusted, not marked counted. ` +
         `Any line whose system stock has moved since the take started, or that has units allocated ` +
         `to open orders, is flagged for you to settle rather than adjusted automatically. The take ` +
         `closes either way.`;
@@ -300,8 +325,11 @@ function StockTakeDetailPage() {
             to="/stock-takes/unresolved"
             className="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800"
           >
-            {take.conflict_count} line{take.conflict_count === 1 ? "" : "s"} flagged for review
-            — settle {take.conflict_count === 1 ? "it" : "them"} on Unresolved variances →
+            {take.conflict_count} line{take.conflict_count === 1 ? "" : "s"} flagged for review.{" "}
+            {isOpen
+              ? "They'll need settling once this take is approved"
+              : "Settle them in the sheet below, or on Unresolved variances"}{" "}
+            →
           </Link>
         )}
 
@@ -316,7 +344,14 @@ function StockTakeDetailPage() {
                     <th className="p-2 text-right">Expected</th>
                     <th className="p-2 text-right">Counted</th>
                     <th className="p-2 text-right">Delta</th>
+                    <th
+                      className="p-2 text-right"
+                      title="The money at stake in each variance: delta × current unit cost"
+                    >
+                      Value
+                    </th>
                     <th className="p-2">Status</th>
+                    {showSettle && <th className="p-2">Settle</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -326,7 +361,7 @@ function StockTakeDetailPage() {
                     return (
                       <Fragment key={group.key}>
                         <tr className="border-b border-slate-200 bg-slate-50">
-                          <th colSpan={5} className="p-2 text-left font-medium">
+                          <th colSpan={columnCount} className="p-2 text-left font-medium">
                             <button
                               type="button"
                               onClick={() =>
@@ -360,6 +395,12 @@ function StockTakeDetailPage() {
                               typed === ""
                                 ? null
                                 : Number(typed) - Number(line.expected_qty);
+                            // Money at stake: the delta priced at today's unit cost. Null
+                            // when there's no count yet or no cost to price it with.
+                            const liveValue =
+                              liveDelta == null || line.unit_cost == null
+                                ? null
+                                : liveDelta * Number(line.unit_cost);
                             // Nothing has touched this item since it was last counted, so
                             // it should already be at the figure on the sheet. Tinted rather
                             // than hidden or reordered: it is still a line to count, just a
@@ -378,7 +419,7 @@ function StockTakeDetailPage() {
                                   {unmoved && (
                                     <span
                                       className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[11px] text-emerald-800"
-                                      title="Nothing has moved this since it was last counted — no adjustment, delivery, build or order. Expect it to confirm the figure rather than change it."
+                                      title="Nothing has moved this since it was last counted: no adjustment, delivery, build or order. Expect it to confirm the figure rather than change it."
                                     >
                                       no movement since {formatDate(unmoved)}
                                     </span>
@@ -402,7 +443,7 @@ function StockTakeDetailPage() {
                                     min="0"
                                     disabled={!isOpen}
                                     className="w-20 rounded border border-slate-300 px-2 py-1 text-right tabular-nums disabled:bg-slate-100"
-                                    placeholder="—"
+                                    placeholder="-"
                                     value={counts[line.id] ?? ""}
                                     onChange={(e) =>
                                       setCounts((prev) => ({
@@ -420,14 +461,62 @@ function StockTakeDetailPage() {
                                   }`}
                                 >
                                   {liveDelta == null
-                                    ? "—"
+                                    ? "-"
                                     : liveDelta > 0
                                       ? `+${roundQty(String(liveDelta))}`
                                       : roundQty(String(liveDelta))}
                                 </td>
+                                <td
+                                  className={`p-2 text-right tabular-nums ${
+                                    liveValue == null || liveValue === 0
+                                      ? "text-slate-400"
+                                      : liveValue < 0
+                                        ? "text-red-700"
+                                        : "text-amber-700"
+                                  }`}
+                                  title={
+                                    line.unit_cost == null
+                                      ? "No cost to value this with: it has no bill of materials"
+                                      : undefined
+                                  }
+                                >
+                                  {liveValue == null
+                                    ? "-"
+                                    : `${liveValue < 0 ? "−" : liveValue > 0 ? "+" : ""}${formatMoney(String(Math.abs(liveValue)), "GBP")}`}
+                                </td>
                                 <td className="p-2">
                                   <StatusBadge status={line.status} />
                                 </td>
+                                {showSettle && (
+                                  <td className="p-2">
+                                    {line.status === "conflict" && (
+                                      <div className="flex flex-wrap gap-1">
+                                        {(
+                                          [
+                                            ["accept_counted", "Use count"],
+                                            ["accept_system", "Keep system"],
+                                            ["reset", "Recount"],
+                                          ] as const
+                                        ).map(([action, label]) => (
+                                          <button
+                                            key={action}
+                                            type="button"
+                                            disabled={resolveMutation.isPending}
+                                            onClick={() =>
+                                              resolveMutation.mutate({
+                                                lineId: line.id,
+                                                action,
+                                              })
+                                            }
+                                            className="rounded border border-amber-300 bg-white px-2 py-0.5 text-[11px] disabled:opacity-50"
+                                          >
+                                            {label}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </td>
+                                )}
                               </tr>
                             );
                           })}
@@ -440,6 +529,7 @@ function StockTakeDetailPage() {
 
         <ErrorBanner error={saveMutation.error} />
         <ErrorBanner error={approveMutation.error} />
+        <ErrorBanner error={resolveMutation.error} />
         <ErrorBanner error={abandonMutation.error} />
 
         <ConfirmDialog

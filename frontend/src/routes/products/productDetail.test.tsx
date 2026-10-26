@@ -718,7 +718,7 @@ describe("pricing paths", () => {
     const dialog = await screen.findByRole("dialog", {
       name: "Unsaved changes",
     });
-    expect(within(dialog).getByText(/Pricing — L6/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Pricing: L6/)).toBeInTheDocument();
   });
 
   it("warns before the vary-by select re-groups a dirty variable-price form", async () => {
@@ -746,7 +746,7 @@ describe("pricing paths", () => {
     const dialog = await screen.findByRole("dialog", {
       name: "Unsaved changes",
     });
-    expect(within(dialog).getByText(/^Pricing — /)).toBeInTheDocument();
+    expect(within(dialog).getByText(/^Pricing: /)).toBeInTheDocument();
 
     await user.click(
       within(dialog).getByRole("button", { name: /keep editing/i }),

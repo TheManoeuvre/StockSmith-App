@@ -63,7 +63,7 @@ export function ForecastSettings() {
       title="Materials forecasting"
       help={
         <>
-          Controls the "Time to stockout" figures on the dashboard — how far back consumption
+          Controls the "Time to stockout" figures on the dashboard: how far back consumption
           history is averaged, and the two weeks-of-cover thresholds that decide when a material
           shows up as a warning or critical alert.
         </>

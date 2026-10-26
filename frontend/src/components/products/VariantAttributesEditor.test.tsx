@@ -66,6 +66,9 @@ function renderEditor() {
   );
 }
 
+const FILAMENT_CATEGORY = { id: 1, name: "Filament", tracks_colour: true, tracks_material_type: true };
+const BLANKS_CATEGORY = { id: 2, name: "Blanks", tracks_colour: false, tracks_material_type: false };
+
 let generateResponses: (() => unknown)[];
 
 beforeEach(() => {
@@ -226,7 +229,7 @@ it("offers only active colours of the type, keeping the original", async () => {
   // Two whites of one type: the live Sunlu spool and a retired Bambu one. Only the live
   // one may become a variant option — a retired spool would otherwise show up as a second
   // "White" beside the original.
-  const petg = { material_type_id: 3, is_active: true };
+  const petg = { material_type_id: 3, category_id: 1, is_active: true };
   const sunluWhite = { id: 9, name: "Sunlu | PETG | Matte White", colour: "White", ...petg };
   const black = { id: 17, name: "Bambu Lab | PETG HF | Black", colour: "Black", ...petg };
   const retiredWhite = { id: 56, name: "Bambu Lab | PETG Basic | White", colour: "White", ...petg, is_active: false };
@@ -234,7 +237,7 @@ it("offers only active colours of the type, keeping the original", async () => {
     { method: "GET", path: "/products/48/bom", respond: () => [{ id: 1, product_id: 48, material_id: 9, qty_required: "10" }] },
     { method: "GET", path: "/products/48/variants", respond: () => [] },
     { method: "GET", path: "/materials", respond: () => [sunluWhite, black, retiredWhite] },
-    { method: "GET", path: "/materials?material_type_id=3", respond: () => [retiredWhite, black, sunluWhite] },
+    { method: "GET", path: "/material-categories", respond: () => [FILAMENT_CATEGORY] },
     { method: "GET", path: "/materials/colours", respond: () => [] },
   ]);
   renderEditor();
@@ -250,7 +253,7 @@ it("offers only active colours of the type, keeping the original", async () => {
 it("tells two live colours of the same name apart, and lets both be ticked", async () => {
   // A second brand bought because the first ran out: two active whites. Labelled by
   // colour alone they are indistinguishable, and as attribute values they collide.
-  const petg = { material_type_id: 3, is_active: true };
+  const petg = { material_type_id: 3, category_id: 1, is_active: true };
   const sunluWhite = { id: 9, name: "Sunlu | PETG | Matte White", colour: "White", ...petg };
   const bambuWhite = { id: 56, name: "Bambu Lab | PETG Basic | White", colour: "White", ...petg };
   const black = { id: 17, name: "Bambu Lab | PETG HF | Black", colour: "Black", ...petg };
@@ -258,7 +261,7 @@ it("tells two live colours of the same name apart, and lets both be ticked", asy
     { method: "GET", path: "/products/48/bom", respond: () => [{ id: 1, product_id: 48, material_id: 9, qty_required: "10" }] },
     { method: "GET", path: "/products/48/variants", respond: () => [] },
     { method: "GET", path: "/materials", respond: () => [sunluWhite, black, bambuWhite] },
-    { method: "GET", path: "/materials?material_type_id=3", respond: () => [sunluWhite, black, bambuWhite] },
+    { method: "GET", path: "/material-categories", respond: () => [FILAMENT_CATEGORY] },
     { method: "GET", path: "/materials/colours", respond: () => [] },
   ]);
   renderEditor();
@@ -267,13 +270,36 @@ it("tells two live colours of the same name apart, and lets both be ticked", asy
 
   // Only the clashing colour gets the long form; Black stays as it was.
   await screen.findByLabelText("Black");
-  expect(screen.getByLabelText("White — Sunlu | PETG | Matte White (original)")).toBeChecked();
-  const bambu = screen.getByLabelText("White — Bambu Lab | PETG Basic | White");
+  expect(screen.getByLabelText("White: Sunlu | PETG | Matte White (original)")).toBeChecked();
+  const bambu = screen.getByLabelText("White: Bambu Lab | PETG Basic | White");
   expect(bambu).not.toBeChecked();
 
   await userEvent.click(bambu);
 
   // Ticking the second must not replace the first.
   expect(bambu).toBeChecked();
-  expect(screen.getByLabelText("White — Sunlu | PETG | Matte White (original)")).toBeChecked();
+  expect(screen.getByLabelText("White: Sunlu | PETG | Matte White (original)")).toBeChecked();
+});
+
+it("pools non-colour materials by category and labels them without the shared name prefix", async () => {
+  // Blanks has no types and no colours: any blank may stand in for another, shown by what
+  // tells them apart rather than a colour name.
+  const blank = { category_id: 2, material_type_id: null, colour: null, is_active: true };
+  const round = { id: 9, name: "Slate Coaster | Round Natural Edge | 10cm", ...blank };
+  const square = { id: 10, name: "Slate Coaster | Square Natural Edge | 10x10cm", ...blank };
+  const box = { id: 11, name: "Brown Box", category_id: 4, material_type_id: null, colour: null, is_active: true };
+  setRoutes([
+    { method: "GET", path: "/products/48/bom", respond: () => [{ id: 1, product_id: 48, material_id: 9, qty_required: "1" }] },
+    { method: "GET", path: "/products/48/variants", respond: () => [] },
+    { method: "GET", path: "/materials", respond: () => [round, square, box] },
+    { method: "GET", path: "/material-categories", respond: () => [FILAMENT_CATEGORY, BLANKS_CATEGORY] },
+    { method: "GET", path: "/materials/colours", respond: () => [] },
+  ]);
+  renderEditor();
+  await userEvent.type(await screen.findByPlaceholderText("Size, Colour…"), "Shape");
+  await userEvent.click(screen.getByLabelText("Material driven by this attribute"));
+
+  expect(await screen.findByLabelText("Square Natural Edge | 10x10cm")).not.toBeChecked();
+  expect(screen.getByLabelText("Round Natural Edge | 10cm (original)")).toBeChecked();
+  expect(screen.queryByLabelText("Brown Box")).toBeNull(); // another category
 });

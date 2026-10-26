@@ -105,7 +105,7 @@ export function DeveloperAppCard({
             summary={
               signingKey?.configured
                 ? `configured${signingKey.expires_at ? ` · expires ${new Date(signingKey.expires_at).toLocaleDateString()}` : ""}`
-                : "not set up — eBay won't report fees on your orders until it is"
+                : "not set up: eBay won't report fees on your orders until it is"
             }
             tone={signingKey?.configured ? "normal" : "warning"}
           >

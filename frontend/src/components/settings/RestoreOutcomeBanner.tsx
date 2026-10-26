@@ -49,7 +49,7 @@ export function RestoreOutcomeBanner() {
             Your data was restored from the backup taken {formatWhen(last.completed_at)}.
           </p>
           <p>
-            Marketplace connections aren't included in backups — reconnect Etsy and eBay under
+            Marketplace connections aren't included in backups: reconnect Etsy and eBay under
             Integrations if you haven't already.
           </p>
           {last.prerestore_filename && (

@@ -35,6 +35,10 @@ class ProductVariant(Base):
     is_active: Mapped[bool] = mapped_column(default=True, nullable=False)
     current_stock: Mapped[int] = mapped_column(default=0, nullable=False)
     allocated_qty: Mapped[int] = mapped_column(default=0, nullable=False)
+    # Running weighted-average build cost per unit of the finished stock. NULL until a build
+    # first draws on a fallback material (services/builds.py) — until then COGS is resolved
+    # from the BOM as written, exactly as before. See Product.avg_unit_cost.
+    avg_unit_cost: Mapped[float | None] = mapped_column(Numeric(14, 6), nullable=True)
     attribute1_value: Mapped[str | None] = mapped_column(String, nullable=True)
     attribute2_value: Mapped[str | None] = mapped_column(String, nullable=True)
     attribute3_value: Mapped[str | None] = mapped_column(String, nullable=True)

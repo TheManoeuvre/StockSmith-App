@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db, require_auth
-from app.models.listing import ListingPlatform
+from app.models.listing import Listing, ListingPlatform
 from app.models.platform_connection import PlatformConnection
 from app.models.platform_credential import PlatformAppCredential, PlatformEnvironment
 from app.models.platform_listing_push import PlatformListingPush
@@ -20,7 +20,12 @@ from app.models.platform_sync_run import PlatformSyncRun, SyncRunMode, SyncRunSt
 from app.models.product import Product
 from app.schemas.product import ProductStoreState
 from app.models.variant import ProductVariant
-from app.schemas.listing import BulkListingSyncResult, ProductListingSyncSummary, PushCorrectionsResult
+from app.schemas.listing import (
+    BulkListingSyncResult,
+    ListingUpdate,
+    ProductListingSyncSummary,
+    PushCorrectionsResult,
+)
 from app.schemas.platform import (
     EbaySigningKeyStatus,
     NewProductDefaultRequest,
@@ -54,6 +59,7 @@ from app.schemas.listing_profile import (
     TaxonomyNode,
 )
 from app.schemas.etsy_backfill import (
+    ExistingProfileAssignmentRead,
     ApplyProfileProposalsRequest,
     ApplyProfileProposalsResult,
     EtsyBackfillPreview,
@@ -533,7 +539,7 @@ async def platform_callback(
     if error:
         return _html(f"{label} connection failed", f"{label} returned an error: {error}")
     if not code or not state or state not in _PENDING:
-        return _html(f"{label} connection failed", "Missing or expired authorization state — please try connecting again.")
+        return _html(f"{label} connection failed", "Missing or expired authorization state. Please try connecting again.")
 
     code_verifier, _, environment = _PENDING.pop(state)
     adapter = await get_adapter(session, platform, environment)
@@ -1011,9 +1017,28 @@ async def get_etsy_profile_proposals(session: AsyncSession = Depends(get_db)) ->
     except PlatformError as e:
         raise _map_platform_error(e)
 
-    proposals = await listing_profile_backfill.propose_profiles(session, listings)
+    # Best effort: without it, names fall back to the making details and the category is
+    # simply not shown, rather than refusing the proposals.
+    try:
+        nodes = await adapter.fetch_taxonomy_nodes(session, connection)
+    except PlatformError:
+        nodes = []
+    names = {n["id"]: n["name"] for n in nodes}
+    paths = {n["id"]: n["path"] for n in nodes}
+
+    proposals = await listing_profile_backfill.propose_profiles(session, listings, names)
     shipping = await listing_profile_backfill.propose_shipping_profiles(session, listings, etsy_profiles)
+    existing = await listing_profile_backfill.propose_existing_assignments(session, listings)
     return ProfileProposalsRead(
+        existing_assignments=[
+            ExistingProfileAssignmentRead(
+                profile_id=g.profile_id,
+                profile_name=g.profile_name,
+                product_count=len(g.product_ids),
+                product_names=g.product_names[:5],
+            )
+            for g in existing
+        ],
         proposals=[
             ProfileProposalRead(
                 index=index,
@@ -1022,6 +1047,7 @@ async def get_etsy_profile_proposals(session: AsyncSession = Depends(get_db)) ->
                 product_count=len(p.product_ids),
                 product_names=p.product_names[:5],
                 taxonomy_id=p.signature.taxonomy_id,
+                category_path=paths.get(p.signature.taxonomy_id),
                 who_made=p.signature.who_made,
                 when_made=p.signature.when_made,
                 is_supply=p.signature.is_supply,
@@ -1093,7 +1119,13 @@ async def apply_etsy_profile_proposals(
         etsy_profiles=etsy_profiles,
         assign_products=payload.assign_products,
     )
+    existing_assigned = (
+        await listing_profile_backfill.apply_existing_assignments(session, listings, payload.existing_profile_ids)
+        if payload.assign_products and payload.existing_profile_ids
+        else 0
+    )
     return ApplyProfileProposalsResult(
+        existing_products_assigned=existing_assigned,
         profiles_created=result.profiles_created,
         products_assigned=result.products_assigned,
         shipping_profiles_created=shipping.shipping_profiles_created,
@@ -1386,14 +1418,14 @@ async def check_product_sync(
     try:
         # Scoped to this product's own SKUs so a single-product check doesn't pay for a
         # per-SKU offer lookup across the whole catalogue.
-        index = await adapter.build_listing_sku_index(
-            session, connection, enrich_skus=await listing_sync.product_skus(session, product_id)
+        index, extra_index = await listing_sync.fetch_sku_index(
+            adapter, session, connection, enrich_skus=await listing_sync.product_skus(session, product_id)
         )
         # Read-only: this reports a quantity drift, it does not correct it. Pushing from
         # a "test" action would make a diagnostic silently mutate the live marketplace —
         # correcting is the separate, explicitly-confirmed push-corrections endpoint.
         return await listing_sync.check_product_sku_sync(
-            session, product_id, index, platform, with_expected_quantity=True
+            session, product_id, index, platform, with_expected_quantity=True, extra_index=extra_index
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
@@ -1431,6 +1463,32 @@ async def push_product_corrections(
     except PlatformError as e:
         raise _map_platform_error(e)
     return PushCorrectionsResult(pushed_count=pushed, failed_count=len(errors), errors=errors)
+
+
+@router.patch(
+    "/{platform}/listings/{listing_id}",
+    response_model=ProductListingSyncSummary,
+    dependencies=[Depends(require_auth)],
+)
+async def update_linked_listing(
+    platform: ListingPlatform, listing_id: int, body: ListingUpdate, session: AsyncSession = Depends(get_db)
+) -> ProductListingSyncSummary:
+    """Labels a linked listing or makes it its unit's primary — local bookkeeping only, no
+    marketplace call. Returns the product's stored sync status so the panel can redraw."""
+    listing = await session.get(Listing, listing_id)
+    if listing is None or listing.platform != platform:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Listing not found")
+    try:
+        await listing_sync.update_listing(
+            session,
+            listing_id,
+            role_given="role" in body.model_fields_set,
+            role=body.role,
+            make_primary=bool(body.is_primary),
+        )
+        return await listing_sync.get_stored_product_sync_status(session, listing.product_id, platform)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
 
 
 @router.get(
@@ -1475,10 +1533,10 @@ async def check_all_listings(
     connection = await _require_connection(session, platform)
     adapter = await get_adapter(session, platform)
     try:
-        index = await adapter.build_listing_sku_index(
-            session, connection, enrich_skus=await listing_sync.tracked_skus(session)
+        index, extra_index = await listing_sync.fetch_sku_index(
+            adapter, session, connection, enrich_skus=await listing_sync.tracked_skus(session)
         )
-        return await listing_sync.check_all_products_sku_sync(session, index, platform)
+        return await listing_sync.check_all_products_sku_sync(session, index, platform, extra_index=extra_index)
     except PlatformError as e:
         raise _map_platform_error(e)
 
@@ -1492,7 +1550,7 @@ async def _get_ebay_adapter(session: AsyncSession) -> tuple[EbayAdapter, Platfor
         # contract (the Trading-API-only methods below don't exist on other adapters).
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="eBay adapter unavailable — the platform registry returned an unexpected adapter type",
+            detail="eBay adapter unavailable: the platform registry returned an unexpected adapter type",
         )
     return adapter, connection
 
@@ -1759,7 +1817,7 @@ async def _get_etsy_adapter(session: AsyncSession) -> tuple[EtsyAdapter, Platfor
     if not isinstance(adapter, EtsyAdapter):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Etsy adapter unavailable — the platform registry returned an unexpected adapter type",
+            detail="Etsy adapter unavailable: the platform registry returned an unexpected adapter type",
         )
     return adapter, connection
 
@@ -1871,7 +1929,7 @@ async def adopt_etsy_listing(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
-                    "Cannot link an Etsy listing to a product/variant with no SKU — set a SKU in StockSmith first, "
+                    "Cannot link an Etsy listing to a product/variant with no SKU: set a SKU in StockSmith first, "
                     "since that's the value written to Etsy."
                 ),
             )

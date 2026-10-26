@@ -123,7 +123,7 @@ export function PlatformCredentialsForm({
           <span className="text-sm font-medium">RuName ({environment})</span>
           <input
             className="rounded border border-slate-300 px-2 py-1.5 text-sm"
-            placeholder="Not a URL — the redirect config name from eBay's dev portal"
+            placeholder="Not a URL: the redirect config name from eBay's dev portal"
             value={form.ruName}
             onChange={(e) => setField("ruName", e.target.value)}
           />
@@ -138,7 +138,7 @@ export function PlatformCredentialsForm({
             onChange={(e) => setField("publicBaseUrl", e.target.value)}
           />
           <span className="text-xs text-slate-500">
-            Used to build the OAuth redirect URI — must match what's registered with Etsy.
+            Used to build the OAuth redirect URI: must match what's registered with Etsy.
           </span>
         </label>
       )}

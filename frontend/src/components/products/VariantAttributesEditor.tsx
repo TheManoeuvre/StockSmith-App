@@ -1,11 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useMemo, useState } from "react";
+import { materialCategoriesApi } from "../../api/materialCategories";
 import { materialsApi } from "../../api/materials";
 import { productsApi } from "../../api/products";
 import type {
   AttributeMaterialRule,
   AttributeQuantityRule,
   Material,
+  MaterialCategory,
   PlatformConflictResolution,
   Product,
   SharedMaterialResolution,
@@ -14,6 +16,7 @@ import type {
 import { ErrorBanner } from "../common/ErrorBanner";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { useGuard } from "../../hooks/useUnsavedChangesGuard";
+import { groupLabeller, groupMembers, noGroupReason } from "../../lib/substitutionGroups";
 import { BulkBomAmendModal } from "./BulkBomAmendModal";
 import { PlatformConflictDialog, platformConflictDetail } from "./PlatformConflictDialog";
 import { SharedMaterialVariantsDialog, sharedMaterialDetail } from "./SharedMaterialVariantsDialog";
@@ -66,6 +69,7 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
     queryFn: () => productsApi.getBom(product.id),
   });
   const { data: materials } = useQuery({ queryKey: ["materials"], queryFn: materialsApi.list });
+  const { data: categories } = useQuery({ queryKey: ["material-categories"], queryFn: materialCategoriesApi.list });
   const colourListId = useId();
 
   // Unusual among these editors: there is no saved server state to mirror. The attribute
@@ -177,7 +181,7 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
           {isExpanded ? "▾" : "▸"}
         </span>
         Variant attributes
-        <span className="font-normal text-slate-500">— define attributes and generate variants</span>
+        <span className="font-normal text-slate-500">: define attributes and generate variants</span>
       </button>
 
       {isExpanded && (
@@ -198,7 +202,7 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
               </label>
               <label className="flex flex-col gap-1 flex-1">
                 <span className="text-sm">
-                  Values (comma-separated){row.materialRules.length > 0 && " — derived from checked materials below"}
+                  Values (comma-separated){row.materialRules.length > 0 && ": derived from checked materials below"}
                 </span>
                 <input
                   className="w-full rounded border border-slate-300 px-2 py-1 disabled:bg-slate-50 disabled:text-slate-500"
@@ -214,7 +218,7 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
               </button>
             </div>
 
-            {row.name.trim() && bom && bom.length > 0 && materials && (
+            {row.name.trim() && bom && bom.length > 0 && materials && categories && (
               <div className="flex flex-col gap-2 rounded border border-slate-200 bg-slate-50 p-2">
                 <p className="text-xs font-medium text-slate-600">BOM rules for "{row.name.trim()}"</p>
                 {bom.map((line) => {
@@ -237,7 +241,13 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
                           onChange={(e) => {
                             if (e.target.checked) {
                               const isFirst = row.materialRules.length === 0;
-                              const originalLabel = baseMaterial.colour || baseMaterial.name;
+                              const members = groupMembers(baseMaterial, materials, categories).filter(
+                                (m) => m.is_active || m.id === baseMaterial.id
+                              );
+                              const originalLabel =
+                                members.length > 0
+                                  ? groupLabeller(members, categories)(baseMaterial)
+                                  : baseMaterial.colour || baseMaterial.name;
                               const newRule: MaterialRuleState = {
                                 baseMaterialId: line.material_id,
                                 valueToMaterialId: isFirst ? { [originalLabel]: baseMaterial.id } : {},
@@ -258,6 +268,8 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
                       {materialRule && (
                         <MaterialRulePanel
                           baseMaterial={baseMaterial}
+                          materials={materials}
+                          categories={categories}
                           rule={materialRule}
                           isDrivingValues={isDrivingValues}
                           existingValues={values}
@@ -376,6 +388,8 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
 
 function MaterialRulePanel({
   baseMaterial,
+  materials,
+  categories,
   rule,
   isDrivingValues,
   existingValues,
@@ -383,6 +397,8 @@ function MaterialRulePanel({
   onDeriveValues,
 }: {
   baseMaterial: Material;
+  materials: Material[];
+  categories: MaterialCategory[];
   rule: MaterialRuleState;
   isDrivingValues: boolean;
   existingValues: string[];
@@ -390,34 +406,28 @@ function MaterialRulePanel({
   onDeriveValues: (valuesText: string) => void;
 }) {
   const referencedIds = useMemo(() => new Set(Object.values(rule.valueToMaterialId)), [rule.valueToMaterialId]);
-  const { data: siblings } = useQuery({
-    queryKey: ["materials", "by-type", baseMaterial.material_type_id],
-    queryFn: () => materialsApi.listByType(baseMaterial.material_type_id as number),
-    enabled: baseMaterial.material_type_id != null,
-    // The server returns every material of the type, retired ones included, in material-name
-    // order. Retired colours are dropped (a deactivated spool must not resurface as a variant
-    // option) unless this rule already points at one; the UI shows the colour name, so sort by
-    // what is actually displayed.
-    select: (list) =>
-      list
-        .filter((m) => m.is_active || m.id === baseMaterial.id || referencedIds.has(m.id))
-        .sort((a, b) => colourLabel(a).localeCompare(colourLabel(b))),
-  });
-
+  // Filtered from the full list the editor already holds rather than fetched per type: the pool
+  // is no longer always a material type (see substitutionGroups). Retired materials are dropped
+  // (a deactivated spool must not resurface as a variant option) unless this rule already
+  // points at one; sorted by what is actually displayed.
+  const poolMembers = useMemo(
+    () =>
+      groupMembers(baseMaterial, materials, categories).filter(
+        (m) => m.is_active || m.id === baseMaterial.id || referencedIds.has(m.id)
+      ),
+    [baseMaterial, materials, categories, referencedIds]
+  );
   // Colours alone are not always unique within a type (a second brand bought because the
   // first ran out), so a colour that appears twice is shown with its full material name.
-  const labelOf = useMemo(() => materialLabeller(siblings ?? []), [siblings]);
+  // Non-colour materials are shown by name, minus the prefix the whole pool shares.
+  const labelOf = useMemo(() => groupLabeller(poolMembers, categories), [poolMembers, categories]);
+  const siblings = useMemo(
+    () => [...poolMembers].sort((a, b) => labelOf(a).localeCompare(labelOf(b))),
+    [poolMembers, labelOf]
+  );
 
-  if (baseMaterial.material_type_id == null) {
-    return (
-      <p className="pl-4 text-xs text-amber-700">
-        "{baseMaterial.name}" has no Material Type set — assign one (in Materials) to group its colour variants
-        before this can drive substitutions.
-      </p>
-    );
-  }
-
-  if (!siblings) return <p className="pl-4 text-xs text-slate-400">Loading materials…</p>;
+  const reason = noGroupReason(baseMaterial, categories);
+  if (reason) return <p className="pl-4 text-xs text-amber-700">{reason}</p>;
 
   if (isDrivingValues) {
     const checkedIds = new Set(Object.values(rule.valueToMaterialId));
@@ -430,8 +440,8 @@ function MaterialRulePanel({
         // The attribute value is normally the colour name. When another material already
         // owns that value, key on the full label instead so both can be ticked; otherwise
         // the second would silently replace the first.
-        const colour = colourLabel(material);
-        next[colour in next ? labelOf(material) : colour] = material.id;
+        const label = labelOf(material);
+        next[label] = material.id;
       }
       onChangeRule({ ...rule, valueToMaterialId: next });
       onDeriveValues(Object.keys(next).join(", "));
@@ -476,21 +486,6 @@ function MaterialRulePanel({
       ))}
     </div>
   );
-}
-
-function colourLabel(m: Material): string {
-  return m.colour || m.name;
-}
-
-/** Colour name where it identifies the material, "Colour — full name" where another
- * material in the list shares it. */
-export function materialLabeller(materials: Material[]): (m: Material) => string {
-  const counts = new Map<string, number>();
-  for (const m of materials) counts.set(colourLabel(m), (counts.get(colourLabel(m)) ?? 0) + 1);
-  return (m) => {
-    const colour = colourLabel(m);
-    return (counts.get(colour) ?? 0) > 1 && m.name !== colour ? `${colour} — ${m.name}` : colour;
-  };
 }
 
 function QuantityRulePanel({

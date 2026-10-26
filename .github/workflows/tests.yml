@@ -57,7 +57,7 @@ jobs:
       # v9 also flipped `prune-cache` to default false, so the cache this saves is larger
       # than it was under v3. That is the intended trade (less load on PyPI, faster installs);
       # if the Actions cache allowance ever becomes the constraint, set prune-cache: true here.
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.2
         with:
           enable-cache: true
           cache-dependency-glob: backend/uv.lock
@@ -147,7 +147,7 @@ jobs:
       # --lib only: there is no binary to test, and building the full app would pull in the
       # frontend bundle and a real sidecar, neither of which this job produces.
       - name: Run Rust tests
-        run: cargo test --lib
+        run: cargo test --lib --locked
         working-directory: frontend/src-tauri
 
   # release.yml only triggers on v* tags, so its logic is otherwise unexercised until a

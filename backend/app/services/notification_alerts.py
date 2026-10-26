@@ -256,9 +256,9 @@ async def raise_order_cancellation_pending_alert(session: AsyncSession, alert: P
         session,
         category=NotificationCategory.order_cancellation_pending,
         urgency=NotificationUrgency.immediate,
-        title=f"{platform_label} order {alert.external_order_id or alert.order_id} {alert.reason} — review needed",
+        title=f"{platform_label} order {alert.external_order_id or alert.order_id} {alert.reason}: review needed",
         body=(
-            "Nothing has been changed locally, including reserved stock — review the order and "
+            "Nothing has been changed locally, including reserved stock: review the order and "
             "confirm a scrap/return-to-stock decision to release it."
         ),
         delivery_mode=config.delivery_mode,
@@ -393,7 +393,10 @@ async def check_material_forecast_alerts(session: AsyncSession) -> None:
     if not critical_on and not warning_on:
         return
 
-    forecasts = await compute_material_forecasts(session)
+    # include_all: by default the forecast omits healthy materials, so a material that
+    # recovered (stock arrived, a purchase was raised) would simply vanish from the list and
+    # its "back to healthy" transition below would never be seen — leaving the alert unread.
+    forecasts = await compute_material_forecasts(session, include_all=True)
     previous = await _load_alert_state_map(session, _MATERIAL_FORECAST_KEY)
     seen_keys: set[str] = set()
 
@@ -456,6 +459,10 @@ async def check_material_forecast_alerts(session: AsyncSession) -> None:
     # status so a reactivated material starts from a clean slate rather than an alert
     # silently never firing again because it "already" transitioned once, years ago.
     for stale_key in set(previous) - seen_keys:
+        for category in (NotificationCategory.material_forecast_critical, NotificationCategory.material_forecast_warning):
+            await resolve_alerts(
+                session, category=category, related_entity_type="material", related_entity_id=int(stale_key)
+            )
         await _clear_alert_state(session, _MATERIAL_FORECAST_KEY, stale_key)
 
 
@@ -470,7 +477,7 @@ def _product_label(line) -> str:
 def _shortfall_body(new_lines: list, already_flagged: int) -> str:
     """One line per newly-short item, capped, with a tail noting anything already alerted on
     for the same order so the reader isn't left thinking this is the whole picture."""
-    body_lines = [f"{_product_label(line)} — short by {line.short_by}" for line in new_lines[:_ORDER_BODY_LINE_CAP]]
+    body_lines = [f"{_product_label(line)}: short by {line.short_by}" for line in new_lines[:_ORDER_BODY_LINE_CAP]]
     overflow = len(new_lines) - _ORDER_BODY_LINE_CAP
     if overflow > 0:
         body_lines.append(f"...and {overflow} more")
@@ -544,7 +551,7 @@ async def check_order_unfulfillable_alerts(session: AsyncSession) -> None:
                 # The title is the only line read at a glance on a lock screen, so it
                 # identifies the order and the size of the problem rather than restating the
                 # alert category the reader already subscribed to.
-                title=f"Order #{order_id} — {count} item{'s' if count != 1 else ''} short",
+                title=f"Order #{order_id}: {count} item{'s' if count != 1 else ''} short",
                 body=_shortfall_body(lines, known_awaiting.get(order_id, 0)),
                 delivery_mode=awaiting_config.delivery_mode,
                 related_entity_type="order",
@@ -561,8 +568,8 @@ async def check_order_unfulfillable_alerts(session: AsyncSession) -> None:
                 session,
                 category=NotificationCategory.order_blocked,
                 urgency=NotificationUrgency.immediate,
-                title=f"Order #{order_id} blocked — {count} item{'s' if count != 1 else ''} with no BOM",
-                body=f"{body}\n\nNothing can be built to cover this — these items need a BOM.",
+                title=f"Order #{order_id} blocked: {count} item{'s' if count != 1 else ''} with no BOM",
+                body=f"{body}\n\nNothing can be built to cover this: these items need a BOM.",
                 delivery_mode=blocked_config.delivery_mode,
                 related_entity_type="order",
                 related_entity_id=order_id,
@@ -603,7 +610,7 @@ async def check_pending_order_threshold(session: AsyncSession) -> None:
             category=NotificationCategory.pending_order_threshold,
             urgency=NotificationUrgency.digest,
             title="Pending order backlog is growing",
-            body=f"{count} orders are pending — above the configured threshold of {threshold}.",
+            body=f"{count} orders are pending: above the configured threshold of {threshold}.",
             delivery_mode=config.delivery_mode,
         )
     elif not is_over and was_over:
@@ -638,7 +645,7 @@ async def check_platform_api_usage_alerts(session: AsyncSession, platform: Listi
                 category=NotificationCategory.marketplace_api_hard_limit,
                 urgency=NotificationUrgency.immediate,
                 title=f"{platform.value.capitalize()} API usage at hard limit",
-                body=f"{usage} of {budget} daily calls used — automatic syncing may be throttled.",
+                body=f"{usage} of {budget} daily calls used: automatic syncing may be throttled.",
                 delivery_mode=hard_config.delivery_mode,
                 related_entity_type="platform",
             )

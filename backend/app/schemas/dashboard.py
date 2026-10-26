@@ -58,6 +58,9 @@ class OrderAwaitingInventory(BaseModel):
     variant_name: str | None
     short_by: int
     order_placed_at: datetime
+    # The order's effective due date (collect-by for a collect order, else ship-by) — the same
+    # figure as the Orders page's Due column. None when the marketplace reported no date.
+    due_date: datetime | None = None
     platform: ListingPlatform | None = None
     # False means the product has no BOM at all (and isn't a bundle, which is fulfilled from
     # its components' stock rather than a BOM) — so this shortfall can never close by
@@ -67,12 +70,27 @@ class OrderAwaitingInventory(BaseModel):
     has_bom: bool = True
 
 
+class OrderAwaitingMapping(BaseModel):
+    """An open order line whose SKU hasn't been matched to a catalog product yet. Still an
+    order awaiting product, but nothing can be built or allocated until it's mapped."""
+
+    line_id: int
+    order_id: int
+    # The raw marketplace SKU — the only identifying text an unmapped line has.
+    sku: str | None = None
+    short_by: int
+    order_placed_at: datetime
+    due_date: datetime | None = None
+    platform: ListingPlatform | None = None
+
+
 class OrderAwaitingPackaging(BaseModel):
     order_id: int
     material_id: int
     material_name: str
     short_by: Decimal
     order_placed_at: datetime
+    due_date: datetime | None = None
     platform: ListingPlatform | None = None
     # Ranked, human-curated fallbacks for material_id — suggested only, never
     # auto-applied. See app.models.material_substitute.
@@ -99,6 +117,7 @@ class DashboardSummary(BaseModel):
     margin_alerts: list[MarginAlert]
     orders_awaiting_inventory: list[OrderAwaitingInventory]
     orders_awaiting_packaging: list[OrderAwaitingPackaging] = []
+    orders_awaiting_mapping: list[OrderAwaitingMapping] = []
     # Capped at 10; items_due_for_count_total is the uncapped count, so the dashboard can
     # say how many it isn't showing. Both default so an older client parsing this payload
     # doesn't break on the new fields.

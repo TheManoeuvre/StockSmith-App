@@ -52,18 +52,6 @@ The trigger is narrow and not fully isolated: a UNIQUE violation on a session th
 
 **Ask:** Isolate the exact trigger and decide whether it's an aiosqlite 0.22 regression (0.22 is recent and changed the connection/threading model) or a SQLAlchemy dialect incompatibility, then pin or bump accordingly. A dependency change wants its own commit and its own green run, not to ride along inside a feature.
 
-### Settle a flagged stock-take line inline on the count sheet
-
-**Problem:** Surfaced via the design canvas — it settles a held-back line (Accept / Keep / Recount) in a `Settle` column right in the count-sheet row. The real app removed the in-take Review tab and routes every flagged line to the standalone `/stock-takes/unresolved` page instead. That page works and is the right home for lines from *closed* takes, but settling one you just approved means leaving the take.
-
-**Ask:** When a take is closed but still has `conflict` lines, render the Accept / Keep / Recount actions inline in the count-sheet row (reusing `stockTakesApi.resolveLine`), so a just-approved take can be cleared without a page change. The Unresolved page stays as the cross-take view.
-
-### Variance value column on the stock-take count sheet
-
-**Problem:** Surfaced via the design canvas — its stock-take sheet has a `Value` column showing the money impact of each line's variance (`delta × unit cost`). The real sheet (`src/routes/stock-takes/$stockTakeId.tsx`) shows Expected / Counted / Delta but no monetary figure, and `StockTakeLineRead` carries no unit cost to compute one from.
-
-**Ask:** Put a `unit_cost` (or a precomputed `delta_value`) on the `StockTakeLineRead` schema — materials from `avg_unit_cost`, products/variants from `cost_per_unit` — and add a right-aligned `Value` column. Lets someone triage a sheet by "what's the £ exposure" rather than raw quantity.
-
 ---
 
 ## Catalogue tidy-up

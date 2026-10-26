@@ -33,7 +33,7 @@ export function DuplicateColoursNotice({ materials }: { materials: Material[] })
         <div className="mt-2 flex flex-col gap-3">
           <p className="text-xs">
             If these are the same spool entered twice, merge them. If they are different brands you keep on purpose,
-            leave them — the variant colour picker shows the full name for each.
+            leave them: the variant colour picker shows the full name for each.
           </p>
           {groups.map((group) => (
             <div key={`${group.typeName}-${group.colour}`}>

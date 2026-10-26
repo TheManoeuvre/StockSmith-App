@@ -158,7 +158,7 @@ _QUANTITY_NOT_PER_SKU_ERROR = "quantity must be consistent across all products"
 # which names neither the listing nor what to do about it.
 _QUANTITY_NOT_PER_SKU_MESSAGE = (
     "This Etsy listing's quantity doesn't vary by variation, so its variants can't be "
-    "stocked independently — every variation shares one quantity. On Etsy, edit the "
+    "stocked independently: every variation shares one quantity. On Etsy, edit the "
     "listing's variations and tick \"quantity\" for the variation that should carry "
     "stock. Until then StockSmith can't push stock to this listing."
 )
@@ -259,7 +259,7 @@ class EtsyAdapter:
             # risk connecting to the wrong (possibly live) store.
             names = ", ".join(str(s.get("shop_name") or s.get("shop_id")) for s in shops)
             raise PlatformSyncError(
-                f"This Etsy account has multiple shops ({names}) — StockSmith can't safely pick one "
+                f"This Etsy account has multiple shops ({names}). StockSmith can't safely pick one "
                 "automatically. Connecting multi-shop accounts isn't supported yet."
             )
         shop_id = shops[0].get("shop_id")
@@ -321,7 +321,7 @@ class EtsyAdapter:
             # than retrying a dead connection every cycle (it used to raise a generic
             # PlatformSyncError here, which the counter ignores).
             raise PlatformAuthError(
-                f"Etsy rejected the access token on {method} {path} even after a refresh — reconnect required."
+                f"Etsy rejected the access token on {method} {path} even after a refresh. Reconnect required."
             )
 
         attempt = 0
@@ -329,8 +329,8 @@ class EtsyAdapter:
             delay = self._rate_limit_delay(response, attempt)
             if delay > _RATE_LIMIT_MAX_SLEEP_SECONDS:
                 raise PlatformRateLimitError(
-                    f"Etsy asked for a {delay:.0f}s back-off on {method} {path} (daily quota) — "
-                    "not sleeping on it; will retry next cycle"
+                    f"Etsy asked for a {delay:.0f}s back-off on {method} {path} (daily quota). "
+                    "Not sleeping on it; will retry next cycle"
                 )
             logger.warning(
                 "Etsy API rate limited on %s %s (retry %d/%d in %.1fs)",
@@ -374,7 +374,7 @@ class EtsyAdapter:
     async def _ensure_fresh(self, session, connection: PlatformConnection) -> None:
         expires_at = ensure_utc(connection.access_token_expires_at)
         if expires_at is None or connection.refresh_token is None:
-            raise PlatformAuthError("Etsy connection has no stored tokens — reconnect required")
+            raise PlatformAuthError("Etsy connection has no stored tokens. Reconnect required")
         if datetime.now(timezone.utc) + _REFRESH_SKEW >= expires_at:
             await self._do_refresh(session, connection)
 
@@ -385,7 +385,7 @@ class EtsyAdapter:
             if expires_at is not None and datetime.now(timezone.utc) + _REFRESH_SKEW < expires_at:
                 return
             if connection.refresh_token is None:
-                raise PlatformAuthError("Etsy connection has no refresh token — reconnect required")
+                raise PlatformAuthError("Etsy connection has no refresh token. Reconnect required")
             tokens = await self.refresh(connection.refresh_token)
             connection.access_token = tokens.access_token
             connection.refresh_token = tokens.refresh_token
@@ -422,7 +422,7 @@ class EtsyAdapter:
         order_sync._partition_new_orders.
         """
         if connection.external_account_id is None:
-            raise PlatformSyncError("Etsy connection has no shop id — reconnect required")
+            raise PlatformSyncError("Etsy connection has no shop id. Reconnect required")
 
         params: dict[str, str | int] = {"limit": 100, "offset": 0, "includes": "Transactions,Shipments"}
         if since is not None:
@@ -663,6 +663,7 @@ class EtsyAdapter:
             unit_price=unit_price,
             currency=price.get("currency_code"),
             variation_text=self._format_variations(tx.get("variations")),
+            external_listing_id=str(tx["listing_id"]) if tx.get("listing_id") else None,
         )
 
     @staticmethod
@@ -1187,6 +1188,20 @@ class EtsyAdapter:
             self._index_listing_skus(listing, index)
         return index
 
+    async def build_listing_sku_multi_index(
+        self, session, connection: PlatformConnection, *, enrich: bool = True, enrich_skus: set[str] | None = None
+    ) -> dict[str, list[ExternalListingRef]]:
+        """Like build_listing_sku_index, but keeps every listing holding a SKU instead of
+        letting the last one crawled overwrite the rest. Sellers run several listings over
+        the same SKUs (A/B tests, a free-shipping variant) that draw on one stock pool, and
+        a quantity push has to reach all of them. Same crawl, so the same API cost; refs
+        are in crawl order (state order, then Etsy's own order within a state)."""
+        multi: dict[str, list[ExternalListingRef]] = {}
+        for listing in await self._crawl_shop_listings(session, connection, includes="Inventory"):
+            for ref in self._listing_sku_refs(listing):
+                multi.setdefault(ref.sku, []).append(ref)
+        return multi
+
     async def _crawl_shop_listings(self, session, connection: PlatformConnection, *, includes: str) -> list[dict]:
         """Every listing in the shop, across every state in _LISTING_STATES, in state
         order. The API takes one `state` per request, so this is one paginated crawl per
@@ -1195,7 +1210,7 @@ class EtsyAdapter:
         anyway — a listing changing state between two of the crawls must not be counted
         twice, and a fake that answers every state with the same page must not either."""
         if connection.external_account_id is None:
-            raise PlatformSyncError("Etsy connection has no shop id — reconnect required")
+            raise PlatformSyncError("Etsy connection has no shop id. Reconnect required")
 
         listings: list[dict] = []
         seen: set[str] = set()
@@ -1332,7 +1347,7 @@ class EtsyAdapter:
         if unknown:
             raise PlatformSyncError(
                 f"Etsy listing {listing_id} has {len(raw_products)} product(s); no product at index "
-                f"{sorted(unknown)} — the listing may have changed since it was loaded."
+                f"{sorted(unknown)}: the listing may have changed since it was loaded."
             )
 
         products_payload = []
@@ -1423,7 +1438,7 @@ class EtsyAdapter:
         from app.services.platforms.base import DraftListingResult
 
         if connection.external_account_id is None:
-            raise PlatformSyncError("Etsy connection has no shop id — reconnect required")
+            raise PlatformSyncError("Etsy connection has no shop id. Reconnect required")
 
         # Etsy takes the listing-level price as "the minimum possible price"; per-unit
         # prices arrive with the inventory call once variations are supported. The
@@ -1670,7 +1685,7 @@ class EtsyAdapter:
         like "you have no shipping profiles" when the real answer is "we were not allowed to
         ask"."""
         if connection.external_account_id is None:
-            raise PlatformSyncError("Etsy connection has no shop id — reconnect required")
+            raise PlatformSyncError("Etsy connection has no shop id. Reconnect required")
 
         response = await self._authed_request(
             session, connection, "GET", f"/shops/{connection.external_account_id}/shipping-profiles"
@@ -1737,7 +1752,7 @@ class EtsyAdapter:
         actually does, which is more use than a name would have been anyway: "Returns and
         exchanges within 30 days" tells you which one to pick; "Policy 2" does not."""
         if connection.external_account_id is None:
-            raise PlatformSyncError("Etsy connection has no shop id — reconnect required")
+            raise PlatformSyncError("Etsy connection has no shop id. Reconnect required")
 
         response = await self._authed_request(
             session, connection, "GET", f"/shops/{connection.external_account_id}/policies/return"
@@ -1759,7 +1774,7 @@ class EtsyAdapter:
         optional field in practice. Labelled from what it actually says (ready to ship /
         made to order, and the processing time), since the object carries no name."""
         if connection.external_account_id is None:
-            raise PlatformSyncError("Etsy connection has no shop id — reconnect required")
+            raise PlatformSyncError("Etsy connection has no shop id. Reconnect required")
 
         response = await self._authed_request(
             session, connection, "GET", f"/shops/{connection.external_account_id}/readiness-state-definitions"
@@ -1799,11 +1814,12 @@ class EtsyAdapter:
         return f"{label} within {deadline} days" if deadline else label
 
     @staticmethod
-    def _index_listing_skus(listing: dict, index: dict[str, ExternalListingRef]) -> None:
+    def _listing_sku_refs(listing: dict) -> list[ExternalListingRef]:
         listing_id = str(listing.get("listing_id"))
         title = listing.get("title") or None
         state = listing.get("state") or "unknown"
         inventory = listing.get("inventory") or {}
+        refs = []
         for product in inventory.get("products", []):
             sku = product.get("sku")
             if not sku or product.get("is_deleted"):
@@ -1813,14 +1829,22 @@ class EtsyAdapter:
                 for offering in product.get("offerings", [])
                 if offering.get("is_enabled") and not offering.get("is_deleted")
             )
-            index[sku] = ExternalListingRef(
-                external_listing_id=listing_id,
-                title=title,
-                sku=sku,
-                state=state,
-                quantity=qty,
-                variation=EtsyAdapter._format_variation(product.get("property_values", [])),
+            refs.append(
+                ExternalListingRef(
+                    external_listing_id=listing_id,
+                    title=title,
+                    sku=sku,
+                    state=state,
+                    quantity=qty,
+                    variation=EtsyAdapter._format_variation(product.get("property_values", [])),
+                )
             )
+        return refs
+
+    @staticmethod
+    def _index_listing_skus(listing: dict, index: dict[str, ExternalListingRef]) -> None:
+        for ref in EtsyAdapter._listing_sku_refs(listing):
+            index[ref.sku] = ref
 
     @staticmethod
     def _format_variation(property_values: list[dict]) -> str | None:

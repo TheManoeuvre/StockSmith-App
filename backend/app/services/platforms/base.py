@@ -57,6 +57,10 @@ class ExternalOrderLine:
     # transaction.variations "Personalization" entry). None when the listing has no
     # personalization option or the buyer left it blank. eBay has no equivalent concept.
     variation_text: str | None = None
+    # The marketplace listing this line was sold from (Etsy transaction.listing_id), for
+    # attribution only — line matching stays SKU-based, since several listings may share
+    # a SKU and draw on one stock pool. None where the marketplace doesn't report it.
+    external_listing_id: str | None = None
 
 
 @dataclass
@@ -407,7 +411,7 @@ class PlatformAdapter(Protocol):
         enrich_skus: set[str] | None = None,
     ) -> dict[str, ExternalListingRef]: ...
     """`enrich`/`enrich_skus` are fidelity hints, not filters: the index must always
-    contain every SKU the marketplace reports, whatever they're set to — callers rely on
+    contain every SKU the marketplace reports, whatever they're set to: callers rely on
     it for membership tests. They exist because some adapters need extra per-SKU calls to
     fill a ref completely (eBay's listing state lives on a separate Offer object), and a
     caller that only needs membership shouldn't pay for them. An adapter whose single

@@ -203,7 +203,7 @@ export function EtsyListingPickerModal({
           <div className="flex flex-col gap-2">
             {report?.listings.length === 0 && (
               <p className="text-sm text-slate-600">
-                Every Etsy listing already matches a StockSmith SKU — nothing to
+                Every Etsy listing already matches a StockSmith SKU: nothing to
                 link.
               </p>
             )}
@@ -288,7 +288,7 @@ export function EtsyListingPickerModal({
                       <option value="">Select Etsy variation…</option>
                       {selected.products.map((p) => (
                         <option key={p.index} value={p.index}>
-                          {p.variation ?? `Variation ${p.index + 1}`} —{" "}
+                          {p.variation ?? `Variation ${p.index + 1}`}:{" "}
                           {p.sku ?? "no SKU"} (qty {p.quantity})
                         </option>
                       ))}
@@ -320,7 +320,7 @@ export function EtsyListingPickerModal({
 function EtsyAdoptionResultBanner({ result }: { result: AdoptListingResult }) {
   return (
     <p className="rounded-md bg-green-50 p-2 text-sm text-green-800">
-      Linked {result.units.length} unit(s) — Etsy now carries StockSmith's SKUs
+      Linked {result.units.length} unit(s). Etsy now carries StockSmith's SKUs
       for this listing.
     </p>
   );

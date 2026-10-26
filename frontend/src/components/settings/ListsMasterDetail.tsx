@@ -70,7 +70,7 @@ export function ListsMasterDetail() {
       render: () => (
         <ReferenceDataTable
           title="Suppliers"
-          description="Who you buy from. Renaming one updates every material and purchase that uses it. Default lead time feeds the materials time-to-stockout forecast — leave it blank to use the shop-wide default."
+          description="Who you buy from. Renaming one updates every material and purchase that uses it. Default lead time feeds the materials time-to-stockout forecast: leave it blank to use the shop-wide default."
           segment="suppliers"
           queryKey={["suppliers"]}
           api={{
@@ -127,7 +127,7 @@ export function ListsMasterDetail() {
       render: () => (
         <ReferenceDataTable
           title="Material categories"
-          description="What kind of thing a material is. The checkboxes are the behaviour that used to be hardcoded to filament and packaging — set them on any category, including ones you add. Order decides how the materials list groups and sorts."
+          description="What kind of thing a material is. The checkboxes are the behaviour that used to be hardcoded to filament and packaging: set them on any category, including ones you add. Order decides how the materials list groups and sorts."
           segment="material-categories"
           queryKey={["material-categories"]}
           api={{
@@ -152,7 +152,7 @@ export function ListsMasterDetail() {
               ],
             },
             { key: "tracks_colour", label: "Has a colour", type: "checkbox" },
-            { key: "tracks_material_type", label: "Has a material type", type: "checkbox" },
+            { key: "tracks_material_type", label: "Has a material type (groups substitutable materials)", type: "checkbox" },
             { key: "cost_per_kg_display", label: "Show cost per kg", type: "checkbox" },
             { key: "consumed_on_failed_build", label: "Consumed by failed builds", type: "checkbox" },
             { key: "auto_kitting_per_order", label: "Kitting: one per order, not per unit", type: "checkbox" },

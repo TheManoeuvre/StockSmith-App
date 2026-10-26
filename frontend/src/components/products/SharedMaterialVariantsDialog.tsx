@@ -60,7 +60,7 @@ export function SharedMaterialVariantsDialog({
             disabled={busy || rest === 0}
             onClick={() => onResolve("skip")}
             className={`${buttonClass} border border-slate-300`}
-            title={rest === 0 ? "Every new variant is affected — there is nothing else to create" : undefined}
+            title={rest === 0 ? "Every new variant is affected: there is nothing else to create" : undefined}
           >
             {busy ? "Working…" : `Leave ${affected === 1 ? "it" : "them"} out`}
           </button>
@@ -85,13 +85,13 @@ export function SharedMaterialVariantsDialog({
           {detail.variants.map((v) => (
             <li key={v.variant_name} className="text-xs">
               <span className="font-medium">{v.variant_name}</span>
-              <span className="text-slate-600"> — {v.message.replace(`Variant '${v.variant_name}': `, "")}</span>
+              <span className="text-slate-600">: {v.message.replace(`Variant '${v.variant_name}': `, "")}</span>
             </li>
           ))}
         </ul>
         <p className="text-slate-600">
           <strong className="font-medium text-slate-900">Keep</strong> creates{" "}
-          {affected === 1 ? "it" : "them"} with both lines on that material, each with its own quantity — the
+          {affected === 1 ? "it" : "them"} with both lines on that material, each with its own quantity: the
           variant uses the material for both parts.{" "}
           <strong className="font-medium text-slate-900">Leave out</strong> creates the other{" "}
           {rest === 1 ? "variant" : `${rest} variants`} and skips {affected === 1 ? "this one" : "these"}.

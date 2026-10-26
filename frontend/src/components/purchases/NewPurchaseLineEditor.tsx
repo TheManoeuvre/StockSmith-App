@@ -15,7 +15,7 @@ const COVER_TEXT: Record<CoverTone, string> = {
 /** The material's line total is keyed from the invoice; the unit price is derived from it.
  *  Sub-£1 unit prices get 4 dp so a per-gram figure isn't rounded to nothing. */
 function unitPriceLabel(unitPrice: number, unit: Material["unit"]): string {
-  if (!Number.isFinite(unitPrice) || unitPrice <= 0) return "—";
+  if (!Number.isFinite(unitPrice) || unitPrice <= 0) return "-";
   const money = `£${unitPrice.toFixed(unitPrice < 1 ? 4 : 2)}`;
   return unit === "each" ? `${money} each` : `${money}/${unit}`;
 }
@@ -55,7 +55,7 @@ export function NewPurchaseLineEditor({
     <div className="overflow-hidden rounded border border-slate-200 bg-white shadow-sm">
       {lines.length === 0 ? (
         <p className="bg-amber-50 px-3 py-4 text-center text-[12.5px] text-amber-700">
-          No lines yet — add one, or take a suggestion below
+          No lines yet: add one, or take a suggestion below
         </p>
       ) : (
         <ul className="divide-y divide-slate-100">
@@ -143,7 +143,7 @@ export function NewPurchaseLineEditor({
                       ? `last paid ${unitPriceLabel(Number(ref.unit_cost), material?.unit ?? "each")} · #${
                           ref.purchase_ref ?? ref.purchase_id
                         } · ${formatDayMonth(ref.at)}${ref.same_supplier ? "" : ` · ${ref.supplier_name ?? "other supplier"}`}`
-                      : "never bought before — no price to compare"}
+                      : "never bought before: no price to compare"}
                   </span>
                   {deltaPct != null && Math.abs(deltaPct) >= 0.5 && (
                     <Badge
@@ -184,7 +184,7 @@ export function NewPurchaseLineEditor({
           + Add line
         </button>
         <span className="text-[11px] text-slate-400">
-          Key the line total from the invoice — the unit price is worked out from it
+          Key the line total from the invoice: the unit price is worked out from it
         </span>
       </div>
     </div>

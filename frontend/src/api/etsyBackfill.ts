@@ -50,6 +50,7 @@ export interface ProfileProposal {
   product_count: number;
   product_names: string[];
   taxonomy_id: number | null;
+  category_path?: string | null;
   who_made: string | null;
   when_made: string | null;
   is_supply: boolean | null;
@@ -70,8 +71,17 @@ export interface ShippingProfileProposal {
   product_names: string[];
 }
 
+/** Products whose Etsy listing matches a profile you already have but aren't assigned to it. */
+export interface ExistingProfileAssignment {
+  profile_id: number;
+  profile_name: string;
+  product_count: number;
+  product_names: string[];
+}
+
 export interface ProfileProposalsPreview {
   proposals: ProfileProposal[];
+  existing_assignments?: ExistingProfileAssignment[];
   shipping_profiles: ShippingProfileProposal[];
 }
 
@@ -89,6 +99,7 @@ export interface ApplyProfileProposalsResult {
   shipping_profiles_created: number;
   shipping_profiles_linked: number;
   shipping_products_assigned: number;
+  existing_products_assigned?: number;
 }
 
 export const etsyProfileProposalsApi = {
@@ -96,11 +107,13 @@ export const etsyProfileProposalsApi = {
   apply: (
     items: { index: number; name: string }[],
     shippingItems: ShippingProfileSelection[] = [],
-    assignProducts = true
+    assignProducts = true,
+    existingProfileIds: number[] = []
   ) =>
     api.post<ApplyProfileProposalsResult>(`/platforms/etsy/profile-proposals/apply`, {
       items,
       shipping_items: shippingItems,
       assign_products: assignProducts,
+      existing_profile_ids: existingProfileIds,
     }),
 };

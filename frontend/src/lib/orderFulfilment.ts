@@ -43,7 +43,7 @@ export function orderFulfilment(order: Order): OrderFulfilment {
     return {
       label: "Cancellation pending review",
       toneClass: "text-red-700",
-      detail: "Marketplace reports this order cancelled — stock stays reserved until confirmed",
+      detail: "Marketplace reports this order cancelled: stock stays reserved until confirmed",
       action: { label: "Review", kind: "open" },
     };
   }
@@ -53,7 +53,7 @@ export function orderFulfilment(order: Order): OrderFulfilment {
     return {
       label: "Replacement to complete",
       toneClass: "text-amber-700",
-      detail: "A second shipping label was detected — record what was sent",
+      detail: "A second shipping label was detected: record what was sent",
       action: { label: "Complete", kind: "open" },
       trackingNumber: order.tracking_number ?? undefined,
     };
