@@ -4,7 +4,7 @@ Etsy's should_auto_renew and an eBay handling time in business days, both nullab
 existing profile keeps sending exactly what it sent before (nothing for these fields).
 
 Revision ID: d4e8b2a6c917
-Revises: a7c2e4b19d35
+Revises: b4d8f2a6c139
 Create Date: 2026-10-16 00:00:00.000000
 
 """
@@ -15,7 +15,7 @@ import sqlalchemy as sa
 
 
 revision: str = 'd4e8b2a6c917'
-down_revision: Union[str, Sequence[str], None] = 'a7c2e4b19d35'
+down_revision: Union[str, Sequence[str], None] = 'b4d8f2a6c139'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
