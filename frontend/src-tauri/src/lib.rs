@@ -571,6 +571,11 @@ fn set_autostart(app: tauri::AppHandle, enabled: bool) -> Result<bool, String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Without this, the first reqwest::Client::builder().build() panics inside start_backend's
+    // task, silently, so the window opens, no sidecar is ever spawned, and the UI sits on
+    // "Reconnecting" forever. Ignored if something has already installed a provider.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     tauri::Builder::default()
         // Registered before every other plugin, per the plugin's own guidance: a second
         // launch has to be intercepted before the rest of the app starts setting itself up,

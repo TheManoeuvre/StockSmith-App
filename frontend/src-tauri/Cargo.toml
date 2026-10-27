@@ -37,4 +37,7 @@ tauri-plugin-shell = "2"
 tauri-plugin-updater = "2"
 reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"] }
 tokio = { version = "1", features = ["time"] }
+# reqwest 0.13.5 panics when building a Client with no process-default provider. The updater plugin
+# already links ring, so install that one explicitly (see run()).
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
 
