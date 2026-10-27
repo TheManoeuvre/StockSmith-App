@@ -11,7 +11,7 @@ import type {
 import { Badge } from "../components/common/Badge";
 import { Th } from "../components/common/ListTable";
 import { SubstituteSuggestions } from "../components/materials/SubstituteSuggestions";
-import { formatDayMonth, roundQty } from "../lib/format";
+import { formatDayMonth, formatDayMonthRange, roundQty } from "../lib/format";
 import { formatMoney } from "../lib/money";
 import {
   formatLeadTime,
@@ -58,11 +58,20 @@ function stockoutDetail(m: LowStockMaterial): string | undefined {
 type FulfillmentRow = {
   key: string;
   orderId: number;
-  shortOn: "Stock" | "Packaging" | "No BOM defined";
+  /** Every order this row stands for — more than one when stock-short lines for the same
+   * product variation are collapsed into a single row. */
+  orderIds: number[];
+  shortOn: "Stock" | "Packaging" | "No BOM defined" | "Unmapped SKU";
+  /** Set on an "Unmapped SKU" row — the action is mapping the line on the order, not building. */
+  needsMapping?: boolean;
   item: string;
   shortBy: string;
   placedAt: string;
+  /** Due dates (ISO) of the orders on this row; empty entries already dropped. */
+  dueDates: string[];
   platform: ListingPlatform | null;
+  /** Distinct channels across the orders on this row. */
+  platforms: (ListingPlatform | null)[];
   build: { productId: number; variantId: number | null } | null;
   /** Only set on a "Packaging" row — the short material, for logging a picked fallback. */
   materialId: number | null;
@@ -73,40 +82,92 @@ type FulfillmentRow = {
  * common, expected case for a maker. Excludes lines with no BOM at all (see blockedRows). */
 function awaitingProductRows(data: DashboardSummary): FulfillmentRow[] {
   const rows: FulfillmentRow[] = [];
+  // One row per product variation: several orders short on the same item collapse together,
+  // their short-by summed, rather than each taking a line of its own.
+  const byVariation = new Map<string, FulfillmentRow>();
   for (const o of data.orders_awaiting_inventory) {
     if (!o.has_bom) continue;
-    rows.push({
-      key: `inv-${o.line_id}`,
+    const key =
+      o.product_id != null
+        ? `inv-${o.product_id}-${o.variant_id ?? "none"}`
+        : `inv-line-${o.line_id}`;
+    const existing = byVariation.get(key);
+    if (existing) {
+      if (!existing.orderIds.includes(o.order_id)) existing.orderIds.push(o.order_id);
+      existing.shortBy = String(Number(existing.shortBy) + o.short_by);
+      if (o.due_date) existing.dueDates.push(o.due_date);
+      if (!existing.platforms.includes(o.platform)) existing.platforms.push(o.platform);
+      if (o.order_placed_at < existing.placedAt) existing.placedAt = o.order_placed_at;
+      continue;
+    }
+    const row: FulfillmentRow = {
+      key,
       orderId: o.order_id,
+      orderIds: [o.order_id],
       shortOn: "Stock",
       item:
-        (o.product_name ?? "—") + (o.variant_name ? ` — ${o.variant_name}` : ""),
+        (o.product_name ?? "-") + (o.variant_name ? ` (${o.variant_name})` : ""),
       shortBy: String(o.short_by),
       placedAt: o.order_placed_at,
+      dueDates: o.due_date ? [o.due_date] : [],
       platform: o.platform,
+      platforms: [o.platform],
       build:
         o.product_id != null
           ? { productId: o.product_id, variantId: o.variant_id }
           : null,
       materialId: null,
       suggestedSubstitutes: [],
-    });
+    };
+    byVariation.set(key, row);
+    rows.push(row);
   }
   for (const [i, o] of data.orders_awaiting_packaging.entries()) {
     rows.push({
       key: `pkg-${o.order_id}-${o.material_id}-${i}`,
       orderId: o.order_id,
+      orderIds: [o.order_id],
       shortOn: "Packaging",
       item: o.material_name,
       shortBy: roundQty(o.short_by),
       placedAt: o.order_placed_at,
+      dueDates: o.due_date ? [o.due_date] : [],
       platform: o.platform,
+      platforms: [o.platform],
       build: null,
       materialId: o.material_id,
       suggestedSubstitutes: o.suggested_substitutes ?? [],
     });
   }
-  rows.sort((a, b) => a.placedAt.localeCompare(b.placedAt));
+  for (const o of data.orders_awaiting_mapping ?? []) {
+    rows.push({
+      key: `map-${o.line_id}`,
+      orderId: o.order_id,
+      orderIds: [o.order_id],
+      shortOn: "Unmapped SKU",
+      needsMapping: true,
+      item: o.sku ?? "—",
+      shortBy: String(o.short_by),
+      placedAt: o.order_placed_at,
+      dueDates: o.due_date ? [o.due_date] : [],
+      platform: o.platform,
+      platforms: [o.platform],
+      build: null,
+      materialId: null,
+      suggestedSubstitutes: [],
+    });
+  }
+  // Most urgent first: earliest due date, rows with none after, ties by when placed.
+  const earliestDue = (r: FulfillmentRow) =>
+    r.dueDates.length > 0
+      ? Math.min(...r.dueDates.map((d) => new Date(d).getTime()))
+      : Number.POSITIVE_INFINITY;
+  rows.sort((a, b) => {
+    const da = earliestDue(a);
+    const db = earliestDue(b);
+    if (da !== db) return da < db ? -1 : 1;
+    return a.placedAt.localeCompare(b.placedAt);
+  });
   return rows;
 }
 
@@ -119,12 +180,15 @@ function blockedRows(data: DashboardSummary): FulfillmentRow[] {
     rows.push({
       key: `blocked-${o.line_id}`,
       orderId: o.order_id,
+      orderIds: [o.order_id],
       shortOn: "No BOM defined",
       item:
-        (o.product_name ?? "—") + (o.variant_name ? ` — ${o.variant_name}` : ""),
+        (o.product_name ?? "-") + (o.variant_name ? ` (${o.variant_name})` : ""),
       shortBy: String(o.short_by),
       placedAt: o.order_placed_at,
+      dueDates: o.due_date ? [o.due_date] : [],
       platform: o.platform,
+      platforms: [o.platform],
       build:
         o.product_id != null
           ? { productId: o.product_id, variantId: o.variant_id }
@@ -168,7 +232,8 @@ function Dashboard() {
 
   const awaitingInventory = data.orders_awaiting_inventory.filter((o) => o.has_bom).length;
   const awaitingPackaging = data.orders_awaiting_packaging.length;
-  const awaitingCount = awaitingInventory + awaitingPackaging;
+  const awaitingMapping = (data.orders_awaiting_mapping ?? []).length;
+  const awaitingCount = awaitingInventory + awaitingPackaging + awaitingMapping;
   const rows = awaitingProductRows(data);
   const blocked = blockedRows(data);
 
@@ -182,13 +247,12 @@ function Dashboard() {
   const dueByClass = { A: 0, B: 0, C: 0 };
   for (const item of data.items_due_for_count) dueByClass[item.abc_class] += 1;
 
-  // Mirrors the null-returns in StockTakeCard and MarginMovedCard: when neither has anything
-  // to say, the stockout table takes the full width instead of sitting beside a blank column.
+  // Mirrors the null-return in StockTakeCard: when it has nothing to say, the stockout table
+  // takes the full width instead of sitting beside a blank column.
   const hasSideCards =
     data.open_stock_take != null ||
     data.unresolved_variance_count > 0 ||
-    data.items_due_for_count.length > 0 ||
-    data.margin_alerts.length > 0;
+    data.items_due_for_count.length > 0;
 
   return (
     <div className="flex flex-col gap-6">
@@ -201,7 +265,9 @@ function Dashboard() {
             label="Orders awaiting products"
             value={String(awaitingCount)}
             unit="right now"
-            note={`${awaitingInventory} short on stock · ${awaitingPackaging} short on packaging`}
+            note={`${awaitingInventory} short on stock · ${awaitingPackaging} short on packaging${
+              awaitingMapping > 0 ? ` · ${awaitingMapping} unmapped` : ""
+            }`}
             accent={
               awaitingCount > 0 ? "border-l-amber-500" : "border-l-slate-400"
             }
@@ -268,7 +334,7 @@ function Dashboard() {
       {blocked.length > 0 && (
         <Card
           title="Blocked orders"
-          hint="No BOM defined to build more from — this won't resolve on its own."
+          hint="No BOM defined to build more from: this won't resolve on its own."
           action={
             <Link to="/orders" className="text-xs text-blue-700 hover:underline">
               Open Orders →
@@ -353,7 +419,7 @@ function Dashboard() {
       >
         {rows.length === 0 ? (
           <p className="text-sm text-slate-500">
-            Nothing waiting — everything on order can be fulfilled from stock.
+            Nothing waiting: everything on order can be fulfilled from stock.
           </p>
         ) : (
           <table className="w-full border-collapse text-left text-[12.5px]">
@@ -364,7 +430,7 @@ function Dashboard() {
                 <Th>Short on</Th>
                 <Th>Item</Th>
                 <Th align="right">Short by</Th>
-                <Th>Placed</Th>
+                <Th>Due</Th>
                 <Th>{""}</Th>
               </tr>
             </thead>
@@ -373,23 +439,33 @@ function Dashboard() {
                 <Fragment key={r.key}>
                 <tr className="border-b border-slate-100">
                   <td className="p-2">
-                    <Link
-                      to="/orders/$orderId"
-                      params={{ orderId: String(r.orderId) }}
-                      className="text-slate-900 underline"
-                    >
-                      #{r.orderId}
-                    </Link>
+                    {r.orderIds.map((id, i) => (
+                      <Fragment key={id}>
+                        {i > 0 && ", "}
+                        <Link
+                          to="/orders/$orderId"
+                          params={{ orderId: String(id) }}
+                          className="text-slate-900 underline"
+                        >
+                          #{id}
+                        </Link>
+                      </Fragment>
+                    ))}
                   </td>
                   <td className="p-2">
-                    <span
-                      className={`rounded px-1.5 py-0.5 text-[10.5px] font-semibold ${
-                        r.platform
-                          ? PLATFORM_COLORS[r.platform].muted
-                          : "border border-slate-200 bg-slate-50 text-slate-600"
-                      }`}
-                    >
-                      {r.platform ? PLATFORM_LABELS[r.platform] : "Manual"}
+                    <span className="inline-flex gap-1">
+                      {r.platforms.map((p) => (
+                        <span
+                          key={p ?? "manual"}
+                          className={`rounded px-1.5 py-0.5 text-[10.5px] font-semibold ${
+                            p
+                              ? PLATFORM_COLORS[p].muted
+                              : "border border-slate-200 bg-slate-50 text-slate-600"
+                          }`}
+                        >
+                          {p ? PLATFORM_LABELS[p] : "Manual"}
+                        </span>
+                      ))}
                     </span>
                   </td>
                   <td className="p-2">
@@ -406,8 +482,17 @@ function Dashboard() {
                   <td className="p-2 text-right text-amber-700 tabular-nums">
                     {r.shortBy}
                   </td>
-                  <td className="p-2">{formatDayMonth(r.placedAt)}</td>
+                  <td className="p-2">{formatDayMonthRange(r.dueDates)}</td>
                   <td className="p-2">
+                    {r.needsMapping && (
+                      <Link
+                        to="/orders/$orderId"
+                        params={{ orderId: String(r.orderId) }}
+                        className="whitespace-nowrap rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800"
+                      >
+                        Map order
+                      </Link>
+                    )}
                     {r.build && (
                       <Link
                         to="/products/$productId"
@@ -421,7 +506,7 @@ function Dashboard() {
                             ? { variantId: r.build.variantId }
                             : {}),
                         }}
-                        className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800"
+                        className="whitespace-nowrap rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800"
                       >
                         Build now
                       </Link>
@@ -452,7 +537,7 @@ function Dashboard() {
       >
         <Card
           title="Time to stockout"
-          hint="Weeks until on-hand stock runs out — finished-goods cover included, on-order stock not. Grouped by supplier."
+          hint="Weeks until on-hand stock runs out: finished-goods cover included, on-order stock not. Grouped by supplier."
         >
           {data.low_stock_materials.length === 0 ? (
             <p className="text-sm text-slate-500">
@@ -492,7 +577,7 @@ function Dashboard() {
                       <button
                         onClick={() => openDraftPurchase(group.materials)}
                         title="Draft one purchase covering every at-risk material from this supplier"
-                        className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-normal text-amber-800"
+                        className="whitespace-nowrap rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-normal text-amber-800"
                       >
                         Create draft purchase
                       </button>
@@ -515,7 +600,7 @@ function Dashboard() {
                       <td className="p-2 text-right tabular-nums">
                         {m.consumption_rate_per_week != null
                           ? `${roundQty(m.consumption_rate_per_week)}/wk`
-                          : "—"}
+                          : "-"}
                       </td>
                       <td
                         className={`p-2 text-right tabular-nums ${STOCKOUT_TEXT_CLASS[m.status]}`}
@@ -525,12 +610,12 @@ function Dashboard() {
                       <td className="p-2 text-right tabular-nums">
                         {Number(m.on_order_qty) > 0
                           ? roundQty(m.on_order_qty)
-                          : "—"}
+                          : "-"}
                       </td>
                       <td className="p-2">
                         <button
                           onClick={() => openDraftPurchase([m])}
-                          className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800"
+                          className="whitespace-nowrap rounded-md border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800"
                         >
                           Create draft purchase
                         </button>
@@ -547,7 +632,6 @@ function Dashboard() {
         {hasSideCards && (
           <div className="flex flex-col gap-6">
             <StockTakeCard data={data} />
-            <MarginMovedCard data={data} />
           </div>
         )}
       </div>
@@ -660,53 +744,6 @@ function StockTakeCard({ data }: { data: DashboardSummary }) {
           )}
         </div>
       )}
-    </Card>
-  );
-}
-
-function MarginMovedCard({ data }: { data: DashboardSummary }) {
-  if (data.margin_alerts.length === 0) return null;
-  const top = [...data.margin_alerts]
-    .sort(
-      (a, b) =>
-        Math.abs(
-          Number(b.current_margin_percent) - Number(b.previous_margin_percent),
-        ) -
-        Math.abs(
-          Number(a.current_margin_percent) - Number(a.previous_margin_percent),
-        ),
-    )
-    .slice(0, 3);
-
-  return (
-    <Card title="Margin moved" hint="Largest swings since the last snapshot.">
-      <ul className="flex flex-col gap-2 text-[12.5px]">
-        {top.map((a) => {
-          const prev = Number(a.previous_margin_percent);
-          const cur = Number(a.current_margin_percent);
-          const diff = cur - prev;
-          return (
-            <li key={a.product_id} className="flex items-center justify-between gap-2">
-              <Link
-                to="/products/$productId"
-                params={{ productId: String(a.product_id) }}
-                search={{ tab: "pricing" }}
-                className="flex-1 truncate text-slate-900 hover:underline"
-              >
-                {a.name}
-              </Link>
-              <span
-                className={
-                  diff < 0 ? "text-red-600 tabular-nums" : "text-green-700 tabular-nums"
-                }
-              >
-                {prev.toFixed(1)}% → {cur.toFixed(1)}% ({diff > 0 ? "+" : ""}
-                {diff.toFixed(1)} pts)
-              </span>
-            </li>
-          );
-        })}
-      </ul>
     </Card>
   );
 }

@@ -21,7 +21,7 @@ from app.services.variants import compute_full_sku
 logger = logging.getLogger("stocksmith.listing_push")
 
 """Pushes a product/variant's current max_sellable to every connected marketplace
-listing for it, whenever local stock actually changes — the outbound half of the
+listing for it, whenever local stock actually changes: the outbound half of the
 allocated/consumed-means-unavailable rule; kitting.compute_max_sellable (the existing
 "what's actually sellable right now" computation) already implements the rule itself, so
 this module is purely the "tell the marketplace" leg. See
@@ -99,7 +99,7 @@ _PRODUCTS_USING_MATERIAL_SQL = text(
     UNION
     SELECT product_id, NULL AS variant_id FROM product_kitting_materials WHERE material_id = :material_id
     -- Every active variant of a product matched above inherits the base BOM unless it
-    -- overrides this specific material away — included unconditionally rather than
+    -- overrides this specific material away: included unconditionally rather than
     -- resolving each variant's effective BOM here (a debounced, idempotent recompute is
     -- cheap; an occasional redundant push for a variant that substituted this material
     -- away is a fine trade for not silently under-notifying).
@@ -252,10 +252,16 @@ async def push_units_now(
                 # StockSmith. This path is also the manual retry for a blocked listing:
                 # the sweep backs those off, but a user who has just fixed the listing on
                 # the marketplace and clicked "Push corrections" gets an answer now.
-                errors.append(f"{listing.platform.value} listing for variant {variant_id}: {message}")
+                errors.append(f"{_describe_listing(listing, variant_id)}: {message}")
             elif status == ListingPushStatus.error:
-                errors.append(f"{listing.platform.value} listing for variant {variant_id}: push failed")
+                errors.append(f"{_describe_listing(listing, variant_id)}: push failed")
     return pushed, errors
+
+
+def _describe_listing(listing: Listing, variant_id: int | None) -> str:
+    # The listing id only when the unit has several, so the single-listing wording is unchanged.
+    label = f"{listing.platform.value} listing for variant {variant_id}"
+    return label if listing.is_primary else f"{label} (additional listing {listing.external_listing_id})"
 
 
 async def _resolve_max_sellable(session: AsyncSession, product_id: int, variant_id: int | None) -> int | None:
@@ -433,6 +439,7 @@ async def _push_one(
                 platform=listing.platform,
                 attempted_qty=qty,
                 status=ListingPushStatus.blocked,
+                listing_id=listing.id,
                 error_message=str(e)[:2000],
             )
         )
@@ -453,6 +460,7 @@ async def _push_one(
                 platform=listing.platform,
                 attempted_qty=qty,
                 status=ListingPushStatus.error,
+                listing_id=listing.id,
                 error_message=str(e)[:2000],
             )
         )
@@ -478,6 +486,7 @@ async def _push_one(
             platform=listing.platform,
             attempted_qty=qty,
             status=ListingPushStatus.success,
+            listing_id=listing.id,
         )
     )
     await session.commit()

@@ -100,6 +100,7 @@ class OrderLineRead(BaseModel):
     needs_mapping: bool
     cost_per_unit_snapshot: Decimal | None = None
     variation_text: str | None = None
+    external_listing_id: str | None = None
     # Substitution provenance — see app.models.order_substitution.OrderLineSubstitution.
     # substituted_from is set when this line was itself created by a substitution;
     # substituted_to lists the still-active (not undone) substitutions made FROM this line.
@@ -176,6 +177,11 @@ class OrderRead(BaseModel):
     replacement_parcels: list[ReplacementParcelRead] = []
     sync_issue: str | None = None
     pending_marketplace_cancellation: bool = False
+    # Two or more different parcel boxes on the order that nobody has confirmed yet — blocks
+    # shipping; on a shipped order it means "shipped with several boxes, not yet reviewed".
+    # See services/box_check.py.
+    needs_box_check: bool = False
+    box_check_confirmed_at: datetime | None = None
     tracking_number: str | None = None
     carrier: str | None = None
     lines: list[OrderLineRead] = []

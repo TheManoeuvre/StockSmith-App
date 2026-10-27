@@ -34,7 +34,7 @@ from app.models.listing import Listing, ListingPlatform
 from app.models.platform_connection import PlatformConnection
 from app.models.product import Product
 from app.models.variant import ProductVariant
-from app.services import draft_readiness, file_storage, listing_copy, listing_profiles, listing_push
+from app.services import draft_readiness, file_storage, listing_copy, listing_profiles, listing_push, product_platforms
 from app.services.general_settings import get_general_settings
 from app.services.platforms.base import DraftImage, DraftListing, DraftUnit
 from app.services.variants import compute_full_sku
@@ -78,6 +78,7 @@ _ETSY_METADATA = {
     "etsy.readiness_state_id": "etsy_readiness_state_id",
     "etsy.return_policy_id": "etsy_return_policy_id",
     "etsy.shop_section_id": "etsy_shop_section_id",
+    "etsy.should_auto_renew": "etsy_auto_renew",
 }
 
 _SHIPPING_METADATA_KEY = {
@@ -93,6 +94,7 @@ _EBAY_METADATA = {
     "ebay.return_policy_id": "ebay_return_policy_id",
     "ebay.merchant_location_key": "ebay_merchant_location_key",
     "ebay.marketplace_id": "ebay_marketplace_id",
+    "ebay.handling_time_days": "ebay_handling_time_days",
 }
 
 
@@ -268,6 +270,7 @@ async def push_draft(
                         if unit.variant_id is not None
                         else Listing.variant_id.is_(None),
                         Listing.platform == platform,
+                        Listing.is_primary.is_(True),
                     )
                 )
             ).scalar_one_or_none()
@@ -283,6 +286,9 @@ async def push_draft(
                 listing.published_sku = unit.sku
             linked += 1
 
+        # Drafting is an unambiguous "this product is sold here". Written explicitly, not left
+        # to the live-listing override, so the store stays on if the listing is later ended.
+        await product_platforms.set_product_store(session, product_id, platform, True)
         await session.commit()
         return DraftPushResult(
             external_listing_id=result.external_listing_id,

@@ -1,6 +1,8 @@
 export interface SettingsNavItem {
   id: string;
   label: string;
+  /** A dot beside the label: something on this page wants attention. */
+  badge?: boolean;
 }
 
 export interface SettingsNavGroup {
@@ -33,11 +35,18 @@ export function SettingsNav({
               key={item.id}
               type="button"
               onClick={() => onChange(item.id)}
-              className={`rounded-md px-2.5 py-1.5 text-left text-[12.5px] font-medium ${
+              className={`flex items-center justify-between rounded-md px-2.5 py-1.5 text-left text-[12.5px] font-medium ${
                 active === item.id ? "bg-blue-50 text-blue-700" : "text-slate-600 hover:bg-slate-50"
               }`}
             >
               {item.label}
+              {item.badge && (
+                <span
+                  role="img"
+                  aria-label="Needs attention"
+                  className="h-2 w-2 rounded-full bg-amber-500"
+                />
+              )}
             </button>
           ))}
         </div>

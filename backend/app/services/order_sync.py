@@ -16,7 +16,7 @@ from app.models.platform_sync_run import PlatformSyncRun, SyncRunMode, SyncRunSt
 from app.models.product import Product
 from app.models.variant import ProductVariant
 from app.schemas.platform import SyncCommitResult, SyncPreviewLine, SyncPreviewOrder, SyncPreviewResult
-from app.services import allocation, order_parcels
+from app.services import allocation, box_check, order_parcels
 from app.services.notification_alerts import (
     PendingCancellationAlert,
     PendingReviewAlert,
@@ -393,6 +393,12 @@ async def commit_sync(platform: ListingPlatform) -> SyncCommitResult:
                     pending_review_alerts.extend(
                         await order_parcels.apply_postage_charges(session, order, ext_order.postage_charges)
                     )
+                # Off the list response, so no enrich gate. Shipped orders only: Order
+                # exists for it, and a pre-shipment receipt has no parcels to report.
+                if ext_order.is_shipped and ext_order.shipments:
+                    pending_review_alerts.extend(
+                        await order_parcels.apply_extra_shipments(session, order, ext_order.shipments)
+                    )
                 order_ids.append(order.id)
 
             if raw_external_orders:
@@ -474,7 +480,12 @@ def _apply_financials(order: Order, ext_order: ExternalOrder) -> None:
     order.tax_charged = _parse_price(ext_order.tax_charged)
     order.vat_charged = _parse_price(ext_order.vat_charged)
     order.discount_amount = _parse_price(ext_order.discount_amount)
-    order.refunded_amount = _parse_price(ext_order.refunded_amount)
+
+    # Etsy reads refunds off the receipt (always present); eBay reads them from the
+    # Finances API, so an eBay pass that skipped enrichment reports None and must not
+    # blank a refund stored earlier.
+    if ext_order.financials_enriched or ext_order.refunded_amount is not None:
+        order.refunded_amount = _parse_price(ext_order.refunded_amount)
 
     # Everything above comes straight off the order-list response and is always accurate.
     # The three fields below come from a separate per-order call the adapter may have
@@ -568,6 +579,7 @@ async def _upsert_lines(session: AsyncSession, order: Order, ext_order: External
                 sku=ext_line.sku,
                 needs_mapping=needs_mapping,
                 variation_text=ext_line.variation_text,
+                external_listing_id=ext_line.external_listing_id,
             )
         )
     await default_order_shipping_profile(session, order)
@@ -653,7 +665,7 @@ async def _reconcile_status(session: AsyncSession, order: Order, ext_order: Exte
             order.pending_marketplace_cancellation = True
             order.sync_issue = (
                 f"{_PLATFORM_LABELS[platform]} reports this order's payment as "
-                f"{ext_order.payment_state.value} — review and cancel/return it."
+                f"{ext_order.payment_state.value}: review and cancel/return it."
             )
             if not was_pending:
                 return ReconcileOutcome(
@@ -702,8 +714,15 @@ async def _reconcile_status(session: AsyncSession, order: Order, ext_order: Exte
             # allocated (manually, or by a later sync) and actually ships.
             order.sync_issue = (
                 f"{_PLATFORM_LABELS[platform]} shows this order as shipped, but no units are allocated "
-                "locally — check stock and allocate manually."
+                "locally: check stock and allocate manually."
             )
+            return ReconcileOutcome(cancellation_resolved=cancellation_resolved)
+        if await box_check.order_needs_box_check(session, order):
+            # Same shape as the no-allocation case above and for the same reason: ship_order
+            # would refuse and, since commit_sync is one transaction, take the batch down with
+            # it. The marketplace already shows this shipped, but StockSmith must not consume
+            # two boxes unreviewed — flag it for the person instead.
+            order.sync_issue = box_check.BOX_CHECK_SYNC_ISSUE.format(platform=_PLATFORM_LABELS[platform])
             return ReconcileOutcome(cancellation_resolved=cancellation_resolved)
         await allocation.ship_order(session, order)
         return ReconcileOutcome(just_shipped=True, cancellation_resolved=cancellation_resolved)
@@ -801,7 +820,7 @@ async def fail_orphaned_runs() -> int:
         orphans = list(result.scalars())
         for run in orphans:
             run.status = SyncRunStatus.error
-            run.error_message = "Interrupted — StockSmith stopped before this sync finished"
+            run.error_message = "Interrupted. StockSmith stopped before this sync finished"
             run.finished_at = datetime.now(timezone.utc)
         if orphans:
             await session.commit()

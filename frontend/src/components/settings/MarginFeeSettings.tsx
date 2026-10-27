@@ -10,9 +10,9 @@ import { SettingsCard } from "./SettingsCard";
 import { BASIS_LABELS } from "./PlatformFeeComponents";
 
 const SOURCE_LABELS: Record<MarginFeeSource, string> = {
-  manual: "Manual — the flat % entered on each product",
-  etsy: "Etsy — calculated from Etsy's fee components",
-  ebay: "eBay — calculated from eBay's fee components",
+  manual: "Manual: the flat % entered on each product",
+  etsy: "Etsy: calculated from Etsy's fee components",
+  ebay: "eBay: calculated from eBay's fee components",
 };
 
 /**
@@ -99,7 +99,7 @@ function EffectiveFeeSummary({ platform }: { platform: ListingPlatform }) {
 
   return (
     <div className="flex flex-col gap-2 rounded bg-slate-50 p-3">
-      <p className="text-sm font-medium">Currently applied — {PLATFORM_LABELS[platform]}</p>
+      <p className="text-sm font-medium">Currently applied: {PLATFORM_LABELS[platform]}</p>
       {enabled.length === 0 ? (
         <p className="text-sm text-slate-500">
           No fee components are enabled for {PLATFORM_LABELS[platform]}, so the calculated fee is zero.

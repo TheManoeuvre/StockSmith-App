@@ -64,6 +64,10 @@ class NotificationCategory(str, enum.Enum):
     # if a later sync finds the flag no longer applies.
     order_cancellation_pending = "order_cancellation_pending"
     daily_summary = "daily_summary"
+    # The scheduled "N items are due for counting" reminder. Like daily_summary it is not a
+    # per-type alert: it is configured by the stock_take_reminder_* columns and never fires
+    # when nothing is due.
+    stock_take_due = "stock_take_due"
 
 
 # The user-configurable alert types — every NotificationCategory except daily_summary,
@@ -224,6 +228,18 @@ class NotificationSettings(Base):
     # selected in a half-filled-out form — the scheduler simply never fires until it's set.
     daily_summary_day_of_week: Mapped[int | None] = mapped_column(Integer, nullable=True)
     daily_summary_last_fired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # The "items due for counting" reminder, scheduled the same way as the order summary
+    # above (see services/stock_take_reminder.py). Off by default.
+    stock_take_reminder_enabled: Mapped[bool] = mapped_column(nullable=False, default=False)
+    stock_take_reminder_frequency: Mapped[SummaryFrequency] = mapped_column(
+        portable_enum(SummaryFrequency, name="notification_summary_frequency"),
+        nullable=False,
+        default=SummaryFrequency.weekly,
+    )
+    stock_take_reminder_hour_local: Mapped[int] = mapped_column(Integer, nullable=False, default=9)
+    stock_take_reminder_day_of_week: Mapped[int | None] = mapped_column(Integer, nullable=True, default=0)
+    stock_take_reminder_last_fired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Threshold for the "pending order count over threshold" alert — kept configurable
     # rather than hard-coded so a shop's normal backlog size doesn't spam this forever.

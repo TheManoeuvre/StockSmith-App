@@ -82,7 +82,7 @@ export function KittingBomEditor({ productId }: { productId: number }) {
         )}
       </div>
       <p className="text-sm text-slate-500">
-        Packaging (boxes, labels, packing materials) required to pack and ship one unit — reserved when an order
+        Packaging (boxes, labels, packing materials) required to pack and ship one unit: reserved when an order
         allocates, consumed only when it ships. Never consumed by recording a build.
       </p>
       {materials && materials.length > 8 && (

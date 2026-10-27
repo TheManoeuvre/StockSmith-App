@@ -1,19 +1,21 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.listing import Listing, ListingPlatform
+from app.models.platform_listing_push import PlatformListingPush
 from app.models.product import Product
 from app.models.variant import ProductVariant
 from app.schemas.listing import (
+    AdditionalListingResult,
     BulkListingSyncResult,
     ListingSyncStatus,
     ProductListingSyncSummary,
     ProductSyncStatus,
     UnitSyncResult,
 )
-from app.services import listing_push
+from app.services import listing_push, product_platforms
 from app.services.platforms.base import ExternalListingRef
 from app.services.variants import compute_full_sku
 
@@ -23,13 +25,97 @@ async def _get_or_create_listing(
 ) -> Listing:
     variant_filter = Listing.variant_id.is_(None) if variant_id is None else Listing.variant_id == variant_id
     result = await session.execute(
-        select(Listing).where(Listing.product_id == product_id, variant_filter, Listing.platform == platform)
+        select(Listing).where(
+            Listing.product_id == product_id,
+            variant_filter,
+            Listing.platform == platform,
+            Listing.is_primary.is_(True),
+        )
     )
     listing = result.scalar_one_or_none()
     if listing is None:
-        listing = Listing(product_id=product_id, variant_id=variant_id, platform=platform)
+        listing = Listing(product_id=product_id, variant_id=variant_id, platform=platform, is_primary=True)
         session.add(listing)
     return listing
+
+
+def split_multi_index(
+    multi: dict[str, list[ExternalListingRef]],
+) -> tuple[dict[str, ExternalListingRef], dict[str, list[ExternalListingRef]]]:
+    """Splits an every-listing-per-SKU index into the one-per-SKU index the sync check has
+    always taken plus the remaining listings per SKU.
+
+    The first ref (an active listing in preference to an inactive one, otherwise crawl
+    order) is the default primary; check_product_sku_sync keeps an existing primary stable
+    when it is still among the candidates. One listing appearing under a SKU more than once
+    (a listing whose variations all share a SKU) is one listing, not several."""
+    index: dict[str, ExternalListingRef] = {}
+    extras: dict[str, list[ExternalListingRef]] = {}
+    for sku, refs in multi.items():
+        distinct: list[ExternalListingRef] = []
+        seen: set[str] = set()
+        for ref in sorted(refs, key=lambda r: r.state != "active"):
+            if ref.external_listing_id not in seen:
+                seen.add(ref.external_listing_id)
+                distinct.append(ref)
+        index[sku] = distinct[0]
+        if len(distinct) > 1:
+            extras[sku] = distinct[1:]
+    return index, extras
+
+
+async def fetch_sku_index(
+    adapter, session: AsyncSession, connection, **kwargs
+) -> tuple[dict[str, ExternalListingRef], dict[str, list[ExternalListingRef]]]:
+    """The marketplace's SKU index, as (index, extras) — see split_multi_index. Adapters
+    that can see several listings under one SKU (Etsy) expose build_listing_sku_multi_index;
+    for the rest the extras are empty and behaviour is exactly the single-listing one."""
+    builder = getattr(adapter, "build_listing_sku_multi_index", None)
+    if builder is None:
+        return await adapter.build_listing_sku_index(session, connection, **kwargs), {}
+    return split_multi_index(await builder(session, connection, **kwargs))
+
+
+def _apply_match(listing: Listing, match: ExternalListingRef, sku: str | None, now: datetime) -> None:
+    listing.external_listing_id = match.external_listing_id
+    listing.external_title = match.title
+    listing.external_variation = match.variation
+    listing.external_state = match.state
+    listing.external_quantity = match.quantity
+    listing.last_checked_at = now
+    # A match is a marketplace confirming it holds this SKU, which is the only moment
+    # that fact is knowable. Deliberately not cleared on a miss: a listing that has gone
+    # inactive is still published under this SKU, and forgetting that would let a later
+    # rename change an identifier that is still in use out there.
+    if sku:
+        listing.published_sku = sku
+
+
+async def _unit_rows(
+    session: AsyncSession, product_id: int, variant_id: int | None, platform: ListingPlatform
+) -> list[Listing]:
+    variant_filter = Listing.variant_id.is_(None) if variant_id is None else Listing.variant_id == variant_id
+    result = await session.execute(
+        select(Listing)
+        .where(Listing.product_id == product_id, variant_filter, Listing.platform == platform)
+        .order_by(Listing.id)
+    )
+    return list(result.scalars())
+
+
+async def _delete_additional(session: AsyncSession, listing: Listing) -> None:
+    """Removes an additional listing row along with its push-attempt log. Left behind, the
+    log's listing_id would be nulled by the FK, and sync_status reads a NULL listing_id as
+    "an attempt against the unit, from before listings were tracked individually" — so a
+    failure on a listing that no longer exists would count against the unit forever."""
+    await session.execute(delete(PlatformListingPush).where(PlatformListingPush.listing_id == listing.id))
+    await session.delete(listing)
+
+
+async def _id_of(session: AsyncSession, listing: Listing) -> int:
+    if listing.id is None:
+        await session.flush()
+    return listing.id
 
 
 def _status_from_match(match: ExternalListingRef | None) -> ListingSyncStatus:
@@ -143,6 +229,7 @@ async def check_product_sku_sync(
     platform: ListingPlatform,
     *,
     with_expected_quantity: bool = False,
+    extra_index: dict[str, list[ExternalListingRef]] | None = None,
 ) -> ProductListingSyncSummary:
     """Tests the product's own SKU (if it has no variants) or every active variant's
     full SKU independently against an already-built listing index, persisting the
@@ -152,7 +239,14 @@ async def check_product_sku_sync(
     unit, so the UI can flag a listing whose quantity has drifted. Off by default because
     it is a per-unit buildability computation: the shop-wide check (which reuses this
     per product) would turn one click into one such computation per unit in the catalogue,
-    and it only needs statuses."""
+    and it only needs statuses.
+
+    extra_index holds the further listings per SKU beyond the one in `index` (see
+    split_multi_index). Each gets its own non-primary Listing row so quantity pushes reach
+    it; rows for listings that no longer hold the SKU are deleted, since they are derived
+    state the next check rebuilds. The primary stays whichever listing it already is while
+    that listing still holds the SKU, so a seller's A/B ordering doesn't flip between
+    checks."""
     product = await session.get(Product, product_id)
     if product is None:
         raise ValueError(f"Product {product_id} not found")
@@ -165,19 +259,40 @@ async def check_product_sku_sync(
 
     for variant_id, variant_name, sku in checks:
         match = index.get(sku) if sku else None
+        extras = list(extra_index.get(sku, [])) if sku and extra_index else []
+        rows = await _unit_rows(session, product_id, variant_id, platform)
+        current_primary = next((r for r in rows if r.is_primary), None)
+        if match is not None and current_primary is not None and current_primary.external_listing_id:
+            for i, ref in enumerate(extras):
+                if ref.external_listing_id == current_primary.external_listing_id:
+                    match, extras[i] = ref, match
+                    break
+
+        # Additional rows that are stale, or about to become the primary, go first and are
+        # flushed before anything is written: the unique index on (unit, listing) would
+        # otherwise see the promotion's UPDATE before the row's DELETE.
+        keep_ids = {ref.external_listing_id for ref in extras}
+        deleted_rows = set()
+        for row in rows:
+            if not row.is_primary and (
+                row.external_listing_id not in keep_ids
+                or (match is not None and row.external_listing_id == match.external_listing_id)
+            ):
+                await _delete_additional(session, row)
+                deleted_rows.add(row.id)
+        await session.flush()
+
         listing = await _get_or_create_listing(session, product_id, variant_id, platform)
-        listing.external_listing_id = match.external_listing_id if match else None
-        listing.external_title = match.title if match else None
-        listing.external_variation = match.variation if match else None
-        listing.external_state = match.state if match else None
-        listing.external_quantity = match.quantity if match else None
-        listing.last_checked_at = now
-        # A match is a marketplace confirming it holds this SKU, which is the only moment
-        # that fact is knowable. Deliberately not cleared on a miss: a listing that has gone
-        # inactive is still published under this SKU, and forgetting that would let a later
-        # rename change an identifier that is still in use out there.
-        if match is not None and sku:
-            listing.published_sku = sku
+        if match is not None:
+            _apply_match(listing, match, sku, now)
+        else:
+            listing.external_listing_id = None
+            listing.external_title = None
+            listing.external_variation = None
+            listing.external_state = None
+            listing.external_quantity = None
+            listing.last_checked_at = now
+        await session.flush()
 
         status = _status_from_match(match)
         expected_quantity = (
@@ -185,8 +300,35 @@ async def check_product_sku_sync(
             if with_expected_quantity
             else None
         )
+
+        extra_rows = {r.external_listing_id: r for r in rows if not r.is_primary and r.id not in deleted_rows}
+        additional: list[AdditionalListingResult] = []
+        for ref in extras:
+            extra_row = extra_rows.get(ref.external_listing_id)
+            if extra_row is None:
+                extra_row = Listing(product_id=product_id, variant_id=variant_id, platform=platform, is_primary=False)
+                session.add(extra_row)
+            _apply_match(extra_row, ref, sku, now)
+            extra_status = _status_from_match(ref)
+            additional.append(
+                AdditionalListingResult(
+                    listing_id=await _id_of(session, extra_row),
+                    external_listing_id=ref.external_listing_id,
+                    role=extra_row.role,
+                    status=extra_status,
+                    external_title=ref.title,
+                    external_variation=ref.variation,
+                    external_state=ref.state,
+                    external_quantity=ref.quantity,
+                    last_checked_at=now,
+                    quantity_mismatch=_quantity_mismatch(extra_status, ref.quantity, expected_quantity),
+                )
+            )
+
         units.append(
             UnitSyncResult(
+                listing_id=await _id_of(session, listing),
+                role=listing.role,
                 variant_id=variant_id,
                 variant_name=variant_name,
                 sku=sku,
@@ -198,7 +340,9 @@ async def check_product_sku_sync(
                 external_quantity=listing.external_quantity,
                 last_checked_at=listing.last_checked_at,
                 expected_quantity=expected_quantity,
-                quantity_mismatch=_quantity_mismatch(status, listing.external_quantity, expected_quantity),
+                quantity_mismatch=_quantity_mismatch(status, listing.external_quantity, expected_quantity)
+                or any(a.quantity_mismatch for a in additional),
+                additional_listings=additional,
             )
         )
 
@@ -207,6 +351,45 @@ async def check_product_sku_sync(
     await session.commit()
     status = rollup_product_status([u.status for u in units])
     return ProductListingSyncSummary(product_id=product_id, product_status=status, units=units)
+
+
+_MAX_ROLE_LENGTH = 60
+
+
+async def update_listing(
+    session: AsyncSession, listing_id: int, role_given: bool, role: str | None, make_primary: bool
+) -> Listing:
+    """Edits a seller-controlled field of one listings row: its label, and which of a unit's
+    listings is the primary. Raises ValueError for an unknown row or an over-long label.
+
+    Promotion swaps the flag with the unit's current primary in two flushes — the partial
+    unique index allows one primary per unit, so the demotion has to land first."""
+    listing = await session.get(Listing, listing_id)
+    if listing is None:
+        raise ValueError(f"Listing {listing_id} not found")
+
+    if role_given:
+        cleaned = (role or "").strip() or None
+        if cleaned is not None and len(cleaned) > _MAX_ROLE_LENGTH:
+            raise ValueError(f"A listing label can be at most {_MAX_ROLE_LENGTH} characters")
+        listing.role = cleaned
+
+    if make_primary and not listing.is_primary:
+        current = next(
+            (
+                r
+                for r in await _unit_rows(session, listing.product_id, listing.variant_id, listing.platform)
+                if r.is_primary
+            ),
+            None,
+        )
+        if current is not None:
+            current.is_primary = False
+            await session.flush()
+        listing.is_primary = True
+
+    await session.commit()
+    return listing
 
 
 async def _unlink_stale_unit_rows(
@@ -236,6 +419,11 @@ async def _unlink_stale_unit_rows(
     for listing in result.scalars():
         if listing.variant_id in checked_unit_ids:
             continue
+        if not listing.is_primary:
+            # An additional listing for a unit this check no longer covers: derived state
+            # with nothing worth keeping.
+            await _delete_additional(session, listing)
+            continue
         listing.external_listing_id = None
         listing.external_title = None
         listing.external_variation = None
@@ -245,15 +433,21 @@ async def _unlink_stale_unit_rows(
 
 
 async def check_all_products_sku_sync(
-    session: AsyncSession, index: dict[str, ExternalListingRef], platform: ListingPlatform
+    session: AsyncSession,
+    index: dict[str, ExternalListingRef],
+    platform: ListingPlatform,
+    extra_index: dict[str, list[ExternalListingRef]] | None = None,
 ) -> BulkListingSyncResult:
     """Builds on one shared listing index (the expensive part) across every active
     product, so a shop-wide check costs the same one marketplace fetch as a
     single-product check."""
     result = await session.execute(select(Product.id).where(Product.is_active.is_(True)))
-    product_ids = [row[0] for row in result]
+    # Products switched off for this store are left alone: checking them writes Listing
+    # rows for a marketplace they were never meant for.
+    excluded = await product_platforms.excluded_product_ids(session, platform)
+    product_ids = [row[0] for row in result if row[0] not in excluded]
 
-    summaries = [await check_product_sku_sync(session, pid, index, platform) for pid in product_ids]
+    summaries = [await check_product_sku_sync(session, pid, index, platform, extra_index=extra_index) for pid in product_ids]
     return BulkListingSyncResult(
         summaries=summaries,
         synced_count=sum(1 for s in summaries if s.product_status == ProductSyncStatus.synced),
@@ -273,9 +467,15 @@ async def get_stored_product_sync_status(
 
     active_variants = await _active_variants(session, product_id)
     result = await session.execute(
-        select(Listing).where(Listing.product_id == product_id, Listing.platform == platform)
+        select(Listing).where(Listing.product_id == product_id, Listing.platform == platform).order_by(Listing.id)
     )
-    listing_by_variant = {listing.variant_id: listing for listing in result.scalars()}
+    listing_by_variant: dict[int | None, Listing] = {}
+    additional_by_variant: dict[int | None, list[Listing]] = {}
+    for row in result.scalars():
+        if row.is_primary:
+            listing_by_variant[row.variant_id] = row
+        else:
+            additional_by_variant.setdefault(row.variant_id, []).append(row)
 
     checks = _unit_checks(product, active_variants)
 
@@ -288,8 +488,27 @@ async def get_stored_product_sync_status(
         # called for a single product (the Platform Sync tab's page load), never fanned
         # out across the catalogue, so there's no bulk path to keep cheap.
         expected_quantity = await listing_push.resolve_push_quantity(session, product_id, variant_id)
+        additional = [
+            AdditionalListingResult(
+                listing_id=extra.id,
+                external_listing_id=extra.external_listing_id,
+                role=extra.role,
+                status=_status_from_stored(extra),
+                external_title=extra.external_title,
+                external_variation=extra.external_variation,
+                external_state=extra.external_state,
+                external_quantity=extra.external_quantity,
+                last_checked_at=extra.last_checked_at,
+                quantity_mismatch=_quantity_mismatch(
+                    _status_from_stored(extra), extra.external_quantity, expected_quantity
+                ),
+            )
+            for extra in additional_by_variant.get(variant_id, [])
+        ]
         units.append(
             UnitSyncResult(
+                listing_id=listing.id if listing else None,
+                role=listing.role if listing else None,
                 variant_id=variant_id,
                 variant_name=variant_name,
                 sku=sku,
@@ -301,7 +520,9 @@ async def get_stored_product_sync_status(
                 external_quantity=external_quantity,
                 last_checked_at=listing.last_checked_at if listing else None,
                 expected_quantity=expected_quantity,
-                quantity_mismatch=_quantity_mismatch(status, external_quantity, expected_quantity),
+                quantity_mismatch=_quantity_mismatch(status, external_quantity, expected_quantity)
+                or any(a.quantity_mismatch for a in additional),
+                additional_listings=additional,
             )
         )
 
@@ -324,7 +545,9 @@ async def get_all_stored_sync_status(
     for variant_id, product_id in variants_result:
         variant_ids_by_product.setdefault(product_id, []).append(variant_id)
 
-    listings_result = await session.execute(select(Listing).where(Listing.platform == platform))
+    listings_result = await session.execute(
+        select(Listing).where(Listing.platform == platform, Listing.is_primary.is_(True))
+    )
     listing_by_unit = {(listing.product_id, listing.variant_id): listing for listing in listings_result.scalars()}
 
     result: dict[int, ProductSyncStatus] = {}

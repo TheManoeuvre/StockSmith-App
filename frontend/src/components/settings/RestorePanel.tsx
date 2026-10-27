@@ -55,8 +55,8 @@ export function RestorePanel() {
           Restoring runs on the computer that hosts StockSmith
           {hostname ? (
             <>
-              {" "}
-              — this device is connected to <span className="font-medium">{hostname}</span>
+              .{" "}
+              This device is connected to <span className="font-medium">{hostname}</span>
             </>
           ) : null}
           . Open StockSmith on that computer to restore a backup.

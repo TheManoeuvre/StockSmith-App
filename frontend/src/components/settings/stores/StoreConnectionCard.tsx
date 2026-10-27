@@ -68,9 +68,9 @@ export function StoreConnectionCard({ platform, onOpen }: { platform: ListingPla
       : state === "sync-failed"
         ? `Last order sync failed${status?.last_sync_error ? `: ${status.last_sync_error}` : "."}`
         : state === "pushes-failing"
-          ? `The latest quantity push to ${failingPushCount === 1 ? "one listing" : `${failingPushCount} listings`} was rejected — stock shown on ${label} may be stale.`
+          ? `The latest quantity push to ${failingPushCount === 1 ? "one listing" : `${failingPushCount} listings`} was rejected: stock shown on ${label} may be stale.`
           : state === "pushes-blocked"
-            ? `${blockedPushCount === 1 ? "One listing needs" : `${blockedPushCount} listings need`} a change on ${label} before stock can be pushed — retrying can't fix it.`
+            ? `${blockedPushCount === 1 ? "One listing needs" : `${blockedPushCount} listings need`} a change on ${label} before stock can be pushed: retrying can't fix it.`
             : [
                 status?.shop_name ?? (status?.account_id ? `Account ${status.account_id}` : null),
                 status?.auto_sync_enabled

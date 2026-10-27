@@ -27,7 +27,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.listing import ListingPlatform
 from app.models.notification import NotificationAlertState, NotificationCategory, NotificationDeliveryMode, NotificationUrgency
 from app.models.order import Order, OrderStatus
-from app.services import platform_api_usage
+from app.models.product import Product
+from app.services import platform_api_usage, product_platforms
 from app.services.buildability import get_orders_awaiting_inventory
 from app.services.forecasting import compute_material_forecasts
 from app.services.notifications import (
@@ -178,6 +179,9 @@ class PendingReviewAlert:
     amount: Decimal | None  # None for a bulk label — see OrderPostageCharge.amount
     currency: str | None
     posted_at: datetime | None
+    # Set when the parcel came from a marketplace shipment rather than a label charge
+    # (order_parcels.apply_extra_shipments) — changes the wording only.
+    shipment_tracking: str | None = None
 
 
 async def raise_replacement_parcel_review_alert(session: AsyncSession, alert: PendingReviewAlert) -> None:
@@ -207,8 +211,12 @@ async def raise_replacement_parcel_review_alert(session: AsyncSession, alert: Pe
         urgency=NotificationUrgency.immediate,
         title=f"Replacement parcel sent for {platform_label} order {alert.external_order_id or alert.order_id}",
         body=(
-            f"A second shipping label ({money}) was bought against this order{when}. "
-            "Add what was sent and why on the order's Fulfilment tab so stock and profit stay right."
+            (
+                f"A second parcel (tracking {alert.shipment_tracking}) was shipped against this order{when}. "
+                if alert.shipment_tracking
+                else f"A second shipping label ({money}) was bought against this order{when}. "
+            )
+            + "Add what was sent and why on the order's Fulfilment tab so stock and profit stay right."
         ),
         delivery_mode=config.delivery_mode,
         related_entity_type="order",
@@ -248,9 +256,9 @@ async def raise_order_cancellation_pending_alert(session: AsyncSession, alert: P
         session,
         category=NotificationCategory.order_cancellation_pending,
         urgency=NotificationUrgency.immediate,
-        title=f"{platform_label} order {alert.external_order_id or alert.order_id} {alert.reason} — review needed",
+        title=f"{platform_label} order {alert.external_order_id or alert.order_id} {alert.reason}: review needed",
         body=(
-            "Nothing has been changed locally, including reserved stock — review the order and "
+            "Nothing has been changed locally, including reserved stock: review the order and "
             "confirm a scrap/return-to-stock decision to release it."
         ),
         delivery_mode=config.delivery_mode,
@@ -276,6 +284,17 @@ async def resolve_order_cancellation_pending_alert(session: AsyncSession, order_
     )
 
 
+async def _used_only_by(session: AsyncSession, shipping_profile_id: int, product_ids: set[int]) -> bool:
+    """True when the profile has active users and every one of them is in `product_ids`."""
+    users = {
+        row[0]
+        for row in await session.execute(
+            select(Product.id).where(Product.shipping_profile_id == shipping_profile_id, Product.is_active.is_(True))
+        )
+    }
+    return bool(users) and users <= product_ids
+
+
 async def check_shipping_profile_missing_alerts(
     session: AsyncSession, platform: ListingPlatform, missing: list, present: list
 ) -> None:
@@ -297,8 +316,13 @@ async def check_shipping_profile_missing_alerts(
     config = type_settings.get(NotificationCategory.shipping_profile_missing)
     label = "Etsy" if platform == ListingPlatform.etsy else platform.value.capitalize()
     thing = "shipping profile" if platform == ListingPlatform.etsy else "postage policy"
+    off = await product_platforms.excluded_product_ids(session, platform)
     for profile in missing:
         if entity(profile) in flagged:
+            continue
+        # A profile only products switched off for this store use is no loss here. A profile no
+        # product uses at all still alerts, as it always did.
+        if off and await _used_only_by(session, profile.id, off):
             continue
         if config is not None and config.enabled:
             await dispatch_notification(
@@ -369,7 +393,10 @@ async def check_material_forecast_alerts(session: AsyncSession) -> None:
     if not critical_on and not warning_on:
         return
 
-    forecasts = await compute_material_forecasts(session)
+    # include_all: by default the forecast omits healthy materials, so a material that
+    # recovered (stock arrived, a purchase was raised) would simply vanish from the list and
+    # its "back to healthy" transition below would never be seen — leaving the alert unread.
+    forecasts = await compute_material_forecasts(session, include_all=True)
     previous = await _load_alert_state_map(session, _MATERIAL_FORECAST_KEY)
     seen_keys: set[str] = set()
 
@@ -432,6 +459,10 @@ async def check_material_forecast_alerts(session: AsyncSession) -> None:
     # status so a reactivated material starts from a clean slate rather than an alert
     # silently never firing again because it "already" transitioned once, years ago.
     for stale_key in set(previous) - seen_keys:
+        for category in (NotificationCategory.material_forecast_critical, NotificationCategory.material_forecast_warning):
+            await resolve_alerts(
+                session, category=category, related_entity_type="material", related_entity_id=int(stale_key)
+            )
         await _clear_alert_state(session, _MATERIAL_FORECAST_KEY, stale_key)
 
 
@@ -446,7 +477,7 @@ def _product_label(line) -> str:
 def _shortfall_body(new_lines: list, already_flagged: int) -> str:
     """One line per newly-short item, capped, with a tail noting anything already alerted on
     for the same order so the reader isn't left thinking this is the whole picture."""
-    body_lines = [f"{_product_label(line)} — short by {line.short_by}" for line in new_lines[:_ORDER_BODY_LINE_CAP]]
+    body_lines = [f"{_product_label(line)}: short by {line.short_by}" for line in new_lines[:_ORDER_BODY_LINE_CAP]]
     overflow = len(new_lines) - _ORDER_BODY_LINE_CAP
     if overflow > 0:
         body_lines.append(f"...and {overflow} more")
@@ -520,7 +551,7 @@ async def check_order_unfulfillable_alerts(session: AsyncSession) -> None:
                 # The title is the only line read at a glance on a lock screen, so it
                 # identifies the order and the size of the problem rather than restating the
                 # alert category the reader already subscribed to.
-                title=f"Order #{order_id} — {count} item{'s' if count != 1 else ''} short",
+                title=f"Order #{order_id}: {count} item{'s' if count != 1 else ''} short",
                 body=_shortfall_body(lines, known_awaiting.get(order_id, 0)),
                 delivery_mode=awaiting_config.delivery_mode,
                 related_entity_type="order",
@@ -537,8 +568,8 @@ async def check_order_unfulfillable_alerts(session: AsyncSession) -> None:
                 session,
                 category=NotificationCategory.order_blocked,
                 urgency=NotificationUrgency.immediate,
-                title=f"Order #{order_id} blocked — {count} item{'s' if count != 1 else ''} with no BOM",
-                body=f"{body}\n\nNothing can be built to cover this — these items need a BOM.",
+                title=f"Order #{order_id} blocked: {count} item{'s' if count != 1 else ''} with no BOM",
+                body=f"{body}\n\nNothing can be built to cover this: these items need a BOM.",
                 delivery_mode=blocked_config.delivery_mode,
                 related_entity_type="order",
                 related_entity_id=order_id,
@@ -579,7 +610,7 @@ async def check_pending_order_threshold(session: AsyncSession) -> None:
             category=NotificationCategory.pending_order_threshold,
             urgency=NotificationUrgency.digest,
             title="Pending order backlog is growing",
-            body=f"{count} orders are pending — above the configured threshold of {threshold}.",
+            body=f"{count} orders are pending: above the configured threshold of {threshold}.",
             delivery_mode=config.delivery_mode,
         )
     elif not is_over and was_over:
@@ -614,7 +645,7 @@ async def check_platform_api_usage_alerts(session: AsyncSession, platform: Listi
                 category=NotificationCategory.marketplace_api_hard_limit,
                 urgency=NotificationUrgency.immediate,
                 title=f"{platform.value.capitalize()} API usage at hard limit",
-                body=f"{usage} of {budget} daily calls used — automatic syncing may be throttled.",
+                body=f"{usage} of {budget} daily calls used: automatic syncing may be throttled.",
                 delivery_mode=hard_config.delivery_mode,
                 related_entity_type="platform",
             )

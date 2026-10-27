@@ -135,7 +135,7 @@ function ParcelCard({
         <span className="text-xs text-slate-500">
           Postage{" "}
           <span className="font-medium text-slate-700">
-            {parcel.effective_postage != null ? formatMoney(parcel.effective_postage, currency) : "—"}
+            {parcel.effective_postage != null ? formatMoney(parcel.effective_postage, currency) : "-"}
           </span>
           {charge && (
             <span className="text-slate-400">
@@ -182,7 +182,7 @@ function ParcelCard({
                   ) : (
                     <>
                       {item.product_name}
-                      {item.variant_name ? ` — ${item.variant_name}` : ""}
+                      {item.variant_name ? ` (${item.variant_name})` : ""}
                     </>
                   )}
                 </td>
@@ -209,8 +209,8 @@ function ParcelCard({
       ) : (
         <p className="text-xs text-amber-700">
           {parcel.needs_review
-            ? "Detected from a marketplace label — what was sent hasn't been recorded yet, so stock and cost of goods don't reflect it."
-            : "Postage only — no items recorded."}
+            ? "Detected from a marketplace label: what was sent hasn't been recorded yet, so stock and cost of goods don't reflect it."
+            : "Postage only: no items recorded."}
         </p>
       )}
       {parcel.notes && <p className="text-xs text-slate-500">{parcel.notes}</p>}

@@ -32,6 +32,10 @@ function proposal(overrides: Record<string, unknown> = {}) {
 let proposals: unknown[];
 let shippingProposals: unknown[];
 
+async function tickAll() {
+  for (const box of screen.getAllByRole("checkbox")) await userEvent.click(box);
+}
+
 function renderPanel() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -87,13 +91,24 @@ it("shows how many products each suggestion would cover", async () => {
   expect(screen.getByText(/Category 1234/)).toBeTruthy();
 });
 
-it("pre-accepts a complete suggestion", async () => {
+it("shows the category as readable text, not an id", async () => {
+  proposals = [proposal({ category_path: "Home & Living > Storage > Desk Organisers" })];
+  renderPanel();
+  await userEvent.click(screen.getByText("Suggest profiles"));
+
+  expect(await screen.findByText(/Home & Living > Storage > Desk Organisers/)).toBeTruthy();
+  expect(screen.getByText(/Made by you/)).toBeTruthy();
+  expect(screen.getByText(/Made to order/)).toBeTruthy();
+});
+
+it("leaves every suggestion unticked until you opt in", async () => {
+  shippingProposals = [shippingProposal()];
   renderPanel();
   await userEvent.click(screen.getByText("Suggest profiles"));
 
   await screen.findByText("18 product(s)");
-  expect(screen.getByRole("checkbox")).toHaveProperty("checked", true);
-  expect(screen.getByText(/Create 1 profile\(s\)/)).toBeTruthy();
+  for (const box of screen.getAllByRole("checkbox")) expect(box).toHaveProperty("checked", false);
+  expect(screen.getByText(/Create 0 profile\(s\)/).closest("button")).toHaveProperty("disabled", true);
 });
 
 it("shows an incomplete suggestion but leaves it unticked", async () => {
@@ -116,6 +131,7 @@ it("lets a suggestion be renamed before it is accepted", async () => {
   const name = await screen.findByDisplayValue("Handmade (category 1234)");
   await userEvent.clear(name);
   await userEvent.type(name, "3D printed home");
+  await userEvent.click(screen.getAllByRole("checkbox")[0]);
   await userEvent.click(screen.getByText(/Create 1 profile\(s\)/));
 
   await waitFor(() => {
@@ -132,8 +148,7 @@ it("sends only the suggestions that are still ticked", async () => {
   await userEvent.click(screen.getByText("Suggest profiles"));
 
   await screen.findByDisplayValue("Vintage");
-  const [, second] = screen.getAllByRole("checkbox");
-  await userEvent.click(second);
+  await userEvent.click(screen.getAllByRole("checkbox")[0]);
   await userEvent.click(screen.getByText(/Create 1 profile\(s\)/));
 
   await waitFor(() => {
@@ -147,6 +162,7 @@ it("reports what it created", async () => {
   renderPanel();
   await userEvent.click(screen.getByText("Suggest profiles"));
   await screen.findByText("18 product(s)");
+  await userEvent.click(screen.getAllByRole("checkbox")[0]);
   await userEvent.click(screen.getByText(/Create 1 profile\(s\)/));
 
   expect(await screen.findByText(/Created/)).toBeTruthy();
@@ -182,6 +198,7 @@ it("offers each unlinked Etsy shipping profile as its own suggestion, named from
 
   expect(await screen.findByDisplayValue("UK Standard")).toBeTruthy();
   expect(screen.getByText(/buyer pays 3.50/)).toBeTruthy();
+  await tickAll();
   expect(screen.getByText(/Create 2 profile\(s\)/)).toBeTruthy();
 });
 
@@ -192,6 +209,7 @@ it("creates a new local profile for an accepted shipping suggestion", async () =
   const name = await screen.findByDisplayValue("UK Standard");
   await userEvent.clear(name);
   await userEvent.type(name, "Royal Mail 2nd");
+  await tickAll();
   await userEvent.click(screen.getByText(/Create 2 profile\(s\)/));
 
   await waitFor(() => {
@@ -212,6 +230,7 @@ it("can link an existing unlinked local profile instead of creating one", async 
   await waitFor(() => expect([...picker.options].map((o) => o.textContent)).toContain("Link: Small parcel"));
   expect([...picker.options].map((o) => o.textContent)).not.toContain("Link: Already linked");
   await userEvent.selectOptions(picker, "4");
+  await tickAll();
   await userEvent.click(screen.getByText(/Create 2 profile\(s\)/));
 
   await waitFor(() => {

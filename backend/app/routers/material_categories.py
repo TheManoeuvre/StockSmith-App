@@ -60,6 +60,9 @@ async def find_or_create_material_category(
 async def update_material_category(
     row_id: int, payload: MaterialCategoryUpdate, session: AsyncSession = Depends(get_db)
 ) -> MaterialCategory:
+    current = await session.get(MaterialCategory, row_id)
+    if current is not None:
+        material_categories.enforce_kitting_flag_chain(current, payload)
     row = await patch_row(session, MaterialCategory, row_id, payload)
     # A rename can move this category's materials in or out of the legacy vocabulary — calling
     # it "Filament PLA" means they can no longer store 'filament'. The generic layer has no way

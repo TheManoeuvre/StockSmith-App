@@ -14,7 +14,7 @@ from app.models.kitting import (
 )
 from app.models.listing import Listing, ListingPlatform
 from app.models.material import Material, MaterialAdjustment
-from app.models.order import Order, OrderLine, OrderStatus
+from app.models.order import Order, OrderFulfilmentMethod, OrderLine, OrderStatus
 from app.models.variant import ProductVariant
 from app.schemas.dashboard import OrderAwaitingPackaging
 from app.schemas.kitting import OrderKittingOverrideLine, OrderKittingRequirementLine, OrderKittingSummary, VariantKittingBomLine
@@ -771,7 +771,7 @@ async def reconcile_order_kitting(session: AsyncSession, order: Order) -> None:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=(
-                        f"Cannot ship — insufficient packaging material '{material.name}' "
+                        f"Cannot ship: insufficient packaging material '{material.name}' "
                         f"(need {consume_delta}, only {available} on hand and not reserved by other orders)"
                     ),
                 )
@@ -994,12 +994,12 @@ async def sync_listing_ceiling_qty(
             Listing.platform == ListingPlatform.etsy,
         )
     )
-    listing = result.scalar_one_or_none()
-    if listing is None:
-        return
-    listing.ceiling_qty = ceiling_qty
-    listing.last_synced_qty = ceiling_qty
-    listing.last_synced_at = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
+    # Every listing sharing the unit's SKU draws on the same stock, so each gets the figure.
+    for listing in result.scalars():
+        listing.ceiling_qty = ceiling_qty
+        listing.last_synced_qty = ceiling_qty
+        listing.last_synced_at = now
 
 
 async def get_orders_awaiting_packaging(session: AsyncSession) -> list[OrderAwaitingPackaging]:
@@ -1062,6 +1062,7 @@ async def get_orders_awaiting_packaging(session: AsyncSession) -> list[OrderAwai
             material_name=material_names.get(material_id, "Unknown material"),
             short_by=short_by,
             order_placed_at=order.order_placed_at,
+            due_date=order.collect_by if order.fulfilment_method == OrderFulfilmentMethod.collect else order.ship_by_date,
             platform=order.platform,
             suggested_substitutes=substitutes_by_material.get(material_id, []),
         )

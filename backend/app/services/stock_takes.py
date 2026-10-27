@@ -27,6 +27,7 @@ from decimal import Decimal
 from fastapi import HTTPException, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.db import async_session_factory
 from app.models.material import LegacyMaterialCategory, Material, MaterialAdjustment, MaterialAdjustmentMode
@@ -38,7 +39,7 @@ from app.models.purchase import MaterialPurchase, MaterialPurchaseReceipt
 from app.models.stock_adjustment import StockAdjustment, StockAdjustmentMode
 from app.models.stock_take import StockTake, StockTakeLine, StockTakeLineStatus, StockTakeStatus
 from app.models.variant import ProductVariant
-from app.schemas.stock_take import ScopePreview, ScopeWarning, StockTakeScope
+from app.schemas.stock_take import ScopeItemRead, ScopePreview, ScopeWarning, StockTakeScope
 from app.services import abc
 from app.services.costing import create_adjustment
 from app.services.platforms.base import ensure_utc
@@ -130,7 +131,7 @@ async def _product_candidates(session: AsyncSession, scope: StockTakeScope, due_
         variants = sorted(variants_by_product.get(p.id, []), key=lambda v: v.variant_name)
         owners = (
             [
-                (v.id, f"{p.name} — {v.variant_name}", v.current_stock, v.allocated_qty, v.last_stock_take_at)
+                (v.id, f"{p.name} ({v.variant_name})", v.current_stock, v.allocated_qty, v.last_stock_take_at)
                 for v in variants
             ]
             if variants
@@ -173,7 +174,57 @@ async def resolve_candidates(session: AsyncSession, scope: StockTakeScope) -> li
         candidates += await _material_candidates(session, scope, due_keys)
     if scope.include_products:
         candidates += await _product_candidates(session, scope, due_keys)
+    if scope.selected_items is not None:
+        picked = {(i.material_id, i.product_id, i.variant_id) for i in scope.selected_items}
+        candidates = [c for c in candidates if c.key in picked]
     return candidates
+
+
+async def list_scope_items(session: AsyncSession, scope: StockTakeScope) -> list[ScopeItemRead]:
+    """Every row the scope's filters match (ignoring any existing selection), with when each
+    was last counted and whether it is due — what the "Select items" picker shows."""
+    filters = scope.model_copy(update={"selected_items": None})
+    candidates = await resolve_candidates(session, filters)
+    due_keys = {(d.material_id, d.product_id, d.variant_id) for d in await abc.compute_due_for_count(session)}
+
+    material_ids = [c.material_id for c in candidates if c.material_id is not None]
+    product_ids = [c.product_id for c in candidates if c.product_id is not None]
+    materials = (
+        {m.id: m for m in (await session.execute(select(Material).where(Material.id.in_(material_ids)))).scalars()}
+        if material_ids
+        else {}
+    )
+    products = (
+        {
+            p.id: p
+            for p in (
+                await session.execute(
+                    select(Product).options(selectinload(Product.product_category)).where(Product.id.in_(product_ids))
+                )
+            ).scalars()
+        }
+        if product_ids
+        else {}
+    )
+    out = []
+    for c in candidates:
+        if c.material_id is not None:
+            section, group = "Materials", materials[c.material_id].category_name or ""
+        else:
+            section, group = "Products", products[c.product_id].product_category_name or ""
+        out.append(
+            ScopeItemRead(
+                material_id=c.material_id,
+                product_id=c.product_id,
+                variant_id=c.variant_id,
+                name=c.name,
+                section=section,
+                group=group,
+                last_stock_take_at=c.last_stock_take_at,
+                is_due=c.key in due_keys,
+            )
+        )
+    return out
 
 
 async def describe_scope(session: AsyncSession, scope: StockTakeScope) -> str:
@@ -208,6 +259,9 @@ async def describe_scope(session: AsyncSession, scope: StockTakeScope) -> str:
     description = " and ".join(parts) if parts else "nothing"
     if scope.overdue_only:
         description += ", due for counting only"
+    if scope.selected_items is not None:
+        n = len(scope.selected_items)
+        description += f", {n} hand-picked item{'s' if n != 1 else ''}"
     return description[0].upper() + description[1:]
 
 
@@ -354,7 +408,7 @@ async def create_stock_take(session: AsyncSession, scope: StockTakeScope) -> tup
     if not candidates:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Nothing to count — no items match that scope",
+            detail="Nothing to count: no items match that scope",
         )
 
     description = await describe_scope(session, scope)
@@ -363,14 +417,18 @@ async def create_stock_take(session: AsyncSession, scope: StockTakeScope) -> tup
     # start flow — on 2026-09-02 two takes with the same scope were created six seconds
     # apart, and the duplicate could only be cleared by hand. Refuse it and point at the
     # take already open; a deliberate re-count means closing or narrowing that one first.
-    duplicate = (
-        await session.execute(
-            select(StockTake)
-            .where(StockTake.status == StockTakeStatus.open)
-            .where(StockTake.scope_description == description)
-            .order_by(StockTake.id)
-        )
-    ).scalars().first()
+    # A hand-picked scope renders as a count, so two different picks of the same size would
+    # look identical; there the open-take warning in the preview is the only guard.
+    duplicate = None
+    if scope.selected_items is None:
+        duplicate = (
+            await session.execute(
+                select(StockTake)
+                .where(StockTake.status == StockTakeStatus.open)
+                .where(StockTake.scope_description == description)
+                .order_by(StockTake.id)
+            )
+        ).scalars().first()
     if duplicate is not None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -551,7 +609,7 @@ def _decide(line: StockTakeLine, current_qty: Decimal, allocated: Decimal) -> _L
     if current_qty != expected:
         return _LineOutcome(
             StockTakeLineStatus.conflict,
-            f"Stock moved since this take started — was {_qty(expected)}, now {_qty(current_qty)}",
+            f"Stock moved since this take started: was {_qty(expected)}, now {_qty(current_qty)}",
             current_qty,
         )
 
@@ -563,7 +621,7 @@ def _decide(line: StockTakeLine, current_qty: Decimal, allocated: Decimal) -> _L
         return _LineOutcome(
             StockTakeLineStatus.conflict,
             f"{_qty(allocated)} {units} allocated to open orders and may be picked and boxed "
-            f"rather than on the shelf — counted {_qty(counted)} against {_qty(expected)} expected",
+            f"rather than on the shelf: counted {_qty(counted)} against {_qty(expected)} expected",
             current_qty,
         )
 
@@ -765,7 +823,7 @@ async def resolve_line(
     if line.counted_qty is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="There is no counted value to accept — re-count this line instead",
+            detail="There is no counted value to accept: re-count this line instead",
         )
 
     # Its own session for the same reason approve uses one per line: this call can refuse
@@ -837,7 +895,7 @@ def line_display_name(line: StockTakeLine, materials: dict, products: dict, vari
     base = product.name if product else "(deleted product)"
     if line.variant_id is not None:
         variant = variants.get(line.variant_id)
-        return (f"{base} — {variant.variant_name}" if variant else f"{base} — (deleted variant)", "each")
+        return (f"{base} ({variant.variant_name})" if variant else f"{base} (deleted variant)", "each")
     return (base, "each")
 
 
@@ -871,6 +929,63 @@ def _material_category_sort(material) -> tuple[int, str]:
         return (material.category_ref.sort_order, material.category_ref.name.lower())
     legacy = material.category.value if material.category is not None else None
     return (_LEGACY_ORDER.get(legacy, len(_LEGACY_ORDER)), (legacy or "").lower())
+
+
+async def line_unit_costs(
+    session: AsyncSession, lines: list[StockTakeLine], materials: dict, products: dict, variants: dict
+) -> dict[int, Decimal | None]:
+    """What one unit of each line costs today, keyed by line id — the basis for putting a
+    money figure on a variance.
+
+    Materials use their average unit cost. Finished stock uses its running average build
+    cost once a build has blended one in (the same figure order COGS reads), and otherwise
+    the BOM as written: a variant's resolved BOM, a plain product's base BOM, both priced
+    at current material cost. None means there is no
+    figure to give: a product or variant with no BOM, which is "cost not tracked" rather
+    than free.
+    """
+    # Local import: buildability pulls in the schemas, which this module otherwise avoids.
+    from app.services import buildability
+
+    base_costs = await buildability.get_cost_per_unit_by_product(session)
+
+    variant_costs: dict[int, Decimal] = {}
+    boms_by_product = {
+        product_id: await buildability.get_resolved_variant_boms_by_variant(session, product_id)
+        for product_id in {v.product_id for v in variants.values()}
+    }
+    bom_material_ids = {
+        bom_line.material_id
+        for boms in boms_by_product.values()
+        for bom in boms.values()
+        for bom_line in bom
+    }
+    bom_materials = (
+        {
+            m.id: m
+            for m in (await session.execute(select(Material).where(Material.id.in_(bom_material_ids)))).scalars()
+        }
+        if bom_material_ids
+        else {}
+    )
+    for boms in boms_by_product.values():
+        for variant_id, bom in boms.items():
+            variant_costs[variant_id] = sum(
+                (Decimal(bom_materials[bl.material_id].avg_unit_cost) * bl.qty_required for bl in bom),
+                start=Decimal(0),
+            )
+
+    costs: dict[int, Decimal | None] = {}
+    for line in lines:
+        if line.material_id is not None:
+            costs[line.id] = Decimal(materials[line.material_id].avg_unit_cost)
+        elif line.variant_id is not None:
+            blended = variants[line.variant_id].avg_unit_cost
+            costs[line.id] = Decimal(blended) if blended is not None else variant_costs.get(line.variant_id)
+        else:
+            blended = products[line.product_id].avg_unit_cost
+            costs[line.id] = Decimal(blended) if blended is not None else base_costs.get(line.product_id)
+    return costs
 
 
 @dataclass(frozen=True)

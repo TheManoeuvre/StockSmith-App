@@ -40,20 +40,21 @@ const ALERT_TYPE_ORDER: NotificationCategory[] = [
 const ALERT_TYPE_LABELS: Record<NotificationCategory, string> = {
   marketplace_sync_failure: "Marketplace sync failed",
   platform_reconnect_required: "Marketplace connection needs reconnecting",
-  marketplace_api_soft_limit: "Marketplace API usage — approaching limit",
-  marketplace_api_hard_limit: "Marketplace API usage — limit hit",
+  marketplace_api_soft_limit: "Marketplace API usage: approaching limit",
+  marketplace_api_hard_limit: "Marketplace API usage: limit hit",
   shipping_price_changed: "Postage price changed on a marketplace",
   shipping_profile_missing: "Linked shipping profile missing on a marketplace",
   material_forecast_warning: "Material running low (warning)",
   material_forecast_critical: "Material running low (critical)",
   order_unfulfillable: "Order awaiting product",
-  order_blocked: "Order blocked — no BOM defined",
+  order_blocked: "Order blocked: no BOM defined",
   pending_order_threshold: "Pending orders over threshold",
-  replacement_parcel_review: "Replacement parcel detected — needs completing",
-  order_cancellation_pending: "Marketplace reports an order cancelled — needs review",
+  replacement_parcel_review: "Replacement parcel detected: needs completing",
+  order_cancellation_pending: "Marketplace reports an order cancelled: needs review",
   backup_failed: "Backup failed",
   secondary_backup_unreachable: "Secondary backup location unreachable",
   daily_summary: "Order summary",
+  stock_take_due: "Items due for counting",
 };
 
 const DELIVERY_MODE_OPTIONS: { value: NotificationDeliveryMode; label: string }[] = [
@@ -83,6 +84,10 @@ interface Form {
   dailySummaryFrequency: SummaryFrequency;
   dailySummaryHourLocal: number;
   dailySummaryDayOfWeek: number;
+  stockTakeReminderEnabled: boolean;
+  stockTakeReminderFrequency: SummaryFrequency;
+  stockTakeReminderHourLocal: number;
+  stockTakeReminderDayOfWeek: number;
   pendingOrderThreshold: string;
   alertTypes: FormAlertType[];
 }
@@ -100,6 +105,10 @@ function toForm(settings: NotificationSettingsValue): Form {
     dailySummaryFrequency: settings.daily_summary_frequency,
     dailySummaryHourLocal: settings.daily_summary_hour_local,
     dailySummaryDayOfWeek: settings.daily_summary_day_of_week ?? 0,
+    stockTakeReminderEnabled: settings.stock_take_reminder_enabled,
+    stockTakeReminderFrequency: settings.stock_take_reminder_frequency,
+    stockTakeReminderHourLocal: settings.stock_take_reminder_hour_local,
+    stockTakeReminderDayOfWeek: settings.stock_take_reminder_day_of_week ?? 0,
     pendingOrderThreshold: String(settings.pending_order_threshold),
     alertTypes: settings.alert_types,
   };
@@ -150,6 +159,11 @@ export function NotificationSettings() {
         daily_summary_frequency: value.dailySummaryFrequency,
         daily_summary_hour_local: value.dailySummaryHourLocal,
         daily_summary_day_of_week: value.dailySummaryFrequency === "weekly" ? value.dailySummaryDayOfWeek : null,
+        stock_take_reminder_enabled: value.stockTakeReminderEnabled,
+        stock_take_reminder_frequency: value.stockTakeReminderFrequency,
+        stock_take_reminder_hour_local: value.stockTakeReminderHourLocal,
+        stock_take_reminder_day_of_week:
+          value.stockTakeReminderFrequency === "weekly" ? value.stockTakeReminderDayOfWeek : null,
         pending_order_threshold: Number(value.pendingOrderThreshold) || 1,
         alert_types: value.alertTypes,
       }),
@@ -164,7 +178,7 @@ export function NotificationSettings() {
 
   const testMutation = useMutation({
     mutationFn: notificationsApi.testPushover,
-    onSuccess: (result) => setPushoverTestResult(result.success ? "Test sent — check your phone." : result.reason ?? "Test failed."),
+    onSuccess: (result) => setPushoverTestResult(result.success ? "Test sent. Check your phone." : result.reason ?? "Test failed."),
   });
 
   const clearMutation = useMutation({
@@ -210,7 +224,7 @@ export function NotificationSettings() {
     <div className="flex flex-col gap-4">
       <SettingsCard
         title="Delivery channels"
-        help="Every alert is logged here in StockSmith regardless of these toggles — they only control whether it also reaches you outside the app."
+        help="Every alert is logged here in StockSmith regardless of these toggles: they only control whether it also reaches you outside the app."
       >
         <div className="flex items-center gap-2 text-sm">
           <Switch
@@ -242,7 +256,7 @@ export function NotificationSettings() {
           >
             Pushover
           </a>{" "}
-          app, as long as StockSmith is running in the background — it doesn't matter whether the window
+          app, as long as StockSmith is running in the background: it doesn't matter whether the window
           is open, minimised, or closed to the tray.
         </p>
 
@@ -291,8 +305,8 @@ export function NotificationSettings() {
               </div>
               <p className="text-xs text-slate-500">
                 {Number(form.pushoverExpiryHours) > 0
-                  ? `Routine alerts — a shortfall waiting on a restock or a build, a material warning, a growing backlog — delete themselves from your phone after ${form.pushoverExpiryHours} hours, so alerts for orders you've already dealt with don't pile up. Blockers and failures stay until you clear them.`
-                  : "Nothing expires — every push stays on your phone until you clear it."}
+                  ? `Routine alerts (a shortfall waiting on a restock or a build, a material warning, a growing backlog) delete themselves from your phone after ${form.pushoverExpiryHours} hours, so alerts for orders you've already dealt with don't pile up. Blockers and failures stay until you clear them.`
+                  : "Nothing expires: every push stays on your phone until you clear it."}
               </p>
             </div>
           </FieldRow>
@@ -312,7 +326,7 @@ export function NotificationSettings() {
 
       <SettingsCard
         title="Quiet hours"
-        help="Suppresses Windows toasts and Pushover pushes during this window — the alert still lands in-app. Anything urgent enough to be marked immediate below (like the order summary) still gets through regardless."
+        help="Suppresses Windows toasts and Pushover pushes during this window. The alert still lands in-app. Anything urgent enough to be marked immediate below (like the order summary) still gets through regardless."
       >
         <div className="flex items-center gap-2 text-sm">
           <Switch
@@ -356,7 +370,7 @@ export function NotificationSettings() {
 
       <SettingsCard
         title="Digest schedule"
-        help="When batched alerts actually go out. Anything set to Digest below is held and delivered as one message at these times — pick none and it goes out as soon as the backend notices it, which is what makes a digest feel like a trickle of separate alerts."
+        help="When batched alerts actually go out. Anything set to Digest below is held and delivered as one message at these times: pick none and it goes out as soon as the backend notices it, which is what makes a digest feel like a trickle of separate alerts."
       >
         <div className="flex flex-wrap gap-1">
           {HOURS.map((hour) => {
@@ -383,7 +397,7 @@ export function NotificationSettings() {
         </div>
         <p className="text-xs text-slate-500">
           {form.digestHours.length === 0
-            ? "No schedule — batched alerts are sent as soon as they're picked up."
+            ? "No schedule: batched alerts are sent as soon as they're picked up."
             : `Digest sent at ${form.digestHours.map(hourLabel).join(", ")}.`}
         </p>
       </SettingsCard>
@@ -429,6 +443,61 @@ export function NotificationSettings() {
               className="rounded border border-slate-300 px-2 py-1"
               value={form.dailySummaryHourLocal}
               onChange={(e) => setField("dailySummaryHourLocal", Number(e.target.value))}
+            >
+              {HOURS.map((hour) => (
+                <option key={hour} value={hour}>
+                  {hourLabel(hour)}
+                </option>
+              ))}
+            </select>
+          </FieldRow>
+        </div>
+      </SettingsCard>
+
+      <SettingsCard
+        title="Stock take reminder"
+        help="A nudge listing how many items in each category are due for counting. Nothing is sent when nothing is due."
+      >
+        <div className="flex items-center gap-2 text-sm">
+          <Switch
+            id="stock-take-reminder-toggle"
+            checked={form.stockTakeReminderEnabled}
+            onChange={(checked) => setField("stockTakeReminderEnabled", checked)}
+          />
+          <label htmlFor="stock-take-reminder-toggle">Send stock take reminder</label>
+        </div>
+        <div className="flex flex-col gap-2">
+          <FieldRow label="Frequency">
+            <SegmentedControl
+              ariaLabel="Stock take reminder frequency"
+              value={form.stockTakeReminderFrequency}
+              onChange={(next) => setField("stockTakeReminderFrequency", next)}
+              options={[
+                { value: "daily" as const, label: "Daily" },
+                { value: "weekly" as const, label: "Weekly" },
+              ]}
+            />
+          </FieldRow>
+          {form.stockTakeReminderFrequency === "weekly" && (
+            <FieldRow label="Day">
+              <select
+                className="rounded border border-slate-300 px-2 py-1"
+                value={form.stockTakeReminderDayOfWeek}
+                onChange={(e) => setField("stockTakeReminderDayOfWeek", Number(e.target.value))}
+              >
+                {WEEKDAYS.map((day, index) => (
+                  <option key={day} value={index}>
+                    {day}
+                  </option>
+                ))}
+              </select>
+            </FieldRow>
+          )}
+          <FieldRow label="Time">
+            <select
+              className="rounded border border-slate-300 px-2 py-1"
+              value={form.stockTakeReminderHourLocal}
+              onChange={(e) => setField("stockTakeReminderHourLocal", Number(e.target.value))}
             >
               {HOURS.map((hour) => (
                 <option key={hour} value={hour}>

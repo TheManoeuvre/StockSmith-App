@@ -92,12 +92,12 @@ class SquareAdapter:
 
     def build_authorize_url(self, state: str, code_challenge: str, redirect_uri: str, scopes: list[str]) -> str:
         raise NotImplementedError(
-            "Square is connected with a pasted access token, not OAuth — see routers/platforms.connect_square"
+            "Square is connected with a pasted access token, not OAuth: see routers/platforms.connect_square"
         )
 
     async def exchange_code(self, code: str, code_verifier: str, redirect_uri: str):
         raise NotImplementedError(
-            "Square is connected with a pasted access token, not OAuth — see routers/platforms.connect_square"
+            "Square is connected with a pasted access token, not OAuth: see routers/platforms.connect_square"
         )
 
     async def refresh(self, refresh_token: str):
@@ -112,7 +112,7 @@ class SquareAdapter:
         self, session, connection: PlatformConnection, listing_ref: ExternalListingRef, sku: str | None, qty: int
     ) -> None:
         raise NotImplementedError(
-            "Square products are StockSmith catalogue products, not pushed listings — see "
+            "Square products are StockSmith catalogue products, not pushed listings: see "
             "docs/plan-square-integration.md"
         )
 
@@ -137,7 +137,7 @@ class SquareAdapter:
         would once the watermark has advanced past it."""
         if connection.external_account_id is None:
             raise PlatformSyncError(
-                "Square connection has no location selected — see routers/platforms.set_square_location"
+                "Square connection has no location selected: see routers/platforms.set_square_location"
             )
 
         updated_since = since.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z") if since else None

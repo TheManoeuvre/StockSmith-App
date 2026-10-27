@@ -1,6 +1,7 @@
 from datetime import date, datetime, timedelta
 
 from sqlalchemy import Date, DateTime, String, func
+from sqlalchemy import true as sa_true
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base, portable_enum
@@ -93,6 +94,15 @@ class PlatformConnection(Base):
     # limit, so the next tick tries again.
     shipping_price_refresh_hours: Mapped[int] = mapped_column(default=24, nullable=False)
     last_shipping_price_refresh_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Per-product store switches (ProductPlatformSettings.is_target). A new product starts
+    # off for this store when this is False. Applied once, at creation: changing it later
+    # never moves a product that already exists.
+    new_products_default_on: Mapped[bool] = mapped_column(default=True, nullable=False, server_default=sa_true())
+    # Set when the user answers the one-off "all products on or all off?" prompt. Survives
+    # disconnect/reconnect of the same shop like the rest of this row; cleared only when the
+    # OAuth callback sees a different account id, since a different shop is a different
+    # product mix. NULL means never asked.
+    product_scope_decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

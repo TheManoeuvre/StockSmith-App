@@ -266,6 +266,46 @@ async def test_material_above_threshold_with_no_history_is_not_surfaced(session)
     assert forecasts == []
 
 
+async def test_empty_material_on_a_live_bom_is_critical_without_history_or_threshold(session):
+    """A material at zero that an active product's BOM uses always alerts — no sales
+    history to forecast from and no reorder threshold needed. Fallbacks keep the product
+    sellable, so this is the only thing that tells anyone the primary has run out."""
+    await _settings(session)
+    empty = await _material(session, name="Box 1", current_qty=Decimal(0))
+    unused = await _material(session, name="Unused", current_qty=Decimal(0))
+    product = await _product(session, "Widget", "SKU-7", current_stock=0)
+    session.add(ProductMaterial(product_id=product.id, material_id=empty.id, qty_required=Decimal(1)))
+    await session.commit()
+
+    forecasts = await compute_material_forecasts(session)
+    assert [f.material_id for f in forecasts] == [empty.id]
+    assert forecasts[0].status == "critical"
+    assert forecasts[0].weeks_of_supply is None
+    assert unused.id not in {f.material_id for f in forecasts}
+
+
+async def test_empty_kitting_material_on_a_live_product_is_critical(session):
+    await _settings(session)
+    box = await _material(session, name="Box 1", current_qty=Decimal(0))
+    product = await _product(session, "Widget", "SKU-8", current_stock=0)
+    session.add(ProductKittingMaterial(product_id=product.id, material_id=box.id, qty_required=Decimal(1)))
+    await session.commit()
+
+    forecasts = await compute_material_forecasts(session)
+    assert [(f.material_id, f.status) for f in forecasts] == [(box.id, "critical")]
+
+
+async def test_empty_material_only_on_an_inactive_product_is_not_surfaced(session):
+    await _settings(session)
+    empty = await _material(session, name="Box 1", current_qty=Decimal(0))
+    product = await _product(session, "Retired", "SKU-9", current_stock=0)
+    product.is_active = False
+    session.add(ProductMaterial(product_id=product.id, material_id=empty.id, qty_required=Decimal(1)))
+    await session.commit()
+
+    assert await compute_material_forecasts(session) == []
+
+
 async def test_include_all_returns_every_material_with_a_status(session):
     """The materials list/detail want a row per material, not just the alerting ones."""
     await _settings(session)

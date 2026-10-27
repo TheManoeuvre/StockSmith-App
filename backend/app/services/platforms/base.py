@@ -57,6 +57,10 @@ class ExternalOrderLine:
     # transaction.variations "Personalization" entry). None when the listing has no
     # personalization option or the buyer left it blank. eBay has no equivalent concept.
     variation_text: str | None = None
+    # The marketplace listing this line was sold from (Etsy transaction.listing_id), for
+    # attribution only — line matching stays SKU-based, since several listings may share
+    # a SKU and draw on one stock pool. None where the marketplace doesn't report it.
+    external_listing_id: str | None = None
 
 
 @dataclass
@@ -80,6 +84,20 @@ class ExternalPostageCharge:
     currency: str | None = None
     posted_at: datetime | None = None
     description: str | None = None
+
+
+@dataclass
+class ExternalShipment:
+    """One parcel the marketplace has dispatched for an order — an entry of Etsy's receipt
+    `shipments` array. Unlike ExternalPostageCharge this doesn't depend on a label having
+    been bought through the marketplace, so it also catches a parcel posted with a label
+    from elsewhere. `tracking_number` is the dedupe key
+    (order_parcels.apply_extra_shipments); a shipment without one can't be told apart on
+    a later sync and is ignored."""
+
+    tracking_number: str | None
+    carrier: str | None = None
+    shipped_at: datetime | None = None
 
 
 @dataclass
@@ -166,6 +184,12 @@ class ExternalOrder:
     # them, an empty list when financials_enriched is False means "not fetched", not
     # "no labels"; order_sync only applies these when financials_enriched is True.
     postage_charges: list[ExternalPostageCharge] = field(default_factory=list)
+
+    # Every parcel dispatched against the order, oldest first, straight off the list
+    # response (so, unlike postage_charges, always populated — no enrich gate). Entry 0 is
+    # the original shipment (already Order.tracking_number); later ones are resends.
+    # Only Etsy fills this today.
+    shipments: list[ExternalShipment] = field(default_factory=list)
 
 
 @dataclass
@@ -387,7 +411,7 @@ class PlatformAdapter(Protocol):
         enrich_skus: set[str] | None = None,
     ) -> dict[str, ExternalListingRef]: ...
     """`enrich`/`enrich_skus` are fidelity hints, not filters: the index must always
-    contain every SKU the marketplace reports, whatever they're set to — callers rely on
+    contain every SKU the marketplace reports, whatever they're set to: callers rely on
     it for membership tests. They exist because some adapters need extra per-SKU calls to
     fill a ref completely (eBay's listing state lives on a separate Offer object), and a
     caller that only needs membership shouldn't pay for them. An adapter whose single

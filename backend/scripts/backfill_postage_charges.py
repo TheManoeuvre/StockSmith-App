@@ -113,7 +113,7 @@ async def _backfill_ebay(session, args) -> int:
     updated = 0
     for order in orders:
         try:
-            _fees, _net, _status, labels = await adapter._fetch_transactions(session, connection, order.external_order_id)
+            _fees, _net, _status, labels, _refunded = await adapter._fetch_transactions(session, connection, order.external_order_id)
         except PlatformError as e:
             print(f"  #{order.id} {order.external_order_id}: FAILED — {e}")
             continue

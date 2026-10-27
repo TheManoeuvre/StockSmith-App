@@ -115,8 +115,8 @@ export function PlatformFeeComponents({ platform }: { platform: ListingPlatform 
               <tr key={c.id} className="border-b border-slate-100">
                 <td className="p-1.5">{c.name}</td>
                 <td className="p-1.5">{BASIS_LABELS[c.basis]}</td>
-                <td className="p-1.5">{c.rate_percent ?? "—"}</td>
-                <td className="p-1.5">{c.fixed_amount ?? "—"}</td>
+                <td className="p-1.5">{c.rate_percent ?? "-"}</td>
+                <td className="p-1.5">{c.fixed_amount ?? "-"}</td>
                 <td className="p-1.5">
                   <input
                     type="checkbox"
@@ -191,7 +191,7 @@ export function PlatformFeeComponents({ platform }: { platform: ListingPlatform 
         </SaveButton>
       </form>
       <p className="text-xs text-slate-400">
-        Rates seeded from research in July 2026 — platforms change these periodically, so re-check against{" "}
+        Rates seeded from research in July 2026: platforms change these periodically, so re-check against{" "}
         {PLATFORM_LABELS[platform]}'s own fee pages if margins look off.
       </p>
     </div>

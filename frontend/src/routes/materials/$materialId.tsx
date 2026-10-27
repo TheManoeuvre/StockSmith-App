@@ -1,4 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { LayersIcon, ProductImage } from "../../components/products/ProductImage";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
 import { materialsApi } from "../../api/materials";
@@ -488,15 +489,12 @@ function MaterialDetail() {
         {/* Identity + the three headline figures — shown on every tab. */}
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-3">
-            <div className="h-16 w-16 shrink-0 overflow-hidden rounded border border-slate-200 bg-slate-50">
-              {imageUrl && (
-                <img
-                  src={imageUrl}
-                  alt={material.name}
-                  className="h-full w-full object-cover"
-                />
-              )}
-            </div>
+            <ProductImage
+              src={imageUrl}
+              alt={material.name}
+              className="h-16 w-16 rounded border"
+              fallback={<LayersIcon />}
+            />
             <div className="min-w-0">
               <p className="truncate text-sm font-medium text-slate-700">
                 {material.material_type_name
@@ -525,7 +523,7 @@ function MaterialDetail() {
               value={
                 Number(material.on_order_qty ?? 0) > 0
                   ? `+${roundQty(material.on_order_qty)}`
-                  : "—"
+                  : "-"
               }
               sub={
                 Number(material.on_order_qty ?? 0) > 0
@@ -698,31 +696,31 @@ function MaterialDetail() {
                     </select>
                   </FieldRow>
                   {editedCategory?.tracks_colour && (
-                    <>
-                      <FieldRow label="Colour">
-                        {/* Backed by the colours reference table now, so the same colour on two materials
+                    <FieldRow label="Colour">
+                      {/* Backed by the colours reference table now, so the same colour on two materials
                     is one row that can be renamed once. onResolved is unused deliberately: the
                     backend matches the name case-insensitively and find-or-creates, which is
                     more reliable than trusting an id the client resolved from a stale list. */}
-                        <CreatableSelect
-                          className="rounded border border-slate-300 px-2 py-1"
-                          options={colourOptions ?? []}
-                          value={colour}
-                          onChange={setColour}
-                          onResolved={() => {}}
-                        />
-                      </FieldRow>
-                      <FieldRow label="Material type">
-                        <CreatableSelect
-                          className="rounded border border-slate-300 px-2 py-1"
-                          options={materialTypes ?? []}
-                          value={materialType}
-                          onChange={setMaterialType}
-                          onResolved={setMaterialTypeId}
-                          placeholder="PLA, PETG…"
-                        />
-                      </FieldRow>
-                    </>
+                      <CreatableSelect
+                        className="rounded border border-slate-300 px-2 py-1"
+                        options={colourOptions ?? []}
+                        value={colour}
+                        onChange={setColour}
+                        onResolved={() => {}}
+                      />
+                    </FieldRow>
+                  )}
+                  {editedCategory?.tracks_material_type && (
+                    <FieldRow label="Material type">
+                      <CreatableSelect
+                        className="rounded border border-slate-300 px-2 py-1"
+                        options={materialTypes ?? []}
+                        value={materialType}
+                        onChange={setMaterialType}
+                        onResolved={setMaterialTypeId}
+                        placeholder={editedCategory.tracks_colour ? "PLA, PETG…" : "Coasters, Keyrings…"}
+                      />
+                    </FieldRow>
                   )}
                   <FieldRow label="Manufacturer">
                     <CreatableSelect
@@ -782,9 +780,12 @@ function MaterialDetail() {
                             title={material.colour ?? undefined}
                           />
                         ) : (
-                          <span className="text-[10px] text-slate-400">
-                            no image
-                          </span>
+                          <div className="flex flex-col items-center gap-1 text-slate-300">
+                            <LayersIcon className="h-8 w-8" />
+                            <span className="text-[10px] text-slate-400">
+                              no image
+                            </span>
+                          </div>
                         )}
                       </div>
                       <div className="flex flex-1 flex-col gap-2">
@@ -981,7 +982,7 @@ function MaterialDetail() {
                         },
                       })
                     }
-                    className="rounded border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm text-amber-800"
+                    className="whitespace-nowrap rounded border border-amber-300 bg-amber-50 px-3 py-1.5 text-sm text-amber-800"
                   >
                     Create draft purchase
                   </button>
@@ -1097,7 +1098,7 @@ function MaterialDetail() {
                 This is a stock count: the figure you enter is what you
                 counted, so the material stops showing as due, its count date
                 moves to today, and nothing it has done since counts as
-                movement. Adjusting by an amount doesn't — a known change isn't
+                movement. Adjusting by an amount doesn't: a known change isn't
                 a count.
               </p>
             )}
@@ -1280,7 +1281,7 @@ function HistoryComment({ h }: { h: MaterialStockHistoryEntry }) {
       </Link>
     );
   }
-  return <>{h.reason ?? "—"}</>;
+  return <>{h.reason ?? "-"}</>;
 }
 
 /** The Supplier tab's PO list — reuses the Stock tab's already-fetched history query

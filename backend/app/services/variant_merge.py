@@ -81,7 +81,7 @@ async def _load_pair(session: AsyncSession, loser_id: int, survivor_id: int) -> 
     if loser.product_id != survivor.product_id:
         raise VariantMergeError("Both variants must belong to the same product.")
     if not survivor.is_active:
-        raise VariantMergeError(f'"{survivor.variant_name}" is disabled — reactivate it before merging into it.')
+        raise VariantMergeError(f'"{survivor.variant_name}" is disabled: reactivate it before merging into it.')
     return loser, survivor
 
 
@@ -260,6 +260,7 @@ async def _copy_overrides(session: AsyncSession, model, loser_id: int, survivor_
                 material_id=row.material_id,
                 qty_required=row.qty_required,
                 replaces_material_id=row.replaces_material_id,
+                source=row.source,
             )
         )
         await session.delete(row)
@@ -308,7 +309,7 @@ async def apply_merge(
             warnings.append(
                 f"{listing.platform.value} listing for \"{loser.variant_name}\" could not be set to 0"
                 + (f": {message}" if message else "")
-                + " — check it on the marketplace."
+                + ": check it on the marketplace."
             )
 
     # 2. Open order lines follow the units they were going to be filled from.

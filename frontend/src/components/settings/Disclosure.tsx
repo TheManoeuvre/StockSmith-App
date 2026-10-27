@@ -11,6 +11,7 @@ import { useState, type ReactNode } from "react";
  * (an unsaved form inside) or lazy-load on open does that; otherwise it keeps its own state.
  */
 export function Disclosure({
+  id,
   title,
   summary,
   tone = "normal",
@@ -19,6 +20,8 @@ export function Disclosure({
   onOpenChange,
   children,
 }: {
+  /** DOM id, so a deep link can scroll to this row. */
+  id?: string;
   title: string;
   /** Shown beside the title, truncated to one line. Carries the "at rest" state of the row. */
   summary?: ReactNode;
@@ -39,7 +42,7 @@ export function Disclosure({
     tone === "danger" ? "text-red-700" : tone === "warning" ? "text-amber-700" : "text-slate-500";
 
   return (
-    <div className="border-b border-slate-100 last:border-b-0">
+    <div id={id} className="border-b border-slate-100 last:border-b-0">
       <button
         type="button"
         aria-expanded={open}

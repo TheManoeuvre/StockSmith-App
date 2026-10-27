@@ -12,16 +12,26 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db, require_auth
-from app.models.listing import ListingPlatform
+from app.models.listing import Listing, ListingPlatform
 from app.models.platform_connection import PlatformConnection
 from app.models.platform_credential import PlatformAppCredential, PlatformEnvironment
 from app.models.platform_listing_push import PlatformListingPush
 from app.models.platform_sync_run import PlatformSyncRun, SyncRunMode, SyncRunStatus
 from app.models.product import Product
+from app.schemas.product import ProductStoreState
 from app.models.variant import ProductVariant
-from app.schemas.listing import BulkListingSyncResult, ProductListingSyncSummary, PushCorrectionsResult
+from app.schemas.listing import (
+    BulkListingSyncResult,
+    ListingUpdate,
+    ProductListingSyncSummary,
+    PushCorrectionsResult,
+)
 from app.schemas.platform import (
     EbaySigningKeyStatus,
+    NewProductDefaultRequest,
+    ProductScopeRequest,
+    ProductScopeResult,
+    ProductStoreRequest,
     ListingPushPage,
     ListingPushRead,
     PlatformConnectResponse,
@@ -49,6 +59,7 @@ from app.schemas.listing_profile import (
     TaxonomyNode,
 )
 from app.schemas.etsy_backfill import (
+    ExistingProfileAssignmentRead,
     ApplyProfileProposalsRequest,
     ApplyProfileProposalsResult,
     EtsyBackfillPreview,
@@ -86,6 +97,7 @@ from app.services import (
     order_sync,
     platform_api_usage,
     platform_credentials,
+    product_platforms,
     shipping_price_sync,
     sync_scheduler,
     sync_status,
@@ -339,6 +351,11 @@ async def _status_from_connection(
     # equivalent, so its connections can never be in this state.
     needs_reconnect = platform == ListingPlatform.ebay and not _has_trading_scope(connection)
 
+    excluded = await product_platforms.excluded_product_ids(session, platform)
+    active_ids = {row[0] for row in await session.execute(select(Product.id).where(Product.is_active.is_(True)))}
+    active_count = len(active_ids)
+    off_count = len(excluded & active_ids)
+
     return PlatformStatus(
         connected=True,
         account_id=connection.external_account_id,
@@ -361,6 +378,10 @@ async def _status_from_connection(
         needs_reconnect_reason=_MISSING_TRADING_SCOPE_HINT if needs_reconnect else None,
         api_calls_today=await platform_api_usage.usage_today(session, platform),
         api_call_budget=platform_api_usage.daily_budget(platform),
+        new_products_default_on=connection.new_products_default_on,
+        product_scope_decided_at=connection.product_scope_decided_at,
+        products_on_count=active_count - off_count,
+        products_off_count=off_count,
     )
 
 
@@ -475,6 +496,7 @@ async def set_square_location(payload: SquareLocationRequest, session: AsyncSess
     if connection.external_account_id is not None and connection.external_account_id != payload.location_id:
         connection.last_orders_synced_at = None
         connection.unpaid_hold_since = None
+        connection.auto_sync_enabled = False
     connection.external_account_id = payload.location_id
     await session.commit()
 
@@ -517,7 +539,7 @@ async def platform_callback(
     if error:
         return _html(f"{label} connection failed", f"{label} returned an error: {error}")
     if not code or not state or state not in _PENDING:
-        return _html(f"{label} connection failed", "Missing or expired authorization state — please try connecting again.")
+        return _html(f"{label} connection failed", "Missing or expired authorization state. Please try connecting again.")
 
     code_verifier, _, environment = _PENDING.pop(state)
     adapter = await get_adapter(session, platform, environment)
@@ -551,6 +573,11 @@ async def platform_callback(
         )
         connection.last_orders_synced_at = None
         connection.unpaid_hold_since = None
+        # A different shop has a different product mix, so the all-on/all-off prompt
+        # is worth asking again.
+        connection.product_scope_decided_at = None
+        # A new shop must not start unattended commits before a manual sync has been run.
+        connection.auto_sync_enabled = False
     connection.external_account_id = account_id
     connection.connected_at = datetime.now(timezone.utc)
     if platform == ListingPlatform.etsy:
@@ -734,7 +761,11 @@ async def disconnect_platform(platform: ListingPlatform, session: AsyncSession =
     connection.scopes = None
     connection.connected_at = None
     connection.last_refreshed_at = None
-    connection.auto_sync_enabled = False
+    # auto_sync_enabled is deliberately left as it was. Clearing it meant the first thing
+    # anyone tries when a platform looks stuck — disconnect, reconnect — quietly switched
+    # off the very thing they were trying to fix, with nothing surfacing it. The scheduler
+    # still won't tick a disconnected shop (_tick requires is_connected), and a reconnect
+    # as a *different* shop switches it off again in the OAuth callback.
     connection.consecutive_auth_failures = 0
     if connection.shop_icon_path:
         resolve_asset_path(connection.shop_icon_path).unlink(missing_ok=True)
@@ -986,9 +1017,28 @@ async def get_etsy_profile_proposals(session: AsyncSession = Depends(get_db)) ->
     except PlatformError as e:
         raise _map_platform_error(e)
 
-    proposals = await listing_profile_backfill.propose_profiles(session, listings)
+    # Best effort: without it, names fall back to the making details and the category is
+    # simply not shown, rather than refusing the proposals.
+    try:
+        nodes = await adapter.fetch_taxonomy_nodes(session, connection)
+    except PlatformError:
+        nodes = []
+    names = {n["id"]: n["name"] for n in nodes}
+    paths = {n["id"]: n["path"] for n in nodes}
+
+    proposals = await listing_profile_backfill.propose_profiles(session, listings, names)
     shipping = await listing_profile_backfill.propose_shipping_profiles(session, listings, etsy_profiles)
+    existing = await listing_profile_backfill.propose_existing_assignments(session, listings)
     return ProfileProposalsRead(
+        existing_assignments=[
+            ExistingProfileAssignmentRead(
+                profile_id=g.profile_id,
+                profile_name=g.profile_name,
+                product_count=len(g.product_ids),
+                product_names=g.product_names[:5],
+            )
+            for g in existing
+        ],
         proposals=[
             ProfileProposalRead(
                 index=index,
@@ -997,6 +1047,7 @@ async def get_etsy_profile_proposals(session: AsyncSession = Depends(get_db)) ->
                 product_count=len(p.product_ids),
                 product_names=p.product_names[:5],
                 taxonomy_id=p.signature.taxonomy_id,
+                category_path=paths.get(p.signature.taxonomy_id),
                 who_made=p.signature.who_made,
                 when_made=p.signature.when_made,
                 is_supply=p.signature.is_supply,
@@ -1068,7 +1119,13 @@ async def apply_etsy_profile_proposals(
         etsy_profiles=etsy_profiles,
         assign_products=payload.assign_products,
     )
+    existing_assigned = (
+        await listing_profile_backfill.apply_existing_assignments(session, listings, payload.existing_profile_ids)
+        if payload.assign_products and payload.existing_profile_ids
+        else 0
+    )
     return ApplyProfileProposalsResult(
+        existing_products_assigned=existing_assigned,
         profiles_created=result.profiles_created,
         products_assigned=result.products_assigned,
         shipping_profiles_created=shipping.shipping_profiles_created,
@@ -1144,6 +1201,67 @@ async def _settings_schema(session, product_id: int, platform: ListingPlatform) 
     )
 
 
+@router.put(
+    "/{platform}/products/{product_id}/store",
+    response_model=ProductStoreState,
+    dependencies=[Depends(require_auth)],
+)
+async def set_product_store(
+    platform: ListingPlatform,
+    product_id: int,
+    payload: ProductStoreRequest,
+    session: AsyncSession = Depends(get_db),
+) -> ProductStoreState:
+    """Turns this product on or off for one store, leaving the rest of its settings alone."""
+    if platform not in product_platforms.PUSHABLE_PLATFORMS:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{platform.value} has no product listings")
+    if await session.get(Product, product_id) is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
+    try:
+        await product_platforms.set_product_store(session, product_id, platform, payload.on)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    await session.commit()
+    is_on, is_locked = (await product_platforms.store_states(session, [product_id])).get(product_id, {}).get(
+        platform, (True, False)
+    )
+    return ProductStoreState(platform=platform.value, is_on=is_on, is_locked=is_locked)
+
+
+@router.post(
+    "/{platform}/product-scope",
+    response_model=ProductScopeResult,
+    dependencies=[Depends(require_auth)],
+)
+async def apply_product_scope(
+    platform: ListingPlatform, payload: ProductScopeRequest, session: AsyncSession = Depends(get_db)
+) -> ProductScopeResult:
+    """Sets every product on or off for this store. This is the one-off prompt's answer, and
+    also the "apply to all" action on the store page. Products live on the store stay on."""
+    if platform not in product_platforms.PUSHABLE_PLATFORMS:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"{platform.value} has no product listings")
+    try:
+        count = await product_platforms.apply_store_scope(session, platform, payload.on)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    await session.commit()
+    return ProductScopeResult(products_set=count)
+
+
+@router.put(
+    "/{platform}/new-product-default",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_auth)],
+)
+async def set_new_product_default(
+    platform: ListingPlatform, payload: NewProductDefaultRequest, session: AsyncSession = Depends(get_db)
+) -> None:
+    """Whether newly created products start on for this store. Existing products are untouched."""
+    connection = await _require_connection(session, platform)
+    connection.new_products_default_on = payload.on_by_default
+    await session.commit()
+
+
 @router.get(
     "/{platform}/products/{product_id}/settings",
     response_model=ProductPlatformSettingsRead,
@@ -1172,6 +1290,11 @@ async def update_product_platform_settings(
     if product is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
 
+    if payload.is_target is False and platform in await product_platforms.live_platforms(session, product_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"This product is live on {platform.value}; end the listing there before turning the store off.",
+        )
     settings = await listing_profiles.get_or_create_settings(session, product_id, platform)
     settings.listing_profile_id = payload.listing_profile_id
     settings.is_target = payload.is_target
@@ -1295,14 +1418,14 @@ async def check_product_sync(
     try:
         # Scoped to this product's own SKUs so a single-product check doesn't pay for a
         # per-SKU offer lookup across the whole catalogue.
-        index = await adapter.build_listing_sku_index(
-            session, connection, enrich_skus=await listing_sync.product_skus(session, product_id)
+        index, extra_index = await listing_sync.fetch_sku_index(
+            adapter, session, connection, enrich_skus=await listing_sync.product_skus(session, product_id)
         )
         # Read-only: this reports a quantity drift, it does not correct it. Pushing from
         # a "test" action would make a diagnostic silently mutate the live marketplace —
         # correcting is the separate, explicitly-confirmed push-corrections endpoint.
         return await listing_sync.check_product_sku_sync(
-            session, product_id, index, platform, with_expected_quantity=True
+            session, product_id, index, platform, with_expected_quantity=True, extra_index=extra_index
         )
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
@@ -1340,6 +1463,32 @@ async def push_product_corrections(
     except PlatformError as e:
         raise _map_platform_error(e)
     return PushCorrectionsResult(pushed_count=pushed, failed_count=len(errors), errors=errors)
+
+
+@router.patch(
+    "/{platform}/listings/{listing_id}",
+    response_model=ProductListingSyncSummary,
+    dependencies=[Depends(require_auth)],
+)
+async def update_linked_listing(
+    platform: ListingPlatform, listing_id: int, body: ListingUpdate, session: AsyncSession = Depends(get_db)
+) -> ProductListingSyncSummary:
+    """Labels a linked listing or makes it its unit's primary — local bookkeeping only, no
+    marketplace call. Returns the product's stored sync status so the panel can redraw."""
+    listing = await session.get(Listing, listing_id)
+    if listing is None or listing.platform != platform:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Listing not found")
+    try:
+        await listing_sync.update_listing(
+            session,
+            listing_id,
+            role_given="role" in body.model_fields_set,
+            role=body.role,
+            make_primary=bool(body.is_primary),
+        )
+        return await listing_sync.get_stored_product_sync_status(session, listing.product_id, platform)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(e))
 
 
 @router.get(
@@ -1384,10 +1533,10 @@ async def check_all_listings(
     connection = await _require_connection(session, platform)
     adapter = await get_adapter(session, platform)
     try:
-        index = await adapter.build_listing_sku_index(
-            session, connection, enrich_skus=await listing_sync.tracked_skus(session)
+        index, extra_index = await listing_sync.fetch_sku_index(
+            adapter, session, connection, enrich_skus=await listing_sync.tracked_skus(session)
         )
-        return await listing_sync.check_all_products_sku_sync(session, index, platform)
+        return await listing_sync.check_all_products_sku_sync(session, index, platform, extra_index=extra_index)
     except PlatformError as e:
         raise _map_platform_error(e)
 
@@ -1401,7 +1550,7 @@ async def _get_ebay_adapter(session: AsyncSession) -> tuple[EbayAdapter, Platfor
         # contract (the Trading-API-only methods below don't exist on other adapters).
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="eBay adapter unavailable — the platform registry returned an unexpected adapter type",
+            detail="eBay adapter unavailable: the platform registry returned an unexpected adapter type",
         )
     return adapter, connection
 
@@ -1668,7 +1817,7 @@ async def _get_etsy_adapter(session: AsyncSession) -> tuple[EtsyAdapter, Platfor
     if not isinstance(adapter, EtsyAdapter):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Etsy adapter unavailable — the platform registry returned an unexpected adapter type",
+            detail="Etsy adapter unavailable: the platform registry returned an unexpected adapter type",
         )
     return adapter, connection
 
@@ -1780,7 +1929,7 @@ async def adopt_etsy_listing(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=(
-                    "Cannot link an Etsy listing to a product/variant with no SKU — set a SKU in StockSmith first, "
+                    "Cannot link an Etsy listing to a product/variant with no SKU: set a SKU in StockSmith first, "
                     "since that's the value written to Etsy."
                 ),
             )

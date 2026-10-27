@@ -12,7 +12,7 @@ from app.services import allocation
 """Order line substitution — "customer wants a different variant". Always a split (see
 OrderLineSubstitution's own docstring): qty units move off an existing line onto a new
 one pointed at the replacement variant, and can be undone at any point before the
-substituted units ship. Restricted to sibling variants of the *same* product — the
+substituted units ship. Restricted to sibling variants of the *same* product: the
 target picker in the UI only ever offers those, and this module enforces it too."""
 
 
@@ -36,7 +36,7 @@ async def substitute_line(
     if qty <= 0 or qty > available:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot substitute {qty} — only {available} not yet shipped",
+            detail=f"Cannot substitute {qty}, only {available} not yet shipped",
         )
 
     order = await session.get(Order, line.order_id)
@@ -56,6 +56,7 @@ async def substitute_line(
         sku=None,
         needs_mapping=False,
         variation_text=line.variation_text,
+        external_listing_id=line.external_listing_id,
     )
     session.add(new_line)
     await session.flush()
@@ -84,7 +85,7 @@ async def undo_substitution(session: AsyncSession, substitution: OrderLineSubsti
     if new_line.shipped_qty > 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot undo — some substituted units have already shipped",
+            detail="Cannot undo: some substituted units have already shipped",
         )
 
     if new_line.allocated_qty > 0:

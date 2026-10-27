@@ -23,7 +23,7 @@ export function SquareLocationCard({
               Syncing orders from location <span className="font-mono text-xs">{status.account_id}</span>.
             </>
           ) : (
-            "No location selected yet — orders can't sync until one is chosen."
+            "No location selected yet: orders can't sync until one is chosen."
           )}
         </p>
         <button

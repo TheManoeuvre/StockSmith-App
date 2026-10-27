@@ -13,16 +13,6 @@ Grouped by feature area; within each group, roughly most-valuable first.
 
 ## Platform sync reliability
 
-### Disconnecting a platform silently switches auto-sync off
-
-**Problem:** `disconnect` (`backend/app/routers/platforms.py:643`) sets `auto_sync_enabled = False` along with clearing the tokens. Reconnecting doesn't restore it — the flag defaults to off for a freshly-connected shop, deliberately, so a new connection can't start unattended commits before the user has run a manual sync. The consequence is that a disconnect/reconnect cycle on an *established* connection, which is the first thing anyone tries when a platform looks stuck, quietly turns off the very thing they're trying to fix.
-
-Nothing surfaces it. `_tick` returns early on the flag (`backend/app/services/sync_scheduler.py`), so there are no sync runs, no errors, and no log lines — while the settings panel goes on showing the platform as connected. The only visible difference between "auto-sync is off" and "the shop has had no new orders" is the absence of rows in a table nobody has reason to open.
-
-Confirmed live: a shop reconnected Etsy on 14 Aug and had no sync attempt of any kind until auto-sync was manually switched back on two days later. eBay, untouched, kept syncing every 15 minutes throughout — which is what made it look like an Etsy fault.
-
-**Ask:** Decide between two shapes and implement one. Either preserve `auto_sync_enabled` across a reconnect of a connection that already had it on (the safety argument for defaulting off applies to a *first* connection, not to re-authorising one that has been syncing for months), or keep clearing it and make the off state loud — the reconnect flow says it's now off, and the panel distinguishes "auto-sync off" from "auto-sync on, nothing to do" rather than rendering both as silence. The second is the smaller change; the first is what stops the reconnect-as-first-aid reflex from making things worse.
-
 ### Crash-recovery watchdog for the tray
 
 **Problem:** The tray, autostart, PID file and sidecar supervisor all shipped (0.10.x tray branch). One piece of `docs/plan-background-sync.md` §6c is still unbuilt: `lib.rs` writes a `backend.stopped` marker on a deliberate Quit and clears it on launch, but nothing reads it. So an app killed by a *crash* (rather than quit on purpose) doesn't come back until the user launches it by hand — which for an unattended sync machine can be days.
@@ -62,41 +52,9 @@ The trigger is narrow and not fully isolated: a UNIQUE violation on a session th
 
 **Ask:** Isolate the exact trigger and decide whether it's an aiosqlite 0.22 regression (0.22 is recent and changed the connection/threading model) or a SQLAlchemy dialect incompatibility, then pin or bump accordingly. A dependency change wants its own commit and its own green run, not to ride along inside a feature.
 
-### Settle a flagged stock-take line inline on the count sheet
-
-**Problem:** Surfaced via the design canvas — it settles a held-back line (Accept / Keep / Recount) in a `Settle` column right in the count-sheet row. The real app removed the in-take Review tab and routes every flagged line to the standalone `/stock-takes/unresolved` page instead. That page works and is the right home for lines from *closed* takes, but settling one you just approved means leaving the take.
-
-**Ask:** When a take is closed but still has `conflict` lines, render the Accept / Keep / Recount actions inline in the count-sheet row (reusing `stockTakesApi.resolveLine`), so a just-approved take can be cleared without a page change. The Unresolved page stays as the cross-take view.
-
-### Variance value column on the stock-take count sheet
-
-**Problem:** Surfaced via the design canvas — its stock-take sheet has a `Value` column showing the money impact of each line's variance (`delta × unit cost`). The real sheet (`src/routes/stock-takes/$stockTakeId.tsx`) shows Expected / Counted / Delta but no monetary figure, and `StockTakeLineRead` carries no unit cost to compute one from.
-
-**Ask:** Put a `unit_cost` (or a precomputed `delta_value`) on the `StockTakeLineRead` schema — materials from `avg_unit_cost`, products/variants from `cost_per_unit` — and add a right-aligned `Value` column. Lets someone triage a sheet by "what's the £ exposure" rather than raw quantity.
-
 ---
 
 ## Catalogue tidy-up
-
-### Surface duplicate colours where the variant picker has to choose between them
-
-**Problem:** The colour picker on the Variants tab (`VariantAttributesEditor`'s
-`MaterialRulePanel`) lists every material of the base material's type and labels each by its
-colour alone, so two materials sharing a colour render as two identical checkboxes. Hit live
-on PETG: `Bambu Lab | PETG Basic | White` and `Sunlu | PETG | Matte White` both said "White".
-That instance is fixed by hiding retired materials from the list (0.20.x), which is the right
-default but only covers the case where one of the pair is already deactivated. Two *active*
-spools of the same colour — a second brand bought because the first was out of stock, or two
-CSV imports spelling one spool differently — still produce the same indistinguishable pair,
-and nothing tells the user which one a tick will drive the BOM onto.
-
-**Ask:** Two halves, either useful alone. (1) Disambiguate in the picker: when a colour label
-appears more than once within a type, fall back to the full material name (or append the
-manufacturer) so the choice is legible — it is a real choice in that case, not a duplicate.
-(2) Detect the duplicate at the source: flag same-colour-same-type pairs on the Materials page
-and offer `services/material_merge` from there, so genuine duplicates get combined rather than
-silently deactivated. The merge itself already exists and already handles stock and weighted
-cost; what is missing is anything that points the user at it.
 
 ### Merge two products
 
@@ -108,6 +66,8 @@ cost; what is missing is anything that points the user at it.
 
 **Problem:** The inverse of a value merge — "4 Stud" turns out to hide two sizes. Deferred with product merge: generating the new value's variants is already possible, and moving stock between them is a pair of adjustments, so there is a manual path and no one has asked.
 
+---
+
 ## Variant BOM correctness
 
 ### Audit existing substitutions onto un-ruled base lines
@@ -117,12 +77,6 @@ cost; what is missing is anything that points the user at it.
 Phase 4 of the backlog-burndown plan rejects this configuration at generation time going forward, but says nothing about rows already in the database.
 
 **Ask:** Audit existing `product_variant_materials` for substitutions targeting an un-ruled base BOM line, and decide whether `_RESOLVED_VARIANT_BOM_SQL` should sum duplicate materials rather than emit them twice — which would fix any such rows already stored, rather than only preventing new ones.
-
-### Provenance column for overrides
-
-**Problem:** `ProductVariantMaterial` has no column distinguishing a rule-generated override from a hand-edited one. The bulk-amend feature therefore can't preserve manual edits automatically — it has to show a preview and make the human consent to each overwrite.
-
-**Ask:** Add a `source` column (`"rule" | "manual"`) so bulk operations can leave hand-edited rows alone by default.
 
 ---
 
@@ -181,29 +135,6 @@ Phase 4 of the backlog-burndown plan rejects this configuration at generation ti
 ---
 
 ## eBay integration hardening
-
-### eBay refunds are recognised but never recorded
-
-**Problem:** `EbayAdapter._parse_order` never sets `refunded_amount`. The adapter plainly
-knows a refund happened — `_ORDER_PAYMENT_STATES` maps `PARTIALLY_REFUNDED` to settled and
-`FULLY_REFUNDED` to reversed — it just never reads the amount, so the column stays NULL on
-every eBay order. Etsy fills it from `_sum_refunds(receipt.refunds)`.
-
-`_compute_net_profit` subtracts `Decimal(order.refunded_amount or 0)`, so a partially
-refunded eBay order counts money that went back to the buyer as profit, and the Refunded
-figure never appears on the order page. Same shape as the discount bug fixed in 0.7.2, and
-found alongside it: a field the adapter simply does not read, failing silently because a
-NULL is indistinguishable from an order that was never refunded.
-
-Not fixed with the discount because it has a different cause and a different source — the
-refund total is not in `pricingSummary` at all, so it needs a decision about where to read
-it from (the Sell Finances REFUND transactions, which `_fetch_transactions` already fetches
-and filters to SALE, look like the closest fit).
-
-**Ask:** Populate `refunded_amount` for eBay, and extend the reconciliation warning added
-in 0.7.2 to account for refunds so a mismatch keeps being noisy. Worth checking against a
-real partially-refunded order before trusting the field — the SALE-only filter in
-`_fetch_transactions` is the reason nobody noticed the REFUND rows were there.
 
 ### Turn the Offer-enrichment tests into an opt-in sandbox integration test
 

@@ -1,5 +1,8 @@
 import { api, downloadCsv } from "./client";
 import type {
+  BoxCheck,
+  BoxCheckConfirmInput,
+  BoxCheckPreview,
   ManualOrderChannel,
   Order,
   OrderKittingOverrideLine,
@@ -86,6 +89,8 @@ export interface ReplacementParcelCreateInput {
   reason: ReplacementParcelReason;
   postage_cost?: string | null;
   postage_charge_id?: number | null;
+  /** A sync placeholder this parcel completes; the backend retires it. */
+  completes_parcel_id?: number | null;
   tracking_number?: string | null;
   carrier?: string | null;
   notes?: string | null;
@@ -107,10 +112,17 @@ export interface ReplacementParcelUpdateInput {
 }
 
 export const ordersApi = {
-  list: (limit: number, offset: number, status?: OrderStatus | "awaiting", q?: string) => {
+  list: (
+    limit: number,
+    offset: number,
+    status?: OrderStatus | "awaiting",
+    q?: string,
+    needsBoxCheck?: boolean,
+  ) => {
     const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     if (status) params.set("status_filter", status);
     if (q) params.set("q", q);
+    if (needsBoxCheck) params.set("needs_box_check", "true");
     return api.get<OrderPage>(`/orders?${params.toString()}`);
   },
   get: (id: number) => api.get<Order>(`/orders/${id}`),
@@ -140,5 +152,10 @@ export const ordersApi = {
   getKittingOverrides: (id: number) => api.get<OrderKittingSummary>(`/orders/${id}/kitting-overrides`),
   replaceKittingOverrides: (id: number, overrides: OrderKittingOverrideLine[]) =>
     api.put<OrderKittingSummary>(`/orders/${id}/kitting-overrides`, overrides),
+  getBoxCheck: (id: number) => api.get<BoxCheck>(`/orders/${id}/box-check`),
+  previewBoxCheck: (id: number, input: BoxCheckConfirmInput) =>
+    api.post<BoxCheckPreview>(`/orders/${id}/box-check/preview`, input),
+  confirmBoxCheck: (id: number, input: BoxCheckConfirmInput) => api.put<Order>(`/orders/${id}/box-check`, input),
+  markBoxCheckReviewed: (id: number) => api.post<Order>(`/orders/${id}/box-check/reviewed`),
   exportCsv: () => downloadCsv("/orders/export", "orders.csv"),
 };

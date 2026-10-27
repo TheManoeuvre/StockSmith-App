@@ -12,6 +12,156 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **A new About page in Settings.** It shows the installed version, a link to the project on GitHub,
+  the licence, and the open-source packages StockSmith is built on with their licences.
+- **Updates are now checked while the app is open, not just at launch.** StockSmith looks for a new
+  release shortly after it starts, every six hours after that, and when you return to the window. When
+  one is found, Settings and its About entry show a dot, and the About page shows what's new and an
+  Install and restart button. If you're several releases behind you see the newest release's notes, with
+  a link to the full history on GitHub.
+- **Ignore an update.** Choosing Ignore this version hides the notice, and it stays hidden across
+  restarts. A newer release brings the notice back. An ignored version can still be installed from About.
+- **Pick exactly which items to count.** Starting a stock take now has a Select items button next
+  to Start counting. It lists everything the current filters match, with the date each item was
+  last counted and whether it is due, so you can tick just the ones you want.
+- **Stock take reminder.** Settings › Notifications can now send a daily or weekly reminder saying
+  how many items in each category are due for counting. Nothing is sent when nothing is due.
+- **Orders with more than one parcel box are held until you confirm which was used.** A multi-item
+  order whose products need different box sizes used to keep every box and use them all up. In
+  Settings > Lists > Material categories, tick **Kitting: check when an order has more than one** on
+  your boxes category (keep labels and tape in a category of their own). It needs **Show in Kitting
+  BOM list** and **Kitting: one per order** on first; those switches now unlock one another in that order,
+  and turning one off turns off the ones after it. An order whose items then
+  point at two or more different boxes from that category can't be shipped, by the Ship button or by a
+  marketplace sync, until you pick the box(es) used in the new **Parcel box** section of the order.
+  You can approve more than one. If the order's items change afterwards, it asks again. Orders waiting
+  on a check show a **Box check** badge and a filter in the orders list.
+- **Correct the boxes on an order that already shipped.** The same section fixes an order that went out
+  with the wrong boxes recorded: boxes you remove go back into stock (or are written off if you untick
+  that), and the order's packaging cost and net profit update. A preview shows the stock and profit
+  effect before you save, and **Mark reviewed, no change** clears an order you've checked and found right.
+
+### Changed
+
+- **The update prompt at launch has been removed.** Updates are now offered from Settings > About, so
+  "Later" no longer asks again on every start.
+- **"Only what's due for counting" is now on by default** when you start a stock take. Untick it
+  to count everything.
+
+## [0.24.0] - 2026-10-24
+
+### Added
+
+- **Orders with unmapped SKUs now show under "Orders awaiting products".** The dashboard lists them
+  with a Map order action, so they no longer sit unnoticed until someone spots them in Orders.
+- **Copy buttons in the order panel.** One next to the order number, and one on personalisation that
+  copies only the value, not its label.
+- **Non-filament materials can now drive variant substitutions**, not just filament.
+- **See what a stock-take variance is worth.** The count sheet has a new Value column that prices each
+  line's difference at today's unit cost (materials at their average cost, products and variants at
+  their running average build cost, or their bill-of-materials cost if none), updating as you type. Items with no bill of materials show a hyphen
+  rather than a zero.
+- **Settle flagged lines without leaving the stock take.** On a closed take, lines held back for review
+  now have Use count / Keep system / Recount buttons right in the sheet. The Unresolved variances page
+  still shows them across every take.
+
+### Changed
+
+- **The sidebar collapses to icons when the window is narrow.** Below 1024px wide it shrinks to an icon rail so the page gets more room. Hovering an icon shows the page name and what it is for, and items with a count (orders awaiting shipment, low stock and so on) show a coloured dot instead of the number.
+- **Builds that use a fallback material are now costed at what was actually used.** Recording a build
+  with a fallback swapped in (e.g. a different box or filament) blends that build's real material
+  cost into the product's, or variant's, running average cost. Orders placed against that stock take
+  their cost of goods from the average, so margins reflect the pricier or cheaper fallback instead of
+  the primary material's price. Products that have never used a fallback cost exactly as before.
+
+### Fixed
+
+- **An empty material no longer hides from the dashboard.** A material at zero stock that an active
+  product's build or packaging list uses now always shows as critical in low stock, even with little
+  sales history and no reorder threshold set. This matters most for primary materials with a fallback,
+  which keep the product sellable and so used to run out unnoticed. Materials with stock already on
+  order are unchanged.
+
+## [0.23.0] - 2026-10-21
+
+### Added
+
+- **Etsy listing profiles can be assigned in bulk.** Products whose listings already match an existing
+  Etsy listing profile are now offered for assignment to it (opt-in, unticked by default). Suggested
+  new profiles skip combinations an existing profile already covers, get readable names built from
+  the category name, and show the category path and plain-language making details.
+- **Create a listing profile without leaving the product.** The Stores tab's profile picker now has a
+  "create profile" option that reuses the Settings form inline and selects the new profile on save.
+- **Placeholder icons for pictureless items.** Products show a parcel icon and materials a layers icon
+  instead of a blank tile.
+- Collapsed shipping profile rows now show per-channel prices.
+
+### Changed
+
+- Dashboard "Orders awaiting products" now shows one row per product variation (orders listed together, short-by summed) instead of one row per order line, and its "Placed" column is now "Due" — the same date as the Orders page's Due column, shown as a range (e.g. 15–18 Oct) when the orders differ.
+
+### Fixed
+
+- **Platform quantity ceiling now needs Save.** The ceiling and buildable-stock toggle used to save on
+  blur or click, bypassing the slide-over's Save button and unsaved-changes warning.
+- Buttons and the sync badge no longer wrap their text onto two lines.
+- Navigation badges refresh when a background sync finishes, on any page.
+- Low-stock notifications are marked read once the material recovers.
+- **Batched phone notifications no longer get cut off.** When a lot of items ran low at once,
+  iOS clipped the Pushover message mid-list. A batch now names each item while it all fits on
+  the lock screen, and otherwise shows counts instead, such as "8 × Filament low", "2 × Hardware
+  low", "1 × Packaging low". The full list is still in the in-app notification log. Batch
+  titles now say what they are about ("Stock Alert: 7 items", "Order Alert: 2 items") instead of
+  repeating the app name, which the phone already shows as the icon. Low-stock lines also drop
+  the repeated "is running low", so more items can be named before it switches to counts.
+
+## [0.22.0] - 2026-10-11
+
+### Added
+- **Switch a store off for a product.** A product can now be turned off for Etsy or eBay.
+  Off drops that store's panels on the product page, its variant-limit warnings, its
+  compatibility-scan entries and its bulk SKU checks, which also saves marketplace API calls;
+  a product with a live listing stays on. Each store has a "turn on for new products by
+  default" setting and a one-off all-on/all-off prompt on its settings page (reconnecting the
+  same shop never asks again). Also new: `sold_on_etsy`/`sold_on_ebay` CSV columns, a "Sold
+  on" filter on the products list, store chips on the new-product form, and a "Don't sell
+  this on eBay" action in the variant-limit popup. The "shipping profile missing" alert now
+  only counts products that are on for that store.
+- **eBay refunds are recorded.** A refunded eBay order used to count the returned money as
+  profit and never showed a Refunded figure. Refunds are now read from eBay and shown on the
+  order, and a warning appears if a refund exceeds what the buyer paid.
+- **Second Etsy parcels are picked up.** When Etsy lists more than one shipment on an order,
+  each extra one now appears as a replacement parcel awaiting review, instead of never
+  coming back for assignment. Completing a label-less placeholder parcel retires it and
+  carries its tracking over.
+- **Personalised order lines are flagged.** A small star badge on an orders-list line shows
+  that the buyer supplied personalisation; hover it to read the text.
+
+### Changed
+- **Orders list no longer shows a margin for orders that haven't shipped.** Before shipping,
+  postage cost is only the shipping profile's estimate (or missing), so the margin read as
+  more certain than it was and was often overstated. Those rows now say "Before shipping"
+  under the net profit figure; the margin appears once the order ships.
+- **Hand-edited variant BOM lines survive bulk amend.** Lines you set in a variant's own BOM
+  editor are now left alone by default; the preview lists what was skipped, and a checkbox
+  ("Also overwrite lines set by hand") includes them. Edits made before this release aren't
+  protected, because their origin wasn't recorded.
+- **Same-coloured materials are easier to tell apart.** The variant colour picker shows the
+  full material name where two materials of a type share a colour (previously ticking the
+  second silently replaced the first), and the Materials page flags such pairs with a
+  "Merge into first" shortcut.
+- **Update dialog is shorter.** It lists one line per feature and has a "View on GitHub"
+  button, so a long release no longer pushes the Yes/No buttons out of reach.
+
+### Fixed
+- **Reconnecting a store keeps auto-sync on.** Disconnecting and reconnecting the same shop
+  used to switch auto-sync off silently. Connecting a different shop, or switching Square
+  location, still starts with it off.
+- **Late daily summary and backups.** The scheduler misread its last-run time as local time,
+  so the daily summary and scheduled backups could go out hours late.
+
 ## [0.21.0] - 2026-09-29
 
 ### Added

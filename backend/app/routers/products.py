@@ -21,6 +21,7 @@ from app.schemas.kitting import KittingBomLine, KittingBomLineRead
 from app.schemas.stock_adjustment import StockAdjustmentRead
 from app.schemas.stock_event import ProductStockEventRead
 from app.models.pricing import ProductPriceSnapshot
+from app.models.listing import ListingPlatform
 from app.schemas.product import (
     AttributeValueMergePlan,
     AttributeValueMergePreviewRequest,
@@ -42,6 +43,7 @@ from app.schemas.product import (
     ProductPage,
     ProductPriceSnapshotRead,
     ProductRead,
+    ProductStoreState,
     ProductUpdate,
 )
 from app.schemas.variant import VariantCreate, VariantRead
@@ -56,7 +58,7 @@ from app.services.buildability import (
     get_buildable_by_product,
     get_ready_to_ship_by_bundle,
 )
-from app.services import abc, attribute_values, listing_push, platform_fees, variant_merge, variant_platform_conflicts
+from app.services import abc, attribute_values, listing_push, platform_fees, product_platforms, variant_merge, variant_platform_conflicts
 from app.services.csv_io import export_products_csv, import_products_csv
 from app.services.kitting import (
     _clamp_value_to_ceiling,
@@ -196,6 +198,7 @@ class _ProductReadContext:
     fee_components: object
     shipping_profiles_by_id: dict
     abc_rules: abc.Rules
+    store_states: dict
 
     @staticmethod
     async def build(session: AsyncSession) -> "_ProductReadContext":
@@ -222,6 +225,7 @@ class _ProductReadContext:
             fee_components=fee_components,
             shipping_profiles_by_id=await get_shipping_profiles_by_id(session),
             abc_rules=await abc.load_rules(session),
+            store_states=await product_platforms.store_states(session),
         )
 
 
@@ -314,6 +318,11 @@ def _read_product(product: Product, ctx: "_ProductReadContext") -> ProductRead:
                 resolve_shipping_cost_for_fee_source(shipping_profile, ctx.fee_source) if shipping_profile else None
             ),
             "cogs_incomplete": product.id in ctx.cogs_incomplete_ids,
+            "store_states": [
+                ProductStoreState(platform=platform.value, is_on=is_on, is_locked=is_locked)
+                for platform in product_platforms.PUSHABLE_PLATFORMS
+                for is_on, is_locked in [ctx.store_states.get(product.id, {}).get(platform, (True, False))]
+            ],
             # Bundles are never counted (their quantity is derived from components), so
             # they carry no classification rather than a meaningless one.
             "classification": (
@@ -346,6 +355,9 @@ async def list_products(
     # for the same reason as the category filter above: the list is paginated, so filtering
     # in the client would only ever narrow the current page and leave `total` wrong.
     cogs_incomplete: bool = False,
+    # Narrows to products switched on for one store (unset counts as on, a live listing pins
+    # it on). Server-side for the same pagination reason as the filters above.
+    sold_on: ListingPlatform | None = None,
     # Off by default, so a deactivated product falls out of the list the way a deleted one
     # would — see DELETE /products/{id} below, which sets is_active=False rather than
     # removing the row. Server-side for the same pagination reason as the filters above;
@@ -362,6 +374,8 @@ async def list_products(
     # this page's product IDs, which is also what lets the gap set be exact rather than
     # page-local. See _ProductReadContext.
     ctx = await _ProductReadContext.build(session)
+    if sold_on is not None and sold_on not in product_platforms.PUSHABLE_PLATFORMS:
+        raise HTTPException(status_code=400, detail=f"{sold_on.value} has no product listings")
     count_query = select(func.count()).select_from(Product)
     incomplete_count_query = select(func.count()).select_from(Product).where(Product.id.in_(ctx.cogs_incomplete_ids))
     inactive_count_query = select(func.count()).select_from(Product).where(Product.is_active.is_(False))
@@ -372,6 +386,13 @@ async def list_products(
         .options(selectinload(Product.product_category))
         .outerjoin(ProductCategory, ProductCategory.id == Product.product_category_id)
     )
+    if sold_on is not None:
+        off = await product_platforms.excluded_product_ids(session, sold_on)
+        if off:
+            count_query = count_query.where(Product.id.not_in(off))
+            incomplete_count_query = incomplete_count_query.where(Product.id.not_in(off))
+            inactive_count_query = inactive_count_query.where(Product.id.not_in(off))
+            query = query.where(Product.id.not_in(off))
     if product_category_id is not None:
         count_query = count_query.where(Product.product_category_id == product_category_id)
         incomplete_count_query = incomplete_count_query.where(Product.product_category_id == product_category_id)
@@ -449,6 +470,7 @@ async def create_product(payload: ProductCreate, session: AsyncSession = Depends
     await session.flush()  # assigns product.id without a second commit round-trip
     product.sku = sku or f"SKU-{product.id:04d}"
     await apply_default_kitting_bom(session, product.id)
+    await product_platforms.apply_new_product_defaults(session, product.id)
     await session.commit()
     return await _get_product_with_type(session, product.id)
 
@@ -847,6 +869,7 @@ async def amend_variant_bom_overrides(
         payload.lines,
         apply=payload.apply,
         include_inactive=payload.include_inactive,
+        include_manual=payload.include_manual,
         is_kitting=payload.is_kitting,
     )
 
@@ -854,22 +877,24 @@ async def amend_variant_bom_overrides(
         # Same reasoning as the single-variant path: a BOM change moves max_buildable,
         # which moves the quantity pushed to the marketplace. _enqueue dedupes and
         # debounces, so amending forty variants schedules forty tasks that drain safely.
-        for variant, changes, _replaced, _new in units:
+        for variant, changes, _replaced, _new, _kept in units:
             if changes:
                 listing_push.enqueue_for_product(product_id, variant.id)
 
     return BulkBomAmendResult(
         applied=payload.apply,
         matched_variant_count=matched_count,
-        changed_variant_count=sum(1 for _v, changes, _r, _n in units if changes),
+        changed_variant_count=sum(1 for _v, changes, _r, _n, _k in units if changes),
+        kept_manual_count=sum(len(kept) for _v, _c, _r, _n, kept in units),
         skipped_inactive_count=skipped_inactive,
         units=[
             BulkBomAmendUnit(
                 variant_id=variant.id,
                 variant_name=variant.variant_name,
                 changes=[BulkBomAmendChange(**c) for c in changes],
+                kept_manual=[BulkBomAmendChange(**c) for c in kept],
             )
-            for variant, changes, _replaced, _new in units
+            for variant, changes, _replaced, _new, kept in units
         ],
     )
 

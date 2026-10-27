@@ -132,13 +132,13 @@ def _align_new_skus(candidate: ClassicListingCandidate, new_skus: list[str]) -> 
     if candidate.variation_specifics is None:
         if len(new_skus) != 1:
             raise PlatformSyncError(
-                f"Listing {candidate.external_listing_id} has no variations — expected exactly 1 SKU, "
+                f"Listing {candidate.external_listing_id} has no variations: expected exactly 1 SKU, "
                 f"got {len(new_skus)}"
             )
     elif len(new_skus) != len(candidate.variation_specifics):
         raise PlatformSyncError(
             f"Listing {candidate.external_listing_id} has {len(candidate.variation_specifics)} variation(s) but "
-            f"{len(new_skus)} SKU(s) were supplied — every variation must be included or eBay would delete the "
+            f"{len(new_skus)} SKU(s) were supplied: every variation must be included or eBay would delete the "
             "omitted ones."
         )
     if any(not sku or not sku.strip() for sku in new_skus):
@@ -243,12 +243,12 @@ def _evaluate_eligibility(
 
     non_empty_skus = [s for s in skus if s]
     if not non_empty_skus:
-        reasons.append("Listing has no SKU set — add a Custom Label (SKU) in Seller Hub before migrating.")
+        reasons.append("Listing has no SKU set: add a Custom Label (SKU) in Seller Hub before migrating.")
     elif variation_specifics is not None:
         missing_variation_skus = sum(1 for sku in skus if not sku)
         if missing_variation_skus:
             reasons.append(
-                f"{missing_variation_skus} of {len(skus)} variation(s) have no SKU — every variation needs one "
+                f"{missing_variation_skus} of {len(skus)} variation(s) have no SKU: every variation needs one "
                 "before the whole listing can migrate."
             )
         if not listing_sku:
@@ -257,7 +257,7 @@ def _evaluate_eligibility(
             # enabled sets it from the product's own SKU; this reason is what tells the
             # user why an otherwise-ready listing still won't go.
             reasons.append(
-                "The listing itself has no SKU (Custom Label) — eBay needs one to migrate a multi-variation "
+                "The listing itself has no SKU (Custom Label): eBay needs one to migrate a multi-variation "
                 "listing. Adopt with 'align SKUs' enabled, or set a Custom Label on the listing in Seller Hub."
             )
 
@@ -602,7 +602,7 @@ class EbayAdapter:
                 # a transient fault. Raise as auth so the scheduler's consecutive-failure
                 # counter engages instead of retrying a dead connection every cycle.
                 raise PlatformAuthError(
-                    f"eBay rejected the access token on {method} {url} even after a refresh — reconnect required."
+                    f"eBay rejected the access token on {method} {url} even after a refresh. Reconnect required."
                 )
 
             # Separate budgets, so a call that hits a rate limit and then a server error
@@ -614,8 +614,8 @@ class EbayAdapter:
                     delay = self._retry_delay(response, rate_limit_attempts)
                     if delay > _RATE_LIMIT_MAX_SLEEP_SECONDS:
                         raise PlatformRateLimitError(
-                            f"eBay asked for a {delay:.0f}s back-off on {method} {url} (call limit) — "
-                            "not sleeping on it; will retry next cycle"
+                            f"eBay asked for a {delay:.0f}s back-off on {method} {url} (call limit). "
+                            "Not sleeping on it; will retry next cycle"
                         )
                     logger.warning(
                         "eBay API rate limited on %s %s (retry %d/%d in %.1fs)",
@@ -734,7 +734,7 @@ class EbayAdapter:
     async def _ensure_fresh(self, session, connection: PlatformConnection) -> None:
         expires_at = ensure_utc(connection.access_token_expires_at)
         if expires_at is None or connection.refresh_token is None:
-            raise PlatformAuthError("eBay connection has no stored tokens — reconnect required")
+            raise PlatformAuthError("eBay connection has no stored tokens. Reconnect required")
         if datetime.now(timezone.utc) + _REFRESH_SKEW >= expires_at:
             await self._do_refresh(session, connection)
 
@@ -756,7 +756,7 @@ class EbayAdapter:
 
     async def _refresh_now(self, session, connection: PlatformConnection) -> None:
         if connection.refresh_token is None:
-            raise PlatformAuthError("eBay connection has no refresh token — reconnect required")
+            raise PlatformAuthError("eBay connection has no refresh token. Reconnect required")
         tokens = await self.refresh(connection.refresh_token)
         connection.access_token = tokens.access_token
         connection.refresh_token = tokens.refresh_token
@@ -829,13 +829,17 @@ class EbayAdapter:
         cutoff = ensure_utc(connection.last_orders_synced_at)
         enrich = payment_state is not PaymentState.unsettled and (cutoff is None or last_modified >= cutoff)
 
-        payment_fees = payment_net = payment_status = None
+        payment_fees = payment_net = payment_status = refunded_amount = None
         tracking_number = carrier = None
         postage_charges: list[ExternalPostageCharge] = []
         if enrich:
-            payment_fees, payment_net, payment_status, postage_charges = await self._fetch_transactions(
-                session, connection, order.get("orderId")
-            )
+            (
+                payment_fees,
+                payment_net,
+                payment_status,
+                postage_charges,
+                refunded_amount,
+            ) = await self._fetch_transactions(session, connection, order.get("orderId"))
             if is_shipped:
                 tracking_number, carrier = await self._fetch_tracking(session, connection, order.get("orderId"))
 
@@ -877,6 +881,7 @@ class EbayAdapter:
             shipping_charged=self._net_money(pricing.get("deliveryCost"), pricing.get("deliveryDiscount")),
             tax_charged=self._parse_money(pricing.get("tax")),
             discount_amount=item_discount,
+            refunded_amount=refunded_amount,
             payment_fees=payment_fees,
             payment_net=payment_net,
             payment_status=payment_status,
@@ -997,6 +1002,19 @@ class EbayAdapter:
         anything ever erroring. It also covers adjustment, fee and importCharges — real
         terms in eBay's total that nothing here reads yet.
         """
+        if external.refunded_amount is not None and external.grand_total is not None:
+            # A refund is not part of the buyer's total (it is read from the Finances API,
+            # not pricingSummary), so it can't be reconciled term by term. It can still be
+            # sanity-checked: refunding more than the buyer paid means a REFUND row is being
+            # double-counted or attributed to the wrong order.
+            if float(external.refunded_amount) - float(external.grand_total) >= 0.01:
+                logger.warning(
+                    "eBay order %s refunds %s, more than the %s the buyer paid. A REFUND transaction is being "
+                    "misread or double-counted.",
+                    external.external_order_id,
+                    external.refunded_amount,
+                    external.grand_total,
+                )
         if external.grand_total is None or external.subtotal is None:
             return
         parts = float(external.subtotal) + float(external.shipping_charged or 0) + float(external.tax_charged or 0)
@@ -1015,7 +1033,7 @@ class EbayAdapter:
 
     async def _fetch_transactions(
         self, session, connection: PlatformConnection, order_id
-    ) -> tuple[str | None, str | None, str | None, list[ExternalPostageCharge]]:
+    ) -> tuple[str | None, str | None, str | None, list[ExternalPostageCharge], str | None]:
         """Sell Finances API getTransactions filtered by orderId — mirrors Etsy's
         per-receipt _fetch_payment. Reads the SALE transaction's fee total for this order;
         a transaction whose payout hasn't settled yet just means these stay None,
@@ -1036,7 +1054,7 @@ class EbayAdapter:
         settled" forever, which is exactly what a genuinely unsettled order looks like.
         """
         if order_id is None:
-            return None, None, None, []
+            return None, None, None, [], None
         try:
             response = await self._authed_request(
                 session,
@@ -1051,18 +1069,19 @@ class EbayAdapter:
             # breakdown and nothing else; failing the whole sync over it would be a far
             # worse trade.
             logger.warning("Skipping eBay fee lookup for order %s: %s", order_id, e)
-            return None, None, None, []
+            return None, None, None, [], None
         if response.status_code != 200:
             logger.warning(
                 "eBay fee lookup failed for order %s: %d %s", order_id, response.status_code, response.text[:500]
             )
-            return None, None, None, []
+            return None, None, None, [], None
         results = response.json().get("transactions", [])
         labels = self._parse_shipping_labels(results, str(order_id))
+        refunded = self._sum_refunds(results, str(order_id))
         sale = next((t for t in results if str(t.get("transactionType")).upper() == "SALE"), None)
         if sale is None:
             logger.info("eBay returned no SALE transaction for order %s — fees not available yet", order_id)
-            return None, None, None, labels
+            return None, None, None, labels, refunded
 
         # totalFeeAmount is the dedicated total-fees field on eBay's Transaction schema.
         # This previously summed totalFeeBasisAmount instead, which is wrong twice over:
@@ -1093,8 +1112,31 @@ class EbayAdapter:
             f"{float(net):.2f}" if net is not None else None,
             sale.get("transactionStatus"),
             labels,
+            refunded,
         )
 
+    @staticmethod
+    def _sum_refunds(transactions: list[dict], order_id: str | None = None) -> str | None:
+        """Money returned to the buyer, summed from the REFUND transactions in a
+        getTransactions response. None when there are none, so an order that was never
+        refunded stays distinguishable from a zero. The amount is taken on magnitude (a
+        REFUND is booked as a DEBIT, but the sign convention isn't worth betting on — see
+        _discount_total). A refund carrying a different orderId is skipped: the orderId
+        filter can return rows for other orders, as it does for bulk label purchases."""
+        total = 0.0
+        found = False
+        for tx in transactions:
+            if str(tx.get("transactionType")).upper() != "REFUND":
+                continue
+            tx_order_id = tx.get("orderId")
+            if order_id is not None and tx_order_id is not None and str(tx_order_id) != order_id:
+                continue
+            value = (tx.get("amount") or {}).get("value")
+            if value is None:
+                continue
+            total += abs(float(value))
+            found = True
+        return f"{total:.2f}" if found else None
     @classmethod
     def _parse_shipping_labels(cls, transactions: list[dict], order_id: str | None = None) -> list[ExternalPostageCharge]:
         """Every SHIPPING_LABEL DEBIT in a getTransactions response, oldest first. eBay
@@ -1153,7 +1195,7 @@ class EbayAdapter:
                         posted_at=cls._parse_timestamp(tx.get("transactionDate")),
                         description=(
                             f"Bulk label purchase of {abs(float(amount)):.2f}{' ' + currency if currency else ''} "
-                            "across several orders — eBay doesn't report this order's share, so the profile "
+                            "across several orders: eBay doesn't report this order's share, so the profile "
                             "estimate is used"
                         ),
                     )
@@ -1788,8 +1830,8 @@ class EbayAdapter:
             response = await _send()
         if response.status_code == 401:
             raise PlatformAuthError(
-                f"eBay rejected the access token on Trading call {call_name} even after a refresh — "
-                "reconnect required."
+                f"eBay rejected the access token on Trading call {call_name} even after a refresh. "
+                "Reconnect required."
             )
         return response
 
@@ -1821,7 +1863,7 @@ class EbayAdapter:
                     if delay > _RATE_LIMIT_MAX_SLEEP_SECONDS:
                         raise PlatformRateLimitError(
                             f"eBay Trading API asked for a {delay:.0f}s back-off on {call_name} (daily "
-                            "budget) — not sleeping on it; will retry next cycle"
+                            "budget). Not sleeping on it; will retry next cycle"
                         )
                     logger.warning(
                         "eBay Trading API rate limited on %s (retry %d/%d in %.1fs)",
@@ -2033,7 +2075,7 @@ class EbayAdapter:
         UNVERIFIED against a live account — same caveat as fetch_classic_listings."""
         if candidate.is_migrated:
             raise PlatformSyncError(
-                f"Listing {candidate.external_listing_id} is already migrated — its SKUs can no longer be safely "
+                f"Listing {candidate.external_listing_id} is already migrated: its SKUs can no longer be safely "
                 "revised through this path (see this method's docstring)."
             )
         aligned = _align_new_skus(candidate, new_skus)
@@ -2048,7 +2090,7 @@ class EbayAdapter:
             # already match (see listing_adoption.plan_sku_alignment).
             raise PlatformSyncError(
                 f"eBay did not respond within {int(_REVISE_TIMEOUT)}s while rewriting SKUs on listing "
-                f"{candidate.external_listing_id}. The change may still have applied — run this again to "
+                f"{candidate.external_listing_id}. The change may still have applied: run this again to "
                 "check. Re-running is safe: it does nothing if the SKUs already match."
             ) from e
         if response.status_code != 200:
@@ -2093,8 +2135,8 @@ class EbayAdapter:
             # method's docstring), which is precisely what makes a timeout recoverable.
             raise PlatformSyncError(
                 f"eBay did not respond within {int(_MIGRATION_TIMEOUT)}s while migrating listing "
-                f"{external_listing_id}. The migration may still have completed on eBay's side — "
-                "run this again to check and finish linking. Migrating twice is safe."
+                f"{external_listing_id}. The migration may still have completed on eBay's side. "
+                "Run this again to check and finish linking. Migrating twice is safe."
             ) from e
         if response.status_code != 200:
             raise PlatformSyncError(f"Failed to migrate eBay listing: {response.status_code} {response.text}")

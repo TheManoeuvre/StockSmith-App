@@ -332,7 +332,7 @@ export function StockSection({
     ? activeVariants.reduce((sum, v) => sum + v.current_stock, 0)
     : product?.current_stock ?? 0;
 
-  const variantName = (id: number | null) => variants?.find((v) => v.id === id)?.variant_name ?? "—";
+  const variantName = (id: number | null) => variants?.find((v) => v.id === id)?.variant_name ?? "-";
 
   const eventComment = (e: ProductStockEvent) => {
     switch (e.event_type) {
@@ -359,10 +359,10 @@ export function StockSection({
               : `Order #${e.order_id}`}
           </Link>
         ) : (
-          (e.order_external_order_id ?? "—")
+          (e.order_external_order_id ?? "-")
         );
       default:
-        return "—";
+        return "-";
     }
   };
 
@@ -443,9 +443,9 @@ export function StockSection({
               {consumedByDefault.length > 0 && (
                 <span className="capitalize">{consumedByDefault.join(", ")}</span>
               )}
-              {consumedByDefault.length > 0 && " is checked by default — "}
-              {consumedByDefault.length === 0 && "Nothing is checked by default — "}
-              uncheck anything the failed run never reached.
+              {consumedByDefault.length > 0 && " is checked by default. "}
+              {consumedByDefault.length === 0 && "Nothing is checked by default. "}
+              Uncheck anything the failed run never reached.
             </p>
             <div className="flex flex-wrap gap-4">
               {resolvedBom.map((line) => (
@@ -470,9 +470,9 @@ export function StockSection({
               return (
                 <div key={material.id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
                   <span>
-                    <span className="font-medium">{material.name}</span>{" "}
+                    <span className="font-medium">{material.name}</span>:{" "}
                     <span className="text-slate-600">
-                      — need {qtyWithUnit(needed, material.unit)}, have {qtyWithUnit(onHand, material.unit)}
+                      need {qtyWithUnit(needed, material.unit)}, have {qtyWithUnit(onHand, material.unit)}
                     </span>
                   </span>
                   {fallbacks === null ? null : fallbacks.length > 0 ? (
@@ -497,7 +497,7 @@ export function StockSection({
                     </label>
                   ) : (
                     <span className="text-slate-500">
-                      No fallbacks set up —{" "}
+                      No fallbacks set up:{" "}
                       <Link to="/materials/$materialId" params={{ materialId: String(material.id) }} className="underline">
                         add one on the material
                       </Link>
@@ -634,7 +634,7 @@ export function StockSection({
           <p className="text-xs text-slate-500">
             This is a stock count: the figure you enter is what you counted, so the item stops
             showing as due, its count date moves to today, and nothing it has done since counts
-            as movement. Adjusting by an amount doesn't — a known change isn't a count.
+            as movement. Adjusting by an amount doesn't: a known change isn't a count.
           </p>
         )}
         <ErrorBanner error={adjustMutation.error} />

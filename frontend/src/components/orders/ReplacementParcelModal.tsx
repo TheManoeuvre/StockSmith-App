@@ -159,6 +159,7 @@ export function ReplacementParcelModal({
         // Always the placeholder's own label (postage mode is pinned to it above) — the
         // backend retires the placeholder for us.
         input.postage_charge_id = parcel.postage_charge?.id ?? null;
+        input.completes_parcel_id = parcel.id;
         input.postage_cost = labelNeedsAmount ? postageForSave : null;
       } else {
         input.postage_charge_id = chargeForSave;
@@ -189,7 +190,7 @@ export function ReplacementParcelModal({
       title={title}
       subtitle={
         itemsEditable
-          ? "Stock for everything listed here leaves the moment you save — this parcel has already gone."
+          ? "Stock for everything listed here leaves the moment you save: this parcel has already gone."
           : "Items on a recorded parcel can't be changed; delete it and record it again if they're wrong."
       }
       maxWidth="max-w-2xl"
@@ -325,7 +326,7 @@ export function ReplacementParcelModal({
                 onChange={setPostageMode}
               />
             ) : (
-              <span className="text-xs text-slate-400">Entered by hand — no unclaimed marketplace label on this order.</span>
+              <span className="text-xs text-slate-400">Entered by hand: no unclaimed marketplace label on this order.</span>
             )}
           </div>
           {postageMode === "label" && linkableCharges.length > 0 ? (
@@ -362,7 +363,7 @@ export function ReplacementParcelModal({
                 onChange={(e) => setPostageCost(e.target.value)}
               />
               <span className="text-xs text-slate-400" title={selectedCharge?.description ?? undefined}>
-                Bulk-bought label — enter what this one cost
+                Bulk-bought label: enter what this one cost
               </span>
             </div>
           )}

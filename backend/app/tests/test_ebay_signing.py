@@ -14,6 +14,7 @@ verifier would, rather than round-tripping through a reimplementation that would
 this module's assumptions.
 """
 
+from datetime import datetime, timezone
 import base64
 import logging
 
@@ -225,7 +226,7 @@ async def test_missing_signing_key_degrades_instead_of_failing_the_sync(recordin
 
     result = await adapter._fetch_transactions(None, _Connection(), "26-14962-77224")
 
-    assert result == (None, None, None, [])
+    assert result == (None, None, None, [], None)
     assert "Settings > Integrations" in caplog.text
 
 
@@ -288,7 +289,7 @@ async def test_fees_come_from_total_fee_amount(recording, monkeypatch):
     key, _private = _keypair()
     adapter = _adapter(monkeypatch, key)
 
-    fees, net, status, _labels = await adapter._fetch_transactions(None, _Connection(), "26-14962-77224")
+    fees, net, status, _labels, _refunded = await adapter._fetch_transactions(None, _Connection(), "26-14962-77224")
 
     assert fees == "3.45"
     # Taken from `amount` as-is. Subtracting the fee from it again would give 11.69 —
@@ -304,7 +305,7 @@ async def test_a_regression_to_the_fee_basis_would_be_caught(recording, monkeypa
     key, _private = _keypair()
     adapter = _adapter(monkeypatch, key)
 
-    fees, _net, _status, _labels = await adapter._fetch_transactions(None, _Connection(), "26-14962-77224")
+    fees, _net, _status, _labels, _refunded = await adapter._fetch_transactions(None, _Connection(), "26-14962-77224")
 
     assert fees != "18.59"
 
@@ -318,7 +319,7 @@ async def test_fees_fall_back_to_the_per_line_breakdown(recording, monkeypatch):
     key, _private = _keypair()
     adapter = _adapter(monkeypatch, key)
 
-    fees, net, _status, _labels = await adapter._fetch_transactions(None, _Connection(), "26-14962-77224")
+    fees, net, _status, _labels, _refunded = await adapter._fetch_transactions(None, _Connection(), "26-14962-77224")
 
     assert fees == "3.45"
     assert net == "15.14"
@@ -349,7 +350,7 @@ async def test_non_sale_transactions_are_ignored(recording, monkeypatch):
     key, _private = _keypair()
     adapter = _adapter(monkeypatch, key)
 
-    fees, net, _status, labels = await adapter._fetch_transactions(None, _Connection(), "26-14962-77224")
+    fees, net, _status, labels, _refunded = await adapter._fetch_transactions(None, _Connection(), "26-14962-77224")
 
     assert fees == "3.45"
     assert net == "15.14"
@@ -400,7 +401,7 @@ async def test_label_credits_are_skipped_not_netted(recording, monkeypatch, capl
     adapter = _adapter(monkeypatch, key)
     caplog.set_level(logging.INFO, logger="stocksmith.ebay")
 
-    _fees, _net, _status, labels = await adapter._fetch_transactions(None, _Connection(), "26-14962-77224")
+    _fees, _net, _status, labels, _refunded = await adapter._fetch_transactions(None, _Connection(), "26-14962-77224")
 
     assert [(c.external_id, c.amount) for c in labels] == [("05-15000-27049", "3.65"), ("05-15000-27051", "4.10")]
     assert labels[0].posted_at is not None and labels[0].posted_at < labels[1].posted_at
@@ -444,7 +445,7 @@ async def test_bulk_label_purchase_is_kept_without_an_amount(recording, monkeypa
     adapter = _adapter(monkeypatch, key)
     caplog.set_level(logging.INFO, logger="stocksmith.ebay")
 
-    _fees, _net, _status, labels = await adapter._fetch_transactions(None, _Connection(), "04-15163-59902")
+    _fees, _net, _status, labels, _refunded = await adapter._fetch_transactions(None, _Connection(), "04-15163-59902")
 
     assert [(c.external_id, c.amount, c.currency) for c in labels] == [
         ("09-15158-06992", None, "GBP"),
@@ -465,5 +466,75 @@ async def test_non_200_is_logged_rather_than_swallowed(recording, monkeypatch, c
 
     result = await adapter._fetch_transactions(None, _Connection(), "26-14962-77224")
 
-    assert result == (None, None, None, [])
+    assert result == (None, None, None, [], None)
     assert "215001" in caplog.text
+
+
+def _refund(amount: str, order_id: str = "26-14962-77224", **overrides) -> dict:
+    refund = {
+        "transactionId": "REFUND-1",
+        "transactionType": "REFUND",
+        "bookingEntry": "DEBIT",
+        "orderId": order_id,
+        "amount": {"value": amount, "currency": "GBP"},
+    }
+    refund.update(overrides)
+    return refund
+
+
+async def test_partial_refund_is_read_from_the_refund_transaction(recording, monkeypatch):
+    recording.response = httpx.Response(200, json={"transactions": [_sale(), _refund("4.50")]})
+    key, _private = _keypair()
+    adapter = _adapter(monkeypatch, key)
+
+    *_rest, refunded = await adapter._fetch_transactions(None, _Connection(), "26-14962-77224")
+
+    assert refunded == "4.50"
+
+
+async def test_several_refunds_are_summed_and_other_orders_refunds_ignored(recording, monkeypatch):
+    transactions = [
+        _sale(),
+        _refund("2.00", transactionId="R1"),
+        _refund("1.25", transactionId="R2"),
+        _refund("9.99", order_id="99-99999-99999", transactionId="R3"),
+    ]
+    recording.response = httpx.Response(200, json={"transactions": transactions})
+    key, _private = _keypair()
+    adapter = _adapter(monkeypatch, key)
+
+    *_rest, refunded = await adapter._fetch_transactions(None, _Connection(), "26-14962-77224")
+
+    assert refunded == "3.25"
+
+
+async def test_never_refunded_order_reports_none_not_zero(recording, monkeypatch):
+    recording.response = httpx.Response(200, json={"transactions": [_sale()]})
+    key, _private = _keypair()
+    adapter = _adapter(monkeypatch, key)
+
+    *_rest, refunded = await adapter._fetch_transactions(None, _Connection(), "26-14962-77224")
+
+    assert refunded is None
+
+
+def test_refund_larger_than_the_buyer_paid_is_flagged(caplog):
+    from app.services.platforms.base import ExternalOrder
+    from app.services.platforms.ebay import EbayAdapter
+
+    now = datetime.now(timezone.utc)
+    external = ExternalOrder(
+        external_order_id="26-14962-77224",
+        buyer_name=None,
+        buyer_note=None,
+        placed_at=now,
+        last_modified=now,
+        is_cancelled=False,
+        is_shipped=False,
+        grand_total="10.00",
+        subtotal="10.00",
+        refunded_amount="12.00",
+    )
+    EbayAdapter._warn_if_unreconciled(external)
+
+    assert "more than the 10.00 the buyer paid" in caplog.text

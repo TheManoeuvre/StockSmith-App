@@ -11,7 +11,7 @@ from app.models.product import Product
 from app.models.product_stock_event import ProductStockEventType
 from app.models.shipping_profile import ShippingProfile
 from app.models.variant import ProductVariant
-from app.services import listing_push
+from app.services import box_check, listing_push
 from app.services.kitting import auto_apply_multiunit_kitting_override, reconcile_order_kitting
 from app.services.notifications import resolve_alerts
 from app.services.order_costs import compute_line_cost_snapshot, default_order_shipping_profile
@@ -20,7 +20,7 @@ from app.services.stock_events import record_stock_event
 
 """Core allocation engine: every stock-reservation state change for an order flows
 through here. Functions always re-query related rows via explicit select() rather than
-touching ORM relationship attributes lazily — AsyncSession relationships raise
+touching ORM relationship attributes lazily. AsyncSession relationships raise
 MissingGreenlet if accessed without eager-loading, a bug class this project has hit
 repeatedly elsewhere, so this module sidesteps it entirely by never relying on lazy
 attribute access."""
@@ -185,7 +185,7 @@ async def deallocate_line(session: AsyncSession, line: OrderLine, qty: int) -> N
     if qty <= 0 or qty > available:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot unassign {qty} — only {available} allocated-but-unshipped",
+            detail=f"Cannot unassign {qty}, only {available} allocated-but-unshipped",
         )
     owner = await _get_stock_owner(session, line)
     line.allocated_qty -= qty
@@ -215,7 +215,7 @@ async def ship_line(session: AsyncSession, line: OrderLine, qty: int) -> None:
     if qty <= 0 or qty > available:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot ship {qty} — only {available} allocated-but-unshipped",
+            detail=f"Cannot ship {qty}, only {available} allocated-but-unshipped",
         )
     owner = await _get_stock_owner(session, line)
     line.shipped_qty += qty
@@ -252,6 +252,11 @@ async def ship_line(session: AsyncSession, line: OrderLine, qty: int) -> None:
 async def ship_order(session: AsyncSession, order: Order) -> None:
     if order.status == OrderStatus.cancelled:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot ship a cancelled order")
+
+    # Held until a person confirms which parcel box was used — see services/box_check.py. Placed
+    # here because every ship path (the Ship button and the marketplace sync) goes through this
+    # function. Raised before any line ships so nothing is half-applied.
+    await box_check.assert_can_ship(session, order)
 
     lines = await _get_lines(session, order.id)
     shippable = [(line, line.allocated_qty - line.shipped_qty) for line in lines]

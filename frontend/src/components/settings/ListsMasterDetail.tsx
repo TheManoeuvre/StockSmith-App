@@ -70,7 +70,7 @@ export function ListsMasterDetail() {
       render: () => (
         <ReferenceDataTable
           title="Suppliers"
-          description="Who you buy from. Renaming one updates every material and purchase that uses it. Default lead time feeds the materials time-to-stockout forecast — leave it blank to use the shop-wide default."
+          description="Who you buy from. Renaming one updates every material and purchase that uses it. Default lead time feeds the materials time-to-stockout forecast: leave it blank to use the shop-wide default."
           segment="suppliers"
           queryKey={["suppliers"]}
           api={{
@@ -127,7 +127,7 @@ export function ListsMasterDetail() {
       render: () => (
         <ReferenceDataTable
           title="Material categories"
-          description="What kind of thing a material is. The checkboxes are the behaviour that used to be hardcoded to filament and packaging — set them on any category, including ones you add. Order decides how the materials list groups and sorts."
+          description="What kind of thing a material is. The checkboxes are the behaviour that used to be hardcoded to filament and packaging: set them on any category, including ones you add. Order decides how the materials list groups and sorts."
           segment="material-categories"
           queryKey={["material-categories"]}
           api={{
@@ -152,11 +152,26 @@ export function ListsMasterDetail() {
               ],
             },
             { key: "tracks_colour", label: "Has a colour", type: "checkbox" },
-            { key: "tracks_material_type", label: "Has a material type", type: "checkbox" },
+            { key: "tracks_material_type", label: "Has a material type (groups substitutable materials)", type: "checkbox" },
             { key: "cost_per_kg_display", label: "Show cost per kg", type: "checkbox" },
             { key: "consumed_on_failed_build", label: "Consumed by failed builds", type: "checkbox" },
-            { key: "auto_kitting_per_order", label: "Kitting: one per order, not per unit", type: "checkbox" },
             { key: "show_in_kitting_bom_list", label: "Show in Kitting BOM list", type: "checkbox" },
+            // The two below only make sense for a category that is kitting material at all, and
+            // the second only for one that is capped to one per order: each needs the one above.
+            {
+              key: "auto_kitting_per_order",
+              label: "Kitting: one per order, not per unit",
+              type: "checkbox",
+              requires: "show_in_kitting_bom_list",
+            },
+            {
+              key: "kitting_check_duplicates",
+              label: "Kitting: check when an order has more than one",
+              type: "checkbox",
+              requires: "auto_kitting_per_order",
+              tooltip:
+                "When an order's items use two or more different materials from this category (e.g. two different box sizes), the order must be manually checked before it can ship. Use it for parcel boxes, and keep labels and tape in a category of their own.",
+            },
           ]}
           usageLabel={(n) => `${n} material${n === 1 ? "" : "s"}`}
         />

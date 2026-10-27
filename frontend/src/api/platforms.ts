@@ -1,6 +1,6 @@
 import { api } from "./client";
 import type { NamedOption } from "./listingProfiles";
-import type { ListingPlatform } from "./types";
+import type { ListingPlatform, ProductStoreState } from "./types";
 
 export type PlatformEnvironment = "production" | "sandbox";
 
@@ -37,6 +37,12 @@ export interface PlatformStatus {
   // sync) stand down so order sync keeps its headroom.
   api_calls_today: number;
   api_call_budget: number;
+  // Per-product store switches. product_scope_decided_at stays null until the one-off
+  // "all products on or off?" prompt has been answered for this store.
+  new_products_default_on: boolean;
+  product_scope_decided_at: string | null;
+  products_on_count: number;
+  products_off_count: number;
 }
 
 export interface SyncSettingsUpdate {
@@ -170,7 +176,26 @@ export interface SyncRunPage {
 export type ListingSyncStatus = "synced" | "listing_not_active" | "not_found" | "not_tested";
 export type ProductSyncStatus = "synced" | "partial" | "not_found" | "not_tested";
 
+// A further marketplace listing holding the same SKU as a unit's primary listing (an A/B
+// test, a free-shipping variant). Pushes reach all of them; the unit's status is the
+// primary's alone.
+export interface AdditionalListingResult {
+  listing_id: number;
+  external_listing_id: string | null;
+  role: string | null;
+  status: ListingSyncStatus;
+  external_title: string | null;
+  external_variation: string | null;
+  external_state: string | null;
+  external_quantity: number | null;
+  last_checked_at: string | null;
+  quantity_mismatch: boolean;
+}
+
 export interface UnitSyncResult {
+  // The primary listing's row id and label. Null before a first check.
+  listing_id: number | null;
+  role: string | null;
   variant_id: number | null;
   variant_name: string | null;
   sku: string | null;
@@ -184,7 +209,9 @@ export interface UnitSyncResult {
   // What StockSmith would push for this unit. Null on the bulk shop-wide check, which
   // skips the computation.
   expected_quantity: number | null;
+  // True if the primary OR any additional listing has drifted.
   quantity_mismatch: boolean;
+  additional_listings: AdditionalListingResult[];
 }
 
 export interface PushCorrectionsResult {
@@ -373,6 +400,12 @@ export const platformsApi = {
   status: (platform: ListingPlatform) => api.get<PlatformStatus>(`/platforms/${platform}/status`),
   connect: (platform: ListingPlatform, environment: PlatformEnvironment = "production") =>
     api.post<{ authorize_url: string }>(`/platforms/${platform}/connect?environment=${environment}`),
+  setProductStore: (platform: ListingPlatform, productId: number, on: boolean) =>
+    api.put<ProductStoreState>(`/platforms/${platform}/products/${productId}/store`, { on }),
+  applyProductScope: (platform: ListingPlatform, on: boolean) =>
+    api.post<{ products_set: number }>(`/platforms/${platform}/product-scope`, { on }),
+  setNewProductDefault: (platform: ListingPlatform, onByDefault: boolean) =>
+    api.put<void>(`/platforms/${platform}/new-product-default`, { on_by_default: onByDefault }),
   disconnect: (platform: ListingPlatform) => api.post<void>(`/platforms/${platform}/disconnect`),
   previewSync: (platform: ListingPlatform) => api.post<SyncPreviewResult>(`/platforms/${platform}/preview-sync`),
   syncOrders: (platform: ListingPlatform) => api.post<SyncCommitResult>(`/platforms/${platform}/sync-orders`),
@@ -383,6 +416,12 @@ export const platformsApi = {
     api.get<SyncRunPage>(`/platforms/${platform}/sync-log?limit=${limit}&offset=${offset}`),
   pushCorrections: (platform: ListingPlatform, productId: number) =>
     api.post<PushCorrectionsResult>(`/platforms/${platform}/products/${productId}/push-corrections`),
+  // Local bookkeeping only (no marketplace call): label a listing, or make it its unit's primary.
+  updateListing: (
+    platform: ListingPlatform,
+    listingId: number,
+    body: { role?: string | null; is_primary?: true }
+  ) => api.patch<ProductListingSyncSummary>(`/platforms/${platform}/listings/${listingId}`, body),
   checkProductSync: (platform: ListingPlatform, productId: number) =>
     api.post<ProductListingSyncSummary>(`/platforms/${platform}/products/${productId}/check-sync`),
   getProductSyncStatus: (platform: ListingPlatform, productId: number) =>

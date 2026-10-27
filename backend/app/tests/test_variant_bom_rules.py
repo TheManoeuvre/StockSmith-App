@@ -387,3 +387,49 @@ async def test_generation_writes_merged_overrides(session, product):
     assert rows[0].material_id == OAK
     assert rows[0].replaces_material_id == LILAC
     assert rows[0].qty_required == Decimal("14")
+
+
+# --- Non-filament substitution pools -------------------------------------------------------
+#
+# Material types are filament's pool. Everything else pools by category unless the category
+# tracks types, in which case the type is the pool (subcategories).
+
+
+async def _blanks(session, tracks_type: bool):
+    from app.models.material_category import MaterialCategory
+
+    cat = MaterialCategory(id=50, name="Blanks", tracks_material_type=tracks_type)
+    session.add(cat)
+    session.add_all([
+        Material(id=60, name="Slate Coaster | Round", category=LegacyMaterialCategory.blanks, category_id=50,
+                 unit=MaterialUnit.each, current_qty=Decimal("10")),
+        Material(id=61, name="Slate Coaster | Square", category=LegacyMaterialCategory.blanks, category_id=50,
+                 unit=MaterialUnit.each, current_qty=Decimal("10")),
+    ])
+    session.add(Product(id=9, name="Coaster", sku="SKU-9"))
+    await session.flush()
+    session.add(ProductMaterial(product_id=9, material_id=60, qty_required=Decimal("1")))
+    await session.commit()
+
+
+def _shape_spec() -> VariantAttributeSpec:
+    return VariantAttributeSpec(
+        name="Shape",
+        values=["Round", "Square"],
+        material_rules=[AttributeMaterialRule(base_material_id=60, value_to_material_id={"Round": 60, "Square": 61})],
+    )
+
+
+@pytest.mark.asyncio
+async def test_untyped_materials_pool_by_category_when_the_category_has_no_types(session):
+    await _blanks(session, tracks_type=False)
+    created = await generate_variants(session, 9, [_shape_spec()])
+    assert {v.variant_name for v in created} == {"Round", "Square"}
+
+
+@pytest.mark.asyncio
+async def test_untyped_materials_do_not_pool_when_the_category_tracks_types(session):
+    await _blanks(session, tracks_type=True)
+    with pytest.raises(HTTPException) as exc:
+        await generate_variants(session, 9, [_shape_spec()])
+    assert exc.value.status_code == 400

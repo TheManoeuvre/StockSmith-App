@@ -129,6 +129,9 @@ export interface MaterialCategory {
    *  order kitting overrides). Off for everything but packaging by default, to keep those
    *  pickers from listing filament and hardware nobody packs. */
   show_in_kitting_bom_list: boolean;
+  /** An order whose items use two or more different materials from this category (e.g. two box
+   *  sizes) is held from shipping until a person confirms which were used. */
+  kitting_check_duplicates: boolean;
   tracks_colour: boolean;
   tracks_material_type: boolean;
   /** Bought by the kilo, stocked by the gram, so average cost reads x1000. */
@@ -237,6 +240,9 @@ export interface StockTakeLine {
   system_qty_at_approval: string | null;
   conflict_reason: string | null;
   delta: string | null;
+  /** What one unit costs today — a material's average cost, or a product/variant's BOM
+   * build cost. Null when cost isn't tracked (no BOM), which is not the same as free. */
+  unit_cost: string | null;
 }
 
 export interface StockTake {
@@ -279,6 +285,23 @@ export interface StockTakeScope {
   material_category_ids: number[];
   product_category_ids: number[];
   overdue_only: boolean;
+  /** A hand-picked subset of what the filters match; omit (or null) for all of it. */
+  selected_items?: ScopeItemRef[] | null;
+}
+
+export interface ScopeItemRef {
+  material_id: number | null;
+  product_id: number | null;
+  variant_id: number | null;
+}
+
+export interface ScopeItem extends ScopeItemRef {
+  name: string;
+  section: "Materials" | "Products";
+  group: string;
+  /** When it was last counted; null if it never has been. */
+  last_stock_take_at: string | null;
+  is_due: boolean;
 }
 
 export interface ScopePreview {
@@ -429,6 +452,13 @@ export interface MaterialStockHistoryEntry {
   purchase_id: number | null;
 }
 
+export interface ProductStoreState {
+  platform: ListingPlatform;
+  is_on: boolean;
+  /** A live listing pins the store on; it can't be turned off until that listing is ended. */
+  is_locked: boolean;
+}
+
 export interface Product {
   id: number;
   name: string;
@@ -480,6 +510,8 @@ export interface Product {
   effective_shipping_cost: string | null;
   /** Missing a shipping profile or a materials cost — see the backend's _cogs_incomplete. */
   cogs_incomplete: boolean;
+  /** One entry per listing store: is the product switched on for it, and is a live listing pinning it on. */
+  store_states: ProductStoreState[];
   main_image_asset_id: number | null;
   ready_to_ship: number | null;
   variant_attribute1_name: string | null;
@@ -697,6 +729,8 @@ export interface BulkBomAmendRequest {
   lines: BulkBomAmendLine[];
   apply?: boolean;
   include_inactive?: boolean;
+  // Also overwrite rows the user set by hand in a variant's own BOM editor.
+  include_manual?: boolean;
   is_kitting?: boolean;
 }
 
@@ -713,6 +747,7 @@ export interface BulkBomAmendUnit {
   variant_id: number;
   variant_name: string;
   changes: BulkBomAmendChange[]; // empty when already correct
+  kept_manual: BulkBomAmendChange[]; // changes not made: the row was set by hand
 }
 
 export interface BulkBomAmendResult {
@@ -720,6 +755,7 @@ export interface BulkBomAmendResult {
   matched_variant_count: number;
   changed_variant_count: number;
   skipped_inactive_count: number;
+  kept_manual_count: number;
   units: BulkBomAmendUnit[];
 }
 
@@ -930,6 +966,17 @@ export interface BuildableProduct {
   expected_max_buildable: number | null;
 }
 
+export interface OrderAwaitingMapping {
+  line_id: number;
+  order_id: number;
+  /** Raw marketplace SKU — all an unmapped line has to identify it. */
+  sku: string | null;
+  short_by: number;
+  order_placed_at: string;
+  due_date: string | null;
+  platform: ListingPlatform | null;
+}
+
 export interface OrderAwaitingInventory {
   line_id: number;
   order_id: number;
@@ -939,6 +986,8 @@ export interface OrderAwaitingInventory {
   variant_name: string | null;
   short_by: number;
   order_placed_at: string;
+  /** Effective due date — same figure as the Orders page's Due column. */
+  due_date: string | null;
   platform: ListingPlatform | null;
   /** False means there's no BOM (and it's not a bundle) to ever build more from — a genuine
    * blocker, not just a wait for stock. See the dashboard's "Blocked orders" section. */
@@ -952,6 +1001,7 @@ export interface OrderAwaitingPackaging {
   short_by: string;
   platform: ListingPlatform | null;
   order_placed_at: string;
+  due_date: string | null;
   /** Ranked, human-curated fallbacks for material_id — suggested only, never auto-applied. */
   suggested_substitutes?: SubstituteSuggestion[];
 }
@@ -1024,6 +1074,8 @@ export interface DashboardSummary {
   margin_alerts: MarginAlert[];
   orders_awaiting_inventory: OrderAwaitingInventory[];
   orders_awaiting_packaging: OrderAwaitingPackaging[];
+  /** Optional: absent on older payloads. */
+  orders_awaiting_mapping?: OrderAwaitingMapping[];
   /** Capped at 10 by the backend; the _total is the uncapped figure, so the section can say
    * how many it isn't showing. */
   items_due_for_count: DueForCountItem[];
@@ -1179,7 +1231,7 @@ export interface Order {
   financials_synced_at: string | null;
   // The two halves of cost of goods. materials_cogs is per line (build BOM x shipped qty,
   // frozen at first allocation); kitting_cogs is per order (what the kitting ledger actually
-  // consumed, frozen at ship). Both null when there is nothing to report — render "—".
+  // consumed, frozen at ship). Both null when there is nothing to report — render "-".
   materials_cogs: string | null;
   kitting_cogs: string | null;
   net_profit: string | null;
@@ -1203,6 +1255,10 @@ export interface Order {
   replacement_parcels: ReplacementParcel[];
   sync_issue: string | null;
   pending_marketplace_cancellation: boolean;
+  // Two or more different parcel boxes on the order that nobody has confirmed: blocks shipping,
+  // or on a shipped order means "shipped with several boxes, not yet reviewed".
+  needs_box_check: boolean;
+  box_check_confirmed_at: string | null;
   tracking_number: string | null;
   carrier: string | null;
   lines: OrderLine[];
@@ -1211,6 +1267,50 @@ export interface Order {
 export interface OrderPage {
   items: Order[];
   total: number;
+}
+
+export interface BoxCheckBox {
+  material_id: number;
+  material_name: string;
+  /** False for a box added by hand rather than resolved from one of the order's items. */
+  is_candidate: boolean;
+  /** Effective kitting qty before shipping; qty actually consumed once shipped. */
+  qty: string;
+  unit_cost: string;
+  free_stock: string;
+}
+
+export interface BoxCheck {
+  mode: "pre_ship" | "shipped" | "none";
+  applies: boolean;
+  needs_check: boolean;
+  confirmed_at: string | null;
+  boxes: BoxCheckBox[];
+}
+
+export interface BoxSelection {
+  material_id: number;
+  qty: string;
+}
+
+export interface BoxCheckConfirmInput {
+  boxes: BoxSelection[];
+  return_to_stock: boolean;
+}
+
+export interface BoxCheckPreview {
+  changes: {
+    material_id: number;
+    material_name: string;
+    current_qty: string;
+    new_qty: string;
+    /** Positive: goes back into stock. Negative: taken out of stock. */
+    stock_effect: string;
+  }[];
+  kitting_cost_before: string;
+  kitting_cost_after: string;
+  net_profit_delta: string;
+  warnings: string[];
 }
 
 export interface OrderKittingOverrideLine {

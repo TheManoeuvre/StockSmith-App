@@ -7,6 +7,7 @@ import { useEditableCopy } from "../../hooks/useEditableCopy";
 import {
   EBAY_CONDITION,
   ETSY_IS_SUPPLY,
+  ETSY_RENEWAL,
   ETSY_WHEN_MADE,
   ETSY_WHO_MADE,
   type Option,
@@ -15,6 +16,7 @@ import { PLATFORM_LABELS } from "../../lib/platforms";
 import { ConfirmDialog } from "../common/ConfirmDialog";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { SettingsCard } from "./SettingsCard";
+import { STORE_PANEL_DOM_IDS } from "./stores/storePanels";
 import { TaxonomyPicker } from "./TaxonomyPicker";
 
 /**
@@ -59,6 +61,7 @@ export function ListingProfiles({ platform, children }: { platform: ListingPlatf
 
   return (
     <SettingsCard
+      id={STORE_PANEL_DOM_IDS["listing-profiles"]}
       title="Listing profiles"
       help="The category, policies and making details a new listing needs. Each product picks one on its own listing setup."
       action={
@@ -138,14 +141,14 @@ export function ListingProfiles({ platform, children }: { platform: ListingPlatf
   );
 }
 
-function ProfileForm({
+export function ProfileForm({
   platform,
   profile,
   onDone,
 }: {
   platform: ListingPlatform;
   profile?: ListingProfile;
-  onDone: () => void;
+  onDone: (saved?: ListingProfile) => void;
 }) {
   const initialDraft: ListingProfileWrite = {
     name: profile?.name ?? "",
@@ -158,6 +161,7 @@ function ProfileForm({
     etsy_return_policy_id: profile?.etsy_return_policy_id ?? null,
     etsy_processing_min: profile?.etsy_processing_min ?? null,
     etsy_processing_max: profile?.etsy_processing_max ?? null,
+    etsy_auto_renew: profile?.etsy_auto_renew ?? null,
     ebay_category_id: profile?.ebay_category_id ?? null,
     ebay_condition: profile?.ebay_condition ?? null,
     ebay_fulfillment_policy_id: profile?.ebay_fulfillment_policy_id ?? null,
@@ -165,6 +169,7 @@ function ProfileForm({
     ebay_return_policy_id: profile?.ebay_return_policy_id ?? null,
     ebay_merchant_location_key: profile?.ebay_merchant_location_key ?? null,
     ebay_marketplace_id: profile?.ebay_marketplace_id ?? null,
+    ebay_handling_time_days: profile?.ebay_handling_time_days ?? null,
   };
   // Buffered through useEditableCopy so a half-filled profile prompts on navigate instead of
   // vanishing silently. seedKey is constant — one form is open at a time and it's remounted
@@ -221,11 +226,11 @@ function ProfileForm({
       profile
         ? listingProfilesApi.update(platform, profile.id, draft)
         : listingProfilesApi.create(platform, draft),
-    onSuccess: () => {
+    onSuccess: (saved) => {
       // Clear the dirty flag before the parent unmounts this form, so the unsaved-changes
       // guard doesn't flash on the way out.
       markSaved(draft);
-      onDone();
+      onDone(saved);
     },
   });
 
@@ -266,7 +271,7 @@ function ProfileForm({
               value={draft.etsy_shipping_profile_id ?? null}
               onChange={(v) => set({ etsy_shipping_profile_id: v === null ? null : Number(v) })}
               emptyHint="No shipping profiles on this Etsy shop."
-              failedHint="Couldn't read your shipping profiles. Reconnect Etsy in Settings — this needs a permission that older connections didn't grant."
+              failedHint="Couldn't read your shipping profiles. Reconnect Etsy in Settings: this needs a permission that older connections didn't grant."
             />
           </Field>
           <Field label="Processing profile" required>
@@ -276,7 +281,7 @@ function ProfileForm({
               value={draft.etsy_readiness_state_id ?? null}
               onChange={(v) => set({ etsy_readiness_state_id: v === null ? null : Number(v) })}
               emptyHint="No processing profiles on this Etsy shop."
-              failedHint="Couldn't read your processing profiles. Reconnect Etsy in Settings — this needs a permission that older connections didn't grant."
+              failedHint="Couldn't read your processing profiles. Reconnect Etsy in Settings: this needs a permission that older connections didn't grant."
             />
           </Field>
           <Field label="Who made it" required>
@@ -302,6 +307,17 @@ function ProfileForm({
                   : String(draft.etsy_is_supply)
               }
               onChange={(v) => set({ etsy_is_supply: v === null ? null : v === "true" })}
+            />
+          </Field>
+          <Field label="Renewal">
+            <OptionSelect
+              options={ETSY_RENEWAL}
+              value={
+                draft.etsy_auto_renew === null || draft.etsy_auto_renew === undefined
+                  ? null
+                  : String(draft.etsy_auto_renew)
+              }
+              onChange={(v) => set({ etsy_auto_renew: v === null ? null : v === "true" })}
             />
           </Field>
           <Field label="Return policy">
@@ -350,6 +366,17 @@ function ProfileForm({
               onChange={(e) => set({ ebay_return_policy_id: text(e.target.value) })}
             />
           </Field>
+          <Field label="Handling time (business days)">
+            <input
+              type="number"
+              min={0}
+              className="w-full rounded border border-slate-300 px-2 py-1"
+              value={draft.ebay_handling_time_days ?? ""}
+              onChange={(e) =>
+                set({ ebay_handling_time_days: e.target.value === "" ? null : Number(e.target.value) })
+              }
+            />
+          </Field>
           <Field label="Location key" required>
             <input
               className="w-full rounded border border-slate-300 px-2 py-1"
@@ -369,7 +396,7 @@ function ProfileForm({
         >
           Save
         </button>
-        <button onClick={onDone} className="rounded border border-slate-300 px-3 py-1 text-xs">
+        <button onClick={() => onDone()} className="rounded border border-slate-300 px-3 py-1 text-xs">
           Cancel
         </button>
       </div>
@@ -415,7 +442,7 @@ function OptionSelect({
       value={value ?? ""}
       onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
     >
-      <option value="">—</option>
+      <option value="">-</option>
       {options.map((option) => (
         <option key={option.value} value={option.value}>
           {option.label}
@@ -456,7 +483,7 @@ function RemoteSelect({
       onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
       disabled={!options}
     >
-      <option value="">{options ? "—" : "Loading…"}</option>
+      <option value="">{options ? "-" : "Loading…"}</option>
       {options?.map((option) => (
         <option key={option.id} value={option.id}>
           {option.label}

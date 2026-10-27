@@ -18,7 +18,6 @@ import { CopyButton } from "../../components/common/CopyButton";
 import { CsvImportExport } from "../../components/common/CsvImportExport";
 import { FilterTabs } from "../../components/common/FilterTabs";
 import { Th } from "../../components/common/ListTable";
-import { useRefreshOnSync } from "../../hooks/useRefreshOnSync";
 import { formatMoney } from "../../lib/money";
 import { formatDayMonth } from "../../lib/format";
 import { maskBuyerName } from "../../lib/names";
@@ -73,12 +72,12 @@ function orderMarginPct(order: Order): number | null {
 }
 
 // The marketplace's due date — ship-by for most orders, collect-by for a Square collect
-// order (see effectiveDueDate) — or "—" when nothing was reported (manual orders, and any
+// order (see effectiveDueDate) — or "-" when nothing was reported (manual orders, and any
 // synced order predating this field). A done order shows the date plain — the deadline no
 // longer matters once it's shipped, collected, or cancelled.
 function dueLabel(order: Order): string {
   const due = effectiveDueDate(order);
-  if (!due) return "—";
+  if (!due) return "-";
   return formatDayMonth(due);
 }
 
@@ -94,14 +93,17 @@ function netProfitSub(order: Order): string {
   if (order.cogs_pending) return "COGS pending";
   if (order.postage_cost_missing) return "No postage cost";
   if (order.platform != null && order.payment_fees == null) return "Fees not reported";
+  // Before shipping, postage cost is only the shipping profile's estimate (or not known
+  // at all), not what the label actually cost — a margin on top of that reads as more
+  // certain than it is, and is often overstated. Wait for the order to ship and freeze
+  // in the real postage cost before putting a number on it.
+  if (order.status !== "shipped") return "Before shipping";
   const pct = orderMarginPct(order);
   return pct == null ? "" : `${pct.toFixed(0)}% margin`;
 }
 
 function OrdersLayout() {
-  // In the layout rather than the list, so a background import still refreshes the list
-  // (and the open order's siblings) while the slide-over is up.
-  useRefreshOnSync();
+  // Background-import refresh lives in the root layout (useNavBadges) so it covers every page.
   return (
     <>
       <OrdersListContent />
@@ -117,6 +119,9 @@ function OrdersListContent() {
   const [page, setPage] = useState(0);
   const [searchInput, setSearchInput] = useState("");
   const [q, setQ] = useState("");
+  // Orders with several parcel boxes nobody has confirmed — held from shipping, or already
+  // shipped and awaiting review. Across every tab, so it overrides the tab's own status filter.
+  const [boxCheckOnly, setBoxCheckOnly] = useState(false);
 
   // Debounce the search box into the query key so a keystroke isn't a request, same as the
   // products list. A change to the effective term sends us back to page 0 — a later page of
@@ -131,8 +136,9 @@ function OrdersListContent() {
   }, [searchInput]);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["orders", tab, page, q],
-    queryFn: () => ordersApi.list(ORDERS_PAGE_SIZE, page * ORDERS_PAGE_SIZE, tab, q),
+    queryKey: ["orders", boxCheckOnly ? "box-check" : tab, page, q],
+    queryFn: () =>
+      ordersApi.list(ORDERS_PAGE_SIZE, page * ORDERS_PAGE_SIZE, boxCheckOnly ? undefined : tab, q, boxCheckOnly),
     placeholderData: keepPreviousData,
   });
 
@@ -151,6 +157,11 @@ function OrdersListContent() {
   const countFor = (id: OrderTab) =>
     ({ awaiting: awaitingCount, shipped: shippedCount, cancelled: cancelledCount })[id];
   const total = data?.total ?? 0;
+  // Cheap count for the filter chip, off the ["orders", …] key like the tab counts above.
+  const { data: boxCheckCount } = useQuery({
+    queryKey: ["order-counts", "box-check"],
+    queryFn: () => ordersApi.list(1, 0, undefined, undefined, true).then((p) => p.total),
+  });
 
   const actionMutation = useMutation({
     mutationFn: ({ id, kind }: { id: number; kind: "allocate" | "ship" }) =>
@@ -219,6 +230,23 @@ function OrdersListContent() {
           active={tab}
           onChange={changeTab}
         />
+        {((boxCheckCount ?? 0) > 0 || boxCheckOnly) && (
+          <button
+            type="button"
+            aria-pressed={boxCheckOnly}
+            onClick={() => {
+              setBoxCheckOnly((v) => !v);
+              setPage(0);
+            }}
+            className={`rounded border px-2.5 py-1.5 text-sm ${
+              boxCheckOnly
+                ? "border-amber-400 bg-amber-100 text-amber-900"
+                : "border-slate-300 bg-white text-slate-700"
+            }`}
+          >
+            Needs box check{boxCheckCount != null ? ` (${boxCheckCount})` : ""}
+          </button>
+        )}
         <input
           className="w-64 rounded border border-slate-300 px-2.5 py-1.5 text-sm"
           placeholder="Search order no., item, SKU, notes…"
@@ -281,6 +309,16 @@ function OrdersListContent() {
   );
 }
 
+// A small filled star marks a personalized line item in the orders list — a glanceable,
+// non-text cue that this order needs its customization text read before packing.
+function PersonalizationIcon() {
+  return (
+    <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M12 2l2.9 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l7.1-1.01z" />
+    </svg>
+  );
+}
+
 function OrderRow({
   order,
   onOpen,
@@ -295,7 +333,7 @@ function OrderRow({
     order.discount_amount != null ? Number(order.discount_amount) : 0;
   const listPrice =
     discount > 0 && order.subtotal != null ? Number(order.subtotal) + discount : null;
-  const marginPct = orderMarginPct(order);
+  const marginPct = order.status === "shipped" ? orderMarginPct(order) : null;
   const netFg =
     order.net_profit != null && Number(order.net_profit) < 0
       ? "text-red-600"
@@ -318,9 +356,21 @@ function OrderRow({
       <td className="p-2 align-top">
         <div className="font-medium">
           {order.external_order_id ? `#${order.external_order_id}` : `#${order.id}`}
+          {order.needs_box_check && (
+            <span
+              title={
+                order.status === "shipped"
+                  ? "Shipped with more than one parcel box recorded. Open the order to check it."
+                  : "More than one parcel box. Shipping is blocked until you confirm which was used."
+              }
+              className="ml-1.5 rounded border border-amber-300 bg-amber-50 px-1.5 py-0.5 text-[10.5px] font-semibold text-amber-800"
+            >
+              Box check
+            </span>
+          )}
         </div>
         <div className="text-[11px] text-slate-400">
-          {maskBuyerName(order.buyer_name) ?? "—"}
+          {maskBuyerName(order.buyer_name) ?? "-"}
         </div>
       </td>
       <td className="p-2 align-top">
@@ -351,9 +401,17 @@ function OrderRow({
               </span>
               <span>
                 {l.needs_mapping
-                  ? `Unmapped: ${l.sku ?? "—"}`
-                  : (l.product_name ?? "—")}
+                  ? `Unmapped: ${l.sku ?? "-"}`
+                  : (l.product_name ?? "-")}
               </span>
+              {l.variation_text && (
+                <span
+                  title={`Personalized: ${l.variation_text}`}
+                  className="inline-flex shrink-0 items-center justify-center rounded-full bg-violet-100 p-0.5 text-violet-600"
+                >
+                  <PersonalizationIcon />
+                </span>
+              )}
             </div>
           ))}
       </td>

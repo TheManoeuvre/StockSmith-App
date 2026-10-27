@@ -281,7 +281,7 @@ async def test_stock_that_came_and_went_is_still_due(session):
 
     due = await compute_due_for_count(session, now=NOW)
 
-    assert [d.name for d in due] == ["Keyring — Red", "Sold out", "Used up", "Counted then emptied"]
+    assert [d.name for d in due] == ["Keyring (Red)", "Sold out", "Used up", "Counted then emptied"]
 
 
 async def test_recently_counted_item_is_absent(session):
@@ -329,7 +329,7 @@ async def test_a_product_with_active_variants_is_counted_as_its_variants(session
 
     due = await compute_due_for_count(session, now=NOW)
 
-    assert [d.name for d in due] == ["Keyring — Blue", "Keyring — Red"]
+    assert [d.name for d in due] == ["Keyring (Blue)", "Keyring (Red)"]
     assert all(d.variant_id is not None and d.product_id == product.id for d in due)
 
 
@@ -359,7 +359,7 @@ async def test_variants_inherit_the_products_tier_and_cadence_but_own_their_date
 
     due = await compute_due_for_count(session, now=NOW)
 
-    assert [d.name for d in due] == ["Keyring — Stale"]
+    assert [d.name for d in due] == ["Keyring (Stale)"]
     assert due[0].abc_class == ABCClass.A
     assert due[0].interval_days == 10
     assert due[0].days_overdue == 30

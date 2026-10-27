@@ -51,6 +51,10 @@ class PlatformListingPush(Base):
     platform: Mapped[ListingPlatform] = mapped_column(
         portable_enum(ListingPlatform, name="listing_platform"), nullable=False
     )
+    # The listing row this attempt was for. Needed because a unit can have several
+    # listings sharing its SKU, and one failing must not be masked by a sibling succeeding.
+    # Nullable (SET NULL) so the log outlives a listing row the sync check later removes.
+    listing_id: Mapped[int | None] = mapped_column(ForeignKey("listings.id", ondelete="SET NULL"), nullable=True)
     attempted_qty: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[ListingPushStatus] = mapped_column(
         portable_enum(ListingPushStatus, name="listing_push_status"), nullable=False

@@ -127,6 +127,14 @@ class Order(Base):
     # never the other way.
     pending_marketplace_cancellation: Mapped[bool] = mapped_column(default=False, nullable=False)
 
+    # Box check (services/box_check.py): a person's confirmation of which parcel box(es) an order
+    # used, required when its items point at two or more different boxes. The signature is the
+    # set of candidate box material ids at confirmation time (sorted, comma-joined), so a later
+    # change to the order's items that alters the candidates no longer matches it and the order
+    # needs checking again. On a shipped order, confirmed_at alone marks it as reviewed.
+    box_check_signature: Mapped[str | None] = mapped_column(String, nullable=True)
+    box_check_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     # The shipping method used for this order (one profile per order — a single parcel,
     # not per line). For synced orders this defaults from the first resolvable line's
     # product/variant shipping_profile_id at import time (order_sync); for manual orders
@@ -207,6 +215,12 @@ class OrderLine(Base):
     # variations). Set once at import (see order_sync._upsert_lines) — never mutated,
     # matching every other field on a marketplace-sourced line.
     variation_text: Mapped[str | None] = mapped_column(String, nullable=True)
+
+    # The marketplace listing this line was sold from (Etsy transaction.listing_id). Set
+    # once at import, attribution only: stock matching stays by SKU so that several
+    # listings sharing a SKU all draw on one pool. NULL for lines imported before this
+    # was captured and for marketplaces that don't report it.
+    external_listing_id: Mapped[str | None] = mapped_column(String, nullable=True)
 
     # Build-BOM cost per unit, snapshotted once at the line's first allocation (see
     # order_costs.compute_line_cost_snapshot, called from allocation._allocate_line) —

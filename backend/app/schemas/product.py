@@ -61,6 +61,18 @@ class ProductUpdate(BaseModel):
     variant_attribute3_name: str | None = None
 
 
+class ProductStoreState(BaseModel):
+    """One store's on/off switch for one product.
+
+    `is_locked` means a live listing pins the store on, so the switch cannot be turned off
+    until that listing is ended.
+    """
+
+    platform: str
+    is_on: bool
+    is_locked: bool = False
+
+
 class ProductRead(ProductBase):
     model_config = ConfigDict(from_attributes=True)
 
@@ -95,6 +107,7 @@ class ProductRead(ProductBase):
     expected_max_sellable_reason: str | None = None
     theoretical_max_sellable: int | None = None
     theoretical_max_sellable_reason: str | None = None
+    store_states: list[ProductStoreState] = []
     cost_per_unit: Decimal | None = None
     # Base kitting BOM cost per unit — the packaging half of what it costs to fulfil one
     # unit, so margin can account for it (see pricing.compute_profit_margin). None for a
@@ -237,6 +250,9 @@ class BulkBomAmendRequest(BaseModel):
     # default, not an option.
     apply: bool = False
     include_inactive: bool = False
+    # Rows the user set by hand in a variant's own BOM editor are left alone unless this
+    # is set; the preview lists them as kept either way.
+    include_manual: bool = False
 
 
 class BulkBomAmendChange(BaseModel):
@@ -252,6 +268,8 @@ class BulkBomAmendUnit(BaseModel):
     variant_id: int
     variant_name: str
     changes: list[BulkBomAmendChange]  # empty when this variant is already correct
+    # Changes not made because the row they would replace was set by hand.
+    kept_manual: list[BulkBomAmendChange] = []
 
 
 class BulkBomAmendResult(BaseModel):
@@ -259,6 +277,7 @@ class BulkBomAmendResult(BaseModel):
     matched_variant_count: int
     changed_variant_count: int
     skipped_inactive_count: int
+    kept_manual_count: int = 0
     units: list[BulkBomAmendUnit]
 
 

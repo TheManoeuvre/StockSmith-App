@@ -167,13 +167,13 @@ export function OrderSyncCard({
         <p className="text-xs text-slate-500">
           Last run {new Date(status.last_sync_attempt_at).toLocaleString()}
           {status.last_sync_status === "running" ? (
-            <span className="text-amber-700"> — still running</span>
+            <span className="text-amber-700"> (still running)</span>
           ) : status.last_sync_status === "success" ? (
-            <span className="text-green-700"> — succeeded</span>
+            <span className="text-green-700"> (succeeded)</span>
           ) : (
             <span className="text-red-600">
               {" "}
-              — failed
+              failed
               {status.last_sync_error ? `: ${status.last_sync_error}` : ""}
             </span>
           )}
@@ -187,7 +187,7 @@ export function OrderSyncCard({
           the user can see. */}
       {status?.unpaid_hold_since && (
         <p className="rounded bg-amber-50 p-2 text-xs text-amber-800">
-          Watching for payment on one or more orders — the sync window is held open back to{" "}
+          Watching for payment on one or more orders: the sync window is held open back to{" "}
           {new Date(status.unpaid_hold_since).toLocaleString()}. They'll import automatically once {label}{" "}
           confirms payment, and reserve no stock until then.
         </p>
@@ -252,7 +252,7 @@ export function OrderSyncCard({
             <>
               {" "}
               <strong>
-                {commitResult.skipped_unpaid_count} not imported — payment hasn't settled yet.
+                {commitResult.skipped_unpaid_count} not imported: payment hasn't settled yet.
               </strong>{" "}
               They'll be imported automatically once it does.
             </>
@@ -362,7 +362,7 @@ function PreviewResultView({ result, label }: { result: SyncPreviewResult; label
         {result.skipped_unpaid_count > 0 && (
           <>
             {" "}
-            <strong>{result.skipped_unpaid_count}</strong> would be held back as unpaid — expand them below to
+            <strong>{result.skipped_unpaid_count}</strong> would be held back as unpaid: expand them below to
             check the marketplace's own payment fields.
           </>
         )}
@@ -371,7 +371,7 @@ function PreviewResultView({ result, label }: { result: SyncPreviewResult; label
         {result.orders.map((order) => (
           <details key={order.external_order_id} className="rounded border border-slate-200 bg-white p-2">
             <summary className="cursor-pointer">
-              {order.buyer_name ?? "—"} — receipt {order.external_order_id}
+              {order.buyer_name ?? "-"}, receipt {order.external_order_id}
               {order.already_imported && (
                 <span className="ml-2 text-xs text-slate-400">(already imported)</span>
               )}
@@ -380,15 +380,15 @@ function PreviewResultView({ result, label }: { result: SyncPreviewResult; label
               {!order.would_import && (
                 <span
                   className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800"
-                  title="Payment hasn't settled on the marketplace — a real sync would not import this order, and it would reserve no stock."
+                  title="Payment hasn't settled on the marketplace: a real sync would not import this order, and it would reserve no stock."
                 >
-                  would not import — {order.payment_state}
+                  would not import: {order.payment_state}
                 </span>
               )}
               {order.would_import && order.payment_state === "reversed" && (
                 <span
                   className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-800"
-                  title="Payment was refunded or charged back — imported for the record, but it reserves no stock and needs review."
+                  title="Payment was refunded or charged back: imported for the record, but it reserves no stock and needs review."
                 >
                   refunded
                 </span>
@@ -405,16 +405,16 @@ function PreviewResultView({ result, label }: { result: SyncPreviewResult; label
               <tbody>
                 {order.lines.map((line) => (
                   <tr key={line.external_line_id} className="border-b border-slate-100">
-                    <td className="p-1">{line.sku ?? "—"}</td>
+                    <td className="p-1">{line.sku ?? "-"}</td>
                     <td className="p-1">{line.qty}</td>
                     <td className="p-1">
                       {line.matched_product_id ? (
                         <span>
                           {line.matched_product_name}
-                          {line.matched_variant_name ? ` — ${line.matched_variant_name}` : ""}
+                          {line.matched_variant_name ? ` (${line.matched_variant_name})` : ""}
                         </span>
                       ) : (
-                        <span className="text-amber-700">No match — needs mapping</span>
+                        <span className="text-amber-700">No match, needs mapping</span>
                       )}
                     </td>
                   </tr>

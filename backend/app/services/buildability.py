@@ -15,6 +15,7 @@ from app.schemas.dashboard import (
     MarginAlert,
     OpenStockTake,
     OrderAwaitingInventory,
+    OrderAwaitingMapping,
 )
 from app.schemas.variant import VariantBomLine
 from app.services.abc import compute_due_for_count
@@ -30,6 +31,7 @@ _ORDERS_AWAITING_INVENTORY_SQL = text(
            p.name AS product_name, pv.variant_name AS variant_name,
            (ol.ordered_qty - ol.allocated_qty) AS short_by,
            o.order_placed_at, o.platform AS platform,
+           CASE WHEN o.fulfilment_method = 'collect' THEN o.collect_by ELSE o.ship_by_date END AS due_date,
            COALESCE(
                p.is_bundle
                OR EXISTS (SELECT 1 FROM product_materials pm WHERE pm.product_id = ol.product_id)
@@ -44,6 +46,21 @@ _ORDERS_AWAITING_INVENTORY_SQL = text(
       AND ol.needs_mapping = false
       AND o.status NOT IN ('cancelled', 'shipped')
     ORDER BY (ol.ordered_qty - ol.allocated_qty) DESC, o.order_placed_at ASC
+    """
+)
+
+_ORDERS_AWAITING_MAPPING_SQL = text(
+    """
+    SELECT ol.id AS line_id, ol.order_id, ol.sku,
+           (ol.ordered_qty - ol.allocated_qty) AS short_by,
+           o.order_placed_at, o.platform AS platform,
+           CASE WHEN o.fulfilment_method = 'collect' THEN o.collect_by ELSE o.ship_by_date END AS due_date
+    FROM order_lines ol
+    JOIN orders o ON o.id = ol.order_id
+    WHERE ol.needs_mapping = true
+      AND ol.allocated_qty < ol.ordered_qty
+      AND o.status NOT IN ('cancelled', 'shipped')
+    ORDER BY o.order_placed_at ASC
     """
 )
 
@@ -561,8 +578,28 @@ async def get_orders_awaiting_inventory(session: AsyncSession) -> list[OrderAwai
             variant_name=row.variant_name,
             short_by=int(row.short_by),
             order_placed_at=row.order_placed_at,
+            due_date=row.due_date,
             platform=row.platform,
             has_bom=bool(row.has_bom),
+        )
+        for row in result
+    ]
+
+
+async def get_orders_awaiting_mapping(session: AsyncSession) -> list[OrderAwaitingMapping]:
+    """Open order lines whose SKU isn't mapped to a product. Kept apart from
+    get_orders_awaiting_inventory (which excludes them and feeds the stock alerts) because
+    the remedy differs: map the line on the order, rather than build stock."""
+    result = await session.execute(_ORDERS_AWAITING_MAPPING_SQL)
+    return [
+        OrderAwaitingMapping(
+            line_id=row.line_id,
+            order_id=row.order_id,
+            sku=row.sku,
+            short_by=int(row.short_by),
+            order_placed_at=row.order_placed_at,
+            due_date=row.due_date,
+            platform=row.platform,
         )
         for row in result
     ]
@@ -631,6 +668,7 @@ async def compute_dashboard_summary(session: AsyncSession) -> DashboardSummary:
     margin_alerts = [MarginAlert(**alert) for alert in await get_margin_alerts(session)]
     orders_awaiting_inventory = await get_orders_awaiting_inventory(session)
     orders_awaiting_packaging = await get_orders_awaiting_packaging(session)
+    orders_awaiting_mapping = await get_orders_awaiting_mapping(session)
 
     # Capped like lowest_buildable_products. On a database that has never had a stock take
     # this is the entire catalogue, and the dashboard wants the worst offenders, not a
@@ -687,6 +725,7 @@ async def compute_dashboard_summary(session: AsyncSession) -> DashboardSummary:
         margin_alerts=margin_alerts,
         orders_awaiting_inventory=orders_awaiting_inventory,
         orders_awaiting_packaging=orders_awaiting_packaging,
+        orders_awaiting_mapping=orders_awaiting_mapping,
         items_due_for_count=[DueForCountItemRead.model_validate(item) for item in items_due_for_count[:10]],
         items_due_for_count_total=len(items_due_for_count),
         unresolved_variance_count=unresolved_variance_count,

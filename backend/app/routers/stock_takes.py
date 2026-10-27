@@ -26,6 +26,7 @@ from app.schemas.stock_take import (
     BulkLineCountRequest,
     LineCountUpdate,
     LineResolution,
+    ScopeItemRead,
     ScopePreview,
     StockTakeProgress,
     StockTakeCreated,
@@ -95,7 +96,7 @@ async def _name_lookups(session: AsyncSession, lines: list[StockTakeLine]) -> tu
     return materials, products, variants
 
 
-def _to_line_read(grouped: stock_takes.GroupedLine) -> StockTakeLineRead:
+def _to_line_read(grouped: stock_takes.GroupedLine, unit_cost: Decimal | None = None) -> StockTakeLineRead:
     line = grouped.line
     # Derived rather than stored so it can never disagree with the two numbers it comes
     # from; None when nothing was counted, which is not the same as a delta of zero.
@@ -123,6 +124,7 @@ def _to_line_read(grouped: stock_takes.GroupedLine) -> StockTakeLineRead:
         ),
         conflict_reason=line.conflict_reason,
         delta=delta,
+        unit_cost=unit_cost,
     )
 
 
@@ -202,9 +204,10 @@ async def _read_take(session: AsyncSession, take: StockTake) -> StockTakeDetail:
     # created in. See services/stock_takes.group_lines — the CSV and the variances list go
     # through the same call, which is the only reason all three agree.
     grouped = stock_takes.group_lines(lines, materials, products, variants)
+    costs = await stock_takes.line_unit_costs(session, lines, materials, products, variants)
     return StockTakeDetail(
         **_take_fields(take, lines),
-        lines=[_to_line_read(g) for g in grouped],
+        lines=[_to_line_read(g, costs[g.line.id]) for g in grouped],
     )
 
 
@@ -255,9 +258,10 @@ async def list_unresolved_variances(session: AsyncSession = Depends(get_db)) -> 
     # Same arrangement as the count sheet, through the same call. These are read while
     # walking the same shelves, so they group the same way.
     take_by_line = {line.id: take for line, take in rows}
+    costs = await stock_takes.line_unit_costs(session, lines, materials, products, variants)
     return [
         UnresolvedVariance(
-            line=_to_line_read(g),
+            line=_to_line_read(g, costs[g.line.id]),
             stock_take_id=take_by_line[g.line.id].id,
             stock_take_closed_at=take_by_line[g.line.id].closed_at,
         )
@@ -269,6 +273,13 @@ async def list_unresolved_variances(session: AsyncSession = Depends(get_db)) -> 
 async def preview_scope(scope: StockTakeScope, session: AsyncSession = Depends(get_db)) -> ScopePreview:
     """What a take with this scope would contain. Writes nothing."""
     return await stock_takes.preview_scope(session, scope)
+
+
+@router.post("/scope-items", response_model=list[ScopeItemRead])
+async def scope_items(scope: StockTakeScope, session: AsyncSession = Depends(get_db)) -> list[ScopeItemRead]:
+    """Every item the scope's filters match, with its last-counted date — the picker behind
+    "Select items". Ignores any selection already on the scope. Writes nothing."""
+    return await stock_takes.list_scope_items(session, scope)
 
 
 @router.post("", response_model=StockTakeCreated, status_code=status.HTTP_201_CREATED)

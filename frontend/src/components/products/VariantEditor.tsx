@@ -150,6 +150,7 @@ export function VariantEditor({ productId }: { productId: number }) {
       <ErrorBanner error={platformConflict ? null : createVariantMutation.error} />
       {platformConflict && (
         <PlatformConflictDialog
+          productId={productId}
           detail={platformConflict}
           busy={createVariantMutation.isPending}
           onResolve={(resolution) => createVariantMutation.mutate(resolution)}
@@ -290,7 +291,7 @@ function VariantRow({
         <div className="shrink-0 text-right">
           <div className="flex items-baseline justify-end gap-2">
             <strong className={`text-lg font-medium ${sellable.headline === 0 ? "text-red-600" : ""}`}>
-              {sellable.headline ?? "—"}
+              {sellable.headline ?? "-"}
             </strong>
             {sellable.capLabel && (
               <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">{sellable.capLabel}</span>
@@ -302,7 +303,7 @@ function VariantRow({
           <div className="text-xs text-slate-500">
             {sellable.builtFree} built + {sellable.buildable ?? 0} buildable
             {inclFallbacksNote(sellable) ? ` (${inclFallbacksNote(sellable)})` : ""} ·{" "}
-            {variant.cost_per_unit ? formatUnitCost(variant.cost_per_unit) : "—"}
+            {variant.cost_per_unit ? formatUnitCost(variant.cost_per_unit) : "-"}
           </div>
         </div>
       </div>
@@ -328,7 +329,7 @@ function VariantRow({
             <label className="flex flex-col gap-1">
               <span className="text-sm">Full SKU</span>
               <span className="rounded border border-transparent px-2 py-1 font-mono text-sm text-slate-500">
-                {variant.full_sku ?? "—"}
+                {variant.full_sku ?? "-"}
               </span>
             </label>
             {!renameManaged && (
@@ -374,6 +375,7 @@ function VariantRow({
           <ErrorBanner error={renameMutation.error ?? (togglePlatformConflict ? null : toggleActiveMutation.error)} />
           {togglePlatformConflict && (
             <PlatformConflictDialog
+              productId={productId}
               detail={togglePlatformConflict}
               busy={toggleActiveMutation.isPending}
               onResolve={(resolution) => toggleActiveMutation.mutate(resolution)}

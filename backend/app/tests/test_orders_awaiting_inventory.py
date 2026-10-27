@@ -7,7 +7,7 @@ NotificationCategory values."""
 from datetime import datetime, timezone
 
 from app.models.material import Material
-from app.models.order import Order, OrderLine, OrderStatus
+from app.models.order import Order, OrderFulfilmentMethod, OrderLine, OrderStatus
 from app.models.product import Product, ProductBundleItem, ProductMaterial
 from app.services.buildability import get_orders_awaiting_inventory
 
@@ -55,3 +55,39 @@ async def test_short_bundle_line_is_not_blocked_despite_having_no_bom(session):
 
     [line] = await get_orders_awaiting_inventory(session)
     assert line.has_bom is True
+
+
+async def test_due_date_is_collect_by_for_collect_orders_else_ship_by(session):
+    product = Product(name="Widget")
+    session.add(product)
+    await session.flush()
+    ship_by = datetime(2026, 10, 18, 12, tzinfo=timezone.utc)
+    collect_by = datetime(2026, 10, 20, 12, tzinfo=timezone.utc)
+    shipped = _short_order(product.id)
+    shipped.ship_by_date = ship_by
+    collected = _short_order(product.id)
+    collected.fulfilment_method = OrderFulfilmentMethod.collect
+    collected.ship_by_date = ship_by
+    collected.collect_by = collect_by
+    session.add_all([shipped, collected])
+    await session.commit()
+
+    lines = await get_orders_awaiting_inventory(session)
+    due = {line.order_id: line.due_date.replace(tzinfo=timezone.utc) for line in lines}
+    assert due[shipped.id] == ship_by
+    assert due[collected.id] == collect_by
+
+
+async def test_unmapped_line_is_awaiting_mapping_not_inventory(session):
+    from app.services.buildability import get_orders_awaiting_mapping
+
+    order = Order(status=OrderStatus.pending, order_placed_at=datetime.now(timezone.utc))
+    order.lines = [OrderLine(ordered_qty=2, allocated_qty=0, sku="MYSTERY-1", needs_mapping=True)]
+    cancelled = Order(status=OrderStatus.cancelled, order_placed_at=datetime.now(timezone.utc))
+    cancelled.lines = [OrderLine(ordered_qty=1, allocated_qty=0, sku="OLD", needs_mapping=True)]
+    session.add_all([order, cancelled])
+    await session.commit()
+
+    assert await get_orders_awaiting_inventory(session) == []
+    [line] = await get_orders_awaiting_mapping(session)
+    assert (line.order_id, line.sku, line.short_by) == (order.id, "MYSTERY-1", 2)

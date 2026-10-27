@@ -66,6 +66,9 @@ class ListingProfile(Base):
     etsy_shop_section_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     etsy_processing_min: Mapped[int | None] = mapped_column(Integer, nullable=True)
     etsy_processing_max: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Etsy's should_auto_renew: true renews the listing automatically on expiry (each renewal
+    # is a fee), false leaves that to the seller. Null sends nothing and takes Etsy's default.
+    etsy_auto_renew: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
 
     # --- eBay ---
     ebay_category_id: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -75,6 +78,9 @@ class ListingProfile(Base):
     ebay_return_policy_id: Mapped[str | None] = mapped_column(String, nullable=True)
     ebay_merchant_location_key: Mapped[str | None] = mapped_column(String, nullable=True)
     ebay_marketplace_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Business days between payment and dispatch. Carried in the draft metadata for the eBay
+    # adapter; the postage policy remains eBay's own source of truth for handling time.
+    ebay_handling_time_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

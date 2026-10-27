@@ -342,7 +342,7 @@ export function ListingPickerModal({
                   Rewrite eBay's SKUs to match StockSmith
                   <span className="block text-xs text-slate-500">
                     Done before migrating, while the SKU is still editable.
-                    Leave this off and any mismatch is only reported — you'd
+                    Leave this off and any mismatch is only reported: you'd
                     then have to fix it in Seller Hub yourself.
                   </span>
                 </span>
@@ -387,7 +387,7 @@ function AdoptionResultBanner({ result }: { result: AdoptListingResult }) {
       <p className="rounded-md bg-green-50 p-2 text-sm text-green-800">
         Listing linked successfully
         {result.skus_aligned
-          ? " — eBay's SKUs were rewritten to match StockSmith."
+          ? ": eBay's SKUs were rewritten to match StockSmith."
           : "."}
       </p>
     );

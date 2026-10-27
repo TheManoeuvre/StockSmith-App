@@ -197,16 +197,14 @@ it("shows the stock-take progress line and a due-for-count entry", async () => {
   expect(screen.getByText("12 days over")).toBeInTheDocument();
 });
 
-it("hides the Orders awaiting products table and margin card when their data is empty", async () => {
+it("hides the Orders awaiting products table when its data is empty", async () => {
   await renderDashboard({
     orders_awaiting_inventory: [],
     orders_awaiting_packaging: [],
-    margin_alerts: [],
   });
   expect(
     await screen.findByText(/Nothing waiting/),
   ).toBeInTheDocument();
-  expect(screen.queryByText("Margin moved")).not.toBeInTheDocument();
 });
 
 it("shows the Blocked orders table only for lines with no BOM", async () => {
@@ -282,5 +280,60 @@ it("shows ranked fallback suggestions on a packaging shortfall and logs the pick
   await user.click(await screen.findByText("Confirm"));
 
   await waitFor(() => expect(usagePosted).toMatchObject({ material_id: 15, substitute_material_id: 16, order_id: 102 }));
-  expect(await screen.findByText(/Logged — using Medium box instead/)).toBeInTheDocument();
+  expect(await screen.findByText(/Logged. Using Medium box instead/)).toBeInTheDocument();
+});
+
+it("collapses stock-short lines for one variation into a row with a due-date range", async () => {
+  const line = (id: number, order: number, due: string | null, variant = 5) => ({
+    line_id: id,
+    order_id: order,
+    product_id: 9,
+    variant_id: variant,
+    product_name: "Pencil Pot",
+    variant_name: variant === 5 ? "6 Stud / Blue" : "6 Stud / Red",
+    short_by: 1,
+    order_placed_at: "2026-08-10T09:00:00Z",
+    due_date: due,
+    has_bom: true,
+  });
+  await renderDashboard({
+    orders_awaiting_inventory: [
+      line(1, 394, "2026-08-15T12:00:00Z"),
+      line(2, 395, "2026-08-18T12:00:00Z"),
+      line(3, 396, "2026-08-17T12:00:00Z", 6),
+    ],
+    orders_awaiting_packaging: [],
+  });
+
+  const blue = (await screen.findByText("Pencil Pot (6 Stud / Blue)")).closest("tr")!;
+  expect(within(blue).getByText("#394")).toBeInTheDocument();
+  expect(within(blue).getByText("#395")).toBeInTheDocument();
+  expect(within(blue).getByText("15–18 Aug")).toBeInTheDocument();
+  // Exactly one row per variation.
+  expect(screen.getAllByText(/Pencil Pot \(6 Stud/)).toHaveLength(2);
+});
+
+it("lists unmapped-SKU orders as awaiting products with a Map order link instead of Build now", async () => {
+  await renderDashboard({
+    orders_awaiting_inventory: [],
+    orders_awaiting_packaging: [],
+    orders_awaiting_mapping: [
+      {
+        line_id: 900,
+        order_id: 777,
+        sku: "MYSTERY-1",
+        short_by: 2,
+        order_placed_at: "2026-08-18T09:00:00Z",
+        due_date: null,
+        platform: null,
+      },
+    ],
+  });
+  const row = (await screen.findByText("MYSTERY-1")).closest("tr")!;
+  expect(within(row).getByText("Unmapped SKU")).toBeInTheDocument();
+  expect(within(row).getByRole("link", { name: "Map order" })).toHaveAttribute(
+    "href",
+    "/orders/777",
+  );
+  expect(within(row).queryByText("Build now")).not.toBeInTheDocument();
 });

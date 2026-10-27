@@ -5,10 +5,11 @@ import {
   useNavigate,
 } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useMemo, useState, type MouseEvent } from "react";
+import { Fragment, useEffect, useMemo, useState, type MouseEvent } from "react";
 import { productCategoriesApi } from "../../api/productCategories";
 import { stockTakesApi } from "../../api/stockTakes";
 import type {
+  ScopeItem,
   StockTakeProgressStatus,
   StockTakeScope,
 } from "../../api/types";
@@ -40,6 +41,109 @@ const PROGRESS_META: Record<
   },
   closed: { label: "Closed", cls: "bg-slate-100 text-slate-600" },
 };
+
+const itemKey = (i: {
+  material_id: number | null;
+  product_id: number | null;
+  variant_id: number | null;
+}) => `${i.material_id ?? ""}:${i.product_id ?? ""}:${i.variant_id ?? ""}`;
+
+function ItemPicker({
+  items,
+  selected,
+  onChange,
+}: {
+  items: ScopeItem[] | undefined;
+  selected: Set<string> | null;
+  onChange: (next: Set<string> | null) => void;
+}) {
+  if (!items) return <p className="text-sm text-slate-500">Loading items…</p>;
+  if (items.length === 0)
+    return <p className="text-sm text-slate-500">No items match these filters.</p>;
+
+  const isOn = (i: ScopeItem) => selected === null || selected.has(itemKey(i));
+  const toggleItem = (i: ScopeItem) => {
+    const next = new Set(selected ?? items.map(itemKey));
+    const k = itemKey(i);
+    next.has(k) ? next.delete(k) : next.add(k);
+    onChange(next.size === items.length ? null : next);
+  };
+
+  const groups = new Map<string, ScopeItem[]>();
+  for (const i of items) {
+    const heading = i.group ? `${i.section} · ${i.group}` : i.section;
+    groups.set(heading, [...(groups.get(heading) ?? []), i]);
+  }
+  const count = selected === null ? items.length : selected.size;
+
+  return (
+    <div className="rounded border border-slate-200">
+      <div className="flex items-center gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+        <span className="text-slate-600">
+          {count} of {items.length} selected
+        </span>
+        <button type="button" className="underline" onClick={() => onChange(null)}>
+          Select all
+        </button>
+        <button type="button" className="underline" onClick={() => onChange(new Set())}>
+          Select none
+        </button>
+      </div>
+      <div className="max-h-96 overflow-y-auto">
+        <table className="w-full text-left text-[12.5px]">
+          <thead>
+            <tr className="border-b border-slate-200 text-slate-500">
+              <th className="w-8 p-2" />
+              <th className="p-2 font-medium">Item</th>
+              <th className="p-2 font-medium">Last counted</th>
+              <th className="p-2 font-medium">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {[...groups].map(([heading, rows]) => (
+              <Fragment key={heading}>
+                <tr className="bg-slate-50/60">
+                  <td colSpan={4} className="p-2 text-xs font-semibold text-slate-600">
+                    {heading}
+                  </td>
+                </tr>
+                {rows.map((i) => (
+                  <tr key={itemKey(i)} className="border-b border-slate-100 last:border-0">
+                    <td className="p-2">
+                      <input
+                        type="checkbox"
+                        aria-label={`Count ${i.name}`}
+                        checked={isOn(i)}
+                        onChange={() => toggleItem(i)}
+                      />
+                    </td>
+                    <td className="p-2">{i.name}</td>
+                    <td className="p-2 tabular-nums text-slate-600">
+                      {i.last_stock_take_at
+                        ? new Date(i.last_stock_take_at).toLocaleDateString(undefined, {
+                            day: "2-digit",
+                            month: "short",
+                            year: "numeric",
+                          })
+                        : "Never"}
+                    </td>
+                    <td className="p-2">
+                      {i.is_due ? (
+                        <Badge className="bg-amber-100 text-amber-800">Due</Badge>
+                      ) : (
+                        <span className="text-slate-400">-</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 export const Route = createFileRoute("/stock-takes")({
   component: StockTakesLayout,
@@ -80,9 +184,14 @@ function StockTakesListContent() {
   const [categoryIds, setCategoryIds] = useState<Set<number>>(new Set());
   const { categories } = useMaterialCategories();
   const [typeIds, setTypeIds] = useState<Set<number>>(new Set());
-  const [overdueOnly, setOverdueOnly] = useState(overdueFromUrl);
+  // On by default: a take is normally "what's due", and counting everything is the
+  // deliberate exception.
+  const [overdueOnly, setOverdueOnly] = useState(true);
+  // null = every item the filters match; a set = a hand-picked subset (keys from itemKey).
+  const [selected, setSelected] = useState<Set<string> | null>(null);
+  const [showItems, setShowItems] = useState(false);
 
-  const scope: StockTakeScope = useMemo(
+  const filterScope: StockTakeScope = useMemo(
     () => ({
       include_materials: includeMaterials,
       include_products: includeProducts,
@@ -91,6 +200,33 @@ function StockTakesListContent() {
       overdue_only: overdueOnly,
     }),
     [includeMaterials, includeProducts, categoryIds, typeIds, overdueOnly],
+  );
+  // A pick only makes sense against the filters it was made under.
+  useEffect(() => {
+    setSelected(null);
+  }, [filterScope]);
+
+  const { data: scopeItems } = useQuery({
+    queryKey: ["stock-take-scope-items", filterScope],
+    queryFn: () => stockTakesApi.scopeItems(filterScope),
+    enabled: showPicker && showItems && (includeMaterials || includeProducts),
+  });
+
+  const scope: StockTakeScope = useMemo(
+    () => ({
+      ...filterScope,
+      selected_items:
+        selected === null
+          ? null
+          : (scopeItems ?? [])
+              .filter((i) => selected.has(itemKey(i)))
+              .map((i) => ({
+                material_id: i.material_id,
+                product_id: i.product_id,
+                variant_id: i.variant_id,
+              })),
+    }),
+    [filterScope, selected, scopeItems],
   );
 
   // Live so the count updates as the scope is edited — starting a take you then have to
@@ -241,8 +377,8 @@ function StockTakesListContent() {
                 {preview.candidate_count === 1 ? "" : "s"} to count
                 {preview.material_count > 0 && preview.product_count > 0 && (
                   <>
-                    {" "}
-                    — {preview.material_count} material
+                    {": "}
+                    {preview.material_count} material
                     {preview.material_count === 1 ? "" : "s"},{" "}
                     {preview.product_count} finished
                   </>
@@ -262,7 +398,7 @@ function StockTakesListContent() {
                   <ul className="mt-1 list-disc pl-5">
                     {preview.warnings.slice(0, 5).map((w, i) => (
                       <li key={i}>
-                        {w.name} — take #{w.other_stock_take_id}, started{" "}
+                        {w.name}: take #{w.other_stock_take_id}, started{" "}
                         {new Date(w.other_started_at).toLocaleDateString()}
                       </li>
                     ))}
@@ -275,7 +411,7 @@ function StockTakesListContent() {
             </div>
           )}
 
-          <div>
+          <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={() => createMutation.mutate()}
               disabled={
@@ -290,7 +426,21 @@ function StockTakesListContent() {
                 ? `${preview.candidate_count} item${preview.candidate_count === 1 ? "" : "s"}`
                 : ""}
             </button>
+            <button
+              type="button"
+              onClick={() => setShowItems((v) => !v)}
+              disabled={!includeMaterials && !includeProducts}
+              className="rounded border border-slate-300 px-4 py-2 text-sm disabled:opacity-50"
+            >
+              {showItems ? "Hide items" : "Select items"}
+            </button>
+            {selected !== null && (
+              <span className="text-sm text-slate-500">{selected.size} hand-picked</span>
+            )}
           </div>
+          {showItems && (
+            <ItemPicker items={scopeItems} selected={selected} onChange={setSelected} />
+          )}
           <ErrorBanner error={createMutation.error} />
         </div>
       )}
@@ -356,7 +506,7 @@ function StockTakesListContent() {
                         {t.conflict_count}
                       </span>
                     ) : (
-                      <span className="text-slate-400">—</span>
+                      <span className="text-slate-400">-</span>
                     )}
                   </td>
                 </tr>

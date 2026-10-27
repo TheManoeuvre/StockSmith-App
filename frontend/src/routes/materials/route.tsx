@@ -1,4 +1,5 @@
 import { createFileRoute, Link, Outlet, useNavigate } from "@tanstack/react-router";
+import { LayersIcon } from "../../components/products/ProductImage";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useRef, useState, type MouseEvent } from "react";
 import { materialsApi } from "../../api/materials";
@@ -18,6 +19,7 @@ import { Badge } from "../../components/common/Badge";
 import { CsvImportExport } from "../../components/common/CsvImportExport";
 import { FilterTabs } from "../../components/common/FilterTabs";
 import { GroupHeaderRow, Th } from "../../components/common/ListTable";
+import { DuplicateColoursNotice } from "../../components/materials/DuplicateColoursNotice";
 import {
   isLowStock,
   normalizeQtyForUnit,
@@ -431,33 +433,33 @@ function MaterialsListContent() {
             />
           </label>
           {tracksColour && (
-            <>
-              <label className="flex flex-col gap-1">
-                <span className="text-sm">Colour</span>
-                {/* Backed by the colours reference table now, so the same colour on two materials
-                    is one row that can be renamed once. onResolved is unused deliberately: the
-                    backend matches the name case-insensitively and find-or-creates, which is
-                    more reliable than trusting an id the client resolved from a stale list. */}
-                <CreatableSelect
-                  className="rounded border border-slate-300 px-2 py-1"
-                  options={colourOptions ?? []}
-                  value={colour}
-                  onChange={setColour}
-                  onResolved={() => {}}
-                />
-              </label>
-              <label className="flex flex-col gap-1">
-                <span className="text-sm">Material type</span>
-                <CreatableSelect
-                  className="rounded border border-slate-300 px-2 py-1"
-                  options={materialTypes ?? []}
-                  value={materialType}
-                  onChange={setMaterialType}
-                  onResolved={setMaterialTypeId}
-                  placeholder="PLA, PETG…"
-                />
-              </label>
-            </>
+            <label className="flex flex-col gap-1">
+              <span className="text-sm">Colour</span>
+              {/* Backed by the colours reference table now, so the same colour on two materials
+                  is one row that can be renamed once. onResolved is unused deliberately: the
+                  backend matches the name case-insensitively and find-or-creates, which is
+                  more reliable than trusting an id the client resolved from a stale list. */}
+              <CreatableSelect
+                className="rounded border border-slate-300 px-2 py-1"
+                options={colourOptions ?? []}
+                value={colour}
+                onChange={setColour}
+                onResolved={() => {}}
+              />
+            </label>
+          )}
+          {tracksMaterialType && (
+            <label className="flex flex-col gap-1">
+              <span className="text-sm">Material type</span>
+              <CreatableSelect
+                className="rounded border border-slate-300 px-2 py-1"
+                options={materialTypes ?? []}
+                value={materialType}
+                onChange={setMaterialType}
+                onResolved={setMaterialTypeId}
+                placeholder={tracksColour ? "PLA, PETG…" : "Coasters, Keyrings…"}
+              />
+            </label>
           )}
           <label className="flex flex-col gap-1">
             <span className="text-sm">Barcode</span>
@@ -505,6 +507,8 @@ function MaterialsListContent() {
           <ErrorBanner error={createMutation.error} />
         </form>
       )}
+
+      {data && <DuplicateColoursNotice materials={data} />}
 
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
         <FilterTabs
@@ -619,8 +623,8 @@ function MaterialRow({
       <td className="py-2 pl-3 pr-1">
         {/* Fixed 80px box. An uploaded photo fills it; a colour chip sits at 75% (60px)
             centred, so a swatch reads as a swatch rather than a cropped image; a material
-            with neither is left as an empty tile. */}
-        <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded border border-slate-200 bg-slate-50">
+            with neither shows the layers icon. */}
+        <div className="flex h-20 w-20 items-center justify-center overflow-hidden rounded border border-slate-200 bg-slate-50 text-slate-300">
           {imageUrl ? (
             <img
               src={imageUrl}
@@ -633,7 +637,9 @@ function MaterialRow({
               style={{ backgroundColor: m.colour_hex }}
               title={m.colour ?? undefined}
             />
-          ) : null}
+          ) : (
+            <LayersIcon />
+          )}
         </div>
       </td>
       <td className="px-2 py-2">
@@ -654,7 +660,7 @@ function MaterialRow({
         )}
       </td>
       <td className="px-2 py-2 text-slate-500">
-        {m.material_type_name ?? "—"}
+        {m.material_type_name ?? "-"}
       </td>
       <td
         className={`px-2 py-2 tabular-nums ${atRisk ? `font-medium ${STOCKOUT_TEXT_CLASS[status]}` : ""}`}
@@ -667,7 +673,7 @@ function MaterialRow({
             +{formatQty(m.on_order_qty, m.unit)}
           </span>
         ) : (
-          <span className="text-slate-400">—</span>
+          <span className="text-slate-400">-</span>
         )}
       </td>
       <td className="px-2 py-2 tabular-nums text-slate-500">
@@ -684,7 +690,7 @@ function MaterialRow({
         {formatWeeksShort(m.weeks_of_supply)}
       </td>
       <td className="px-2 py-2 text-slate-500">
-        {m.default_supplier_name ?? "—"}
+        {m.default_supplier_name ?? "-"}
         {formatLeadTime(m.lead_time_days) && (
           <span className="block text-xs text-slate-400">{formatLeadTime(m.lead_time_days)}</span>
         )}
