@@ -219,7 +219,9 @@ async def propose_profiles(
     matched = (
         await session.execute(
             select(Listing.product_id, Listing.external_listing_id).where(
-                Listing.platform == ListingPlatform.etsy, Listing.external_listing_id.is_not(None)
+                Listing.platform == ListingPlatform.etsy,
+                Listing.external_listing_id.is_not(None),
+                Listing.is_primary.is_(True),
             )
         )
     ).all()
@@ -396,7 +398,9 @@ async def _matched_products(session: AsyncSession, listings: list[dict]) -> list
     matched = (
         await session.execute(
             select(Listing.product_id, Listing.external_listing_id).where(
-                Listing.platform == ListingPlatform.etsy, Listing.external_listing_id.is_not(None)
+                Listing.platform == ListingPlatform.etsy,
+                Listing.external_listing_id.is_not(None),
+                Listing.is_primary.is_(True),
             )
         )
     ).all()

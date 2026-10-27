@@ -16,6 +16,7 @@ import { NotificationCenter } from "../components/common/NotificationCenter";
 import { MaintenanceOverlay } from "../components/common/MaintenanceOverlay";
 import { UnsavedChangesDialog } from "../components/common/UnsavedChangesDialog";
 import { useRefreshOnSync } from "../hooks/useRefreshOnSync";
+import { useAppUpdate } from "../hooks/useAppUpdate";
 import { DirtyRegistryProvider } from "../hooks/useDirtyRegistry";
 import { GuardProvider, useUnsavedChangesGuard } from "../hooks/useUnsavedChangesGuard";
 import { dashboardApi } from "../api/dashboard";
@@ -69,6 +70,8 @@ interface NavItem {
   to: string;
   icon: ReactNode;
   badge?: number;
+  /** A bare dot with no count, for "something here wants a look" that isn't a number. */
+  dot?: boolean;
   tone: NavBadgeTone;
   /** What the page is for — shown in the tooltip when the sidebar is collapsed to icons. */
   hint: string;
@@ -168,6 +171,13 @@ function NavButton({ item }: { item: NavItem }) {
             className={`absolute right-1.5 top-1 h-2 w-2 rounded-full ring-2 ring-white lg:hidden ${DOT_TONE_CLASSES[item.tone]}`}
           />
         )}
+        {item.dot && (
+          <span
+            role="img"
+            aria-label="Update available"
+            className={`h-2 w-2 flex-none rounded-full max-lg:absolute max-lg:right-1.5 max-lg:top-1 max-lg:ring-2 max-lg:ring-white ${DOT_TONE_CLASSES[item.tone]}`}
+          />
+        )}
       </Link>
       <NavTip label={item.label} hint={item.hint} badge={item.badge} />
     </div>
@@ -176,6 +186,9 @@ function NavButton({ item }: { item: NavItem }) {
 
 function RootChrome() {
   const badges = useNavBadges();
+  // Mounted here, on every page, so the scheduled release check runs for as long as the app is
+  // open rather than only while Settings is.
+  const { available: updateAvailable } = useAppUpdate();
   const dashboard: NavItem = {
     label: "Dashboard",
     to: "/",
@@ -230,7 +243,16 @@ function RootChrome() {
         <div className="flex flex-col gap-px border-t border-slate-200 pt-1.5">
           <NotificationCenter />
           <SyncStatusIndicator />
-          <NavButton item={{ label: "Settings", to: "/settings", icon: <SettingsIcon />, tone: "neutral", hint: "Stores, sync and app preferences" }} />
+          <NavButton
+            item={{
+              label: "Settings",
+              to: "/settings",
+              icon: <SettingsIcon />,
+              tone: "warm",
+              dot: updateAvailable,
+              hint: updateAvailable ? "A new version is available — see Settings › About" : "Stores, sync and app preferences",
+            }}
+          />
         </div>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">

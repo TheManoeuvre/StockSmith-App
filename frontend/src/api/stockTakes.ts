@@ -2,6 +2,7 @@ import { api, baseUrl, authHeaders, platformFetch, downloadCsv } from "./client"
 import type {
   ApproveResult,
   DueForCountItem,
+  ScopeItem,
   ScopePreview,
   StockCountSettings,
   StockTake,
@@ -27,6 +28,9 @@ export const stockTakesApi = {
 
   /** What a take with this scope would contain. Writes nothing. */
   previewScope: (scope: StockTakeScope) => api.post<ScopePreview>("/stock-takes/preview-scope", scope),
+
+  /** Every item the scope's filters match, with its last-counted date — for "Select items". */
+  scopeItems: (scope: StockTakeScope) => api.post<ScopeItem[]>("/stock-takes/scope-items", scope),
 
   create: (scope: StockTakeScope) => api.post<StockTakeCreated>("/stock-takes", scope),
   remove: (id: number) => api.delete<void>(`/stock-takes/${id}`),

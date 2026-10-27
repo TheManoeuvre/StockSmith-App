@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { platformsApi, type PlatformEnvironment } from "../../../api/platforms";
 import type { ListingPlatform } from "../../../api/types";
 import { openExternalUrl } from "../../../lib/tauri";
@@ -18,6 +18,7 @@ import { SquareLocationCard } from "./SquareLocationCard";
 import { StockPushesCard } from "./StockPushesCard";
 import { ProductScopeCard } from "./ProductScopeCard";
 import { StoreToolsCard } from "./StoreToolsCard";
+import { STORE_PANEL_DOM_IDS, type StorePanelId } from "./storePanels";
 import { formatRelative, stateChip, useStoreHealth } from "./useStoreHealth";
 
 /**
@@ -26,7 +27,7 @@ import { formatRelative, stateChip, useStoreHealth } from "./useStoreHealth";
  * (listing profiles), then the migration tools, and last the developer app that was set up
  * once. The old page interleaved all of these in the order they were built.
  */
-export function StorePage({ platform }: { platform: ListingPlatform }) {
+export function StorePage({ platform, panel }: { platform: ListingPlatform; panel?: StorePanelId }) {
   const label = PLATFORM_LABELS[platform];
   const queryClient = useQueryClient();
   const health = useStoreHealth(platform);
@@ -41,6 +42,14 @@ export function StorePage({ platform }: { platform: ListingPlatform }) {
   const [environment, setEnvironment] = useState<PlatformEnvironment>("production");
   const isSquare = platform === "square";
   const [squareDialogMode, setSquareDialogMode] = useState<"connect" | "change-location" | null>(null);
+
+  // The panels only render once the store is connected and its status has loaded, so the scroll
+  // waits for that rather than firing against a page that doesn't contain the target yet.
+  const panelReady = connected && !isSquare;
+  useEffect(() => {
+    if (!panel || !panelReady) return;
+    document.getElementById(STORE_PANEL_DOM_IDS[panel])?.scrollIntoView({ block: "start" });
+  }, [panel, panelReady, platform]);
 
   const invalidateStatus = () => {
     queryClient.invalidateQueries({
@@ -184,13 +193,15 @@ export function StorePage({ platform }: { platform: ListingPlatform }) {
               <ListingProfiles platform={platform}>
                 {platform === "etsy" && (
                   <Disclosure
+                    id={STORE_PANEL_DOM_IDS["profile-suggestions"]}
+                    defaultOpen={panel === "profile-suggestions"}
                     title="Suggest profiles from Etsy"
                     summary="group your existing listings into profiles"
                   >
                     <EtsyProfileProposalsPanel />
                   </Disclosure>
                 )}
-                <PlatformLimitsEditor platform={platform} />
+                <PlatformLimitsEditor platform={platform} defaultOpen={panel === "listing-limits"} />
               </ListingProfiles>
               <StoreToolsCard platform={platform} status={status} />
             </>

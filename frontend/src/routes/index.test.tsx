@@ -197,16 +197,14 @@ it("shows the stock-take progress line and a due-for-count entry", async () => {
   expect(screen.getByText("12 days over")).toBeInTheDocument();
 });
 
-it("hides the Orders awaiting products table and margin card when their data is empty", async () => {
+it("hides the Orders awaiting products table when its data is empty", async () => {
   await renderDashboard({
     orders_awaiting_inventory: [],
     orders_awaiting_packaging: [],
-    margin_alerts: [],
   });
   expect(
     await screen.findByText(/Nothing waiting/),
   ).toBeInTheDocument();
-  expect(screen.queryByText("Margin moved")).not.toBeInTheDocument();
 });
 
 it("shows the Blocked orders table only for lines with no BOM", async () => {

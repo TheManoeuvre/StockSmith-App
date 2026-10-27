@@ -16,7 +16,7 @@ from app.models.platform_sync_run import PlatformSyncRun, SyncRunMode, SyncRunSt
 from app.models.product import Product
 from app.models.variant import ProductVariant
 from app.schemas.platform import SyncCommitResult, SyncPreviewLine, SyncPreviewOrder, SyncPreviewResult
-from app.services import allocation, order_parcels
+from app.services import allocation, box_check, order_parcels
 from app.services.notification_alerts import (
     PendingCancellationAlert,
     PendingReviewAlert,
@@ -579,6 +579,7 @@ async def _upsert_lines(session: AsyncSession, order: Order, ext_order: External
                 sku=ext_line.sku,
                 needs_mapping=needs_mapping,
                 variation_text=ext_line.variation_text,
+                external_listing_id=ext_line.external_listing_id,
             )
         )
     await default_order_shipping_profile(session, order)
@@ -715,6 +716,13 @@ async def _reconcile_status(session: AsyncSession, order: Order, ext_order: Exte
                 f"{_PLATFORM_LABELS[platform]} shows this order as shipped, but no units are allocated "
                 "locally: check stock and allocate manually."
             )
+            return ReconcileOutcome(cancellation_resolved=cancellation_resolved)
+        if await box_check.order_needs_box_check(session, order):
+            # Same shape as the no-allocation case above and for the same reason: ship_order
+            # would refuse and, since commit_sync is one transaction, take the batch down with
+            # it. The marketplace already shows this shipped, but StockSmith must not consume
+            # two boxes unreviewed — flag it for the person instead.
+            order.sync_issue = box_check.BOX_CHECK_SYNC_ISSUE.format(platform=_PLATFORM_LABELS[platform])
             return ReconcileOutcome(cancellation_resolved=cancellation_resolved)
         await allocation.ship_order(session, order)
         return ReconcileOutcome(just_shipped=True, cancellation_resolved=cancellation_resolved)

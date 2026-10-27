@@ -8,6 +8,7 @@ import { ErrorBanner } from "../common/ErrorBanner";
 import { SaveIndicator } from "../common/SaveIndicator";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
+import { useMaterialCategories } from "../../hooks/useMaterialCategories";
 import { useManagedSave } from "../../hooks/useDirtyRegistry";
 import { formatMoney } from "../../lib/money";
 
@@ -35,6 +36,7 @@ export function OrderKittingSection({ orderId, currency }: { orderId: number; cu
     queryFn: () => ordersApi.getKittingOverrides(orderId),
   });
   const { data: materials } = useQuery({ queryKey: ["materials"], queryFn: materialsApi.list });
+  const { kittingBomCategoryNames } = useMaterialCategories();
 
   const seed = useMemo<KittingEdits | undefined>(() => {
     if (!summary) return undefined;
@@ -101,7 +103,13 @@ export function OrderKittingSection({ orderId, currency }: { orderId: number; cu
       ...Object.keys(overrides).map(Number),
       ...extras.map((o) => o.material_id),
     ]);
-    const firstUnused = materials?.find((m) => !usedIds.has(m.id));
+    // Default into a kitting-flagged category — the picker hides the rest, so landing on
+    // materials[0] (often filament) would show that row out of scope. Fall back to any unused
+    // material only when nothing is flagged yet, so the button still works.
+    const unused = (m: { id: number; is_active: boolean }) => m.is_active && !usedIds.has(m.id);
+    const firstUnused =
+      materials?.find((m) => unused(m) && kittingBomCategoryNames.has(m.category)) ??
+      materials?.find(unused);
     if (!firstUnused) return;
     setExtras((prev) => [
       ...prev,

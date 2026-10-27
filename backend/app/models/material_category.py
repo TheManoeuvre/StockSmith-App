@@ -23,6 +23,10 @@ class MaterialCategory(Base):
       so those BOM lines default to consumed. Nothing else does.
     * `auto_kitting_per_order` — services/kitting.py: only packaging is auto-added as a
       per-order kitting override.
+    * `kitting_check_duplicates` — services/box_check.py: an order whose items use two or more
+      DIFFERENT materials from this category (e.g. two box sizes, each capped to one per order)
+      is held from shipping until a person confirms which were used. Only meaningful alongside
+      `auto_kitting_per_order`, and the reason labels and tape belong in a category of their own.
     * `tracks_colour` / `tracks_material_type` — the Materials pages only offered the Colour and
       Material type fields for filament. Two flags rather than one, because they are genuinely
       independent: resin plausibly has a colour and no material type, wooden blanks plausibly
@@ -65,6 +69,7 @@ class MaterialCategory(Base):
     show_in_kitting_bom_list: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("0")
     )
+    kitting_check_duplicates: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))
     tracks_colour: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))
     tracks_material_type: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))
     cost_per_kg_display: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("0"))

@@ -464,3 +464,127 @@ describe("ReferenceDataTable reordering", () => {
     expect(screen.getByLabelText("filament Name")).toHaveValue("Filament PLA");
   });
 });
+
+describe("ReferenceDataTable dependent checkboxes", () => {
+  const rows = (over: Record<string, unknown>) => [
+    {
+      id: 1,
+      name: "Packaging",
+      show_in_kitting_bom_list: false,
+      auto_kitting_per_order: false,
+      kitting_check_duplicates: false,
+      usage_count: 0,
+      created_at: "2026-01-01T00:00:00Z",
+      ...over,
+    },
+  ];
+
+  function ChainHarness() {
+    const guard = useUnsavedChangesGuard();
+    return (
+      <GuardProvider guard={guard}>
+        <ReferenceDataTable
+          title="Material categories"
+          segment="material-categories"
+          queryKey={["material-categories"]}
+          api={{
+            list: materialCategoriesApi.list,
+            create: materialCategoriesApi.findOrCreate,
+            update: materialCategoriesApi.update,
+          }}
+          fields={[
+            { key: "name", label: "Name" },
+            { key: "show_in_kitting_bom_list", label: "Show in Kitting BOM list", type: "checkbox" },
+            {
+              key: "auto_kitting_per_order",
+              label: "Kitting: one per order",
+              type: "checkbox",
+              requires: "show_in_kitting_bom_list",
+            },
+            {
+              key: "kitting_check_duplicates",
+              label: "Kitting: check when an order has more than one",
+              type: "checkbox",
+              requires: "auto_kitting_per_order",
+            },
+          ]}
+          usageLabel={(n) => `${n} material${n === 1 ? "" : "s"}`}
+        />
+        <UnsavedChangesDialog {...guard.dialogProps} />
+      </GuardProvider>
+    );
+  }
+
+  async function open(over: Record<string, unknown>) {
+    setRoutes([
+      { method: "GET" as const, path: "/material-categories", respond: () => rows(over) },
+      {
+        method: "PATCH" as const,
+        path: /^\/material-categories\/\d+$/,
+        respond: (body: unknown) => ({ ...rows(over)[0], ...(body as object) }),
+      },
+      { method: "GET" as const, path: /.*/, respond: () => [] },
+    ] as never[]);
+    const user = userEvent.setup();
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <DirtyRegistryProvider>
+          <ChainHarness />
+        </DirtyRegistryProvider>
+      </QueryClientProvider>
+    );
+    await user.click(await screen.findByRole("button", { name: /^Packaging/ }));
+    return user;
+  }
+
+  const sw = (label: string) => screen.getByLabelText(`Packaging ${label}`);
+
+  it("locks each switch until the one before it is on", async () => {
+    await open({});
+
+    expect(sw("Show in Kitting BOM list")).toBeEnabled();
+    expect(sw("Kitting: one per order")).toBeDisabled();
+    expect(sw("Kitting: check when an order has more than one")).toBeDisabled();
+  });
+
+  it("unlocks the next switch as each prerequisite is turned on", async () => {
+    const user = await open({});
+
+    await user.click(sw("Show in Kitting BOM list"));
+    expect(sw("Kitting: one per order")).toBeEnabled();
+    expect(sw("Kitting: check when an order has more than one")).toBeDisabled();
+
+    await user.click(sw("Kitting: one per order"));
+    expect(sw("Kitting: check when an order has more than one")).toBeEnabled();
+  });
+
+  it("turning a prerequisite off switches everything downstream off", async () => {
+    const user = await open({
+      show_in_kitting_bom_list: true,
+      auto_kitting_per_order: true,
+      kitting_check_duplicates: true,
+    });
+
+    await user.click(sw("Show in Kitting BOM list"));
+
+    expect(sw("Kitting: one per order")).not.toBeChecked();
+    expect(sw("Kitting: check when an order has more than one")).not.toBeChecked();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => {
+      const patch = calls.find((c) => c.method === "PATCH");
+      expect(patch?.body).toMatchObject({
+        show_in_kitting_bom_list: false,
+        auto_kitting_per_order: false,
+        kitting_check_duplicates: false,
+      });
+    });
+  });
+
+  it("still lets a flag left on under an off prerequisite be switched off", async () => {
+    const user = await open({ auto_kitting_per_order: true });
+
+    expect(sw("Kitting: one per order")).toBeEnabled();
+    await user.click(sw("Kitting: one per order"));
+    expect(sw("Kitting: one per order")).not.toBeChecked();
+  });
+});

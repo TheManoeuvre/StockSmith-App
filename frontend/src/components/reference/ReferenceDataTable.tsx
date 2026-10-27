@@ -46,10 +46,27 @@ export interface ReferenceField {
    *  marketplace that isn't connected. */
   disabled?: boolean;
   hint?: string;
+  /** For type "checkbox": the key of another checkbox this one depends on. While that one is off
+   *  this one is disabled (with a note saying why), and switching that one off switches this one
+   *  off too, so the form can never hold a dependent flag whose prerequisite is off. Chains work:
+   *  turning off the first link clears everything downstream. */
+  requires?: string;
+  /** Explanatory text shown on hover over the field's label (and a small "i" beside it). */
+  tooltip?: string;
   /** For type "money": a blank is sent as null (the column is `Decimal | None`) instead of "". */
   nullable?: boolean;
   /** Rendered beside the field's label — a drift marker, a "calculated" badge. */
   adornment?: (row: ReferenceRow, form: Record<string, string>) => React.ReactNode;
+}
+
+/** Switches off every checkbox that (directly or through a chain) requires `key`. Mutates `form`. */
+function clearDependents(fields: ReferenceField[], form: Record<string, string>, key: string): void {
+  for (const f of fields) {
+    if (f.requires === key && form[f.key] === "true") {
+      form[f.key] = "false";
+      clearDependents(fields, form, f.key);
+    }
+  }
 }
 
 export interface ReferenceColumn<T extends ReferenceRow> {
@@ -472,17 +489,35 @@ function ExpandedRow<T extends ReferenceRow>({
             // Label after the control, not above it — the flex-col layout the text inputs use
             // puts a tick box under its own caption, which reads as a different question.
             const fieldId = `reference-row-${row.id}-${field.key}`;
+            const prerequisite = field.requires ? fields.find((f) => f.key === field.requires) : undefined;
+            const locked = prerequisite !== undefined && form[prerequisite.key] !== "true";
             return (
-              <div key={field.key} className="flex items-center gap-2 text-sm">
+              <div
+                key={field.key}
+                className={`flex items-center gap-2 text-sm ${locked ? "opacity-60" : ""}`}
+                title={locked ? `Turn on "${prerequisite.label}" first` : field.tooltip}
+              >
                 <Switch
                   id={fieldId}
                   ariaLabel={`${row.name} ${field.label}`}
                   checked={form[field.key] === "true"}
+                  // Locked only blocks turning ON: one left on under an off prerequisite by older
+                  // data must still be switchable off.
+                  disabled={locked && form[field.key] !== "true"}
                   onChange={(checked) =>
-                    setForm((prev) => ({ ...prev, [field.key]: checked ? "true" : "false" }))
+                    setForm((prev) => {
+                      const next = { ...prev, [field.key]: checked ? "true" : "false" };
+                      if (!checked) clearDependents(fields, next, field.key);
+                      return next;
+                    })
                   }
                 />
                 <label htmlFor={fieldId}>{field.label}</label>
+                {field.tooltip && (
+                  <span aria-hidden="true" className="cursor-help text-xs text-slate-400">
+                    ⓘ
+                  </span>
+                )}
               </div>
             );
           }

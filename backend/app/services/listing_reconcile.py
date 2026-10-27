@@ -72,8 +72,11 @@ _task: asyncio.Task | None = None
 
 async def _latest_attempt_status(
     session, platform: ListingPlatform
-) -> dict[tuple[int | None, int | None], tuple[ListingPushStatus, datetime | None]]:
-    """The most recent push attempt's (status, attempted_at) per (product_id, variant_id).
+) -> dict[tuple[int | None, int | None, int | None], tuple[ListingPushStatus, datetime | None]]:
+    """The most recent push attempt's (status, attempted_at) per (product_id, variant_id,
+    listing_id) — per listing, because a unit can have several listings sharing its SKU and
+    one failing must not be masked by a sibling succeeding. listing_id is None only on
+    attempts logged before listings were tracked individually.
 
     Only the latest attempt matters: an error followed by a success is a listing that is
     fine now, and a blocked listing that later succeeded is one the seller has fixed. The
@@ -84,18 +87,21 @@ async def _latest_attempt_status(
     latest_id = (
         select(func.max(PlatformListingPush.id))
         .where(PlatformListingPush.platform == platform)
-        .group_by(PlatformListingPush.product_id, PlatformListingPush.variant_id)
+        .group_by(
+            PlatformListingPush.product_id, PlatformListingPush.variant_id, PlatformListingPush.listing_id
+        )
         .scalar_subquery()
     )
     result = await session.execute(
         select(
             PlatformListingPush.product_id,
             PlatformListingPush.variant_id,
+            PlatformListingPush.listing_id,
             PlatformListingPush.status,
             PlatformListingPush.attempted_at,
         ).where(PlatformListingPush.id.in_(latest_id))
     )
-    return {(row.product_id, row.variant_id): (row.status, row.attempted_at) for row in result}
+    return {(row.product_id, row.variant_id, row.listing_id): (row.status, row.attempted_at) for row in result}
 
 
 async def _listings_to_check(session, platform: ListingPlatform, now: datetime) -> list[Listing]:
@@ -123,7 +129,10 @@ async def _listings_to_check(session, platform: ListingPlatform, now: datetime) 
     )
     picked: list[Listing] = []
     for listing in result.scalars():
-        status, attempted_at = latest.get((listing.product_id, listing.variant_id), (None, None))
+        status, attempted_at = latest.get(
+            (listing.product_id, listing.variant_id, listing.id),
+            latest.get((listing.product_id, listing.variant_id, None), (None, None)),
+        )
 
         if status == ListingPushStatus.blocked:
             # Due for its occasional re-check, or skipped outright — never merely stale.
