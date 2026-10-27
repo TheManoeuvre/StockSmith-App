@@ -255,15 +255,15 @@ equivalent at all.
 guardrail engine wired into the actual push pipeline — settings rows with no enforcement
 behind them would be actively misleading.
 
-### Listing profile fields: Etsy renewal and eBay handling time
+### eBay handling time on listing profiles is stored but unused
 
-**Problem:** The mockup's "Listing defaults" panel shows four fields; two already exist on
-`ListingProfile` (`etsy_processing_min`/`max`, `ebay_return_policy_id`) and were surfaced in
-the redesign. "Etsy renewal" (automatic/manual) and "eBay handling time" (business days) do
-not exist as columns anywhere.
+**Problem:** 0.25.0 added `ListingProfile.etsy_auto_renew` (sent to Etsy as `should_auto_renew`) and
+`ebay_handling_time_days`. The eBay value is saved and put into the draft metadata, but nothing
+consumes it: `EbayAdapter` has no draft-creation method, and eBay normally takes handling time from
+the postage policy.
 
-**Ask:** Add both as new `ListingProfile` columns (small model + migration change) once
-prioritized, sent through at draft-listing time the same way the existing fields are.
+**Ask:** When eBay draft creation is built, decide whether the profile field is still the right place
+for handling time, and either wire it through or drop it.
 
 ### Currency: round prices to a nearest increment
 
@@ -333,16 +333,3 @@ run a backup on quit.
 verifying Tauri actually exposes a reliable on-quit hook before promising this — the app is
 also designed to keep running in the background/tray (see `BackgroundSyncSettings`), which
 may make "on quit" a rarer event than the mockup assumes.
-
-### Deep-linking into a specific Settings panel
-
-**Problem:** The mockup's product slide-over has a "Stores" tab with an "Open listing
-profiles" link that jumps straight to Settings → Stores & sync → Etsy → the listing-profiles
-panel. Since 0.17.0 the Settings route carries the store in the URL
-(`?page=stores-sync&store=etsy`) and the sidebar's "Sync problem" link uses it, but there's
-still no param for which panel on the store page should be expanded or scrolled to.
-
-**Ask:** Extend `validateSearch` with an optional `panel` param and have the store page
-honour it on load (open the right Disclosure row, scroll it into view). Small,
-self-contained routing work — worth scoping on its own rather than bundling into a future
-settings change.
