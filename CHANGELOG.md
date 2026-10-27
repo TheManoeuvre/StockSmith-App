@@ -12,6 +12,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-27
+
 ### Added
 
 - **A new About page in Settings.** It shows the installed version, a link to the project on GitHub,
@@ -42,9 +44,30 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   with the wrong boxes recorded: boxes you remove go back into stock (or are written off if you untick
   that), and the order's packaging cost and net profit update. A preview shows the stock and profit
   effect before you save, and **Mark reviewed, no change** clears an order you've checked and found right.
+- **Several Etsy listings can share one SKU.** For A/B tests or free-shipping variants, sync now finds
+  every listing holding a SKU and keeps them on one shared stock pool: a stock change is pushed to all
+  of them, and each listing's push status is tracked on its own, so one blocked listing no longer holds
+  up the rest. The Etsy sync panel shows the extra listings as "also listed" rows. You can label a
+  listing, or make an additional one the primary.
+- **Etsy renewal and eBay handling time on listing profiles.** A profile can now say whether Etsy
+  listings auto-renew, and store an eBay handling time. The eBay handling time is saved but not used yet.
+- **Links straight to a Settings section.** The store page can open directly at Listing profiles,
+  Profile suggestions or Listing limits.
+- **Order lines show Etsy's listing id**, for telling apart orders from listings that share a SKU.
 
 ### Changed
 
+- **The Add product form is restyled.** Store chips use each store's own colour, there is a Category
+  field (a new category is created when you save), and Save sits in a footer next to a new Cancel button.
+- **The made-to-order flag and Inactive badge sit under the product name** in the products list instead
+  of wrapping beside it.
+- **A new kitting line on an order defaults to a kitting material** rather than the first unused
+  material, which was often filament.
+- **eBay stock-push failures are readable.** Settings > eBay > Stock pushes shows eBay's reason in plain
+  English, with each listing listed once and dropping off when a later push succeeds.
+- **Etsy API limits come from Etsy.** StockSmith uses the daily quota Etsy reports, including calls made
+  by anything else sharing the API key, instead of a fixed budget.
+- **The Margin moved card is gone from the dashboard.**
 - **The update prompt at launch has been removed.** Updates are now offered from Settings > About, so
   "Later" no longer asks again on every start.
 - **"Only what's due for counting" is now on by default** when you start a stock take. Untick it
