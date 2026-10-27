@@ -12,6 +12,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.25.1] - 2026-10-27
+
+- **Fixes StockSmith getting stuck on "Reconnecting" after updating to 0.25.0.** The app window opened but
+  never started its background service, so nothing loaded. If you're stuck on 0.25.0, install this update
+  from the installer on the Releases page; your data is untouched.
+
 ## [0.25.0] - 2026-10-27
 
 ### Added
