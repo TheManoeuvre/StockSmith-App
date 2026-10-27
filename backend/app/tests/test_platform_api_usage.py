@@ -90,3 +90,62 @@ async def test_adapter_request_helpers_increment_the_counter(session, monkeypatc
 
     assert await platform_api_usage.usage_today(session, ListingPlatform.etsy) == 1
     assert await platform_api_usage.usage_today(session, ListingPlatform.ebay) == 1
+
+
+async def test_provider_headers_override_budget_and_local_count(session):
+    platform_api_usage.record(ListingPlatform.etsy, 7)  # local tally, should be ignored
+
+    platform_api_usage.observe_limits(ListingPlatform.etsy, 2_000, 1_500)
+
+    assert platform_api_usage.daily_budget(ListingPlatform.etsy) == 2_000
+    assert await platform_api_usage.usage_today(session, ListingPlatform.etsy) == 500
+    assert platform_api_usage.soft_limit(ListingPlatform.etsy) == 1_600
+    # Other platforms keep their fallback.
+    assert platform_api_usage.daily_budget(ListingPlatform.ebay) == 5_000
+
+
+async def test_lowest_remaining_wins_when_responses_arrive_out_of_order(session):
+    platform_api_usage.observe_limits(ListingPlatform.etsy, 10_000, 9_000)
+    platform_api_usage.observe_limits(ListingPlatform.etsy, 10_000, 9_500)  # stale, late
+
+    assert await platform_api_usage.usage_today(session, ListingPlatform.etsy) == 1_000
+
+
+async def test_yesterdays_observation_is_ignored(session):
+    from datetime import date
+
+    platform_api_usage.observe_limits(ListingPlatform.etsy, 2_000, 10)
+    _, limit, remaining = platform_api_usage._observed[ListingPlatform.etsy]
+    platform_api_usage._observed[ListingPlatform.etsy] = (date(2000, 1, 1), limit, remaining)
+
+    assert platform_api_usage.daily_budget(ListingPlatform.etsy) == 10_000
+
+
+async def test_etsy_request_once_reads_quota_headers(session, monkeypatch):
+    import httpx
+
+    from app.services.platforms.etsy import EtsyAdapter
+
+    class _Conn:
+        access_token = "t"
+
+    class _FakeClient:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def request(self, *a, **k):
+            return httpx.Response(
+                200, json={}, headers={"x-limit-per-day": "5000", "x-remaining-today": "4990"}
+            )
+
+    monkeypatch.setattr("app.services.platforms.etsy.httpx.AsyncClient", _FakeClient)
+    await EtsyAdapter("i", "s")._request_once(_Conn(), "GET", "/x")
+
+    assert platform_api_usage.daily_budget(ListingPlatform.etsy) == 5_000
+    assert await platform_api_usage.usage_today(session, ListingPlatform.etsy) == 10

@@ -369,7 +369,20 @@ class EtsyAdapter:
         # retries included (this helper is re-entered per attempt) — see
         # services/platform_api_usage.
         platform_api_usage.record(ListingPlatform.etsy)
+        self._observe_quota(response)
         return response
+
+    @staticmethod
+    def _observe_quota(response: httpx.Response) -> None:
+        """Feeds Etsy's own daily quota (x-limit-per-day / x-remaining-today) to
+        platform_api_usage so budgets follow the real limit, not a hard-coded one."""
+        try:
+            limit = int(response.headers["x-limit-per-day"])
+            remaining = int(response.headers["x-remaining-today"])
+        except (KeyError, ValueError):
+            return
+        if limit > 0 and remaining >= 0:
+            platform_api_usage.observe_limits(ListingPlatform.etsy, limit, remaining)
 
     async def _ensure_fresh(self, session, connection: PlatformConnection) -> None:
         expires_at = ensure_utc(connection.access_token_expires_at)
