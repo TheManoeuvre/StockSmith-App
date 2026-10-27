@@ -50,7 +50,7 @@ describe("StockPushesCard", () => {
     });
     renderCard(1);
 
-    expect(await screen.findByText(/Variant 1: Rejected 5/)).toBeInTheDocument();
+    expect(await screen.findByText(/\(Variant 1\): Rejected 5/)).toBeInTheDocument();
     expect(screen.queryByText(/Rejected 3/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Variant 2/)).not.toBeInTheDocument();
     expect(screen.getAllByRole("listitem")).toHaveLength(1);
