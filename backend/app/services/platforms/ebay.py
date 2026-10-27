@@ -160,6 +160,60 @@ def _is_already_migrated_error(migration_response: dict) -> bool:
     return False
 
 
+# eBay prefixes many request errors' `message` with this boilerplate, and sometimes sends
+# nothing else — the actual reason then only appears in `parameters`. Confirmed live on
+# bulkUpdatePriceQuantity's 25002: "A user error has occurred. Model is not allowed as a
+# variation specific.", with the reason repeated as a parameter value.
+_GENERIC_EBAY_MESSAGE_PREFIXES = ("A user error has occurred.", "A system error has occurred.")
+
+
+def _describe_ebay_errors(payload: dict) -> str | None:
+    """Plain-English summary of the errors in an eBay REST error payload — either the
+    plain {"errors": [...]} shape or a bulk {"responses": [{"errors": [...]}, ...]} one.
+
+    These strings end up verbatim in the Settings alert box, where the raw JSON was
+    unreadable. Warnings are dropped (eBay attaches unrelated ones, like the business
+    policies notice, to every response), duplicates across the per-SKU and per-offer
+    responses collapse, and the errorId is kept at the end since it's what eBay's docs and
+    support key on. Parameters are only consulted when the message is pure boilerplate, and
+    then only values that read as prose — the rest are indices and field names that mean
+    nothing out of context.
+
+    Returns None when there's nothing recognisable, so callers fall back to the raw text."""
+    errors = list(payload.get("errors") or [])
+    for response in payload.get("responses") or []:
+        if isinstance(response, dict):
+            errors.extend(response.get("errors") or [])
+
+    descriptions: list[str] = []
+    for error in errors:
+        if not isinstance(error, dict):
+            continue
+        full_message = (error.get("message") or "").strip()
+        message = full_message
+        for prefix in _GENERIC_EBAY_MESSAGE_PREFIXES:
+            message = message.removeprefix(prefix).strip()
+        sentences = [message] if message else []
+        long_message = (error.get("longMessage") or "").strip()
+        if long_message and long_message not in (full_message, message):
+            sentences.append(long_message)
+        if not sentences:
+            for parameter in error.get("parameters") or []:
+                value = (parameter.get("value") or "").strip() if isinstance(parameter, dict) else ""
+                if " " in value and value not in sentences:
+                    sentences.append(value)
+        if not sentences and full_message:
+            sentences.append(full_message)
+        if not sentences:
+            continue
+        text = " ".join(s if s.endswith((".", "!", "?")) else f"{s}." for s in sentences)
+        if error.get("errorId") is not None:
+            text += f" (eBay error {error['errorId']})"
+        if text not in descriptions:
+            descriptions.append(text)
+    return " ".join(descriptions) or None
+
+
 def _evaluate_eligibility(
     listing_type: str,
     skus: list[str],
@@ -1250,6 +1304,12 @@ class EbayAdapter:
             session, connection, "POST", f"{self.api_base}/sell/inventory/v1/bulk_update_price_quantity", json=body
         )
         if response.status_code != 200:
+            try:
+                description = _describe_ebay_errors(response.json())
+            except ValueError:
+                description = None
+            if description:
+                raise PlatformSyncError(f"eBay rejected the stock update for {sku}: {description}")
             raise PlatformSyncError(f"Failed to update eBay inventory quantity: {response.status_code} {response.text}")
 
         result = response.json()
@@ -1258,9 +1318,8 @@ class EbayAdapter:
             raise PlatformSyncError(f"eBay bulk_update_price_quantity response did not include SKU '{sku}'")
         status_code = matched.get("statusCode")
         if status_code is not None and not (200 <= status_code < 300):
-            raise PlatformSyncError(
-                f"eBay rejected the quantity update for SKU '{sku}': {status_code} {matched.get('errors')}"
-            )
+            description = _describe_ebay_errors(result) or f"{status_code} {matched.get('errors')}"
+            raise PlatformSyncError(f"eBay rejected the stock update for {sku}: {description}")
 
     async def _fetch_offers(self, session, connection: PlatformConnection, sku: str) -> list[dict]:
         """GET .../offer?sku=... — the raw offer objects for one SKU.

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
-import { platformsApi, type BulkListingSyncResult, type PlatformSyncSummary } from "../../../api/platforms";
+import { platformsApi, type BulkListingSyncResult, type ListingPushRead, type PlatformSyncSummary } from "../../../api/platforms";
 import type { ListingPlatform } from "../../../api/types";
 import { PLATFORM_LABELS } from "../../../lib/platforms";
 import { ErrorBanner } from "../../common/ErrorBanner";
@@ -36,10 +36,19 @@ export function StockPushesCard({
     queryFn: () => platformsApi.listingPushLog(platform, RECENT_PUSH_CHECK_SIZE, 0),
     refetchInterval: 30_000,
   });
-  const recentFailures = pushLog?.items.filter((p) => p.status === "error") ?? [];
+  // One entry per listing: a failing listing retries hourly, so the raw log repeats the same
+  // error for it, and an older failure already superseded by a successful push isn't news.
+  // The log is newest-first, so the first row seen for a unit is its current state.
+  const latestPerUnit = new Map<string, ListingPushRead>();
+  for (const p of pushLog?.items ?? []) {
+    const key = `${p.product_id}:${p.variant_id ?? ""}`;
+    if (!latestPerUnit.has(key)) latestPerUnit.set(key, p);
+  }
+  const latestPushes = [...latestPerUnit.values()];
+  const recentFailures = latestPushes.filter((p) => p.status === "error");
   // Blocked pushes carry the fix in their error_message (the adapter writes it for exactly
   // this), so the detail list below is the whole of the guidance — there is nothing to add.
-  const recentBlocked = pushLog?.items.filter((p) => p.status === "blocked") ?? [];
+  const recentBlocked = latestPushes.filter((p) => p.status === "blocked");
 
   const checkAllMutation = useMutation({
     mutationFn: () => platformsApi.checkAllListings(platform),
