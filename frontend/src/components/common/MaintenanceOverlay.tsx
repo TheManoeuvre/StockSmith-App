@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { fetchSystemStatus } from "../../api/client";
 import type { SystemStatus } from "../../api/restore";
 import { getSettings } from "../../lib/tauri";
+import { UpdateFromOverlay } from "./UpdateFromOverlay";
 
 const POLL_INTERVAL_MS = 3000;
 
@@ -105,6 +106,7 @@ export function MaintenanceOverlay() {
             ? "StockSmith is restoring a backup on the host computer. This device will reconnect on its own."
             : "Can't reach StockSmith right now. This will clear as soon as it's back."}
         </p>
+        {!inMaintenance && <UpdateFromOverlay />}
       </div>
     </div>
   );

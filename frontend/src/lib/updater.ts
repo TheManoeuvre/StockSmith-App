@@ -73,6 +73,14 @@ export async function installUpdate(onProgress?: (loaded: number, total: number 
   }
 }
 
+/** Calls back when the tray's "Check for updates" is clicked. Returns an unsubscribe function;
+ * a no-op outside the desktop app. */
+export async function onCheckForUpdatesRequested(callback: () => void): Promise<() => void> {
+  if (!isTauri) return () => {};
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen("check-for-updates", callback);
+}
+
 const IGNORED_UPDATE_KEY = "ignoredUpdateVersion";
 const IGNORED_UPDATE_LOCAL_KEY = "stocksmith-ignored-update";
 
