@@ -50,19 +50,34 @@ export function AttributeValuesPanel({ product }: { product: Product }) {
     queryFn: () => productsApi.listVariants(product.id),
   });
 
+  // Collapsed by default, like Variant attributes: it's occasional housekeeping.
+  const [isExpanded, setIsExpanded] = useState(false);
+
   const slots = attributeSlotValues(product, variants ?? []);
   if (slots.length === 0 || slots.every((s) => s.values.length === 0)) return null;
 
   return (
     <div className="flex flex-col gap-3 rounded bg-white p-4 shadow-sm">
-      <div>
-        <h3 className="text-sm font-medium">Attribute values</h3>
+      <button
+        type="button"
+        onClick={() => setIsExpanded((v) => !v)}
+        aria-expanded={isExpanded}
+        className="flex items-center gap-2 self-start text-left text-sm font-medium"
+      >
+        <span aria-hidden="true" className="text-xs text-slate-400">
+          {isExpanded ? "▾" : "▸"}
+        </span>
+        Attribute values
+        <span className="font-normal text-slate-500">: rename or merge values</span>
+      </button>
+      {isExpanded && (
         <p className="text-xs text-slate-500">
           Rename an attribute or one of its values everywhere it appears, or merge two values that mean the same
           thing. SKUs are never changed; marketplace listings show the new name when next pushed.
         </p>
-      </div>
-      {slots.map((slot) => (
+      )}
+      {isExpanded &&
+        slots.map((slot) => (
         <div key={slot.slot} className="flex flex-col gap-1">
           <SlotHeading product={product} slot={slot.slot} name={slot.name} />
           <ul className="flex flex-col gap-1">
