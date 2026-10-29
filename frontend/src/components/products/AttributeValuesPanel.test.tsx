@@ -51,6 +51,10 @@ function renderPanel() {
   );
 }
 
+async function expand(user = userEvent.setup()) {
+  await user.click(await screen.findByRole("button", { name: /^Attribute values/ }));
+}
+
 let renameResponse: () => unknown;
 
 beforeEach(() => {
@@ -70,6 +74,7 @@ beforeEach(() => {
 it("renames an attribute through the product PATCH, naming only that slot", async () => {
   const user = userEvent.setup();
   renderPanel();
+  await expand(user);
 
   await user.click(await screen.findByRole("button", { name: "Rename attribute Size" }));
   const input = screen.getByLabelText("New name for attribute Size");
@@ -86,7 +91,11 @@ it("renames an attribute through the product PATCH, naming only that slot", asyn
 });
 
 it("lists each attribute's distinct values, including those only on disabled variants", async () => {
+  const user = userEvent.setup();
   renderPanel();
+  expect(await screen.findByRole("button", { name: /^Attribute values/ })).toHaveAttribute("aria-expanded", "false");
+  expect(screen.queryByText("4 Stud")).not.toBeInTheDocument();
+  await expand(user);
 
   expect(await screen.findByText("Size")).toBeInTheDocument();
   expect(screen.getByText("4 Stud")).toBeInTheDocument();
@@ -100,6 +109,7 @@ it("lists each attribute's distinct values, including those only on disabled var
 it("renames a value with the slot it belongs to", async () => {
   const user = userEvent.setup();
   renderPanel();
+  await expand(user);
 
   await user.click(await screen.findByRole("button", { name: "Rename 4 Stud Standard" }));
   const input = screen.getByLabelText("New name for 4 Stud Standard");
@@ -119,6 +129,7 @@ it("warns when live listings will keep the old label until pushed", async () => 
   renameResponse = () => ({ variants_updated: 2, live_platforms: ["etsy"] });
   const user = userEvent.setup();
   renderPanel();
+  await expand(user);
 
   await user.click(await screen.findByRole("button", { name: "Rename 4 Stud Standard" }));
   await user.type(screen.getByLabelText("New name for 4 Stud Standard"), " X{Enter}");
@@ -132,6 +143,7 @@ it("explains a 409 as a merge rather than a rename", async () => {
   };
   const user = userEvent.setup();
   renderPanel();
+  await expand(user);
 
   await user.click(await screen.findByRole("button", { name: "Rename 4 Stud Standard" }));
   const input = screen.getByLabelText("New name for 4 Stud Standard");
@@ -154,6 +166,7 @@ it("explains a 409 as a merge rather than a rename", async () => {
 it("opens the merge modal from a value's own button", async () => {
   const user = userEvent.setup();
   renderPanel();
+  await expand(user);
 
   await user.click(await screen.findByRole("button", { name: "Merge 4 Stud Standard into another value" }));
 
