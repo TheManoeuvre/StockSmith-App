@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
-use tauri::{Manager, State, WindowEvent};
+use tauri::{Emitter, Manager, State, WindowEvent};
 use tauri_plugin_autostart::ManagerExt;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
 use tauri_plugin_shell::process::CommandEvent;
@@ -19,6 +19,9 @@ const READY_TIMEOUT_SECS: u64 = 20;
 /// someone who was doing something else. Also honoured on a manual launch, which is what
 /// makes it testable without rebooting.
 const HIDDEN_ARG: &str = "--hidden";
+
+/// Emitted to the webview when the tray's "Check for updates" is clicked.
+const CHECK_FOR_UPDATES_EVENT: &str = "check-for-updates";
 
 /// How often the supervisor asks the backend whether it is still there, and how long it
 /// waits after a failed restart before trying again. The backoff exists so a backend that
@@ -523,14 +526,22 @@ fn confirm_and_quit(app: &tauri::AppHandle) {
 fn build_tray(app: &tauri::AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let open = MenuItem::with_id(app, "open", "Open StockSmith", true, None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit StockSmith", true, None::<&str>)?;
+    // Works with the backend down, which is the point: the updater runs in this shell, so a
+    // release that fixes a broken backend can be installed without the app ever having loaded.
+    let updates = MenuItem::with_id(app, "check_updates", "Check for updates", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
-    let menu = Menu::with_items(app, &[&open, &separator, &quit])?;
+    let menu = Menu::with_items(app, &[&open, &updates, &separator, &quit])?;
 
     let mut builder = TrayIconBuilder::with_id("main")
         .tooltip("StockSmith — syncing in the background")
         .menu(&menu)
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => show_main_window(app),
+            "check_updates" => {
+                show_main_window(app);
+                // The frontend owns the update UI; it navigates to Settings > About.
+                let _ = app.emit(CHECK_FOR_UPDATES_EVENT, ());
+            }
             "quit" => confirm_and_quit(app),
             _ => {}
         });
@@ -620,8 +631,17 @@ pub fn run() {
             }
 
             let handle = app.handle().clone();
+            // start_backend runs as its own task so a panic inside it comes back here as an
+            // error. Left unobserved, the panic is silent: that is how 0.25.0 shipped a window
+            // that never started its backend and said nothing about why.
             tauri::async_runtime::spawn(async move {
-                start_backend(handle).await;
+                if let Err(error) = tauri::async_runtime::spawn(start_backend(handle.clone())).await {
+                    append_backend_log(&format!("[shell] Backend startup task failed: {error}"));
+                    show_startup_error(
+                        &handle,
+                        "StockSmith could not start its backend. Check backend.log under %LOCALAPPDATA%\\StockSmith\\, or use Check for updates in the tray menu - a newer version may fix this.",
+                    );
+                }
             });
             Ok(())
         })

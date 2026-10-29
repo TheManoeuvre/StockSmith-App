@@ -1,5 +1,5 @@
-import type { ReactNode } from "react";
-import { createRootRoute, Link, Outlet, useMatchRoute } from "@tanstack/react-router";
+import { useEffect, type ReactNode } from "react";
+import { createRootRoute, Link, Outlet, useMatchRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import {
   DashboardIcon,
@@ -17,6 +17,7 @@ import { MaintenanceOverlay } from "../components/common/MaintenanceOverlay";
 import { UnsavedChangesDialog } from "../components/common/UnsavedChangesDialog";
 import { useRefreshOnSync } from "../hooks/useRefreshOnSync";
 import { useAppUpdate } from "../hooks/useAppUpdate";
+import { onCheckForUpdatesRequested } from "../lib/updater";
 import { DirtyRegistryProvider } from "../hooks/useDirtyRegistry";
 import { GuardProvider, useUnsavedChangesGuard } from "../hooks/useUnsavedChangesGuard";
 import { dashboardApi } from "../api/dashboard";
@@ -46,6 +47,21 @@ function RootLayout() {
 
 function RootShell() {
   const guard = useUnsavedChangesGuard();
+  const navigate = useNavigate();
+  // The tray's "Check for updates". Settings > About doesn't need the backend, so this works
+  // even while the Reconnecting overlay is up (the overlay stands down on /settings).
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let cancelled = false;
+    void onCheckForUpdatesRequested(() => navigate({ to: "/settings", search: { page: "about" } })).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+  }, [navigate]);
   // No window-close prompt any more, deliberately. Closing the window now hides it to the
   // tray (see src-tauri/lib.rs's on_window_event), so unsaved work isn't going anywhere —
   // the window is still there, with the form still in it. Asking "discard your changes?"
