@@ -43,7 +43,8 @@ it("shows the store's panels while the product is on", () => {
 it("collapses to a one-line note when the product is off", () => {
   renderSection(product([{ platform: "ebay", is_on: false, is_locked: false }]));
   expect(screen.queryByText("eBay panels")).not.toBeInTheDocument();
-  expect(screen.getByText(/isn't sold on eBay/)).toBeInTheDocument();
+  expect(screen.getByText(/eBay setup is hidden/)).toBeInTheDocument();
+  expect(screen.getByText("Not sold on eBay")).toBeInTheDocument();
 });
 
 it("treats a product with no recorded state as on", () => {

@@ -30,7 +30,7 @@ Colour meaning is fixed by the app: **slate** = neutral chrome, **blue-600** = t
 - Icons (`OrdersIcon` etc.) are 16px `currentColor` glyphs — colour them via the parent's `text-*` class.
 
 ### Where the truth lives
-Read `styles.css` (and the `_ds_bundle.css` it imports) for the exact class list, and `components/<group>/<Name>/<Name>.prompt.md` for each component's props and verified example JSX.
+Read `styles.css` (and the `_ds_bundle.css` it imports) for the exact class list. The custom properties there are Tailwind's own: **ignore every `--tw-*` and `--default-*` variable** (compiler plumbing for shadows, rings, transforms and defaults — not StockSmith design tokens, never reference them in your own code). The real vocabulary is the utility classes above plus the `--color-*`, `--text-*` and `--font-*` theme variables. For each component's props and verified example JSX, read `components/<group>/<Name>/<Name>.prompt.md`.
 
 ### Idiomatic screen
 ```jsx

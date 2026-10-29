@@ -47,10 +47,10 @@ export function ProductStoreSection({
   });
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-3 border-t border-slate-200 pt-3">
       <div className="flex items-center justify-between gap-3">
-        <h3 className="text-md font-semibold">{label}</h3>
-        <label className="flex items-center gap-2 text-sm text-slate-600">
+        <h3 className="text-sm font-semibold">{label}</h3>
+        <label className="flex items-center gap-2 text-[12.5px] text-slate-600">
           {state.is_locked
             ? "Live: end the listing to turn off"
             : state.is_on
@@ -68,9 +68,9 @@ export function ProductStoreSection({
       {state.is_on ? (
         children
       ) : (
-        <p className="rounded bg-white p-4 text-sm text-slate-500 shadow-sm">
-          This product isn't sold on {label}. Its {label} setup, sync checks and warnings are hidden and
-          skipped. Turn it on above to bring them back.
+        // One line, no card: an empty state shouldn't carry the weight of a section.
+        <p className="text-[11px] text-slate-500">
+          {label} setup is hidden and {label} is skipped when pushing.
         </p>
       )}
     </div>

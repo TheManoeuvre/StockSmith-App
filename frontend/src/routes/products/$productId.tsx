@@ -850,7 +850,7 @@ function ProductDetail() {
         )}
 
         {activeTab === "stores" && (
-          <section className="flex flex-col gap-6">
+          <section className="flex flex-col gap-4">
             <ProductStoresSettings
               product={product}
               showBuildableToggle={!product.is_bundle}
