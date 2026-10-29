@@ -167,19 +167,19 @@ it("keeps warnings behind the expander so blockers stay prominent", async () => 
   await screen.findByText("Ready to draft");
   expect(screen.queryByText("No image attached.")).toBeNull();
 
-  await userEvent.click(screen.getByText("Show"));
+  await userEvent.click(screen.getByRole("button", { name: /listing setup/ }));
   expect(await screen.findByText("No image attached.")).toBeTruthy();
 });
 
 it("says which fallback the title came from rather than passing it off as authored", async () => {
   renderPanel();
-  await userEvent.click(await screen.findByText("Show"));
+  await userEvent.click(await screen.findByRole("button", { name: /listing setup/ }));
   expect(await screen.findByText(/Using the product name: Brick Pencil Pot/)).toBeTruthy();
 });
 
 it("counts title characters against the platform's own limit", async () => {
   renderPanel();
-  await userEvent.click(await screen.findByText("Show"));
+  await userEvent.click(await screen.findByRole("button", { name: /listing setup/ }));
 
   const title = await screen.findByRole("textbox", { name: /listing title/i });
   await userEvent.type(title, "Brick Pot");
@@ -200,7 +200,7 @@ it("flags a title over the cap while still letting it be typed", async () => {
     },
   ]);
   renderPanel();
-  await userEvent.click(await screen.findByText("Show"));
+  await userEvent.click(await screen.findByRole("button", { name: /listing setup/ }));
 
   const title = await screen.findByRole("textbox", { name: /listing title/i });
   await userEvent.type(title, "Far too long a title");
@@ -211,7 +211,7 @@ it("flags a title over the cap while still letting it be typed", async () => {
 
 it("offers the platform's profiles behind an explicit choice, with no default", async () => {
   renderPanel();
-  await userEvent.click(await screen.findByText("Show"));
+  await userEvent.click(await screen.findByRole("button", { name: /listing setup/ }));
 
   const select = await screen.findByRole("combobox", { name: /Listing profile/i });
   const options = [...(select as HTMLSelectElement).options].map((o) => o.textContent);
@@ -223,7 +223,7 @@ it("shows what the chosen profile commits the listing to, by name rather than id
   // The name of a profile says nothing about its consequences; the category and
   // processing profile are what the user is actually deciding.
   renderPanel();
-  await userEvent.click(await screen.findByText("Show"));
+  await userEvent.click(await screen.findByRole("button", { name: /listing setup/ }));
   await userEvent.selectOptions(await screen.findByRole("combobox", { name: /Listing profile/i }), "1");
 
   expect(await screen.findByText("Home & Living › Office › Pencil Holders")).toBeTruthy();
@@ -237,7 +237,7 @@ it("shows what the chosen profile commits the listing to, by name rather than id
 
 it("names what a chosen profile is missing instead of leaving a blank", async () => {
   renderPanel();
-  await userEvent.click(await screen.findByText("Show"));
+  await userEvent.click(await screen.findByRole("button", { name: /listing setup/ }));
   await userEvent.selectOptions(await screen.findByRole("combobox", { name: /Listing profile/i }), "2");
 
   expect(await screen.findByText("1990s")).toBeTruthy();
@@ -248,13 +248,13 @@ it("names what a chosen profile is missing instead of leaving a blank", async ()
 it("summarises the saved profile on open without a fresh pick", async () => {
   currentSettings = { ...SETTINGS, listing_profile_id: 1 };
   renderPanel();
-  await userEvent.click(await screen.findByText("Show"));
+  await userEvent.click(await screen.findByRole("button", { name: /listing setup/ }));
   expect(await screen.findByText("Home & Living › Office › Pencil Holders")).toBeTruthy();
 });
 
 it("saves the chosen profile and the listing copy together", async () => {
   renderPanel();
-  await userEvent.click(await screen.findByText("Show"));
+  await userEvent.click(await screen.findByRole("button", { name: /listing setup/ }));
 
   await userEvent.selectOptions(await screen.findByRole("combobox", { name: /Listing profile/i }), "2");
   await userEvent.type(await screen.findByRole("textbox", { name: /listing title/i }), "Etsy title");
@@ -302,7 +302,7 @@ function renderGuarded(managed = true) {
 
 it("reports its edits as unsaved and lets the slide-over footer save them", async () => {
   renderGuarded();
-  await userEvent.click(await screen.findByText("Show"));
+  await userEvent.click(await screen.findByRole("button", { name: /listing setup/ }));
   const title = await screen.findByRole("textbox", { name: /listing title/i });
   expect(screen.getByTestId("footer").textContent).toBe("No changes");
 
@@ -321,16 +321,16 @@ it("reports its edits as unsaved and lets the slide-over footer save them", asyn
 
 it("asks before collapsing over unsaved edits, and discards them only on confirmation", async () => {
   renderGuarded();
-  await userEvent.click(await screen.findByText("Show"));
+  await userEvent.click(await screen.findByRole("button", { name: /listing setup/ }));
   await userEvent.type(await screen.findByRole("textbox", { name: /listing title/i }), "Half typed");
 
-  await userEvent.click(screen.getByText("Hide"));
+  await userEvent.click(screen.getByRole("button", { name: /listing setup/ }));
   expect(await screen.findByText("Discard changes")).toBeTruthy();
   await userEvent.click(screen.getByText("Keep editing"));
   // Still open, edits intact.
   expect((screen.getByRole("textbox", { name: /listing title/i }) as HTMLInputElement).value).toBe("Half typed");
 
-  await userEvent.click(screen.getByText("Hide"));
+  await userEvent.click(screen.getByRole("button", { name: /listing setup/ }));
   await userEvent.click(await screen.findByText("Discard changes"));
   expect(screen.queryByRole("textbox", { name: /listing title/i })).toBeNull();
   // Hidden dirty state would keep the footer nagging about something nobody can see.
@@ -339,7 +339,7 @@ it("asks before collapsing over unsaved edits, and discards them only on confirm
 
 it("keeps its own Save button when mounted outside a managed slide-over", async () => {
   renderGuarded(false);
-  await userEvent.click(await screen.findByText("Show"));
+  await userEvent.click(await screen.findByRole("button", { name: /listing setup/ }));
   const save = await screen.findByRole("button", { name: "Save" });
   expect((save as HTMLButtonElement).disabled).toBe(true);
   await userEvent.type(await screen.findByRole("textbox", { name: /listing title/i }), "x");

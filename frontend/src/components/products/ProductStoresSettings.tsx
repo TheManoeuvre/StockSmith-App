@@ -5,6 +5,7 @@ import type { Product } from "../../api/types";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { useManagedSave } from "../../hooks/useDirtyRegistry";
 import { ErrorBanner } from "../common/ErrorBanner";
+import { FieldRow } from "../common/FieldRow";
 
 interface StoresSettingsForm {
   ceiling: string;
@@ -76,27 +77,27 @@ export function ProductStoresSettings({
   });
 
   return (
-    <div className="flex flex-col gap-2 rounded bg-white p-4 text-sm shadow-sm">
-      <label className="flex items-center gap-3">
-        <span className="shrink-0 whitespace-nowrap text-slate-600">
-          Platform quantity ceiling
+    // A plain setting, not a status: no card, so it doesn't compete with the sync card below.
+    <div className="flex flex-col gap-2 text-sm">
+      <FieldRow label="Platform quantity ceiling">
+        <span className="flex items-center gap-3">
+          <input
+            className="w-28 shrink-0 rounded border border-slate-300 px-2 py-1 text-sm tabular-nums"
+            placeholder="No cap"
+            value={form.ceiling}
+            onChange={(e) => setForm((prev) => ({ ...prev, ceiling: e.target.value }))}
+          />
+          <span className="text-[11px] text-slate-500">
+            caps advertised sellable per variant; blank = no cap
+          </span>
         </span>
-        <span className="min-w-0 flex-1 text-right text-xs text-slate-400">
-          caps advertised sellable per variant; blank = no cap
-        </span>
-        <input
-          className="w-28 shrink-0 rounded border border-slate-300 px-2 py-1 text-right tabular-nums"
-          placeholder="No cap"
-          value={form.ceiling}
-          onChange={(e) => setForm((prev) => ({ ...prev, ceiling: e.target.value }))}
-        />
-      </label>
+      </FieldRow>
       {ceilingInvalid && (
         <p className="text-xs text-red-600">Enter a whole number of 0 or more, or leave blank.</p>
       )}
       {showBuildableToggle && (
         <>
-          <label className="flex items-center gap-2">
+          <label className="flex items-center gap-2 text-sm text-slate-700">
             <input
               type="checkbox"
               checked={form.pushBuildable}
@@ -106,7 +107,7 @@ export function ProductStoresSettings({
             />
             Include buildable stock when pushing to marketplaces
           </label>
-          <p className="text-xs text-slate-500">
+          <p className="max-w-[68ch] text-[11px] text-slate-500">
             On by default: pushes advertise on-hand stock plus what could be built now from
             raw materials in stock. Turn off where build lead time makes that backfill risky.
           </p>

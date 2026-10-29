@@ -8,8 +8,10 @@ import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { useGuard } from "../../hooks/useUnsavedChangesGuard";
 import { PLATFORM_LABELS } from "../../lib/platforms";
+import { Badge } from "../common/Badge";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { SaveButton } from "../common/SaveButton";
+import { Disclosure } from "../settings/Disclosure";
 import { ProfileForm } from "../settings/ListingProfiles";
 import { ListingProfileSummary } from "./ListingProfileSummary";
 
@@ -134,36 +136,21 @@ function PanelBody({ productId, platform }: { productId: number; platform: Listi
   const warnings = readiness?.issues.filter((i) => i.severity === "warning") ?? [];
 
   return (
-    <div className="flex flex-col gap-2 rounded border border-slate-200 bg-white p-3 text-sm">
-      <button onClick={toggleOpen} className="flex items-center justify-between text-left">
-        <span className="flex items-center gap-2">
-          <span className="font-medium">{label} listing setup</span>
-          {readiness && (
-            <span
-              className={`rounded px-2 py-0.5 text-xs ${
-                readiness.can_create ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"
-              }`}
-            >
+    <div className="rounded-lg border border-slate-200 bg-white px-3 text-sm">
+      {/* Controlled, because collapsing has to ask first when the form inside is dirty. */}
+      <Disclosure
+        title={`${label} listing setup`}
+        summary={
+          readiness && (
+            <Badge className={readiness.can_create ? "bg-green-100 text-green-800" : "bg-amber-100 text-amber-800"}>
               {readiness.can_create ? "Ready to draft" : `${blockers.length} thing(s) missing`}
-            </span>
-          )}
-        </span>
-        <span className="text-slate-500">{open ? "Hide" : "Show"}</span>
-      </button>
-
-      {blockers.length > 0 && (
-        <ul className="list-inside list-disc text-xs text-red-700">
-          {blockers.map((issue, i) => (
-            <li key={`${issue.field}-${i}`}>
-              {issue.message}
-              {issue.fix_hint && <span className="text-slate-600"> {issue.fix_hint}</span>}
-            </li>
-          ))}
-        </ul>
-      )}
-
-      {open && (
-        <>
+            </Badge>
+          )
+        }
+        open={open}
+        onOpenChange={toggleOpen}
+      >
+        <div className="flex flex-col gap-2">
           {warnings.length > 0 && (
             <ul className="list-inside list-disc text-xs text-amber-800">
               {warnings.map((issue, i) => (
@@ -278,7 +265,18 @@ function PanelBody({ productId, platform }: { productId: number; platform: Listi
               </SaveButton>
             </div>
           )}
-        </>
+        </div>
+      </Disclosure>
+
+      {blockers.length > 0 && (
+        <ul className="list-inside list-disc py-2 text-xs text-red-700">
+          {blockers.map((issue, i) => (
+            <li key={`${issue.field}-${i}`}>
+              {issue.message}
+              {issue.fix_hint && <span className="text-slate-600"> {issue.fix_hint}</span>}
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   );

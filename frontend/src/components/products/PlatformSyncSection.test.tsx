@@ -129,3 +129,44 @@ it("makes an additional listing the primary", async () => {
 
   await waitFor(() => expect(calls.find((c) => c.method === "PATCH")?.body).toEqual({ is_primary: true }));
 });
+
+it("says the shared listing once in the header and keeps matching units collapsed", async () => {
+  summary = {
+    product_id: 37,
+    product_status: "synced",
+    units: [
+      unit({ variant_id: 1, variant_name: "Small", sku: "SKU-S" }),
+      unit({ variant_id: 2, variant_name: "Large", sku: "SKU-L" }),
+    ],
+  };
+  renderSection();
+
+  await screen.findByText("All 2 match");
+  expect(screen.getByText("Brick Pencil Pot")).toBeTruthy();
+  expect(screen.queryByText("SKU-S")).toBeNull();
+
+  await userEvent.click(screen.getByRole("button", { name: /All 2 units/ }));
+  expect(screen.getByText("SKU-S")).toBeTruthy();
+  expect(screen.getByText("SKU-L")).toBeTruthy();
+});
+
+it("lists only the drifted unit in the warning, with both quantities", async () => {
+  summary = {
+    product_id: 37,
+    product_status: "synced",
+    units: [
+      unit({ variant_id: 1, variant_name: "Small", sku: "SKU-S", external_quantity: 14, expected_quantity: 10, quantity_mismatch: true }),
+      unit({ variant_id: 2, variant_name: "Large", sku: "SKU-L" }),
+    ],
+  };
+  renderSection();
+
+  await screen.findByText("1 unit differs");
+  const warning = screen.getByRole("button", { name: "Push corrections" }).closest("div")?.parentElement as HTMLElement;
+  expect(within(warning).getByText("Small")).toBeTruthy();
+  expect(within(warning).getByText("14")).toBeTruthy();
+  expect(within(warning).getByText("10")).toBeTruthy();
+  expect(within(warning).queryByText("Large")).toBeNull();
+  // The matching unit is one click away, under its own heading.
+  expect(screen.getByRole("button", { name: /1 other unit/ })).toBeTruthy();
+});
