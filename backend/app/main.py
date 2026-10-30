@@ -16,6 +16,7 @@ from app.routers import (
     colours,
     dashboard,
     fee_config,
+    insights,
     manufacturers,
     material_categories,
     material_substitutes,
@@ -153,6 +154,7 @@ app.include_router(variants.router, prefix="/api/v1")
 app.include_router(assets.router, prefix="/api/v1")
 app.include_router(purchases.router, prefix="/api/v1")
 app.include_router(dashboard.router, prefix="/api/v1")
+app.include_router(insights.router, prefix="/api/v1")
 app.include_router(manufacturers.router, prefix="/api/v1")
 app.include_router(suppliers.router, prefix="/api/v1")
 app.include_router(builds.router, prefix="/api/v1")

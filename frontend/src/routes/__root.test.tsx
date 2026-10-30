@@ -53,12 +53,13 @@ async function renderShell() {
 
 beforeEach(() => setRoutes([]));
 
-it("orders the nav by the daily loop, grouped under Sell and Stock", async () => {
+it("orders the nav by the daily loop, grouped under Sell, Stock and Analyse", async () => {
   const nav = await renderShell();
   const labels = nav.getAllByRole("link").map((a) => a.textContent?.replace(/\d+$/, ""));
-  expect(labels).toEqual(["Dashboard", "Orders", "Products", "Materials", "Purchases", "Stock Take"]);
+  expect(labels).toEqual(["Dashboard", "Orders", "Products", "Materials", "Purchases", "Stock Take", "Insights"]);
   expect(nav.getByText("Sell")).toBeInTheDocument();
   expect(nav.getByText("Stock")).toBeInTheDocument();
+  expect(nav.getByText("Analyse")).toBeInTheDocument();
 });
 
 it("badges only the rows that want doing — never Dashboard or Products", async () => {

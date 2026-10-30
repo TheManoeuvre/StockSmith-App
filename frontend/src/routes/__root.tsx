@@ -3,6 +3,7 @@ import { createRootRoute, Link, Outlet, useMatchRoute } from "@tanstack/react-ro
 import { useQuery } from "@tanstack/react-query";
 import {
   DashboardIcon,
+  InsightsIcon,
   MaterialsIcon,
   OrdersIcon,
   ProductsIcon,
@@ -212,6 +213,12 @@ function RootChrome() {
         { label: "Materials", to: "/materials", icon: <MaterialsIcon />, hint: "Raw materials and how much is left", ...badges.materials },
         { label: "Purchases", to: "/purchases", icon: <PurchasesIcon />, hint: "Supplier orders and deliveries", ...badges.purchases },
         { label: "Stock Take", to: "/stock-takes", icon: <StockTakeIcon />, hint: "Count stock and correct the books", ...badges.stockTake },
+      ],
+    },
+    {
+      label: "Analyse",
+      items: [
+        { label: "Insights", to: "/insights", icon: <InsightsIcon />, tone: "neutral", hint: "How the business is performing: sales, margins and costs" },
       ],
     },
   ];
