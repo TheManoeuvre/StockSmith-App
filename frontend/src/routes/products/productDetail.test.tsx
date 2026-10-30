@@ -592,27 +592,27 @@ describe("variant paths", () => {
 
   it("warns before Show less hides a dirty row", async () => {
     const user = userEvent.setup();
-    const many = Array.from({ length: 7 }, (_, i) => variant(20 + i, `V${i}`));
+    const many = Array.from({ length: 14 }, (_, i) => variant(20 + i, `V${i}`));
     setRoutes(withVariants(many));
     await renderProductPage();
     await user.click(variantsTab());
 
     await user.click(
-      await screen.findByRole("button", { name: /show all 7/i }),
+      await screen.findByRole("button", { name: /show all 14/i }),
     );
 
-    // V6 is only visible while expanded — it sits past INITIAL_VARIANT_LIMIT of 5.
-    await user.click(await screen.findByRole("button", { name: /^V6/i }));
-    const nameInput = await screen.findByDisplayValue("V6");
+    // V13 is only visible while expanded — it sits past INITIAL_VARIANT_LIMIT of 5.
+    await user.click(await screen.findByRole("button", { name: /^V13/i }));
+    const nameInput = await screen.findByDisplayValue("V13");
     await user.clear(nameInput);
-    await user.type(nameInput, "V6 edited");
+    await user.type(nameInput, "V13 edited");
 
     await user.click(screen.getByRole("button", { name: /show less/i }));
 
     const dialog = await screen.findByRole("dialog", {
       name: "Unsaved changes",
     });
-    expect(within(dialog).getByText(/Variant "V6"/)).toBeInTheDocument();
+    expect(within(dialog).getByText(/Variant "V13"/)).toBeInTheDocument();
   });
 
   it("saves a variant rename and stops warning", async () => {
