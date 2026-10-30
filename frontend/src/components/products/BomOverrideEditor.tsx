@@ -90,7 +90,7 @@ export function BomOverrideEditor({
         continue;
       }
       const qtyLine = effectiveBom.find((l) => l.material_id === base.material_id && l.replaces_material_id == null);
-      if (qtyLine && qtyLine.qty_required !== base.qty_required) {
+      if (qtyLine && Number(qtyLine.qty_required) !== Number(base.qty_required)) {
         next[base.material_id] = { mode: "qty", qty_required: qtyLine.qty_required, substitute_material_id: null };
         continue;
       }
@@ -237,10 +237,10 @@ export function BomOverrideEditor({
 
   if (baseBom.length === 0) {
     return (
-      <div className="mt-3">
-        <h4 className="mb-1 text-sm font-medium text-slate-600">{title}</h4>
-        <p className="text-xs text-slate-400">No lines set on the base product.</p>
-      </div>
+      <section className="rounded-lg border border-slate-200 bg-white p-3">
+        <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{title}</h4>
+        <p className="mt-1.5 text-xs text-slate-400">No lines set on the base product.</p>
+      </section>
     );
   }
 
@@ -257,6 +257,9 @@ export function BomOverrideEditor({
     return worst;
   })();
 
+  const overrideCount =
+    baseBom.filter((b) => overrideFor(b.material_id).mode !== "inherit").length + additiveLines.length;
+
   const MODES: { mode: OverrideMode; label: string }[] = [
     { mode: "inherit", label: "Inherit" },
     { mode: "qty", label: "Qty" },
@@ -264,9 +267,21 @@ export function BomOverrideEditor({
   ];
 
   return (
-    <div className="mt-3">
-      <h4 className="mb-1 text-sm font-medium text-slate-600">{title}</h4>
-      <div className="overflow-hidden rounded border border-slate-200">
+    <section className="rounded-lg border border-slate-200 bg-white p-3">
+      <div className="mb-2 flex items-center gap-2">
+        <h4 className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">{title}</h4>
+        {overrideCount > 0 && (
+          <span className="rounded-full bg-blue-50 px-1.5 py-px text-[10.5px] font-semibold text-blue-700">
+            {overrideCount} customised
+          </span>
+        )}
+      </div>
+      <div className="overflow-hidden rounded-md border border-slate-200">
+        <div className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-2.5 py-1 text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">
+          <span className="w-40 shrink-0">Material</span>
+          <span className="flex-1">Override</span>
+          <span className="w-28 shrink-0 text-right">Resolves to</span>
+        </div>
         {baseBom.map((base) => {
           const material = materials.find((m) => m.id === base.material_id);
           const o = overrideFor(base.material_id);
@@ -275,22 +290,27 @@ export function BomOverrideEditor({
           return (
             <div
               key={base.material_id}
-              className="flex items-center gap-2 border-b border-slate-100 px-2.5 py-1.5 last:border-0"
+              className={`flex items-center gap-2 border-b border-l-2 border-b-slate-100 px-2.5 py-1.5 last:border-b-transparent ${
+                inherited ? "border-l-transparent" : "border-l-blue-500 bg-blue-50/40"
+              }`}
             >
               <span
-                className={`shrink-0 truncate text-xs text-slate-500 ${swap ? "w-24" : "w-40"}`}
+                className={`shrink-0 truncate text-xs ${inherited ? "text-slate-500" : "font-medium text-slate-800"} ${
+                  swap ? "w-24" : "w-40"
+                }`}
                 title={material?.name}
               >
                 {material?.name ?? base.material_id}
               </span>
 
-              <div className="flex shrink-0 gap-px rounded bg-slate-100 p-0.5">
+              <div role="group" aria-label="Override mode" className="flex shrink-0 gap-px rounded-md bg-slate-100 p-0.5">
                 {MODES.map(({ mode, label }) => (
                   <button
                     key={mode}
                     type="button"
                     onClick={() => setMode(base.material_id, mode)}
-                    className={`rounded px-2 py-0.5 text-[11px] font-semibold ${
+                    aria-pressed={o.mode === mode}
+                    className={`rounded px-2 py-0.5 text-[11px] font-semibold transition-colors ${
                       o.mode === mode
                         ? "bg-white text-slate-900 shadow-sm"
                         : "text-slate-500 hover:text-slate-700"
@@ -407,11 +427,11 @@ export function BomOverrideEditor({
         <button
           type="button"
           onClick={addAdditiveLine}
-          className="rounded border border-dashed border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-600 hover:border-blue-500 hover:text-blue-600"
+          className="rounded-md border border-dashed border-slate-300 px-2 py-1 text-[11px] font-semibold text-slate-600 hover:border-blue-500 hover:text-blue-600"
         >
           + Extra material
         </button>
-        <span className="text-[11px] text-slate-400">
+        <span className="ml-auto text-[11px] text-slate-400">
           {overallBottleneck
             ? overallBottleneck.qty == null
               ? "No materials"
@@ -426,12 +446,12 @@ export function BomOverrideEditor({
           isPending={saveMutation.isPending}
           status={saveStatus}
           onClick={() => saveMutation.mutate()}
-          className="mt-2 rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
+          className="mt-3 rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
           Save {title.toLowerCase()}
         </SaveButton>
       )}
       <ErrorBanner error={saveMutation.error} />
-    </div>
+    </section>
   );
 }
