@@ -12,10 +12,33 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-11-03
+
+### Added
+
+- **A new Insights page.** See how the business is performing: what sells, where the money goes after
+  costs, and which products are worth making more of. Overview, Products, Costs and Data quality tabs
+  cover sales and profit trends by channel, per-product and per-variant margins, a cost waterfall
+  (fees, postage, packaging, materials, resends and failed builds), and orders whose financials
+  haven't synced yet, which are reported separately rather than counted as zero.
+- **Materials list shows time to stockout.** Each material shows how long its on-hand stock will last,
+  and how long it will last once open orders are made.
+- **Updates can be installed even if StockSmith can't start its background service.** The
+  Reconnecting screen now has a Check for updates / Install and restart button, and the tray menu has a
+  Check for updates entry.
+
+### Changed
+
+- **The product Stores tab is tidier.** The sync card shows a one-line summary, and only listings whose
+  quantity differs from expected are spelled out, with Push corrections alongside.
+- **The Attribute values panel is collapsed by default.**
 - **Quantities for "each" materials show as whole numbers.** Variant quantity rules, order kitting, the box check and BOM editors no longer show `1.0000` for items counted individually, and round typed values to whole numbers.
 - **The Variants tab on a product is denser and easier to scan.** Each collapsed variant is now a single line with
   its sellable count, stock and cost lined up in columns, and the list shows 12 variants before "Show all". Opening
   a variant groups its name and SKU into one card, and the BOM override tables highlight the lines you've changed.
+
+### Fixed
+
 - **Fixes variants showing every BOM line as a quantity override** when the base and variant quantities were the
   same number written differently (e.g. 45 and 45.0000).
 
