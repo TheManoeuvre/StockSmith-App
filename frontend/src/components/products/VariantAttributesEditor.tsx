@@ -8,6 +8,7 @@ import type {
   AttributeQuantityRule,
   Material,
   MaterialCategory,
+  MaterialUnit,
   PlatformConflictResolution,
   Product,
   SharedMaterialResolution,
@@ -16,6 +17,7 @@ import type {
 import { ErrorBanner } from "../common/ErrorBanner";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { useGuard } from "../../hooks/useUnsavedChangesGuard";
+import { displayQty, normalizeQtyForUnit } from "../../lib/format";
 import { groupLabeller, groupMembers, noGroupReason } from "../../lib/substitutionGroups";
 import { BulkBomAmendModal } from "./BulkBomAmendModal";
 import { PlatformConflictDialog, platformConflictDetail } from "./PlatformConflictDialog";
@@ -308,6 +310,7 @@ export function VariantAttributesEditor({ product }: { product: Product }) {
                       {quantityRule && (
                         <QuantityRulePanel
                           baseLineQty={line.qty_required}
+                          unit={baseMaterial.unit}
                           rule={quantityRule}
                           existingValues={values}
                           onChangeRule={(next) =>
@@ -490,11 +493,13 @@ function MaterialRulePanel({
 
 function QuantityRulePanel({
   baseLineQty,
+  unit,
   rule,
   existingValues,
   onChangeRule,
 }: {
   baseLineQty: string;
+  unit: MaterialUnit;
   rule: QuantityRuleState;
   existingValues: string[];
   onChangeRule: (next: QuantityRuleState) => void;
@@ -507,7 +512,14 @@ function QuantityRulePanel({
           <span className="w-24">{value}</span>
           <input
             className="w-20 rounded border border-slate-300 px-1 py-0.5"
-            value={rule.valueToQty[value] ?? baseLineQty}
+            inputMode={unit === "each" ? "numeric" : "decimal"}
+            value={rule.valueToQty[value] ?? normalizeQtyForUnit(displayQty(baseLineQty), unit)}
+            onBlur={(e) =>
+              onChangeRule({
+                ...rule,
+                valueToQty: { ...rule.valueToQty, [value]: normalizeQtyForUnit(e.target.value, unit) },
+              })
+            }
             onChange={(e) => onChangeRule({ ...rule, valueToQty: { ...rule.valueToQty, [value]: e.target.value } })}
           />
         </label>

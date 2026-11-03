@@ -5,6 +5,7 @@ import { materialCategoriesApi } from "../../api/materialCategories";
 import { ordersApi } from "../../api/orders";
 import type { BoxCheck, BoxCheckConfirmInput, BoxCheckPreview } from "../../api/types";
 import { formatMoney } from "../../lib/money";
+import { displayQty } from "../../lib/format";
 import { ErrorBanner } from "../common/ErrorBanner";
 
 interface Pick {
@@ -43,7 +44,7 @@ export function OrderBoxCheckSection({ orderId, currency }: { orderId: number; c
       const current = Number(box.qty);
       // Before shipping and not yet confirmed: start unticked so the person has to choose.
       const preselect = data.mode === "shipped" || !data.needs_check ? current > 0 : false;
-      next[box.material_id] = { on: preselect, qty: current > 0 ? box.qty : "1" };
+      next[box.material_id] = { on: preselect, qty: current > 0 ? displayQty(box.qty) : "1" };
     }
     setPicks(next);
     setExtraIds([]);
@@ -162,7 +163,7 @@ export function OrderBoxCheckSection({ orderId, currency }: { orderId: number; c
                     onChange={(e) => setPick(box.material_id, { qty: e.target.value })}
                   />
                 </td>
-                <td className="p-2 text-slate-500">{box.qty}</td>
+                <td className="p-2 text-slate-500">{displayQty(box.qty)}</td>
                 <td className="p-2 text-slate-500">{formatMoney(box.unit_cost, currency)}</td>
               </tr>
             );

@@ -8,7 +8,7 @@ import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { useManagedSave } from "../../hooks/useDirtyRegistry";
 import { useMaterialCategories } from "../../hooks/useMaterialCategories";
-import { normalizeQtyForUnit, wholeNumberStepFor } from "../../lib/format";
+import { displayQty, normalizeQtyForUnit, wholeNumberStepFor } from "../../lib/format";
 import { formatMoney } from "../../lib/money";
 
 /**
@@ -322,7 +322,7 @@ export function BomOverrideEditor({
                 <input
                   className="w-16 shrink-0 rounded border border-slate-300 px-1.5 py-0.5 text-right text-xs tabular-nums"
                   step={wholeNumberStepFor(effMat?.unit)}
-                  placeholder={base.qty_required}
+                  placeholder={displayQty(base.qty_required)}
                   value={o.qty_required}
                   onChange={(e) => updateQty(base.material_id, e.target.value)}
                   onBlur={(e) =>

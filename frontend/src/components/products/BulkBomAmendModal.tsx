@@ -9,6 +9,7 @@ import type {
 } from "../../api/types";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { Modal } from "../common/Modal";
+import { displayQty } from "../../lib/format";
 
 type BomSource = "build" | "kitting";
 
@@ -318,7 +319,7 @@ export function BulkBomAmendModal({
                       <>
                         <input
                           className="w-24 shrink-0 rounded-md border border-slate-300 px-2 py-1 text-sm"
-                          placeholder={`keep (base ${base.qty_required})`}
+                          placeholder={`keep (base ${displayQty(base.qty_required)})`}
                           title="Blank keeps each variant's current quantity. Enter the base quantity to reset."
                           value={selected.qty}
                           onChange={(e) => updateQty(base.material_id, e.target.value)}
