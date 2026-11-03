@@ -19,7 +19,7 @@ import { BomOverrideEditor } from "./BomOverrideEditor";
 import { inclFallbacksNote, sellableSummary } from "../../lib/format";
 import { formatUnitCost } from "../../lib/money";
 
-const INITIAL_VARIANT_LIMIT = 5;
+const INITIAL_VARIANT_LIMIT = 12;
 
 export function VariantEditor({ productId }: { productId: number }) {
   const queryClient = useQueryClient();
@@ -77,12 +77,20 @@ export function VariantEditor({ productId }: { productId: number }) {
   const hiddenCount = filteredVariants.length - visibleVariants.length;
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-1.5">
       {disabledCount > 0 && (
         <label className="flex items-center gap-2 text-sm text-slate-600">
           <input type="checkbox" checked={showDisabled} onChange={(e) => setShowDisabled(e.target.checked)} />
           Show disabled ({disabledCount})
         </label>
+      )}
+
+      {visibleVariants.length > 0 && (
+        <div className="flex justify-end gap-2 px-2.5 text-[10.5px] font-semibold uppercase tracking-wide text-slate-400">
+          <span className="w-9 text-right">Sell</span>
+          <span className="w-44 text-right">Stock</span>
+          <span className="w-16 text-right">Cost</span>
+        </div>
       )}
 
       {visibleVariants.map((variant) => (
@@ -259,111 +267,138 @@ function VariantRow({
   const sellable = sellableSummary(variant, { pushBuildableCapacity });
 
   return (
-    <div className={`rounded bg-white shadow-sm ${!variant.is_active ? "opacity-60" : ""}`}>
-      <div className="flex w-full items-center justify-between gap-3 p-3">
+    <div className={`rounded-md bg-white shadow-sm ${!variant.is_active ? "opacity-60" : ""} ${expanded ? "ring-1 ring-slate-300" : ""}`}>
+      {/* One dense line per variant so a long list scans quickly; the right-hand figures sit
+          in fixed-width columns so they line up from row to row. */}
+      <div className="flex w-full items-center justify-between gap-3 px-2.5 py-1.5">
         {/* The copy button is a SIBLING of the toggle, never a child: nested buttons are
             invalid, and burying it inside would put "Copy …" into the row's accessible
             name. variant_name stays first for the same reason — that name is how the
             row is found. */}
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <button onClick={onToggle} className="flex min-w-0 items-center gap-2 text-left">
-            <span className="font-medium">{variant.variant_name}</span>
+        <div className="flex min-w-0 flex-1 items-center gap-1.5">
+          <button
+            onClick={onToggle}
+            aria-expanded={expanded}
+            className="flex min-w-0 items-center gap-1.5 text-left"
+          >
+            <svg
+              aria-hidden
+              viewBox="0 0 8 8"
+              className={`h-2 w-2 shrink-0 text-slate-400 transition-transform ${expanded ? "rotate-90" : ""}`}
+            >
+              <path d="M2 1l4 3-4 3z" fill="currentColor" />
+            </svg>
+            <span className="truncate text-[13px] font-medium">{variant.variant_name}</span>
             {variant.full_sku && (
               <span
-                className="truncate rounded bg-slate-100 px-2 py-0.5 font-mono text-xs text-slate-600"
+                className="shrink-0 truncate rounded bg-slate-100 px-1.5 py-px font-mono text-[11px] text-slate-600"
                 title={variant.full_sku}
               >
                 {variant.full_sku}
               </span>
             )}
             {badges.map((b) => (
-              <span key={b} className="rounded bg-slate-100 px-2 py-0.5 text-xs text-slate-600">
+              <span key={b} className="shrink-0 rounded bg-slate-100 px-1.5 py-px text-[11px] text-slate-600">
                 {b}
               </span>
             ))}
             {!variant.is_active && (
-              <span className="rounded bg-red-100 px-2 py-0.5 text-xs text-red-700">Disabled</span>
+              <span className="shrink-0 rounded bg-red-100 px-1.5 py-px text-[11px] text-red-700">Disabled</span>
             )}
             {syncUnit && <PlatformSyncBadge platform="etsy" status={syncUnit.status} />}
           </button>
           {variant.full_sku && <CopyButton value={variant.full_sku} label={`Copy ${variant.full_sku}`} />}
         </div>
-        <div className="shrink-0 text-right">
-          <div className="flex items-baseline justify-end gap-2">
-            <strong className={`text-lg font-medium ${sellable.headline === 0 ? "text-red-600" : ""}`}>
-              {sellable.headline ?? "-"}
-            </strong>
-            {sellable.capLabel && (
-              <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-800">{sellable.capLabel}</span>
-            )}
-          </div>
-          {/* Everything the old line spelled out is still reachable: the expanded row's
-              BOM tables carry each material's own "Max theoretical" bottleneck, which is
-              the actual answer to "why only this many?". */}
-          <div className="text-xs text-slate-500">
+        {/* Everything the old line spelled out is still reachable: the expanded row's
+            BOM tables carry each material's own "Max theoretical" bottleneck, which is
+            the actual answer to "why only this many?". */}
+        <div className="flex shrink-0 items-center gap-2 text-[11.5px] tabular-nums text-slate-500">
+          {sellable.capLabel && (
+            <span className="rounded bg-amber-100 px-1.5 py-px text-[11px] text-amber-800">{sellable.capLabel}</span>
+          )}
+          <strong
+            className={`w-9 text-right text-[13px] font-semibold ${sellable.headline === 0 ? "text-red-600" : "text-slate-900"}`}
+            title="Sellable"
+          >
+            {sellable.headline ?? "-"}
+          </strong>
+          <span className="w-44 text-right">
             {sellable.builtFree} built + {sellable.buildable ?? 0} buildable
-            {inclFallbacksNote(sellable) ? ` (${inclFallbacksNote(sellable)})` : ""} ·{" "}
+            {inclFallbacksNote(sellable) ? ` (${inclFallbacksNote(sellable)})` : ""}
+          </span>
+          <span className="w-16 text-right" title="Cost per unit">
             {variant.cost_per_unit ? formatUnitCost(variant.cost_per_unit) : "-"}
-          </div>
+          </span>
         </div>
       </div>
       {expanded && (
-        <div className="border-t border-slate-100 p-3">
-          <div className="mb-3 flex items-end gap-2">
-            <label className="flex flex-col gap-1">
-              <span className="text-sm">Variant name</span>
-              <input
-                className="rounded border border-slate-300 px-2 py-1"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-sm">SKU suffix</span>
-              <input
-                className="rounded border border-slate-300 px-2 py-1"
-                value={skuSuffix}
-                onChange={(e) => setSkuSuffix(e.target.value)}
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-sm">Full SKU</span>
-              <span className="rounded border border-transparent px-2 py-1 font-mono text-sm text-slate-500">
-                {variant.full_sku ?? "-"}
-              </span>
-            </label>
-            {!renameManaged && (
-              <SaveButton
-                isDirty={renameDirty}
-                isPending={renameMutation.isPending}
-                status={renameStatus}
-                onClick={() => renameMutation.mutate()}
-                className="rounded border border-slate-300 px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Save
-              </SaveButton>
-            )}
-            <button
-              // Never counted dirty (it saves immediately), but disabling can hide the row and
-              // so unmount the editors inside it.
-              onClick={() =>
-                guard.attempt(() => toggleActiveMutation.mutate("ask"), { prefix: `variant-${variant.id}/` })
-              }
-              className="rounded border border-slate-300 px-3 py-1.5 text-sm"
-            >
-              {variant.is_active ? "Disable" : "Reactivate"}
-            </button>
-            {variant.is_active && siblings.length > 0 && (
-              <button
-                // Merging disables this row too, so the same unsaved-edit check applies.
-                onClick={() => guard.attempt(() => setMerging(true), { prefix: `variant-${variant.id}/` })}
-                className="rounded border border-slate-300 px-3 py-1.5 text-sm"
-                title="Fold this variant's stock, open orders and SKU into another variant of this product"
-              >
-                Merge into…
-              </button>
-            )}
-          </div>
+        <div className="flex flex-col gap-4 border-t border-slate-100 bg-slate-50/50 p-4">
+          <section className="rounded-lg border border-slate-200 bg-white p-3">
+            <h3 className="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Identity</h3>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-slate-500">Variant name</span>
+                <input
+                  className="rounded-md border border-slate-300 px-2 py-1 text-sm"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-slate-500">SKU suffix</span>
+                <input
+                  className="rounded-md border border-slate-300 px-2 py-1 font-mono text-sm"
+                  value={skuSuffix}
+                  onChange={(e) => setSkuSuffix(e.target.value)}
+                />
+              </label>
+              <label className="flex flex-col gap-1">
+                <span className="text-xs text-slate-500">Full SKU</span>
+                <span className="truncate rounded-md border border-dashed border-slate-200 bg-slate-50 px-2 py-1 font-mono text-sm text-slate-600">
+                  {variant.full_sku ?? "-"}
+                </span>
+              </label>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+              {!renameManaged && (
+                <SaveButton
+                  isDirty={renameDirty}
+                  isPending={renameMutation.isPending}
+                  status={renameStatus}
+                  onClick={() => renameMutation.mutate()}
+                  className="rounded-md bg-slate-900 px-3 py-1.5 text-sm text-white disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  Save
+                </SaveButton>
+              )}
+              <div className="ml-auto flex items-center gap-2">
+                {variant.is_active && siblings.length > 0 && (
+                  <button
+                    // Merging disables this row too, so the same unsaved-edit check applies.
+                    onClick={() => guard.attempt(() => setMerging(true), { prefix: `variant-${variant.id}/` })}
+                    className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50"
+                    title="Fold this variant's stock, open orders and SKU into another variant of this product"
+                  >
+                    Merge into…
+                  </button>
+                )}
+                <button
+                  // Never counted dirty (it saves immediately), but disabling can hide the row and
+                  // so unmount the editors inside it.
+                  onClick={() =>
+                    guard.attempt(() => toggleActiveMutation.mutate("ask"), { prefix: `variant-${variant.id}/` })
+                  }
+                  className={`rounded-md border px-3 py-1.5 text-sm ${
+                    variant.is_active
+                      ? "border-red-200 text-red-700 hover:bg-red-50"
+                      : "border-slate-300 hover:bg-slate-50"
+                  }`}
+                >
+                  {variant.is_active ? "Disable" : "Reactivate"}
+                </button>
+              </div>
+            </div>
+          </section>
           {merging && (
             <VariantMergeModal
               loser={variant}
@@ -383,6 +418,7 @@ function VariantRow({
             />
           )}
 
+          {!fullVariant && <p className="text-xs text-slate-400">Loading bills of materials…</p>}
           {fullVariant && materials && (
             <>
               <BomOverrideEditor

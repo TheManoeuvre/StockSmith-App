@@ -13,6 +13,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 - **Quantities for "each" materials show as whole numbers.** Variant quantity rules, order kitting, the box check and BOM editors no longer show `1.0000` for items counted individually, and round typed values to whole numbers.
+- **The Variants tab on a product is denser and easier to scan.** Each collapsed variant is now a single line with
+  its sellable count, stock and cost lined up in columns, and the list shows 12 variants before "Show all". Opening
+  a variant groups its name and SKU into one card, and the BOM override tables highlight the lines you've changed.
+- **Fixes variants showing every BOM line as a quantity override** when the base and variant quantities were the
+  same number written differently (e.g. 45 and 45.0000).
 
 ## [0.25.1] - 2026-10-27
 
