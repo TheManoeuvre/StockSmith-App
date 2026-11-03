@@ -687,7 +687,21 @@ function MaterialRow({
       <td
         className={`px-2 py-2 tabular-nums ${status && status !== "ok" ? STOCKOUT_TEXT_CLASS[status] : "text-slate-500"}`}
       >
-        {formatWeeksShort(m.weeks_of_supply)}
+        {onOrder &&
+        m.weeks_of_supply_on_hand != null &&
+        m.weeks_of_supply != null &&
+        Number(m.weeks_of_supply) - Number(m.weeks_of_supply_on_hand) >= 0.05 ? (
+          <>
+            {/* On order: the shelf alone may run dry long before the delivery lands, so
+                show that figure first and the with-order total beneath it. */}
+            <div>{formatWeeksShort(m.weeks_of_supply_on_hand)} on hand</div>
+            <div className="text-xs text-slate-400">
+              {formatWeeksShort(m.weeks_of_supply)} with order
+            </div>
+          </>
+        ) : (
+          formatWeeksShort(m.weeks_of_supply)
+        )}
       </td>
       <td className="px-2 py-2 text-slate-500">
         {m.default_supplier_name ?? "-"}

@@ -58,6 +58,8 @@ export interface Material {
    *  mutation response). `weeks_of_supply` is null when there's too little sales history —
    *  `stockout_status` is then "insufficient_data"; "ok" means healthy. See lib/forecast.ts. */
   weeks_of_supply: string | null;
+  /** `weeks_of_supply` with on-order purchase lines left out — what the shelf alone covers. */
+  weeks_of_supply_on_hand?: string | null;
   consumption_rate_per_week: string | null;
   fg_buffer_weeks: string | null;
   /** Lead time (business days) applied to this material's reorder point — its default

@@ -104,6 +104,8 @@ class MaterialRead(MaterialBase):
     # is null when there's too little sales history; `stockout_status` is then
     # "insufficient_data". "ok" means healthy.
     weeks_of_supply: Decimal | None = None
+    # `weeks_of_supply` without on-order purchase lines credited — what the shelf alone covers.
+    weeks_of_supply_on_hand: Decimal | None = None
     consumption_rate_per_week: Decimal | None = None
     fg_buffer_weeks: Decimal | None = None
     # Lead time (business days) applied to this material's reorder point — its default
