@@ -7,6 +7,7 @@ import {
 } from "../../api/orders";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { Modal } from "../common/Modal";
+import { displayQty } from "../../lib/format";
 
 // Per-line scrap/return-to-stock prompt for cancelling or returning an order — see
 // docs/plan-marketplace-integrations.md Section 4. Replaces the old one-click cancel,
@@ -153,7 +154,7 @@ export function CancelOrderDialog({
                     <p className="text-xs text-slate-500">
                       Kitting:{" "}
                       {line.kitting_materials
-                        .map((m) => `${m.material_name} ×${m.qty}`)
+                        .map((m) => `${m.material_name} ×${displayQty(m.qty)}`)
                         .join(", ")}
                     </p>
                     <DispositionRadio

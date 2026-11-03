@@ -9,7 +9,7 @@ import { Modal } from "../common/Modal";
 import { SegmentedControl } from "../common/SegmentedControl";
 import { MaterialSelect } from "../materials/MaterialSelect";
 import { formatMoney } from "../../lib/money";
-import { formatDayMonth } from "../../lib/format";
+import { formatDayMonth, normalizeQtyForUnit, wholeNumberStepFor } from "../../lib/format";
 import { PLATFORM_LABELS } from "../../lib/platforms";
 import { REASON_LABELS, SELECTABLE_REASONS } from "./replacementParcels";
 
@@ -277,10 +277,25 @@ export function ReplacementParcelModal({
                   <input
                     type="number"
                     min={0}
-                    step="any"
+                    step={wholeNumberStepFor(materials?.find((m) => m.id === row.material_id)?.unit)}
                     aria-label="Packaging quantity"
                     className="w-24 rounded border border-slate-300 px-2 py-1 text-sm text-right tabular-nums"
                     value={row.qty}
+                    onBlur={(e) =>
+                      setMaterialRows(
+                        seededMaterials.map((r, j) =>
+                          j === i
+                            ? {
+                                ...r,
+                                qty: normalizeQtyForUnit(
+                                  e.target.value,
+                                  materials?.find((m) => m.id === r.material_id)?.unit,
+                                ),
+                              }
+                            : r,
+                        ),
+                      )
+                    }
                     onChange={(e) =>
                       setMaterialRows(seededMaterials.map((r, j) => (j === i ? { ...r, qty: e.target.value } : r)))
                     }

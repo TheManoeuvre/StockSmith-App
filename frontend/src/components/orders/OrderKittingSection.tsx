@@ -11,6 +11,7 @@ import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { useMaterialCategories } from "../../hooks/useMaterialCategories";
 import { useManagedSave } from "../../hooks/useDirtyRegistry";
 import { formatMoney } from "../../lib/money";
+import { displayQty, normalizeQtyForUnit } from "../../lib/format";
 
 interface KittingEdits {
   /** qty override per auto-computed material line, keyed by material_id. "" = inherit. */
@@ -144,16 +145,16 @@ export function OrderKittingSection({ orderId, currency }: { orderId: number; cu
           {summary.lines.map((line) => (
             <tr key={line.material_id} className="border-b border-slate-100">
               <td className="p-2">{line.material_name}</td>
-              <td className="p-2 text-slate-400">{line.auto_qty}</td>
+              <td className="p-2 text-slate-400">{displayQty(line.auto_qty)}</td>
               <td className="p-2">
                 <input
                   className="w-20 rounded border border-slate-300 px-2 py-1"
-                  placeholder={line.auto_qty}
+                  placeholder={displayQty(line.auto_qty)}
                   value={overrides[line.material_id] ?? ""}
                   onChange={(e) => setOverride(line.material_id, e.target.value)}
                 />
               </td>
-              <td className="p-2">{line.effective_qty}</td>
+              <td className="p-2">{displayQty(line.effective_qty)}</td>
               <td
                 className="p-2"
                 title={
@@ -164,9 +165,9 @@ export function OrderKittingSection({ orderId, currency }: { orderId: number; cu
               >
                 {formatMoney(line.effective_cost, currency)}
               </td>
-              <td className="p-2">{line.reserved_qty}</td>
+              <td className="p-2">{displayQty(line.reserved_qty)}</td>
               <td className="p-2">
-                {line.consumed_qty}
+                {displayQty(line.consumed_qty)}
                 {Number(line.consumed_qty) > 0 && (
                   <span className="block text-xs text-slate-500">{formatMoney(line.consumed_cost, currency)}</span>
                 )}
@@ -192,7 +193,15 @@ export function OrderKittingSection({ orderId, currency }: { orderId: number; cu
                 <td className="p-2">
                   <input
                     className="w-20 rounded border border-slate-300 px-2 py-1"
+                    inputMode={material?.unit === "each" ? "numeric" : "decimal"}
                     value={o.qty_required}
+                    onBlur={(e) =>
+                      setExtras((prev) =>
+                        prev.map((x, j) =>
+                          j === i ? { ...x, qty_required: normalizeQtyForUnit(e.target.value, material?.unit) } : x,
+                        ),
+                      )
+                    }
                     onChange={(e) =>
                       setExtras((prev) =>
                         prev.map((x, j) => (j === i ? { ...x, qty_required: e.target.value } : x)),
