@@ -6,6 +6,7 @@ import { productsApi } from "../../api/products";
 import type { Order, OrderLine } from "../../api/types";
 import { Badge } from "../../components/common/Badge";
 import { CopyButton } from "../../components/common/CopyButton";
+import { decodeHtmlEntities, splitPersonalization } from "../../lib/personalization";
 import { DetailPanel } from "../../components/common/DetailPanel";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { Stat } from "../../components/common/Stat";
@@ -802,9 +803,29 @@ function OrderLineRow({
         )}
         {line.variation_text && (
           <div className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-slate-500">
-            <span>{line.variation_text}</span>
+            <span>
+              {splitPersonalization(line.variation_text).map((part, i) =>
+                part.kind === "url" ? (
+                  <a
+                    key={i}
+                    href={part.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={part.url}
+                    className="text-blue-600 underline"
+                  >
+                    file {part.index}
+                  </a>
+                ) : (
+                  <span key={i}>{part.text}</span>
+                ),
+              )}
+            </span>
             {/* variation_text is stored as "Label: value"; only the value is pasteable. */}
-            <CopyButton value={line.variation_text.replace(/^[^:]*:\s*/, "")} label="Copy personalization" />
+            <CopyButton
+              value={decodeHtmlEntities(line.variation_text).replace(/^[^:]*:\s*/, "")}
+              label="Copy personalization"
+            />
           </div>
         )}
         {line.substituted_from && (
