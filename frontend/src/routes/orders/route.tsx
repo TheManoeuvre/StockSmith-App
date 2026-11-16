@@ -23,6 +23,7 @@ import { formatDayMonth } from "../../lib/format";
 import { maskBuyerName } from "../../lib/names";
 import { effectiveDueDate, orderFulfilment } from "../../lib/orderFulfilment";
 import { PLATFORM_COLORS, PLATFORM_LABELS } from "../../lib/platforms";
+import { decodeHtmlEntities } from "../../lib/personalization";
 
 /**
  * Pathless layout for /orders: the list lives here (not in index.tsx) so it stays mounted
@@ -406,7 +407,7 @@ function OrderRow({
               </span>
               {l.variation_text && (
                 <span
-                  title={`Personalized: ${l.variation_text}`}
+                  title={`Personalized: ${decodeHtmlEntities(l.variation_text)}`}
                   className="inline-flex shrink-0 items-center justify-center rounded-full bg-violet-100 p-0.5 text-violet-600"
                 >
                   <PersonalizationIcon />
