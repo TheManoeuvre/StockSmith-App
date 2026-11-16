@@ -12,6 +12,18 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-11-16
+
+### Fixed
+
+- **Etsy personalization reads cleanly on orders.** Buyer-entered text no longer shows HTML codes
+  (`Pippa&#39;s` now appears as `Pippa's`), uploaded-file answers show as short "file 1" links instead of
+  long URLs, and the copy button copies the cleaned-up text.
+
+### Changed
+
+- Routine dependency updates.
+
 ## [0.26.0] - 2026-11-03
 
 ### Added
