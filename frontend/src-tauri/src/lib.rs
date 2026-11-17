@@ -330,7 +330,10 @@ async fn spawn_sidecar_if_needed(app: &tauri::AppHandle) -> Result<(), String> {
             return Ok(());
         }
         return Err(format!(
-            "A different version of the StockSmith backend is already running on port 8000              (it reports {}, this app is {}). This usually means an update could not replace              the backend because it was still running. Close StockSmith completely, then run              the installer again.",
+            "A different version of the StockSmith backend is already running on port 8000 \
+             (it reports {}, this app is {}). This usually means an update could not replace \
+             the backend because it was still running. Close StockSmith completely, then run \
+             the installer again.",
             reported.as_deref().unwrap_or("an older build"),
             own
         ));
