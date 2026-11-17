@@ -32,7 +32,7 @@ async def substitute_line(
     if variant_id == line.variant_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Line is already this variation")
 
-    available = line.ordered_qty - line.shipped_qty
+    available = line.ordered_qty - line.shipped_qty - line.short_shipped_qty
     if qty <= 0 or qty > available:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

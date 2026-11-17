@@ -721,7 +721,12 @@ async def reconcile_order_kitting(session: AsyncSession, order: Order) -> None:
     reserved_target = await _compute_kitting_requirement(
         session, order.id, lines, lambda l: l.allocated_qty - l.shipped_qty
     )
-    consumed_target = await _compute_kitting_requirement(session, order.id, lines, lambda l: l.shipped_qty)
+    # short_shipped_qty is added back: a unit corrected off the original shipment
+    # (allocation.correct_shipped_qty) still went out in a parcel whose packaging was
+    # consumed, so the correction must not read as packaging to un-consume.
+    consumed_target = await _compute_kitting_requirement(
+        session, order.id, lines, lambda l: l.shipped_qty + l.short_shipped_qty
+    )
 
     ledger_rows = {
         row.material_id: row

@@ -369,6 +369,7 @@ def _serialize_order(
             ordered_qty=line.ordered_qty,
             allocated_qty=line.allocated_qty,
             shipped_qty=line.shipped_qty,
+            short_shipped_qty=line.short_shipped_qty,
             unit_price=line.unit_price,
             currency=line.currency,
             external_line_id=line.external_line_id,
@@ -849,6 +850,18 @@ async def unassign_line(
 ) -> OrderRead:
     line = await _get_line(session, line_id)
     await allocation.deallocate_line(session, line, payload.qty)
+    await session.commit()
+    return await _serialize_one(session, await _get_order_with_lines(session, line.order_id))
+
+
+@router.post("/lines/{line_id}/correct-shipped", response_model=OrderRead)
+async def correct_shipped_line(
+    line_id: int, payload: DeallocateRequest, session: AsyncSession = Depends(get_db)
+) -> OrderRead:
+    """Lowers a line's shipped quantity by `qty` and returns those units to stock — for an
+    order that was marked shipped with more than physically went out."""
+    line = await _get_line(session, line_id)
+    await allocation.correct_shipped_qty(session, line, payload.qty)
     await session.commit()
     return await _serialize_one(session, await _get_order_with_lines(session, line.order_id))
 

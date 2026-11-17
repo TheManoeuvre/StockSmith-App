@@ -753,7 +753,8 @@ function OrderLineRow({
 }) {
   const queryClient = useQueryClient();
   const unassignable = line.allocated_qty - line.shipped_qty;
-  const substitutable = line.product_id != null && line.ordered_qty - line.shipped_qty > 0;
+  const substitutable =
+    line.product_id != null && line.ordered_qty - line.shipped_qty - line.short_shipped_qty > 0;
   const isFullySubstituted = line.ordered_qty === 0;
   // A row is visually "linked" to another when it's either side of a still-active
   // substitution — the shared connector bar is what makes a split legible across rows
@@ -849,7 +850,12 @@ function OrderLineRow({
       </td>
       <td className="p-2">{isFullySubstituted ? dash : line.ordered_qty}</td>
       <td className="p-2">{isFullySubstituted ? dash : line.allocated_qty}</td>
-      <td className="p-2">{isFullySubstituted ? dash : line.shipped_qty}</td>
+      <td className="p-2">
+        {isFullySubstituted ? dash : line.shipped_qty}
+        {line.short_shipped_qty > 0 && (
+          <div className="text-[11px] text-amber-700">{line.short_shipped_qty} never sent</div>
+        )}
+      </td>
       <td className="p-2">
         {isFullySubstituted
           ? dash
@@ -870,6 +876,7 @@ function OrderLineRow({
               Unassign
             </button>
           )}
+          {line.shipped_qty > 0 && <CorrectShippedControl line={line} />}
           {substitutable && <SubstituteLineControl line={line} />}
         </div>
       </td>
@@ -877,11 +884,66 @@ function OrderLineRow({
   );
 }
 
+/** For a line marked shipped with more units than physically went out: lowers shipped by
+ *  the entered amount and puts those units back in stock (allocation.correct_shipped_qty). */
+function CorrectShippedControl({ line }: { line: OrderLine }) {
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [qty, setQty] = useState(1);
+  const mutation = useMutation({
+    mutationFn: () => ordersApi.correctShipped(line.id, qty),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["orders", line.order_id] });
+      queryClient.invalidateQueries({ queryKey: ["orders"] });
+      queryClient.invalidateQueries({ queryKey: ["products"] });
+      queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
+      setOpen(false);
+      setQty(1);
+    },
+  });
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} className="rounded border border-slate-300 px-2 py-1 text-xs">
+        Fewer sent
+      </button>
+    );
+  }
+  return (
+    <div className="flex w-48 flex-col gap-1.5 rounded border border-slate-200 bg-white p-2 text-xs">
+      <span className="text-slate-600">
+        Units that never left. They go back into stock; the order stays shipped.
+      </span>
+      <div className="flex items-center gap-2">
+        <input
+          type="number"
+          min={1}
+          max={line.shipped_qty}
+          aria-label="Units not actually sent"
+          className="w-16 rounded border border-slate-300 px-2 py-1 text-right tabular-nums"
+          value={qty}
+          onChange={(e) => setQty(Number(e.target.value))}
+        />
+        <button
+          onClick={() => mutation.mutate()}
+          disabled={mutation.isPending || !Number.isInteger(qty) || qty < 1 || qty > line.shipped_qty}
+          className="rounded bg-slate-900 px-2 py-1 text-white disabled:bg-slate-300"
+        >
+          {mutation.isPending ? "Saving…" : "Restock"}
+        </button>
+        <button onClick={() => setOpen(false)} className="text-slate-500">
+          Cancel
+        </button>
+      </div>
+      <ErrorBanner error={mutation.error} />
+    </div>
+  );
+}
+
 function SubstituteLineControl({ line }: { line: OrderLine }) {
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [variantId, setVariantId] = useState<number | "">("");
-  const maxQty = line.ordered_qty - line.shipped_qty;
+  const maxQty = line.ordered_qty - line.shipped_qty - line.short_shipped_qty;
   const [qty, setQty] = useState(maxQty);
   const [reason, setReason] = useState("");
 

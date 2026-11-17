@@ -29,7 +29,7 @@ _ORDERS_AWAITING_INVENTORY_SQL = text(
     """
     SELECT ol.id AS line_id, ol.order_id, ol.product_id, ol.variant_id,
            p.name AS product_name, pv.variant_name AS variant_name,
-           (ol.ordered_qty - ol.allocated_qty) AS short_by,
+           (ol.ordered_qty - ol.allocated_qty - ol.short_shipped_qty) AS short_by,
            o.order_placed_at, o.platform AS platform,
            CASE WHEN o.fulfilment_method = 'collect' THEN o.collect_by ELSE o.ship_by_date END AS due_date,
            COALESCE(
@@ -42,23 +42,23 @@ _ORDERS_AWAITING_INVENTORY_SQL = text(
     JOIN orders o ON o.id = ol.order_id
     LEFT JOIN products p ON p.id = ol.product_id
     LEFT JOIN product_variants pv ON pv.id = ol.variant_id
-    WHERE ol.allocated_qty < ol.ordered_qty
+    WHERE ol.allocated_qty + ol.short_shipped_qty < ol.ordered_qty
       AND ol.needs_mapping = false
       AND o.status NOT IN ('cancelled', 'shipped')
-    ORDER BY (ol.ordered_qty - ol.allocated_qty) DESC, o.order_placed_at ASC
+    ORDER BY (ol.ordered_qty - ol.allocated_qty - ol.short_shipped_qty) DESC, o.order_placed_at ASC
     """
 )
 
 _ORDERS_AWAITING_MAPPING_SQL = text(
     """
     SELECT ol.id AS line_id, ol.order_id, ol.sku,
-           (ol.ordered_qty - ol.allocated_qty) AS short_by,
+           (ol.ordered_qty - ol.allocated_qty - ol.short_shipped_qty) AS short_by,
            o.order_placed_at, o.platform AS platform,
            CASE WHEN o.fulfilment_method = 'collect' THEN o.collect_by ELSE o.ship_by_date END AS due_date
     FROM order_lines ol
     JOIN orders o ON o.id = ol.order_id
     WHERE ol.needs_mapping = true
-      AND ol.allocated_qty < ol.ordered_qty
+      AND ol.allocated_qty + ol.short_shipped_qty < ol.ordered_qty
       AND o.status NOT IN ('cancelled', 'shipped')
     ORDER BY o.order_placed_at ASC
     """

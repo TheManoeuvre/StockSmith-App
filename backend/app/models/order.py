@@ -189,6 +189,10 @@ class OrderLine(Base):
     __table_args__ = (
         CheckConstraint("ordered_qty >= 0", name="ck_order_lines_ordered_qty_nonneg"),
         CheckConstraint(
+            "short_shipped_qty >= 0 AND allocated_qty + short_shipped_qty <= ordered_qty",
+            name="ck_order_lines_short_shipped_qty_range",
+        ),
+        CheckConstraint(
             "allocated_qty >= 0 AND allocated_qty <= ordered_qty", name="ck_order_lines_allocated_qty_range"
         ),
         CheckConstraint(
@@ -205,6 +209,12 @@ class OrderLine(Base):
     ordered_qty: Mapped[int] = mapped_column(Integer, nullable=False)
     allocated_qty: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     shipped_qty: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    # Units the order was recorded as shipping but physically never left (see
+    # allocation.correct_shipped_qty). Taken out of shipped_qty/allocated_qty and stock
+    # restored, but still part of ordered_qty: the buyer bought them, and the missing
+    # units go out as a replacement parcel. Counts as fulfilled for status purposes, so
+    # the order stays shipped and nothing tries to allocate or ship them again.
+    short_shipped_qty: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     unit_price: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     currency: Mapped[str | None] = mapped_column(String, nullable=True)
     external_line_id: Mapped[str | None] = mapped_column(String, nullable=True)
