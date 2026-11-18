@@ -350,6 +350,30 @@ describe("settings page", () => {
       expect(dialog().getByText(/Materials forecasting/)).toBeInTheDocument();
     });
 
+    it("warns before switching lists discards a dirty row, and keeps the list on Keep editing", async () => {
+      const row = (name: string) => ({ id: 1, name, usage_count: 0, website_url: null, default_lead_time_days: null });
+      setRoutes([
+        { method: "GET" as const, path: "/manufacturers", respond: () => [row("Bambu")] },
+        { method: "GET" as const, path: "/suppliers", respond: () => [row("Acme")] },
+        ...baseRoutes(),
+      ]);
+      const user = userEvent.setup();
+      await renderSettings();
+      await user.click(navItem("Lists"));
+
+      await user.click(await screen.findByRole("button", { name: /Bambu/ }));
+      await user.type(screen.getByLabelText("Bambu Name"), "x");
+      await user.click(screen.getByRole("button", { name: /^Suppliers/ }));
+
+      expect(await screen.findByRole("dialog")).toBeInTheDocument();
+      await user.click(screen.getByRole("button", { name: "Keep editing" }));
+      expect(screen.getByLabelText("Bambu Name")).toHaveValue("Bambux");
+
+      await user.click(screen.getByRole("button", { name: /^Suppliers/ }));
+      await user.click(await screen.findByRole("button", { name: /Discard/ }));
+      expect(await screen.findByRole("button", { name: /Acme/ })).toHaveAttribute("aria-expanded", "false");
+    });
+
     it("stays put when you choose to keep editing", async () => {
       const user = userEvent.setup();
       const router = await renderSettings();
