@@ -1,5 +1,16 @@
-import { describe, expect, it } from "vitest";
-import { displayQty, qtyWithUnit, sellableSummary, type SellableInput } from "./format";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  displayQty,
+  isWholeNumberUnit,
+  normalizeQtyForUnit,
+  qtyWithUnit,
+  roundQty,
+  sellableSummary,
+  setUnitRules,
+  unitSuffix,
+  wholeNumberStepFor,
+  type SellableInput,
+} from "./format";
 
 describe("displayQty", () => {
   it("drops the trailing zeros the backend's Numeric(14,4) carries", () => {
@@ -120,5 +131,51 @@ describe("sellableSummary", () => {
       expect(s.expected).toBeNull();
       expect(s.buildable).toBeNull();
     });
+  });
+});
+
+describe("units added in Settings", () => {
+  const BUILT_INS = [
+    { name: "g", decimal_places: null, show_suffix: true },
+    { name: "ml", decimal_places: null, show_suffix: true },
+    { name: "each", decimal_places: 0, show_suffix: false },
+  ];
+  const withMetres = () => setUnitRules([...BUILT_INS, { name: "m", decimal_places: 2, show_suffix: true }]);
+  afterEach(() => setUnitRules(BUILT_INS));
+
+  it("shows a two-decimal unit to exactly two places, with its name", () => {
+    withMetres();
+    expect(qtyWithUnit("1.5", "m")).toBe("1.50 m");
+    expect(qtyWithUnit("12.0000", "m")).toBe("12.00 m");
+  });
+
+  it("keeps the trimmed display for an unbounded unit and the bare number for a hidden one", () => {
+    withMetres();
+    expect(qtyWithUnit("12.5000", "g")).toBe("12.5 g");
+    expect(qtyWithUnit("3.0000", "each")).toBe("3");
+    expect(unitSuffix("each")).toBe("");
+  });
+
+  it("steps and normalises by the unit's own precision", () => {
+    withMetres();
+    expect(wholeNumberStepFor("m")).toBe("0.01");
+    expect(wholeNumberStepFor("each")).toBe("1");
+    expect(wholeNumberStepFor("g")).toBe("any");
+    expect(normalizeQtyForUnit("1.5", "m")).toBe("1.50");
+    expect(normalizeQtyForUnit("2.6", "each")).toBe("3");
+    expect(normalizeQtyForUnit("2.6", "g")).toBe("2.6");
+    expect(isWholeNumberUnit("each")).toBe(true);
+    expect(isWholeNumberUnit("m")).toBe(false);
+  });
+
+  it("does not round a bounded unit's quantity to a whole number", () => {
+    withMetres();
+    expect(roundQty("1.5", "m")).toBe("1.50");
+    expect(roundQty("1.5", "g")).toBe("2");
+    expect(roundQty("1.5")).toBe("2");
+  });
+
+  it("falls back to showing the name for a unit it has no row for", () => {
+    expect(unitSuffix("furlong")).toBe(" furlong");
   });
 });

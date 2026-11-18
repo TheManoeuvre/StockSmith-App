@@ -9,6 +9,7 @@ import { materialTypesApi } from "../../api/materialTypes";
 import { coloursApi } from "../../api/colours";
 import type { Material, MaterialUnit } from "../../api/types";
 import { useMaterialCategories } from "../../hooks/useMaterialCategories";
+import { useMaterialUnits } from "../../hooks/useMaterialUnits";
 import { useMaterialImageUrl } from "../../hooks/useMaterialImageUrl";
 import { useLazyVisible } from "../../hooks/useLazyVisible";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
@@ -24,6 +25,7 @@ import {
   isLowStock,
   normalizeQtyForUnit,
   roundQty,
+  unitLabel,
   wholeNumberStepFor,
 } from "../../lib/format";
 import { formatUnitCost } from "../../lib/money";
@@ -56,7 +58,6 @@ function MaterialsLayout() {
   );
 }
 
-const UNITS: MaterialUnit[] = ["g", "ml", "each"];
 
 type SortKey =
   | "name"
@@ -67,8 +68,9 @@ type SortKey =
   | "weeks_of_supply";
 
 function formatQty(qty: string | null, unit: MaterialUnit): string {
-  const suffix = unit === "each" ? "#" : unit;
-  return `${roundQty(qty)} ${suffix}`;
+  // "#" stands in for a unit that hides its name, so a column of counts still reads as counts.
+  const suffix = unitLabel(unit) || "#";
+  return `${roundQty(qty, unit)} ${suffix}`;
 }
 
 function MaterialsListContent() {
@@ -100,7 +102,11 @@ function MaterialsListContent() {
   // Empty until the list loads, then the first by sort order. There is no sensible hardcoded
   // default any more — "filament" might not exist.
   const [category, setCategory] = useState<string>("");
-  const [unit, setUnit] = useState<MaterialUnit>("g");
+  const { units } = useMaterialUnits();
+  // Empty until the user picks (or a category imposes one), then falls back to the first unit by
+  // sort order: "g" might not exist any more.
+  const [pickedUnit, setUnit] = useState<MaterialUnit>("");
+  const unit = pickedUnit || units[0]?.name || "g";
   const [unitTouchedByUser, setUnitTouchedByUser] = useState(false);
   const [reorderThreshold, setReorderThreshold] = useState("0");
   const [colour, setColour] = useState("");
@@ -413,9 +419,9 @@ function MaterialsListContent() {
                 setUnitTouchedByUser(true);
               }}
             >
-              {UNITS.map((u) => (
-                <option key={u} value={u}>
-                  {u}
+              {units.map((u) => (
+                <option key={u.id} value={u.name}>
+                  {u.name}
                 </option>
               ))}
             </select>

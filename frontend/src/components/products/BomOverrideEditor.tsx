@@ -8,7 +8,7 @@ import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { useManagedSave } from "../../hooks/useDirtyRegistry";
 import { useMaterialCategories } from "../../hooks/useMaterialCategories";
-import { displayQty, normalizeQtyForUnit, wholeNumberStepFor } from "../../lib/format";
+import { displayQty, normalizeQtyForUnit, unitSuffix, wholeNumberStepFor } from "../../lib/format";
 import { formatMoney } from "../../lib/money";
 
 /**
@@ -215,7 +215,7 @@ export function BomOverrideEditor({
   const effectiveLabel = (mat: Material | undefined, qty: string): string => {
     if (!mat) return "-";
     const n = Number(qty);
-    const unit = mat.unit === "each" ? "" : ` ${mat.unit}`;
+    const unit = unitSuffix(mat.unit);
     const cost = Number.isFinite(n) ? formatMoney(String(n * Number(mat.avg_unit_cost)), "GBP") : "-";
     return `${qty}${unit} · ${cost}`;
   };

@@ -44,7 +44,7 @@ function toForm(take: StockTakeDetail | undefined): CountForm | undefined {
   return Object.fromEntries(
     take.lines.map((l) => [
       l.id,
-      l.counted_qty === null ? "" : roundQty(l.counted_qty),
+      l.counted_qty === null ? "" : roundQty(l.counted_qty, l.unit),
     ]),
   );
 }
@@ -426,7 +426,7 @@ function StockTakeDetailPage() {
                                   )}
                                 </td>
                                 <td className="p-2 text-right tabular-nums">
-                                  {roundQty(line.expected_qty)} {line.unit}
+                                  {roundQty(line.expected_qty, line.unit)} {line.unit}
                                   {/* A real variance vs. a shelf that only looks short —
                                   belongs next to the number being compared. */}
                                   {line.allocated_qty_at_start !== null &&

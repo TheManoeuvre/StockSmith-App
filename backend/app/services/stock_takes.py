@@ -82,7 +82,7 @@ async def _material_candidates(session: AsyncSession, scope: StockTakeScope, due
                 product_id=None,
                 variant_id=None,
                 name=m.name,
-                unit=m.unit.value,
+                unit=m.unit,
                 expected_qty=Decimal(m.current_qty),
                 allocated_qty=None,
                 last_stock_take_at=m.last_stock_take_at,
@@ -546,7 +546,7 @@ async def _validate_count(session: AsyncSession, line: StockTakeLine, counted_qt
 
         material = await session.get(Material, line.material_id)
         if material is not None:
-            validate_qty_for_unit(counted_qty, material.unit, "counted_qty")
+            await validate_qty_for_unit(session, counted_qty, material.unit, "counted_qty")
     elif counted_qty != counted_qty.to_integral_value():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -890,7 +890,7 @@ def line_display_name(line: StockTakeLine, materials: dict, products: dict, vari
     """(name, unit) for a line, from pre-built lookups so a list doesn't go N+1."""
     if line.material_id is not None:
         material = materials.get(line.material_id)
-        return (material.name if material else "(deleted material)", material.unit.value if material else "")
+        return (material.name if material else "(deleted material)", material.unit if material else "")
     product = products.get(line.product_id)
     base = product.name if product else "(deleted product)"
     if line.variant_id is not None:

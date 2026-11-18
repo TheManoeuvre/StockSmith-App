@@ -9,6 +9,7 @@ import { materialTypesApi } from "../../api/materialTypes";
 import { coloursApi } from "../../api/colours";
 import { pickFile } from "../../lib/tauri";
 import { useMaterialCategories } from "../../hooks/useMaterialCategories";
+import { useMaterialUnits } from "../../hooks/useMaterialUnits";
 import { useMaterialImageUrl } from "../../hooks/useMaterialImageUrl";
 import { ConfirmDialog } from "../../components/common/ConfirmDialog";
 import { MaterialSubstitutesSection } from "../../components/materials/MaterialSubstitutesSection";
@@ -33,6 +34,7 @@ import {
   isLowStock,
   normalizeQtyForUnit,
   roundQty,
+  unitSuffix,
   wholeNumberStepFor,
 } from "../../lib/format";
 import { formatUnitCost } from "../../lib/money";
@@ -145,7 +147,6 @@ const EMPTY_ADJUST: AdjustForm = {
   adjustReasonOther: "",
 };
 
-const UNITS: MaterialUnit[] = ["g", "ml", "each"];
 
 // The slide-over replaces the shared edit form's own Save button with one footer Save (see
 // the footer below and useManagedSave); providing the context here — a layer above the body
@@ -302,6 +303,7 @@ function MaterialDetail() {
     stockTakeIntervalDays,
   } = details;
   const { categories, byName: categoriesByName } = useMaterialCategories();
+  const { units } = useMaterialUnits();
   // Two different categories are in play: the saved one, which decides how the stats above read,
   // and the one currently selected in the form, which decides which fields the form offers.
   const editedCategory = categoriesByName.get(category);
@@ -514,7 +516,7 @@ function MaterialDetail() {
           <div className="grid grid-cols-3 gap-3">
             <Stat
               label="On hand"
-              value={`${roundQty(material.current_qty)}${material.unit === "each" ? "" : ` ${material.unit}`}`}
+              value={`${roundQty(material.current_qty, material.unit)}${unitSuffix(material.unit)}`}
               sub="counted"
               tone="highlight"
             />
@@ -522,7 +524,7 @@ function MaterialDetail() {
               label="On order"
               value={
                 Number(material.on_order_qty ?? 0) > 0
-                  ? `+${roundQty(material.on_order_qty)}`
+                  ? `+${roundQty(material.on_order_qty, material.unit)}`
                   : "-"
               }
               sub={
@@ -536,7 +538,7 @@ function MaterialDetail() {
               value={formatWeeksShort(material.weeks_of_supply)}
               sub={
                 (material.consumption_rate_per_week
-                  ? `${roundQty(material.consumption_rate_per_week)}/wk used`
+                  ? `${roundQty(material.consumption_rate_per_week, material.unit)}/wk used`
                   : "no history") +
                 (material.fg_buffer_weeks && Number(material.fg_buffer_weeks) > 0.05
                   ? ` · incl. ${Number(material.fg_buffer_weeks).toFixed(1)} wk from stock`
@@ -688,9 +690,12 @@ function MaterialDetail() {
                       value={unit}
                       onChange={(e) => setUnit(e.target.value as MaterialUnit)}
                     >
-                      {UNITS.map((u) => (
-                        <option key={u} value={u}>
-                          {u}
+                      {/* A unit that has since been deleted from the list stays selectable while a
+                          material still holds it, so the form never silently changes it. */}
+                      {!units.some((u) => u.name === unit) && <option value={unit}>{unit}</option>}
+                      {units.map((u) => (
+                        <option key={u.id} value={u.name}>
+                          {u.name}
                         </option>
                       ))}
                     </select>
@@ -1084,13 +1089,14 @@ function MaterialDetail() {
             </form>
             {adjustValue.trim() !== "" && (
               <p className="mb-1 text-xs text-slate-500">
-                On hand {roundQty(material.current_qty)} →{" "}
+                On hand {roundQty(material.current_qty, material.unit)} →{" "}
                 {roundQty(
                   adjustMode === "set"
                     ? Number(adjustValue)
                     : Number(material.current_qty) + Number(adjustValue),
+                  material.unit,
                 )}
-                {material.unit === "each" ? "" : ` ${material.unit}`}
+                {unitSuffix(material.unit)}
               </p>
             )}
             {adjustMode === "set" && (
@@ -1216,15 +1222,15 @@ function HistoryTypeBadge({ kind }: { kind: MaterialStockHistoryEntry["kind"] })
  * actually landed on, and "Counted" is what that mode means: the row that dates the item
  * and that the count sheet's no-movement mark is measured from. */
 function HistoryDelta({ h, unit }: { h: MaterialStockHistoryEntry; unit: MaterialUnit }) {
-  const suffix = unit === "each" ? "" : ` ${unit}`;
+  const suffix = unitSuffix(unit);
   if (h.kind === "adjustment" && h.mode === "set") {
     return (
       <>
-        Counted {roundQty(h.target_qty ?? "0")}
+        Counted {roundQty(h.target_qty ?? "0", unit)}
         {suffix}{" "}
         <span className="text-xs text-slate-400">
           (Δ {Number(h.qty) > 0 ? "+" : ""}
-          {roundQty(h.qty)}
+          {roundQty(h.qty, unit)}
           {suffix})
         </span>
       </>
@@ -1236,7 +1242,7 @@ function HistoryDelta({ h, unit }: { h: MaterialStockHistoryEntry; unit: Materia
   return (
     <span className={colour}>
       {qty > 0 ? "+" : ""}
-      {roundQty(h.qty)}
+      {roundQty(h.qty, unit)}
       {suffix}
     </span>
   );

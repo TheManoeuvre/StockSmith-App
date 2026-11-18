@@ -46,8 +46,9 @@ export function ReceiveDialog({
     [purchase.lines],
   );
   const [receivedAt, setReceivedAt] = useState(todayLocalISO());
+  const unitFor = (line: PurchaseLine) => materials.find((m) => m.id === line.material_id)?.unit;
   const [qtys, setQtys] = useState<Record<number, string>>(() =>
-    Object.fromEntries(open.map((l) => [l.id, roundQty(l.outstanding_qty)])),
+    Object.fromEntries(open.map((l) => [l.id, roundQty(l.outstanding_qty, unitFor(l))])),
   );
   const [costs, setCosts] = useState<Record<number, string>>({});
 
@@ -60,7 +61,7 @@ export function ReceiveDialog({
   const zeroCostLines = receiving.filter((l) => Number(l.total_cost) === 0 && !costs[l.id]);
 
   const receiveAll = () =>
-    setQtys(Object.fromEntries(open.map((l) => [l.id, roundQty(l.outstanding_qty)])));
+    setQtys(Object.fromEntries(open.map((l) => [l.id, roundQty(l.outstanding_qty, unitFor(l))])));
 
   const submit = () => {
     onSubmit(
@@ -130,9 +131,9 @@ export function ReceiveDialog({
                 return (
                   <tr key={line.id} className="border-b border-slate-100">
                     <td className="p-2">{material?.name ?? `Material #${line.material_id}`}</td>
-                    <td className="p-2 text-slate-500">{roundQty(line.qty)}</td>
-                    <td className="p-2 text-slate-500">{roundQty(line.received_qty)}</td>
-                    <td className="p-2">{roundQty(line.outstanding_qty)}</td>
+                    <td className="p-2 text-slate-500">{roundQty(line.qty, material?.unit)}</td>
+                    <td className="p-2 text-slate-500">{roundQty(line.received_qty, material?.unit)}</td>
+                    <td className="p-2">{roundQty(line.outstanding_qty, material?.unit)}</td>
                     <td className="p-2">
                       <input
                         type="number"

@@ -180,7 +180,7 @@ async def _load_pair(session: AsyncSession, source_id: int, target_id: int) -> t
         raise ReferenceDataError("Material not found.")
     if source.unit != target.unit:
         raise ReferenceDataError(
-            f'"{source.name}" is counted in {source.unit.value} and "{target.name}" in {target.unit.value}. '
+            f'"{source.name}" is counted in {source.unit} and "{target.name}" in {target.unit}. '
             "Quantities in different units cannot be added together."
         )
     if not target.is_active:

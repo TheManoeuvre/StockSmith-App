@@ -9,7 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.listing import ListingPlatform
 from app.models.manufacturer import Manufacturer
-from app.models.material import Material, MaterialAdjustment, MaterialAdjustmentMode, MaterialUnit
+from app.models.material import Material, MaterialAdjustment, MaterialAdjustmentMode
 from app.models.material_category import MaterialCategory
 from app.models.colour import Colour
 from app.models.material_type import MaterialType
@@ -23,6 +23,7 @@ from app.services.costing import recompute_material
 from app.services.kitting import apply_default_kitting_bom
 from app.services import product_platforms
 from app.services.product_platforms import apply_new_product_defaults
+from app.services import units
 from app.services.validation import validate_qty_for_unit
 
 MATERIALS_CSV_FIELDS = [
@@ -167,7 +168,7 @@ async def export_materials_csv(session: AsyncSession) -> str:
                 "name": m.name,
                 "category": (category_names.get(m.category_id) if m.category_id else None)
                 or (m.category.value if m.category is not None else ""),
-                "unit": m.unit.value,
+                "unit": m.unit,
                 "current_qty": str(m.current_qty),
                 "reorder_threshold": str(m.reorder_threshold),
                 "colour": (colour_names.get(m.colour_id) if m.colour_id else None) or m.colour or "",
@@ -203,7 +204,12 @@ async def import_materials_csv(session: AsyncSession, content: bytes) -> dict:
             if category_row is None:
                 raise ValueError("category is required")
             category = material_categories.legacy_value_for(category_row.name)
-            unit = MaterialUnit(row["unit"].strip())
+            # Matched case-insensitively against the units table, so a CSV saying "M" or "ML"
+            # lands on the unit that exists instead of failing or inventing a second one.
+            unit_row = await units.find_by_name_ci(session, row["unit"])
+            if unit_row is None:
+                raise ValueError(f"unknown unit '{row['unit'].strip()}'")
+            unit = unit_row.name
             reorder_threshold = Decimal(row.get("reorder_threshold") or "0")
             target_qty = Decimal(row["current_qty"]) if row.get("current_qty") else None
             typical_reorder_qty = (
@@ -211,11 +217,11 @@ async def import_materials_csv(session: AsyncSession, content: bytes) -> dict:
             )
             is_active = _parse_bool(row.get("is_active"), default=True)
 
-            validate_qty_for_unit(reorder_threshold, unit, "reorder_threshold")
+            await validate_qty_for_unit(session, reorder_threshold, unit, "reorder_threshold")
             if typical_reorder_qty is not None:
-                validate_qty_for_unit(typical_reorder_qty, unit, "typical_reorder_qty")
+                await validate_qty_for_unit(session, typical_reorder_qty, unit, "typical_reorder_qty")
             if target_qty is not None:
-                validate_qty_for_unit(target_qty, unit, "current_qty")
+                await validate_qty_for_unit(session, target_qty, unit, "current_qty")
 
             manufacturer_id = None
             manufacturer_name = (row.get("manufacturer_name") or "").strip()
@@ -634,7 +640,7 @@ async def import_stock_take_csv(
             if line.material_id is not None:
                 material = materials.get(line.material_id)
                 if material is not None:
-                    validate_qty_for_unit(counted, material.unit, "counted_qty")
+                    await validate_qty_for_unit(session, counted, material.unit, "counted_qty")
             elif counted != counted.to_integral_value():
                 raise ValueError("counted_qty must be a whole number for finished stock")
 

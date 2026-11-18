@@ -4,7 +4,7 @@ from decimal import Decimal
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from app.models.abc_classification import ABCClass
-from app.models.material import MaterialAdjustmentMode, MaterialUnit
+from app.models.material import MaterialAdjustmentMode
 from app.schemas.abc import ResolvedClassificationRead
 
 
@@ -16,7 +16,7 @@ class MaterialBase(BaseModel):
     # and the CSV importer carry on unchanged now that the set of valid names is open.
     category: str
     category_id: int | None = None
-    unit: MaterialUnit
+    unit: str
     reorder_threshold: Decimal = Decimal(0)
     # Both accepted, mirroring how material_type_name/material_type_id already behave: a client
     # can send a colour_id it picked, or just a name to be found-or-created. Nothing is forced
@@ -52,7 +52,7 @@ class MaterialUpdate(BaseModel):
     name: str | None = None
     category: str | None = None
     category_id: int | None = None
-    unit: MaterialUnit | None = None
+    unit: str | None = None
     reorder_threshold: Decimal | None = None
     is_active: bool | None = None
     colour: str | None = None

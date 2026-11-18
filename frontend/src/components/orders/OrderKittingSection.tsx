@@ -11,7 +11,7 @@ import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { useMaterialCategories } from "../../hooks/useMaterialCategories";
 import { useManagedSave } from "../../hooks/useDirtyRegistry";
 import { formatMoney } from "../../lib/money";
-import { displayQty, normalizeQtyForUnit } from "../../lib/format";
+import { displayQty, isWholeNumberUnit, normalizeQtyForUnit } from "../../lib/format";
 
 interface KittingEdits {
   /** qty override per auto-computed material line, keyed by material_id. "" = inherit. */
@@ -193,7 +193,7 @@ export function OrderKittingSection({ orderId, currency }: { orderId: number; cu
                 <td className="p-2">
                   <input
                     className="w-20 rounded border border-slate-300 px-2 py-1"
-                    inputMode={material?.unit === "each" ? "numeric" : "decimal"}
+                    inputMode={isWholeNumberUnit(material?.unit) ? "numeric" : "decimal"}
                     value={o.qty_required}
                     onBlur={(e) =>
                       setExtras((prev) =>

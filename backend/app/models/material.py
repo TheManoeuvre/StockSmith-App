@@ -27,6 +27,12 @@ class LegacyMaterialCategory(str, enum.Enum):
 
 
 class MaterialUnit(str, enum.Enum):
+    """The three units the app shipped with. NOT exhaustive any more: units are rows in
+    `material_units` (see models/material_unit.py), editable under Settings -> Lists, and
+    `Material.unit` is a plain string naming one of them. This enum survives only as the seed
+    values and as shorthand for the built-ins — being a `str` subclass, `MaterialUnit.g` is
+    accepted anywhere a unit name is."""
+
     g = "g"
     ml = "ml"
     each = "each"
@@ -65,9 +71,8 @@ class Material(Base):
     category_id: Mapped[int | None] = mapped_column(
         ForeignKey("material_categories.id", ondelete="RESTRICT"), nullable=True
     )
-    unit: Mapped[MaterialUnit] = mapped_column(
-        portable_enum(MaterialUnit, name="material_unit"), nullable=False
-    )
+    # The name of a `material_units` row. Not a foreign key — see models/material_unit.py.
+    unit: Mapped[str] = mapped_column(String, nullable=False)
     current_qty: Mapped[float] = mapped_column(Numeric(14, 4), nullable=False, default=0)
     # Soft-reserved by kitting-BOM allocation (services/kitting.py) — mirrors
     # Product.allocated_qty. Only ever moved by order allocate/ship/cancel reconciliation,
