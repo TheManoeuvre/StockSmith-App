@@ -6,6 +6,7 @@
  */
 
 import type { Material, MaterialUnit } from "../api/types";
+import { unitRule } from "./format";
 
 const DAY_MS = 86_400_000;
 
@@ -66,10 +67,10 @@ export function projectedOnHand(
   return Math.max(0, onHandNow - (ratePerWeek / 7) * leadDays);
 }
 
-/** Quantity granularity a reorder suggestion rounds up to: 100 for bulk (g/ml), 1 for
- *  countable ("each"). */
+/** Quantity granularity a reorder suggestion rounds up to: 100 for a bulk unit with no precision
+ *  limit (g/ml), 1 for anything counted or measured to a fixed number of places ("each", metres). */
 export function reorderGranularity(unit: MaterialUnit): number {
-  return unit === "each" ? 1 : 100;
+  return unitRule(unit)?.decimal_places == null ? 100 : 1;
 }
 
 /**

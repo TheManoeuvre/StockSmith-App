@@ -100,9 +100,9 @@ function UnresolvedVariances() {
                 </div>
                 <p className="text-sm text-amber-800">{line.conflict_reason}</p>
                 <p className="mt-1 text-sm">
-                  Expected {roundQty(line.expected_qty)} · counted{" "}
-                  {line.counted_qty === null ? "-" : roundQty(line.counted_qty)}
-                  {line.system_qty_at_approval !== null && <> · system now {roundQty(line.system_qty_at_approval)}</>}
+                  Expected {roundQty(line.expected_qty, line.unit)} · counted{" "}
+                  {line.counted_qty === null ? "-" : roundQty(line.counted_qty, line.unit)}
+                  {line.system_qty_at_approval !== null && <> · system now {roundQty(line.system_qty_at_approval, line.unit)}</>}
                 </p>
                 <div className="mt-2 flex flex-wrap gap-2">
                   <button

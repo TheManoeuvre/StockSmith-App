@@ -18,6 +18,7 @@ import { MaintenanceOverlay } from "../components/common/MaintenanceOverlay";
 import { UnsavedChangesDialog } from "../components/common/UnsavedChangesDialog";
 import { useRefreshOnSync } from "../hooks/useRefreshOnSync";
 import { useAppUpdate } from "../hooks/useAppUpdate";
+import { useMaterialUnits } from "../hooks/useMaterialUnits";
 import { onCheckForUpdatesRequested } from "../lib/updater";
 import { DirtyRegistryProvider } from "../hooks/useDirtyRegistry";
 import { GuardProvider, useUnsavedChangesGuard } from "../hooks/useUnsavedChangesGuard";
@@ -47,6 +48,9 @@ function RootLayout() {
 }
 
 function RootShell() {
+  // Loads the units of measure and pushes their formatting rules into lib/format.ts, which every
+  // quantity on every page reads from. Mounted here so it is populated app-wide.
+  useMaterialUnits();
   const guard = useUnsavedChangesGuard();
   const navigate = useNavigate();
   // The tray's "Check for updates". Settings > About doesn't need the backend, so this works

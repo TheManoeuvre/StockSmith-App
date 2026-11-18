@@ -1,6 +1,13 @@
 import type { MaterialUnit } from "../api/types";
 
-export function roundQty(value: string | number | null | undefined): string {
+// Whole units for a dense glance. Pass the unit where it is known: a unit bounded to decimal places
+// (metres at two) keeps them, because rounding 1.5 m to "2" would be a lie about the stock.
+export function roundQty(
+  value: string | number | null | undefined,
+  unit?: MaterialUnit | null,
+): string {
+  const places = unitRule(unit)?.decimal_places;
+  if (places) return Number(value ?? 0).toFixed(places);
   return Math.round(Number(value ?? 0)).toString();
 }
 
@@ -12,30 +19,94 @@ export function displayQty(value: string | number | null | undefined): string {
   return Number.isFinite(n) ? String(n) : String(value ?? "");
 }
 
-// The unit, as a display suffix. "each" is the default and carries no suffix — spelling
-// it out on every row of a coaster order reads as clutter, not information.
-export function unitSuffix(unit: MaterialUnit | null | undefined): string {
-  return unit && unit !== "each" ? ` ${unit}` : "";
+// ---- Units of measure -------------------------------------------------------------------
+//
+// Units are rows in the database (Settings → Lists), each carrying how fine a quantity may be
+// and whether its name is shown. These helpers are called from dozens of render paths that hold
+// only a unit *name*, so the rules live in a module-level table that useMaterialUnits() fills
+// from the API, rather than being threaded through every call site. Until it has loaded — and for
+// a name that has no row — the table holds the three units the app shipped with, so a first
+// paint reads the same as it always did.
+
+export interface UnitRule {
+  /** null = any precision; 0 = whole numbers; N = at most N places, displayed to N. */
+  decimal_places: number | null;
+  show_suffix: boolean;
 }
 
-// displayQty + unitSuffix: "30", "100 g", "12.5 ml".
+const BUILT_IN_RULES: Record<string, UnitRule> = {
+  g: { decimal_places: null, show_suffix: true },
+  ml: { decimal_places: null, show_suffix: true },
+  each: { decimal_places: 0, show_suffix: false },
+};
+
+let unitRules: Record<string, UnitRule> = { ...BUILT_IN_RULES };
+
+/** Replace the rule table. Called by useMaterialUnits() whenever the units list loads or changes. */
+export function setUnitRules(units: { name: string; decimal_places: number | null; show_suffix: boolean }[]): void {
+  unitRules = Object.fromEntries(
+    units.map((u) => [u.name, { decimal_places: u.decimal_places, show_suffix: u.show_suffix }]),
+  );
+}
+
+export function unitRule(unit: MaterialUnit | null | undefined): UnitRule | undefined {
+  return unit ? unitRules[unit] : undefined;
+}
+
+/** True for a unit that only takes whole numbers (what "each" always was). */
+export function isWholeNumberUnit(unit: MaterialUnit | null | undefined): boolean {
+  return unitRule(unit)?.decimal_places === 0;
+}
+
+/** The unit's name beside a number, or "" for a unit that doesn't show it. A unit with no rule
+ *  shows its name: better a stray suffix than a quantity that has silently lost its unit. */
+export function unitLabel(unit: MaterialUnit | null | undefined): string {
+  if (!unit) return "";
+  return unitRule(unit)?.show_suffix === false ? "" : unit;
+}
+
+// The unit, as a display suffix with its leading space. "each" carries none — spelling it out on
+// every row of a coaster order reads as clutter, not information.
+export function unitSuffix(unit: MaterialUnit | null | undefined): string {
+  const label = unitLabel(unit);
+  return label ? ` ${label}` : "";
+}
+
+// A quantity in its unit's own precision: a bounded unit is shown to exactly that many places
+// ("1.50" for metres at two), an unbounded one trimmed as displayQty does.
+export function displayQtyForUnit(
+  value: string | number | null | undefined,
+  unit: MaterialUnit | null | undefined,
+): string {
+  const places = unitRule(unit)?.decimal_places;
+  const n = Number(value ?? 0);
+  if (places == null || !Number.isFinite(n)) return displayQty(value);
+  return n.toFixed(places);
+}
+
+// displayQtyForUnit + unitSuffix: "30", "100 g", "12.5 ml", "1.50 m".
 export function qtyWithUnit(
   value: string | number | null | undefined,
   unit: MaterialUnit | null | undefined,
 ): string {
-  return `${displayQty(value)}${unitSuffix(unit)}`;
+  return `${displayQtyForUnit(value, unit)}${unitSuffix(unit)}`;
 }
 
-// Materials measured in "each" can't have fractional quantities — you can't have half
-// a screw. Mirrors the backend's validate_qty_for_unit (app/services/validation.py).
+// The `step` for a quantity input. A unit bounded to N places steps by one in the last place; an
+// unbounded one takes anything. Mirrors the backend's validate_qty_for_unit
+// (app/services/validation.py), which is what actually refuses a value that is too fine.
 export function wholeNumberStepFor(unit: MaterialUnit | null | undefined): string {
-  return unit === "each" ? "1" : "any";
+  const places = unitRule(unit)?.decimal_places;
+  if (places == null) return "any";
+  return places === 0 ? "1" : (10 ** -places).toFixed(places);
 }
 
 export function normalizeQtyForUnit(value: string, unit: MaterialUnit | null | undefined): string {
-  if (unit !== "each" || value.trim() === "") return value;
+  const places = unitRule(unit)?.decimal_places;
+  if (places == null || value.trim() === "") return value;
   const n = Number(value);
-  return Number.isNaN(n) ? value : Math.round(n).toString();
+  if (Number.isNaN(n)) return value;
+  return places === 0 ? Math.round(n).toString() : n.toFixed(places);
 }
 
 // A reorder_threshold of 0 means "don't track reordering for this material" — never

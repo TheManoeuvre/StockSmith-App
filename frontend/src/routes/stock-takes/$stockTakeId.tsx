@@ -44,7 +44,7 @@ function toForm(take: StockTakeDetail | undefined): CountForm | undefined {
   return Object.fromEntries(
     take.lines.map((l) => [
       l.id,
-      l.counted_qty === null ? "" : roundQty(l.counted_qty),
+      l.counted_qty === null ? "" : roundQty(l.counted_qty, l.unit),
     ]),
   );
 }
@@ -426,13 +426,13 @@ function StockTakeDetailPage() {
                                   )}
                                 </td>
                                 <td className="p-2 text-right tabular-nums">
-                                  {roundQty(line.expected_qty)} {line.unit}
+                                  {roundQty(line.expected_qty, line.unit)} {line.unit}
                                   {/* A real variance vs. a shelf that only looks short —
                                   belongs next to the number being compared. */}
                                   {line.allocated_qty_at_start !== null &&
                                     Number(line.allocated_qty_at_start) > 0 && (
                                       <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] text-amber-800">
-                                        {roundQty(line.allocated_qty_at_start)}{" "}
+                                        {roundQty(line.allocated_qty_at_start, line.unit)}{" "}
                                         picked for orders
                                       </span>
                                     )}
@@ -463,8 +463,8 @@ function StockTakeDetailPage() {
                                   {liveDelta == null
                                     ? "-"
                                     : liveDelta > 0
-                                      ? `+${roundQty(String(liveDelta))}`
-                                      : roundQty(String(liveDelta))}
+                                      ? `+${roundQty(String(liveDelta), line.unit)}`
+                                      : roundQty(String(liveDelta), line.unit)}
                                 </td>
                                 <td
                                   className={`p-2 text-right tabular-nums ${

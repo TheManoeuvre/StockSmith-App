@@ -12,9 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.backup_settings import BackupSettings
 from app.models.general_settings import CurrencyCode, GeneralSettings
 from app.models.material_category import MaterialCategory
+from app.models.material_unit import MaterialUnitRow
 from app.models.notification import ALERT_TYPES, DEFAULT_IMMEDIATE_ALERT_TYPES, NotificationDeliveryMode, NotificationSettings, NotificationTypeSettings
 from app.models.platform_fee import FeeBasis, MarginFeeConfig, MarginFeeSource, PlatformFeeComponent
 from app.services.material_categories import DEFAULT_CATEGORIES
+from app.services.units import DEFAULT_UNITS
 
 # Etsy UK / eBay UK fee components as researched July 2026 — point-in-time rates,
 # periodically re-verify against each platform's own fee pages.
@@ -179,6 +181,17 @@ async def _ensure_material_categories(session: AsyncSession) -> None:
         session.add(MaterialCategory(**row))
 
 
+async def _ensure_material_units(session: AsyncSession) -> None:
+    """Seed g, ml and each into a database that has no units. Same reasoning as the categories:
+    the migration seeds its own copy; this covers create_all test databases, and is guarded on
+    the table being empty so a unit someone deleted does not come back on the next restart."""
+    existing = await session.execute(select(MaterialUnitRow.id).limit(1))
+    if existing.first() is not None:
+        return
+    for row in DEFAULT_UNITS:
+        session.add(MaterialUnitRow(**row))
+
+
 async def ensure_seed_data(session: AsyncSession) -> None:
     """Idempotent — safe to call on every startup, only inserts what's missing."""
     await _ensure_general_settings(session)
@@ -187,5 +200,6 @@ async def ensure_seed_data(session: AsyncSession) -> None:
     await _ensure_notification_type_settings(session)
     await _ensure_margin_fee_config(session)
     await _ensure_platform_fee_components(session)
+    await _ensure_material_units(session)
     await _ensure_material_categories(session)
     await session.commit()

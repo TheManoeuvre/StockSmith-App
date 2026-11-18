@@ -25,7 +25,7 @@ from app.models.base import Base
 from app.models.listing import ListingPlatform
 from app.models.platform_connection import PlatformConnection
 from app.models.purchase import MaterialPurchase, MaterialPurchaseReceipt, Purchase, PurchaseStatus
-from app.seed import _ensure_material_categories
+from app.seed import _ensure_material_categories, _ensure_material_units
 from app.services import listing_push, order_sync, platform_limits, stock_takes
 from app.services.platforms.base import ExternalOrder, ExternalOrderLine, PaymentState
 
@@ -79,6 +79,7 @@ async def session(session_factory):
         # material a test creates would have category_id NULL and quietly exercise the legacy
         # fallback instead of the reference row — the new code path would look covered and be
         # untested.
+        await _ensure_material_units(s)
         await _ensure_material_categories(s)
         await s.commit()
         yield s

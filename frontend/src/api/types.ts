@@ -1,4 +1,18 @@
-export type MaterialUnit = "g" | "ml" | "each";
+/** The name of a unit of measure — "g", "ml", "each", or anything added under Settings → Lists.
+ *  A plain string: units are rows in the database now, not a fixed union. */
+export type MaterialUnit = string;
+
+export interface MaterialUnitRow {
+  id: number;
+  /** The symbol shown beside a number. Materials reference a unit by this name. */
+  name: string;
+  /** null = any precision (shown trimmed); 0 = whole numbers; N = at most N places, shown to N. */
+  decimal_places: number | null;
+  /** false for units like "each" whose name is clutter beside a number. */
+  show_suffix: boolean;
+  sort_order: number;
+  usage_count: number;
+}
 export type AssetType = "main_image" | "listing_image" | "step" | "threemf" | "gcode";
 /** Time-to-stockout urgency from services/forecasting.py. "ok" only appears where the
  *  caller asked for every material (the materials list/detail), not on the dashboard. */
@@ -943,6 +957,7 @@ export interface Asset {
 export interface LowStockMaterial {
   id: number;
   name: string;
+  unit?: MaterialUnit | null;
   current_qty: string;
   reorder_threshold: string;
   on_order_qty: string;
@@ -1000,6 +1015,7 @@ export interface OrderAwaitingPackaging {
   order_id: number;
   material_id: number;
   material_name: string;
+  unit?: MaterialUnit | null;
   short_by: string;
   platform: ListingPlatform | null;
   order_placed_at: string;

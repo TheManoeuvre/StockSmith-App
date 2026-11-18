@@ -11,6 +11,8 @@ from app.schemas.material_substitute import SubstituteSuggestion
 class LowStockMaterial(BaseModel):
     id: int
     name: str
+    # The material's unit name, so the dashboard can format its quantities by that unit's rule.
+    unit: str | None = None
     current_qty: Decimal
     reorder_threshold: Decimal
     on_order_qty: Decimal = Decimal(0)
@@ -88,6 +90,7 @@ class OrderAwaitingPackaging(BaseModel):
     order_id: int
     material_id: int
     material_name: str
+    unit: str | None = None
     short_by: Decimal
     order_placed_at: datetime
     due_date: datetime | None = None

@@ -42,6 +42,7 @@ from app.models.material import (
     MaterialUnit,
 )
 from app.models.material_category import MaterialCategory
+from app.models.material_unit import MaterialUnitRow
 from app.models.material_substitute import MaterialSubstitute, MaterialSubstituteUsage
 from app.models.material_type import MaterialType
 from app.models.notification import (
@@ -87,6 +88,7 @@ __all__ = [
     "LegacyMaterialCategory",
     "MaterialCategory",
     "MaterialUnit",
+    "MaterialUnitRow",
     "MaterialAdjustment",
     "MaterialAdjustmentMode",
     "MaterialSubstitute",

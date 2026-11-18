@@ -247,6 +247,7 @@ async def test_kitting_packaging_shortfall_surfaces_ranked_substitutes(session):
     assert len(awaiting) == 1
     entry = awaiting[0]
     assert entry.material_id == box.id
+    assert entry.unit == box.unit
     assert len(entry.suggested_substitutes) == 1
     assert entry.suggested_substitutes[0].material_id == bigger_box.id
     assert entry.suggested_substitutes[0].notes == "fits, just bigger"

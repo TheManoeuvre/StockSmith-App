@@ -7,6 +7,8 @@ import { materialTypesApi } from "../../api/materialTypes";
 import { productCategoriesApi } from "../../api/productCategories";
 import { coloursApi } from "../../api/colours";
 import { useGuard } from "../../hooks/useUnsavedChangesGuard";
+import { materialUnitsApi } from "../../api/materialUnits";
+import { useMaterialUnits } from "../../hooks/useMaterialUnits";
 import { ReferenceDataTable } from "../reference/ReferenceDataTable";
 
 type ListId =
@@ -14,6 +16,7 @@ type ListId =
   | "suppliers"
   | "material-types"
   | "material-categories"
+  | "material-units"
   | "product-categories"
   | "colours";
 
@@ -34,6 +37,7 @@ interface ListDef {
 export function ListsMasterDetail() {
   const [activeId, setActiveId] = useState<ListId>("manufacturers");
   const guard = useGuard();
+  const { units } = useMaterialUnits();
 
   const lists: ListDef[] = [
     {
@@ -147,11 +151,7 @@ export function ListsMasterDetail() {
               label: "Default unit",
               type: "select",
               placeholder: "Leave unchanged",
-              options: [
-                { value: "g", label: "g" },
-                { value: "ml", label: "ml" },
-                { value: "each", label: "each" },
-              ],
+              options: units.map((u) => ({ value: u.name, label: u.name })),
             },
             { key: "tracks_colour", label: "Has a colour", type: "checkbox" },
             { key: "tracks_material_type", label: "Has a material type (groups substitutable materials)", type: "checkbox" },
@@ -174,6 +174,40 @@ export function ListsMasterDetail() {
               tooltip:
                 "When an order's items use two or more different materials from this category (e.g. two different box sizes), the order must be manually checked before it can ship. Use it for parcel boxes, and keep labels and tape in a category of their own.",
             },
+          ]}
+          usageLabel={(n) => `${n} material${n === 1 ? "" : "s"}`}
+        />
+      ),
+    },
+    {
+      id: "material-units",
+      label: "Units",
+      navDescription: "g, ml, each, metres… and how finely each is counted.",
+      queryKey: ["material-units"],
+      list: materialUnitsApi.list,
+      render: () => (
+        <ReferenceDataTable
+          title="Units"
+          description="The units a material can be measured in. Decimal places is how fine a quantity may be: 0 for things you count (each), 2 for metres, blank for no limit (g, ml). A unit with decimal places shows to exactly that many places. Changing it doesn't touch stock already recorded, only what can be entered from then on. Renaming a unit updates every material that uses it."
+          segment="material-units"
+          queryKey={["material-units"]}
+          api={{
+            list: materialUnitsApi.list,
+            create: materialUnitsApi.findOrCreate,
+            update: materialUnitsApi.update,
+            remove: materialUnitsApi.remove,
+            reorder: materialUnitsApi.reorder,
+          }}
+          fields={[
+            { key: "name", label: "Name" },
+            {
+              key: "decimal_places",
+              label: "Decimal places",
+              type: "number",
+              placeholder: "No limit",
+              hint: "0 to 4. Leave blank for no limit.",
+            },
+            { key: "show_suffix", label: "Show the name beside quantities", type: "checkbox" },
           ]}
           usageLabel={(n) => `${n} material${n === 1 ? "" : "s"}`}
         />

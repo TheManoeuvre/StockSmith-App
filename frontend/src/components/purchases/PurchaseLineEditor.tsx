@@ -99,18 +99,18 @@ export function PurchaseLineEditor({
                       className="w-16 rounded border border-slate-300 px-2 py-1"
                       step={wholeNumberStepFor(material?.unit)}
                       min={locked ? persisted?.received_qty : undefined}
-                      title={locked ? `${roundQty(persisted!.received_qty)} has already arrived on this line` : undefined}
+                      title={locked ? `${roundQty(persisted!.received_qty, material?.unit)} has already arrived on this line` : undefined}
                       value={line.qty}
                       onChange={(e) => updateLine(i, { qty: e.target.value })}
                       onBlur={(e) => updateLine(i, { qty: normalizeQtyForUnit(e.target.value, material?.unit) })}
                     />
                   </td>
                   {showReceiving && (
-                    <td className="p-2 text-slate-500">{persisted ? roundQty(persisted.received_qty) : "-"}</td>
+                    <td className="p-2 text-slate-500">{persisted ? roundQty(persisted.received_qty, material?.unit) : "-"}</td>
                   )}
                   {showReceiving && (
                     <td className="p-2">
-                      {persisted ? roundQty(persisted.outstanding_qty) : "-"}
+                      {persisted ? roundQty(persisted.outstanding_qty, material?.unit) : "-"}
                       {closed && (
                         <span className="ml-2 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-600">
                           closed short

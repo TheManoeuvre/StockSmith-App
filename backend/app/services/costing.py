@@ -180,7 +180,7 @@ async def create_adjustment(
     material = await session.get(Material, material_id)
     if material is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Material not found")
-    validate_qty_for_unit(value, material.unit, "value")
+    await validate_qty_for_unit(session, value, material.unit, "value")
 
     if mode == MaterialAdjustmentMode.set:
         qty_delta = value - Decimal(material.current_qty)
