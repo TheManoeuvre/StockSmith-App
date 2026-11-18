@@ -270,6 +270,25 @@ describe("settings page", () => {
       expect(await screen.findByRole("heading", { name: "Material categories" })).toBeInTheDocument();
     });
 
+    it("collapses the open row when switching to another list", async () => {
+      // Both lists have a row with id 1, which is what made the expansion carry over.
+      const row = (name: string) => ({ id: 1, name, usage_count: 0, website_url: null, default_lead_time_days: null });
+      setRoutes([
+        { method: "GET" as const, path: "/manufacturers", respond: () => [row("Bambu")] },
+        { method: "GET" as const, path: "/suppliers", respond: () => [row("Acme")] },
+        ...baseRoutes(),
+      ]);
+      const user = userEvent.setup();
+      await renderSettings();
+      await user.click(navItem("Lists"));
+
+      await user.click(await screen.findByRole("button", { name: /Bambu/ }));
+      expect(screen.getByRole("button", { name: /Bambu/ })).toHaveAttribute("aria-expanded", "true");
+
+      await user.click(screen.getByRole("button", { name: /^Suppliers/ }));
+      expect(await screen.findByRole("button", { name: /Acme/ })).toHaveAttribute("aria-expanded", "false");
+    });
+
     it("keeps the global fee basis and both platforms' fee components together on Pricing & fees", async () => {
       const user = userEvent.setup();
       await renderSettings();
