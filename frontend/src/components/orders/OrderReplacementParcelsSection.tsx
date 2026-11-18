@@ -7,7 +7,7 @@ import { ConfirmDialog } from "../common/ConfirmDialog";
 import { CopyButton } from "../common/CopyButton";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { Th } from "../common/ListTable";
-import { formatDayMonth } from "../../lib/format";
+import { formatDayMonth, unitSuffix } from "../../lib/format";
 import { formatMoney } from "../../lib/money";
 import { PLATFORM_LABELS } from "../../lib/platforms";
 import { ReplacementParcelModal, invalidateAfterParcelChange } from "./ReplacementParcelModal";
@@ -188,7 +188,7 @@ function ParcelCard({
                 </td>
                 <td className="p-2 text-right tabular-nums">
                   {Number(item.qty)}
-                  {item.material_unit && item.material_unit !== "each" ? ` ${item.material_unit}` : ""}
+                  {unitSuffix(item.material_unit)}
                 </td>
                 <td className="p-2 text-right tabular-nums">{formatMoney(item.unit_cost_snapshot, currency)}</td>
                 <td className="p-2 text-right tabular-nums">{formatMoney(item.line_cost, currency)}</td>

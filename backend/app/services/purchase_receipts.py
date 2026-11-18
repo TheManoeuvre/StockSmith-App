@@ -145,7 +145,7 @@ async def record_receipts(
             raise HTTPException(status_code=http_status.HTTP_400_BAD_REQUEST, detail=detail)
         material = await session.get(Material, line.material_id)
         if material is not None:
-            validate_qty_for_unit(qty, material.unit, "qty")
+            await validate_qty_for_unit(session, qty, material.unit, "qty")
 
     # A material whose ledger is empty has a *provable* zero, so the quantity after its
     # first delivery is exactly what was delivered — that is a verified count, and asking

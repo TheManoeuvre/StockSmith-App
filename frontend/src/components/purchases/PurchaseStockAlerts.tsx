@@ -2,7 +2,7 @@ import { Badge } from "../common/Badge";
 import type { Material, PriceReference } from "../../api/types";
 import type { PurchaseLineInput } from "../../api/purchases";
 import { formatMoney } from "../../lib/money";
-import { displayQty, isLowStock } from "../../lib/format";
+import { displayQty, isLowStock, unitSuffix } from "../../lib/format";
 import { suggestReorderQty } from "../../lib/reorder";
 
 interface Alert {
@@ -121,7 +121,7 @@ export function PurchaseStockAlerts({
               <div className="shrink-0 text-right">
                 <div className="text-[11.5px] font-semibold tabular-nums">
                   +{displayQty(suggestQty)}
-                  {m.unit === "each" ? "" : ` ${m.unit}`}
+                  {unitSuffix(m.unit)}
                 </div>
                 <div className="text-[11px] text-slate-400">
                   {formatMoney(String(suggestQty * lastUnit), "GBP")} at last price

@@ -2,7 +2,6 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
-from app.models.material import MaterialUnit
 
 
 class MaterialCategoryBase(BaseModel):
@@ -10,7 +9,7 @@ class MaterialCategoryBase(BaseModel):
     sort_order: int = 0
     # NULL means "don't change the unit the user picked". Only a category that has been given
     # one imposes it.
-    default_unit: MaterialUnit | None = None
+    default_unit: str | None = None
     consumed_on_failed_build: bool = False
     auto_kitting_per_order: bool = False
     show_in_kitting_bom_list: bool = False
@@ -39,7 +38,7 @@ class MaterialCategoryUpdate(BaseModel):
 
     name: str
     sort_order: int | None = None
-    default_unit: MaterialUnit | None = None
+    default_unit: str | None = None
     consumed_on_failed_build: bool | None = None
     auto_kitting_per_order: bool | None = None
     show_in_kitting_bom_list: bool | None = None

@@ -20,7 +20,7 @@ from app.schemas.material import (
 from app.services.colours import resolve_updates as resolve_colour_updates
 from app.services.material_categories import resolve_updates as resolve_category_updates
 from app.schemas.purchase import MaterialStockHistoryRead
-from app.services import abc, material_merge
+from app.services import abc, material_merge, units
 from app.services.reference_data import InUseError, ReferenceDataError
 from app.services.costing import create_adjustment, get_on_order_qty_by_material
 from app.services.csv_io import export_materials_csv, import_materials_csv
@@ -242,9 +242,10 @@ async def import_materials(file: UploadFile, session: AsyncSession = Depends(get
 
 @router.post("", response_model=MaterialRead, status_code=status.HTTP_201_CREATED)
 async def create_material(payload: MaterialCreate, session: AsyncSession = Depends(get_db)) -> Material:
-    validate_qty_for_unit(payload.reorder_threshold, payload.unit, "reorder_threshold")
+    await units.require_unit(session, payload.unit)
+    await validate_qty_for_unit(session, payload.reorder_threshold, payload.unit, "reorder_threshold")
     if payload.typical_reorder_qty is not None:
-        validate_qty_for_unit(payload.typical_reorder_qty, payload.unit, "typical_reorder_qty")
+        await validate_qty_for_unit(session, payload.typical_reorder_qty, payload.unit, "typical_reorder_qty")
     fields = await resolve_category_updates(session, await resolve_colour_updates(session, payload.model_dump()))
     material = Material(**fields)
     session.add(material)
@@ -286,10 +287,12 @@ async def update_material(
         session, await resolve_colour_updates(session, payload.model_dump(exclude_unset=True))
     )
     effective_unit = updates.get("unit", material.unit)
+    if "unit" in updates:
+        await units.require_unit(session, effective_unit)
     if "reorder_threshold" in updates:
-        validate_qty_for_unit(updates["reorder_threshold"], effective_unit, "reorder_threshold")
+        await validate_qty_for_unit(session, updates["reorder_threshold"], effective_unit, "reorder_threshold")
     if "typical_reorder_qty" in updates and updates["typical_reorder_qty"] is not None:
-        validate_qty_for_unit(updates["typical_reorder_qty"], effective_unit, "typical_reorder_qty")
+        await validate_qty_for_unit(session, updates["typical_reorder_qty"], effective_unit, "typical_reorder_qty")
     if "name" in updates and updates["name"] != material.name:
         # A plain-string 409, as the reference-data routers answer, so the detail panel can
         # offer a merge instead of showing a unique-constraint failure.

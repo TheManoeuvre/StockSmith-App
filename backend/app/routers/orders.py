@@ -284,7 +284,7 @@ def _serialize_parcel(parcel: OrderReplacementParcel) -> ReplacementParcelRead:
                 product_name=item.product.name if item.product else None,
                 variant_name=item.variant.variant_name if item.variant else None,
                 material_name=item.material.name if item.material else None,
-                material_unit=item.material.unit.value if item.material and item.material.unit else None,
+                material_unit=item.material.unit if item.material and item.material.unit else None,
                 qty=qty,
                 unit_cost_snapshot=unit_cost,
                 line_cost=line_cost,

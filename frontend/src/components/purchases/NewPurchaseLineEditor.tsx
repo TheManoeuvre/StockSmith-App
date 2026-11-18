@@ -2,7 +2,7 @@ import { MaterialSelect } from "../materials/MaterialSelect";
 import { Badge } from "../common/Badge";
 import type { Material, PriceReference } from "../../api/types";
 import type { PurchaseLineInput } from "../../api/purchases";
-import { displayQty, formatDayMonth, normalizeQtyForUnit } from "../../lib/format";
+import { displayQty, formatDayMonth, isWholeNumberUnit, normalizeQtyForUnit, unitLabel, unitRule } from "../../lib/format";
 import { coverOnArrival, coverTone, projectedOnHand, type CoverTone } from "../../lib/reorder";
 
 const COVER_TEXT: Record<CoverTone, string> = {
@@ -17,7 +17,7 @@ const COVER_TEXT: Record<CoverTone, string> = {
 function unitPriceLabel(unitPrice: number, unit: Material["unit"]): string {
   if (!Number.isFinite(unitPrice) || unitPrice <= 0) return "-";
   const money = `£${unitPrice.toFixed(unitPrice < 1 ? 4 : 2)}`;
-  return unit === "each" ? `${money} each` : `${money}/${unit}`;
+  return unitRule(unit)?.show_suffix === false ? `${money} ${unit}` : `${money}/${unit}`;
 }
 
 /**
@@ -107,7 +107,7 @@ export function NewPurchaseLineEditor({
                   <input
                     type="number"
                     className="w-20 rounded border border-slate-300 px-2 py-1 text-right text-sm tabular-nums"
-                    step={stepFor ?? (material?.unit === "each" ? "1" : "10")}
+                    step={stepFor ?? (isWholeNumberUnit(material?.unit) ? "1" : "10")}
                     // The step base is `min`: offsetting it by the current remainder makes the
                     // arrows move by the typical reorder qty from whatever was typed (1020 →
                     // 2020), rather than snapping to a multiple. Typing stays free-form.
@@ -126,7 +126,7 @@ export function NewPurchaseLineEditor({
                     aria-label="Quantity"
                   />
                   <span className="w-7 shrink-0 text-[11px] text-slate-400">
-                    {material?.unit === "each" ? "" : material?.unit}
+                    {unitLabel(material?.unit)}
                   </span>
                   <span className="shrink-0 text-[11px] text-slate-400">£</span>
                   <input

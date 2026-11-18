@@ -17,7 +17,7 @@ import type {
 import { ErrorBanner } from "../common/ErrorBanner";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { useGuard } from "../../hooks/useUnsavedChangesGuard";
-import { displayQty, normalizeQtyForUnit } from "../../lib/format";
+import { displayQty, isWholeNumberUnit, normalizeQtyForUnit } from "../../lib/format";
 import { groupLabeller, groupMembers, noGroupReason } from "../../lib/substitutionGroups";
 import { BulkBomAmendModal } from "./BulkBomAmendModal";
 import { PlatformConflictDialog, platformConflictDetail } from "./PlatformConflictDialog";
@@ -512,7 +512,7 @@ function QuantityRulePanel({
           <span className="w-24">{value}</span>
           <input
             className="w-20 rounded border border-slate-300 px-1 py-0.5"
-            inputMode={unit === "each" ? "numeric" : "decimal"}
+            inputMode={isWholeNumberUnit(unit) ? "numeric" : "decimal"}
             value={rule.valueToQty[value] ?? normalizeQtyForUnit(displayQty(baseLineQty), unit)}
             onBlur={(e) =>
               onChangeRule({

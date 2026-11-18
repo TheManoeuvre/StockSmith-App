@@ -3,8 +3,7 @@ from datetime import datetime
 from sqlalchemy import Boolean, DateTime, Integer, String, func, text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from app.models.base import Base, portable_enum
-from app.models.material import MaterialUnit
+from app.models.base import Base
 
 
 class MaterialCategory(Base):
@@ -53,9 +52,8 @@ class MaterialCategory(Base):
     # Ascending. Ties are broken by name then id so the ordering is total even after a partial
     # reorder — nothing in the schema stops two rows sharing a value.
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
-    default_unit: Mapped[MaterialUnit | None] = mapped_column(
-        portable_enum(MaterialUnit, name="material_unit"), nullable=True
-    )
+    # The name of a `material_units` row, or NULL. Not a foreign key — see models/material_unit.py.
+    default_unit: Mapped[str | None] = mapped_column(String, nullable=True)
 
     consumed_on_failed_build: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("0")
