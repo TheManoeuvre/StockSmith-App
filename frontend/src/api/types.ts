@@ -957,6 +957,7 @@ export interface Asset {
 export interface LowStockMaterial {
   id: number;
   name: string;
+  unit?: MaterialUnit | null;
   current_qty: string;
   reorder_threshold: string;
   on_order_qty: string;
@@ -1014,6 +1015,7 @@ export interface OrderAwaitingPackaging {
   order_id: number;
   material_id: number;
   material_name: string;
+  unit?: MaterialUnit | null;
   short_by: string;
   platform: ListingPlatform | null;
   order_placed_at: string;

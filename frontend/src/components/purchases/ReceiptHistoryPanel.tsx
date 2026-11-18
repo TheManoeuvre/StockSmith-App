@@ -14,7 +14,7 @@ interface Batch {
   key: string;
   batchId: string | null;
   receivedAt: string;
-  lines: { materialName: string; qty: string; cost: string | null; receiptId: number }[];
+  lines: { materialName: string; unit: string | undefined; qty: string; cost: string | null; receiptId: number }[];
 }
 
 export function ReceiptHistoryPanel({
@@ -33,7 +33,8 @@ export function ReceiptHistoryPanel({
   const batches = useMemo<Batch[]>(() => {
     const byKey = new Map<string, Batch>();
     for (const line of purchase.lines) {
-      const materialName = materials.find((m) => m.id === line.material_id)?.name ?? `Material #${line.material_id}`;
+      const material = materials.find((m) => m.id === line.material_id);
+      const materialName = material?.name ?? `Material #${line.material_id}`;
       for (const receipt of line.receipts) {
         // A receipt predating batch ids (or written by the migration) stands on its own
         // rather than being lumped in with unrelated ones that share a date.
@@ -46,6 +47,7 @@ export function ReceiptHistoryPanel({
         };
         batch.lines.push({
           materialName,
+          unit: material?.unit,
           qty: receipt.qty,
           cost: receipt.total_cost,
           receiptId: receipt.id,
@@ -78,7 +80,7 @@ export function ReceiptHistoryPanel({
                   <ul className="flex flex-col gap-0.5">
                     {batch.lines.map((line) => (
                       <li key={line.receiptId}>
-                        {roundQty(line.qty)} × {line.materialName}
+                        {roundQty(line.qty, line.unit)} × {line.materialName}
                         {line.cost !== null && (
                           <span className="ml-2 text-xs text-slate-500">billed £{Number(line.cost).toFixed(2)}</span>
                         )}

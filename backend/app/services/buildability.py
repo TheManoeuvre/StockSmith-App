@@ -7,6 +7,7 @@ from decimal import Decimal
 from sqlalchemy import bindparam, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.material import Material
 from app.schemas.abc import DueForCountItemRead
 from app.schemas.dashboard import (
     BuildableProduct,
@@ -628,10 +629,15 @@ async def compute_dashboard_summary(session: AsyncSession) -> DashboardSummary:
     from app.services.forecasting import compute_material_forecasts
 
     forecasts = await compute_material_forecasts(session)
+    unit_by_material = {
+        row.id: row.unit
+        for row in await session.execute(select(Material.id, Material.unit).where(Material.id.in_([f.material_id for f in forecasts])))
+    }
     low_stock = [
         LowStockMaterial(
             id=f.material_id,
             name=f.name,
+            unit=unit_by_material.get(f.material_id),
             current_qty=f.current_qty,
             reorder_threshold=f.reorder_threshold,
             on_order_qty=f.on_order_qty,
