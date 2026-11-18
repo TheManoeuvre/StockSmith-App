@@ -136,6 +136,8 @@ export const ordersApi = {
   updateLineQty: (lineId: number, orderedQty: number) =>
     api.patch<Order>(`/orders/lines/${lineId}`, { ordered_qty: orderedQty }),
   unassignLine: (lineId: number, qty: number) => api.post<Order>(`/orders/lines/${lineId}/unassign`, { qty }),
+  correctShipped: (lineId: number, qty: number) =>
+    api.post<Order>(`/orders/lines/${lineId}/correct-shipped`, { qty }),
   mapSku: (lineId: number, input: { product_id?: number | null; variant_id?: number | null }) =>
     api.post<Order>(`/orders/lines/${lineId}/map-sku`, input),
   substituteLine: (lineId: number, input: { variant_id: number; qty: number; reason?: string | null }) =>

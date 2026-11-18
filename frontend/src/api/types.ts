@@ -1120,6 +1120,7 @@ export interface OrderLine {
   ordered_qty: number;
   allocated_qty: number;
   shipped_qty: number;
+  short_shipped_qty: number;
   unit_price: string | null;
   currency: string | null;
   external_line_id: string | null;

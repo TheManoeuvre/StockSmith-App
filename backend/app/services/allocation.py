@@ -47,10 +47,10 @@ async def _recompute_order_status(session: AsyncSession, order: Order) -> None:
         return
     previous_status = order.status
     total_ordered = sum(l.ordered_qty for l in lines)
-    total_shipped = sum(l.shipped_qty for l in lines)
+    total_shipped = sum(l.shipped_qty + l.short_shipped_qty for l in lines)
     if total_shipped >= total_ordered:
         order.status = OrderStatus.shipped
-    elif all(l.allocated_qty >= l.ordered_qty for l in lines):
+    elif all(l.allocated_qty + l.short_shipped_qty >= l.ordered_qty for l in lines):
         order.status = OrderStatus.allocated
     else:
         order.status = OrderStatus.pending
@@ -73,7 +73,7 @@ async def _allocate_line(session: AsyncSession, line: OrderLine, source: str) ->
     owner = await _get_stock_owner(session, line)
     if owner is None:
         return 0
-    need = line.ordered_qty - line.allocated_qty
+    need = line.ordered_qty - line.allocated_qty - line.short_shipped_qty
     if need <= 0:
         return 0
     free = owner.current_stock - owner.allocated_qty
@@ -140,7 +140,7 @@ async def auto_allocate_after_build(
         .where(
             OrderLine.product_id == product_id,
             OrderLine.variant_id == variant_id,
-            OrderLine.allocated_qty < OrderLine.ordered_qty,
+            OrderLine.allocated_qty + OrderLine.short_shipped_qty < OrderLine.ordered_qty,
             OrderLine.needs_mapping.is_(False),
             Order.status.in_([OrderStatus.pending, OrderStatus.allocated]),
             # An order the marketplace has reported as cancelled — or whose payment has
@@ -249,6 +249,44 @@ async def ship_line(session: AsyncSession, line: OrderLine, qty: int) -> None:
     )
 
 
+async def correct_shipped_qty(session: AsyncSession, line: OrderLine, qty: int) -> None:
+    """Records that `qty` units of a line marked shipped never actually left (a customer
+    got 1 of 2). The units come out of shipped_qty and allocated_qty, go back into
+    current_stock, and are tracked as short_shipped_qty so the line still reads as fully
+    fulfilled: ordered_qty is untouched (the buyer bought them; the missing units go out
+    as a replacement parcel), the order stays shipped, and nothing re-allocates them.
+
+    Cost of goods follows shipped_qty, so the original shipment is costed for what it
+    really contained. Packaging is deliberately not touched (see reconcile_order_kitting:
+    the parcel did go out, in its box)."""
+    if qty <= 0 or qty > line.shipped_qty:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot correct {qty}, only {line.shipped_qty} marked shipped",
+        )
+    owner = await _get_stock_owner(session, line)
+    line.shipped_qty -= qty
+    line.allocated_qty -= qty
+    line.short_shipped_qty += qty
+    if owner is not None:
+        owner.current_stock += qty
+        listing_push.enqueue_for_owner(owner)  # stock went up ⇒ sellable again
+        record_stock_event(
+            session,
+            product_id=line.product_id,
+            variant_id=line.variant_id,
+            event_type=ProductStockEventType.adjustment,
+            qty_delta=qty,
+            running_balance=owner.current_stock,
+            reason=f"Order #{line.order_id}: {qty} marked shipped but never sent",
+            source_order_line_id=line.id,
+        )
+    await session.flush()
+    order = await session.get(Order, line.order_id)
+    if order is not None:
+        await _recompute_order_status(session, order)
+
+
 async def ship_order(session: AsyncSession, order: Order) -> None:
     if order.status == OrderStatus.cancelled:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot ship a cancelled order")
@@ -301,12 +339,12 @@ async def apply_ordered_qty_change(
     other caller keeps the "a line is either removed or has positive demand" rule."""
     if new_ordered_qty < 0 or (new_ordered_qty == 0 and not allow_zero):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ordered_qty must be positive")
-    if new_ordered_qty < line.shipped_qty:
+    if new_ordered_qty < line.shipped_qty + line.short_shipped_qty:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="ordered_qty cannot be less than what's already shipped"
         )
-    if new_ordered_qty < line.allocated_qty:
-        await deallocate_line(session, line, line.allocated_qty - new_ordered_qty)
+    if new_ordered_qty < line.allocated_qty + line.short_shipped_qty:
+        await deallocate_line(session, line, line.allocated_qty + line.short_shipped_qty - new_ordered_qty)
     line.ordered_qty = new_ordered_qty
     order = await session.get(Order, line.order_id)
     if order is not None:

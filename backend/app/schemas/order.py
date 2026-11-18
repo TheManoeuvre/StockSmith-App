@@ -94,6 +94,7 @@ class OrderLineRead(BaseModel):
     ordered_qty: int
     allocated_qty: int
     shipped_qty: int
+    short_shipped_qty: int = 0
     unit_price: Decimal | None
     currency: str | None
     external_line_id: str | None
