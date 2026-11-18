@@ -65,6 +65,13 @@ export function NewPurchaseLineEditor({
             const total = Number(line.total_cost) || 0;
             const unitPrice = qty > 0 ? total / qty : 0;
 
+            const typical = Number(material?.typical_reorder_qty);
+            const stepFor = typical > 0 ? String(typical) : null;
+            const stepBase =
+              typical > 0
+                ? Math.round(((qty % typical) - typical * 1000) * 1000) / 1000
+                : 0;
+
             const ref = priceByMaterial.get(line.material_id);
             const lastUnit = ref ? Number(ref.unit_cost) : null;
             const rose = lastUnit != null && lastUnit > 0 && unitPrice > lastUnit * 1.005;
@@ -100,9 +107,17 @@ export function NewPurchaseLineEditor({
                   <input
                     type="number"
                     className="w-20 rounded border border-slate-300 px-2 py-1 text-right text-sm tabular-nums"
-                    step={material?.unit === "each" ? "1" : "10"}
+                    step={stepFor ?? (material?.unit === "each" ? "1" : "10")}
+                    // The step base is `min`: offsetting it by the current remainder makes the
+                    // arrows move by the typical reorder qty from whatever was typed (1020 →
+                    // 2020), rather than snapping to a multiple. Typing stays free-form.
+                    min={stepFor ? String(stepBase) : undefined}
                     value={line.qty}
-                    onChange={(e) => updateLine(i, { qty: e.target.value })}
+                    onChange={(e) =>
+                      updateLine(i, {
+                        qty: stepFor && Number(e.target.value) < 0 ? "0" : e.target.value,
+                      })
+                    }
                     onBlur={(e) =>
                       updateLine(i, {
                         qty: normalizeQtyForUnit(e.target.value, material?.unit),
