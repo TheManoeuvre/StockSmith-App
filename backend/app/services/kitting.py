@@ -1052,12 +1052,11 @@ async def get_orders_awaiting_packaging(session: AsyncSession) -> list[OrderAwai
     if not shortfalls:
         return []
 
-    material_names = {
-        row.id: row.name
-        for row in (
-            await session.execute(select(Material.id, Material.name).where(Material.id.in_(material_ids_needed)))
-        )
-    }
+    material_rows = (
+        await session.execute(select(Material.id, Material.name, Material.unit).where(Material.id.in_(material_ids_needed)))
+    ).all()
+    material_names = {row.id: row.name for row in material_rows}
+    material_units = {row.id: row.unit for row in material_rows}
     substitutes_by_material = await get_ranked_substitutes_by_material(session, material_ids_needed)
 
     result = [
@@ -1065,6 +1064,7 @@ async def get_orders_awaiting_packaging(session: AsyncSession) -> list[OrderAwai
             order_id=order.id,
             material_id=material_id,
             material_name=material_names.get(material_id, "Unknown material"),
+            unit=material_units.get(material_id),
             short_by=short_by,
             order_placed_at=order.order_placed_at,
             due_date=order.collect_by if order.fulfilment_method == OrderFulfilmentMethod.collect else order.ship_by_date,

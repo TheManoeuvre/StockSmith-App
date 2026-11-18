@@ -129,7 +129,7 @@ function awaitingProductRows(data: DashboardSummary): FulfillmentRow[] {
       orderIds: [o.order_id],
       shortOn: "Packaging",
       item: o.material_name,
-      shortBy: roundQty(o.short_by),
+      shortBy: roundQty(o.short_by, o.unit),
       placedAt: o.order_placed_at,
       dueDates: o.due_date ? [o.due_date] : [],
       platform: o.platform,
@@ -599,17 +599,17 @@ function Dashboard() {
                       </td>
                       <td className="p-2 text-right tabular-nums">
                         {m.consumption_rate_per_week != null
-                          ? `${roundQty(m.consumption_rate_per_week)}/wk`
+                          ? `${roundQty(m.consumption_rate_per_week, m.unit)}/wk`
                           : "-"}
                       </td>
                       <td
                         className={`p-2 text-right tabular-nums ${STOCKOUT_TEXT_CLASS[m.status]}`}
                       >
-                        {roundQty(m.current_qty)}
+                        {roundQty(m.current_qty, m.unit)}
                       </td>
                       <td className="p-2 text-right tabular-nums">
                         {Number(m.on_order_qty) > 0
-                          ? roundQty(m.on_order_qty)
+                          ? roundQty(m.on_order_qty, m.unit)
                           : "-"}
                       </td>
                       <td className="p-2">

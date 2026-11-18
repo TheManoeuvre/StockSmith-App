@@ -432,7 +432,7 @@ function StockTakeDetailPage() {
                                   {line.allocated_qty_at_start !== null &&
                                     Number(line.allocated_qty_at_start) > 0 && (
                                       <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[11px] text-amber-800">
-                                        {roundQty(line.allocated_qty_at_start)}{" "}
+                                        {roundQty(line.allocated_qty_at_start, line.unit)}{" "}
                                         picked for orders
                                       </span>
                                     )}
@@ -463,8 +463,8 @@ function StockTakeDetailPage() {
                                   {liveDelta == null
                                     ? "-"
                                     : liveDelta > 0
-                                      ? `+${roundQty(String(liveDelta))}`
-                                      : roundQty(String(liveDelta))}
+                                      ? `+${roundQty(String(liveDelta), line.unit)}`
+                                      : roundQty(String(liveDelta), line.unit)}
                                 </td>
                                 <td
                                   className={`p-2 text-right tabular-nums ${
