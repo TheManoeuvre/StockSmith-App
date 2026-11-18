@@ -15,6 +15,7 @@ import { FieldRow } from "../../components/common/FieldRow";
 import { Stat } from "../../components/common/Stat";
 import { formatMoney } from "../../lib/money";
 import { displayQty, formatDayMonth, isLowStock } from "../../lib/format";
+import { addBusinessDays } from "../../lib/forecast";
 import { coverOnArrival, qtyToClearWarning } from "../../lib/reorder";
 
 export const Route = createFileRoute("/purchases/new")({
@@ -70,6 +71,23 @@ function NewPurchase() {
   const [supplierOrderNumber, setSupplierOrderNumber] = useState("");
   const [orderDate, setOrderDate] = useState("");
   const [expectedArrivalDate, setExpectedArrivalDate] = useState("");
+  // True once the user has typed their own expected-delivery date; stops the supplier's
+  // lead time from overwriting it. Clearing the field hands control back to auto-fill.
+  const etaOverridden = useRef(false);
+  const supplierLeadDays =
+    (suppliers ?? []).find((s) => s.id === supplierId)?.default_lead_time_days ?? null;
+
+  const autoFillEta = (date: string, leadDays: number | null) => {
+    if (etaOverridden.current || !date || leadDays == null) return;
+    setExpectedArrivalDate(addBusinessDays(date, leadDays));
+  };
+
+  // Supplier chosen/changed after the date was already set.
+  useEffect(() => {
+    autoFillEta(orderDate, supplierLeadDays);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supplierLeadDays]);
+
   const [notes, setNotes] = useState("");
   const [deliveryCost, setDeliveryCost] = useState("");
   const [lines, setLines] = useState<PurchaseLineInput[]>([]);
@@ -316,7 +334,10 @@ function NewPurchase() {
               type="date"
               className="rounded border border-slate-300 px-2 py-1"
               value={orderDate}
-              onChange={(e) => setOrderDate(e.target.value)}
+              onChange={(e) => {
+                setOrderDate(e.target.value);
+                autoFillEta(e.target.value, supplierLeadDays);
+              }}
             />
           </FieldRow>
           <FieldRow label="Expected delivery">
@@ -325,9 +346,15 @@ function NewPurchase() {
                 type="date"
                 className="rounded border border-slate-300 px-2 py-1"
                 value={expectedArrivalDate}
-                onChange={(e) => setExpectedArrivalDate(e.target.value)}
+                onChange={(e) => {
+                  etaOverridden.current = e.target.value !== "";
+                  setExpectedArrivalDate(e.target.value);
+                }}
               />
               <span className="text-[11px] text-slate-400">
+                {supplierLeadDays != null && !etaOverridden.current
+                  ? `from ${supplierLeadDays} business-day supplier lead time · `
+                  : ""}
                 cover below is measured at this date
               </span>
             </div>

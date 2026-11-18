@@ -55,6 +55,21 @@ export function formatWeeksShort(weeksOfSupply: string | null): string {
   return `${Number(weeksOfSupply).toFixed(1)} wk`;
 }
 
+/** `iso` (YYYY-MM-DD) plus `days` business days (Mon-Fri), as YYYY-MM-DD. Weekend start
+ *  dates roll forward as if placed on the following Monday's eve, i.e. counting begins from
+ *  the next weekday. */
+export function addBusinessDays(iso: string, days: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  let left = Math.max(0, Math.round(days));
+  while (left > 0) {
+    dt.setUTCDate(dt.getUTCDate() + 1);
+    const dow = dt.getUTCDay();
+    if (dow !== 0 && dow !== 6) left -= 1;
+  }
+  return dt.toISOString().slice(0, 10);
+}
+
 /** Supplier lead time, compact: "10 bd lead", or "" when there's nothing useful to show.
  *  The reorder point is judged this far ahead of stockout, so it belongs wherever the
  *  supplier is named. Business days, Mon-Fri. */
