@@ -787,7 +787,11 @@ function OrderLineRow({
   const dash = <span className="text-slate-300">-</span>;
 
   return (
-    <tr className={`border-b border-slate-100 ${isFullySubstituted ? "bg-slate-50" : ""}`}>
+    <tr
+      // Baseline-align so a note under a figure (e.g. "1 never sent") hangs below it instead of
+      // pushing that figure out of line with the rest of the row.
+      className={`border-b border-slate-100 [&>td]:align-baseline ${isFullySubstituted ? "bg-slate-50" : ""}`}
+    >
       <td className={productCellClasses}>
         {line.needs_mapping ? (
           <div className="flex flex-col gap-1">
