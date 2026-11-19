@@ -73,20 +73,31 @@ material categories (filament, resin, pigment, hardware, packaging, blanks, othe
 - **Not seeded, deliberately:** suppliers, manufacturers, product categories. Business-
   specific; seeded rows are clutter to delete.
 
-**Open question — category set for a public audience.** The seven categories are 3D-print
-shaped (filament, resin, pigment). For a candle maker or jeweller they are noise. Options:
-(a) keep them, rely on "delete what you don't use"; (b) seed a generic set (raw material,
-component, consumable, packaging, other) and offer 3D-print as a preset; (c) ask "what do
-you make?" on first launch and seed the matching preset. (c) is the best experience and the
-most work; (b) is the cheapest honest default. **Decide before building §5 step 2.**
+**Decided (2026-11-19) — ask "what do you make?" on first launch.** ✅ Built. Five presets
+plus a "Something else" fallback, defined in `backend/app/services/business_presets.py`:
+
+| Preset | Categories | Extra unit |
+|---|---|---|
+| 3D printing & resin | the original seven, unchanged | — |
+| Candles, soap & bath | wax, soap base, fragrance, colourants & additives, wicks, vessels, labels, packaging, other | — |
+| Jewellery & beading | findings, beads, chain & wire, stones & charms, cord & thread, packaging, other | cm |
+| Sewing, knitting & textiles | fabric, yarn, thread, interfacing & wadding, notions, labels & tags, packaging, other | m |
+| Paper goods & print | paper & card, sticker & vinyl sheets, envelopes, embellishments, packaging, other | — |
+| Something else | raw materials, components, consumables, packaging, other | — |
+
+Each preset also seeds example material types. Rules: the choice is stored in
+`general_settings.business_type` (NULL = not asked yet); it can only be applied while no
+materials exist; existing installs with data are stamped `3d_printing` by migration
+`d2e7a4c19f60` and never see the picker. Changing business type after setup is not
+supported — categories are edited in Settings → Lists instead.
 
 ---
 
 ## 5. Onboarding flow
 
 1. **First-launch choice:** Start fresh · Restore from backup (new PC) · Explore sample data.
-2. **Basics:** confirm currency, business type (if §4 option c), sync start date defaulting
-   to today.
+   ✅ Partly built: the business-type picker (§4) offers "Restore a backup instead".
+2. **Basics:** confirm currency, ✅ business type, sync start date defaulting to today.
 3. **Setup checklist** — on the Dashboard, resumable, dismissable. Steps follow §2's tiers.
    Each step:
    - completes itself from real data (e.g. "≥1 material has stock"), never a manual tick;
@@ -185,7 +196,8 @@ work.
 
 1. ✅ This plan; PR template + `CLAUDE.md` process rule.
 2. Docs scaffolding (§7) — route, `HelpLink`, slug test, first concept pages.
-3. Decide §4 category question and §8 credentials question.
+3. ✅ §4 category question decided and built (business-type picker). §8 credentials
+   question still open.
 4. Seed additions (§4) and flag help text.
 5. Empty states across all pages (§3).
 6. `/onboarding/status` endpoint + Dashboard checklist (§5.3).

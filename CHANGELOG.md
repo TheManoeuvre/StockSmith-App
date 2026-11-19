@@ -12,6 +12,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **New installs ask what you make.** The first time StockSmith opens, it asks which kind of business
+  you run — 3D printing & resin, candles & soap, jewellery & beading, sewing & textiles, paper goods &
+  print, or something else — and sets up material categories, units and example material types to
+  match. Everything it creates can be renamed or removed in Settings › Lists. Existing installs are
+  not asked and keep their categories exactly as they are.
+
 ## [0.27.0] - 2026-11-16
 
 ### Fixed

@@ -15,6 +15,7 @@ import { NavTip } from "../components/common/NavTip";
 import { SyncStatusIndicator } from "../components/common/SyncStatusIndicator";
 import { NotificationCenter } from "../components/common/NotificationCenter";
 import { MaintenanceOverlay } from "../components/common/MaintenanceOverlay";
+import { BusinessTypePicker } from "../components/onboarding/BusinessTypePicker";
 import { UnsavedChangesDialog } from "../components/common/UnsavedChangesDialog";
 import { useRefreshOnSync } from "../hooks/useRefreshOnSync";
 import { useAppUpdate } from "../hooks/useAppUpdate";
@@ -80,6 +81,8 @@ function RootShell() {
       {/* App-wide for the same reason the guard is: a restore on the host locks out every page,
           not just Settings. */}
       <MaintenanceOverlay />
+      {/* First launch only: "what do you make?". Renders nothing once chosen. */}
+      <BusinessTypePicker />
     </GuardProvider>
   );
 }
