@@ -23,8 +23,7 @@ Materials are everything you buy and use up: raw materials, components and packa
 2. Add suppliers as you go, so reordering and purchase records know where things come from.
 
 Got a lot? The Materials page has **Import CSV**. Click **Export CSV** first to get a file with
-the right columns, fill it in in a spreadsheet, and import it back. Products work the same way —
-but a product's BOM and variants can't be imported yet, so those are added by hand.
+the right columns, fill it in in a spreadsheet, and import it back.
 
 ## 3. Count what you have
 
@@ -56,6 +55,22 @@ go into one, and how much of each.
 3. If it comes in options (sizes, colours, scents), add them on the **Variants** tab. Each
    variant can change the recipe — a large candle uses more wax.
 4. If this product ships in different packaging from your usual, change its kitting BOM.
+
+### Importing a whole catalogue
+
+**Products › Import / export** takes three spreadsheet (CSV) files, imported in this order:
+
+1. **Products** — name, SKU and description.
+2. **Variants** — one row per variant, with its product's SKU, its name, its attributes and price.
+3. **Recipes (BOMs)** — one row per material in a recipe: the product's SKU, the material's name
+   and how much one uses. Leave **variant_name** blank for the product's own recipe; fill it in
+   for a variant that uses a different amount or an extra material. To swap one material for
+   another in a variant — white instead of black, say — put the material it replaces in
+   **replaces_material**.
+
+Export each file first to get the right columns. Importing a recipe replaces that recipe as a
+whole, and a recipe with any mistake in it is left unchanged, with the mistake listed so you can
+fix it and import again.
 
 Once a product has a BOM, StockSmith can tell you how many you could make from the stock you
 have, and what each one costs to make.

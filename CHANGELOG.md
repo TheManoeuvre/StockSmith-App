@@ -32,6 +32,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   print, or something else — and sets up material categories, units and example material types to
   match. Everything it creates can be renamed or removed in Settings › Lists. Existing installs are
   not asked and keep their categories exactly as they are.
+- **Import a whole catalogue from spreadsheets.** Products › Import / export now takes variants and
+  recipes (BOMs) as well as products: one row per variant, and one row per material in a recipe,
+  including a variant's own quantities and material swaps. Importing a recipe replaces it as a whole,
+  and a recipe with a mistake in it is left unchanged, with every bad row listed.
 - **New installs start with Royal Mail postage options.** Three Royal Mail 2nd Class shipping profiles
   (large letter, small parcel, medium parcel) at Post Office prices, ready to edit to what you pay.
   Existing installs are unchanged.

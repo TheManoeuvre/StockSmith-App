@@ -21,7 +21,7 @@ import { useGuard } from "../../hooks/useUnsavedChangesGuard";
 import { Badge } from "../../components/common/Badge";
 import { CopyButton } from "../../components/common/CopyButton";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
-import { CsvImportExport } from "../../components/common/CsvImportExport";
+import { CatalogueCsvPanel } from "../../components/products/CatalogueCsvPanel";
 import { FilterTabs } from "../../components/common/FilterTabs";
 import { GroupHeaderRow, Th } from "../../components/common/ListTable";
 import { PlatformSyncBadge } from "../../components/products/PlatformSyncBadge";
@@ -132,6 +132,7 @@ function ProductsListContent() {
   // Off by default, same as the materials list's showInactive — an inactive product is
   // hidden from the main list until asked for.
   const [showInactive, setShowInactive] = useState(false);
+  const [showCsv, setShowCsv] = useState(false);
   const [soldOn, setSoldOn] = useState<"" | ListingPlatform>("");
   // Collapsed category groups, by label. Session-only, same as the materials list.
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
@@ -265,11 +266,14 @@ function ProductsListContent() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <CsvImportExport
-            onExport={productsApi.exportCsv}
-            onImport={productsApi.importCsv}
-            invalidateKey={["products", "dashboard-summary"]}
-          />
+          <button
+            type="button"
+            onClick={() => setShowCsv((v) => !v)}
+            aria-expanded={showCsv}
+            className="rounded border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50"
+          >
+            Import / export
+          </button>
           <button
             onClick={() =>
               guard.attempt(() => setShowForm((v) => !v), {
@@ -281,6 +285,8 @@ function ProductsListContent() {
             {showForm ? "Cancel" : "Add product"}
           </button>
         </div>
+
+      {showCsv && <CatalogueCsvPanel />}
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
@@ -417,7 +423,8 @@ function ProductsListContent() {
         >
           A product is something you sell. Click <strong>Add product</strong>, then give it a <strong>BOM</strong>: the
           materials one of them uses. With a BOM, StockSmith can work out what each costs to make and how many you
-          could make from the stock you have. Add your materials first, so they're there to choose from.
+          could make from the stock you have. Add your materials first, so they're there to choose from. Got a
+          whole catalogue? <strong>Import / export</strong> takes products, variants and recipes as spreadsheets.
         </EmptyState>
       ) : (
         <table className="w-full border-collapse overflow-hidden rounded-lg bg-white text-left text-[12.5px] shadow-sm">
