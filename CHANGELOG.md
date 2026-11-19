@@ -12,6 +12,30 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-11-19
+
+### Added
+
+- **Units of measure are now an editable list.** Add your own units (for example metres) under
+  Settings → Lists → Units, and choose how many decimal places each one shows. Quantities across the
+  dashboard, stock takes and receipts follow each unit's rule.
+- **"Fewer sent" correction on orders.** If a line was marked shipped with more units than actually
+  went out, you can lower it: the difference goes back into stock and the order stays shipped.
+
+### Changed
+
+- **New purchases fill in the expected delivery date for you.** Picking an order date or supplier sets
+  it from the supplier's lead time. Type a date to override it, or clear the field to go back to
+  auto-fill.
+- **Quantity arrows on new purchases step by the material's typical reorder quantity.**
+- **Settings lists start collapsed when you switch between them**, and warn you about unsaved changes
+  before switching.
+
+### Fixed
+
+- Fixed misaligned text in the error shown when the app and its background service are on different
+  versions.
+
 ## [0.27.0] - 2026-11-16
 
 ### Fixed
