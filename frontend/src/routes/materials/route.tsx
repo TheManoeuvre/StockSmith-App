@@ -36,6 +36,9 @@ import {
   STOCKOUT_LABEL,
   STOCKOUT_TEXT_CLASS,
 } from "../../lib/forecast";
+import { HelpLink } from "../../components/help/HelpLink";
+import { PAGE_HELP } from "../../lib/help";
+import { EmptyState } from "../../components/common/EmptyState";
 
 /** At risk = the forecast flags it critical/warning (by weeks-to-stockout or the user's own
  *  reorder floor), or it's simply at/below its reorder threshold — the latter covers a new
@@ -345,7 +348,10 @@ function MaterialsListContent() {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">Materials</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-semibold">Materials</h1>
+            <HelpLink doc={PAGE_HELP.materials.doc} anchor={PAGE_HELP.materials.anchor} />
+          </div>
           <p className="mt-0.5 text-[12.5px] text-slate-500">
             {trackedCount} tracked · {atRiskCount} at risk · £
             {onHandValue.toFixed(2)} on hand
@@ -546,43 +552,55 @@ function MaterialsListContent() {
         </div>
       </div>
 
-      <table className="w-full border-collapse overflow-hidden rounded-lg bg-white text-left text-[12.5px] shadow-sm">
-        <thead>
-          <tr className="border-b border-slate-200 bg-slate-50/60">
-            <Th>{""}</Th>
-            {sortHeader("name", "Material")}
-            <Th>Type</Th>
-            {sortHeader("current_qty", "On hand")}
-            {sortHeader("on_order_qty", "On order")}
-            {sortHeader("reorder_threshold", "Reorder at")}
-            {sortHeader("avg_unit_cost", "Unit cost")}
-            {sortHeader("weeks_of_supply", "To stockout")}
-            <Th>Supplier</Th>
-          </tr>
-        </thead>
-        {grouped.map(([cat, materials]) => (
-          <tbody key={cat}>
-            <GroupHeaderRow
-              label={cat}
-              count={materials.length}
-              colSpan={9}
-              capitalize
-              collapsed={collapsedGroups.has(cat)}
-              onToggle={() => toggleGroup(cat)}
-            />
-            {!collapsedGroups.has(cat) &&
-              materials.map((m) => (
-                <MaterialRow
-                  key={m.id}
-                  material={m}
-                  costPerKg={
-                    categoriesByName.get(cat)?.cost_per_kg_display ?? false
-                  }
-                />
-              ))}
-          </tbody>
-        ))}
-      </table>
+      {data !== undefined && data.length === 0 ? (
+        <EmptyState
+          title="No materials yet"
+          actions={<HelpLink doc="getting-started" anchor="2-add-your-materials">How to add materials</HelpLink>}
+        >
+          Materials are everything you buy and use up: raw materials, components and packaging. Click{" "}
+          <strong>Add material</strong> to add one, or for lots at once, <strong>Export CSV</strong> to get a template,
+          fill it in and <strong>Import CSV</strong>. Then count what you have, so StockSmith starts from the right
+          numbers.
+        </EmptyState>
+      ) : (
+        <table className="w-full border-collapse overflow-hidden rounded-lg bg-white text-left text-[12.5px] shadow-sm">
+          <thead>
+            <tr className="border-b border-slate-200 bg-slate-50/60">
+              <Th>{""}</Th>
+              {sortHeader("name", "Material")}
+              <Th>Type</Th>
+              {sortHeader("current_qty", "On hand")}
+              {sortHeader("on_order_qty", "On order")}
+              {sortHeader("reorder_threshold", "Reorder at")}
+              {sortHeader("avg_unit_cost", "Unit cost")}
+              {sortHeader("weeks_of_supply", "To stockout")}
+              <Th>Supplier</Th>
+            </tr>
+          </thead>
+          {grouped.map(([cat, materials]) => (
+            <tbody key={cat}>
+              <GroupHeaderRow
+                label={cat}
+                count={materials.length}
+                colSpan={9}
+                capitalize
+                collapsed={collapsedGroups.has(cat)}
+                onToggle={() => toggleGroup(cat)}
+              />
+              {!collapsedGroups.has(cat) &&
+                materials.map((m) => (
+                  <MaterialRow
+                    key={m.id}
+                    material={m}
+                    costPerKg={
+                      categoriesByName.get(cat)?.cost_per_kg_display ?? false
+                    }
+                  />
+                ))}
+            </tbody>
+          ))}
+        </table>
+      )}
 
       <p className="text-[12px] text-slate-500">
         Showing {shownCount} of {trackedCount}

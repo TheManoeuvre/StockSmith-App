@@ -247,6 +247,15 @@ async def _redirect_uri(
     return f"{base_url.rstrip('/')}/api/v1/platforms/{platform.value}/callback"
 
 
+def _start_new_account(connection: PlatformConnection, account_id: str) -> None:
+    """Called whenever a connection is about to point at `account_id`. A first connection, or a
+    switch to a different shop or Square location, starts importing from today: the stored
+    start date belonged to a shop that isn't this one, or is just the row's creation date. A
+    reconnect of the same shop keeps whatever the user set."""
+    if connection.external_account_id != account_id:
+        connection.sync_start_date = datetime.now(timezone.utc).date()
+
+
 async def _get_or_create_connection(
     session: AsyncSession, platform: ListingPlatform, environment: PlatformEnvironment = PlatformEnvironment.production
 ) -> PlatformConnection:
@@ -497,6 +506,7 @@ async def set_square_location(payload: SquareLocationRequest, session: AsyncSess
         connection.last_orders_synced_at = None
         connection.unpaid_hold_since = None
         connection.auto_sync_enabled = False
+    _start_new_account(connection, payload.location_id)
     connection.external_account_id = payload.location_id
     await session.commit()
 
@@ -578,6 +588,7 @@ async def platform_callback(
         connection.product_scope_decided_at = None
         # A new shop must not start unattended commits before a manual sync has been run.
         connection.auto_sync_enabled = False
+    _start_new_account(connection, account_id)
     connection.external_account_id = account_id
     connection.connected_at = datetime.now(timezone.utc)
     if platform == ListingPlatform.etsy:

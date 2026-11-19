@@ -24,6 +24,7 @@ from app.routers import (
     material_units,
     materials,
     notifications,
+    onboarding,
     orders,
     platform_config,
     platforms,
@@ -37,6 +38,7 @@ from app.routers import (
     suppliers,
     system,
     variants,
+    workspace,
 )
 from app.services import (
     backup_scheduler,
@@ -171,6 +173,8 @@ app.include_router(backups.router, prefix="/api/v1")
 app.include_router(restore.router, prefix="/api/v1")
 app.include_router(notifications.settings_router, prefix="/api/v1")
 app.include_router(notifications.router, prefix="/api/v1")
+app.include_router(onboarding.router, prefix="/api/v1")
+app.include_router(workspace.router, prefix="/api/v1")
 
 # Intentionally *not* under /api/v1: a client polling for the end of a restore has to reach this
 # while everything under that prefix is answering 503. See app/routers/system.py.

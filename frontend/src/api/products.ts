@@ -123,6 +123,12 @@ export const productsApi = {
   exportCsv: () => downloadCsv("/products/export", "products.csv"),
   importCsv: (fileBytes: Uint8Array, filename: string): Promise<CsvImportResult> =>
     uploadCsv("/products/import", fileBytes, filename),
+  exportVariantsCsv: () => downloadCsv("/products/variants/export", "variants.csv"),
+  importVariantsCsv: (fileBytes: Uint8Array, filename: string): Promise<CsvImportResult> =>
+    uploadCsv("/products/variants/import", fileBytes, filename),
+  exportBomsCsv: () => downloadCsv("/products/boms/export", "boms.csv"),
+  importBomsCsv: (fileBytes: Uint8Array, filename: string): Promise<CsvImportResult> =>
+    uploadCsv("/products/boms/import", fileBytes, filename),
 };
 
 export const buildsApi = {

@@ -26,6 +26,9 @@ export default defineConfig(async () => ({
           port: 1421,
         }
       : undefined,
+    // The in-app help is read from the repository's docs/help folder (see src/lib/help.ts), which
+    // sits outside this project root; the dev server refuses to serve it without this.
+    fs: { allow: [".", "../docs/help"] },
     watch: {
       // 3. tell Vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],

@@ -12,6 +12,50 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **StockSmith is now open source under the MIT licence.** Free to use, change and share.
+- **New store connections import orders from the day you connect.** Older orders have no costs
+  recorded and would arrive as work already done. If you have orders still to send, move the store's
+  "Import orders from" date back before your first sync. Reconnecting the same shop keeps your date.
+- **Square's connect dialog starts on Production**, for your real shop, rather than Sandbox.
+
+### Fixed
+
+- **Due-date ranges read correctly outside the UK.** A span of orders on the Dashboard showed as
+  "15–Aug 18" on computers set to US English; dates now follow your computer's own format.
+
+### Added
+
+- **New installs ask what you make.** The first time StockSmith opens, it asks which kind of business
+  you run — 3D printing & resin, candles & soap, jewellery & beading, sewing & textiles, paper goods &
+  print, or something else — and sets up material categories, units and example material types to
+  match. Everything it creates can be renamed or removed in Settings › Lists. Existing installs are
+  not asked and keep their categories exactly as they are.
+- **Look around with sample data.** From the first-launch screen or Help, StockSmith can restart into
+  a made-up candle shop with three months of products, stock, orders and sales, kept entirely apart
+  from your own data. A banner shows you're in it, and leaving deletes it.
+- **Import a whole catalogue from spreadsheets.** Products › Import / export now takes variants and
+  recipes (BOMs) as well as products: one row per variant, and one row per material in a recipe,
+  including a variant's own quantities and material swaps. Importing a recipe replaces it as a whole,
+  and a recipe with a mistake in it is left unchanged, with every bad row listed.
+- **New installs start with Royal Mail postage options.** Three Royal Mail 2nd Class shipping profiles
+  (large letter, small parcel, medium parcel) at Post Office prices, ready to edit to what you pay.
+  Existing installs are unchanged.
+- **Help, built in.** A new Help page at the bottom of the sidebar explains how StockSmith works and
+  how to set it up: getting started, the ideas behind each page, what each material category setting
+  does, connecting Square, Etsy and eBay, backups and moving to a new computer, and troubleshooting.
+  It works offline, and the "Reconnecting" screen now links straight to the troubleshooting page.
+- **A setup checklist on the Dashboard for new installs.** Seven steps in the order that works best —
+  materials, an opening count, packaging, products, a store, an off-computer backup — each ticking
+  itself off as you do it, with a link to where it's done and how. Hide it whenever you like and bring
+  it back from Help. Existing installs don't see it unless they ask for it.
+- **Empty pages say what to do next.** Materials, Products, Purchases, Orders and Stock takes now explain
+  what they're for and how to get started when there's nothing in them yet, instead of a blank table.
+- **A ? beside every page title** opens the help for that page.
+- **Each material category setting is explained.** Hover the ⓘ beside any switch in Settings › Lists ›
+  Material categories, or follow the link to the full explanation.
+
 ## [0.27.0] - 2026-11-16
 
 ### Fixed

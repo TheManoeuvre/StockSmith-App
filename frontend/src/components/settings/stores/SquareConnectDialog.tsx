@@ -4,6 +4,7 @@ import type { NamedOption } from "../../../api/listingProfiles";
 import { platformsApi, type PlatformEnvironment } from "../../../api/platforms";
 import { ErrorBanner } from "../../common/ErrorBanner";
 import { Modal } from "../../common/Modal";
+import { HelpLink } from "../../help/HelpLink";
 
 /**
  * Square has no OAuth redirect (see docs/plan-square-integration.md) — connecting means
@@ -25,7 +26,7 @@ export function SquareConnectDialog({
 }) {
   const queryClient = useQueryClient();
   const [accessToken, setAccessToken] = useState("");
-  const [environment, setEnvironment] = useState<PlatformEnvironment>("sandbox");
+  const [environment, setEnvironment] = useState<PlatformEnvironment>("production");
   const [locations, setLocations] = useState<NamedOption[] | null>(null);
   const [selectedLocationId, setSelectedLocationId] = useState<string>("");
 
@@ -156,7 +157,8 @@ export function SquareConnectDialog({
         <p className="text-sm text-slate-600">
           Paste a Square access token from the{" "}
           <span className="font-medium">Square Developer Console</span> (your app → Sandbox or
-          Production → Credentials). It's stored encrypted and never shown again.
+          Production → Credentials). It's stored encrypted and never shown again.{" "}
+          <HelpLink doc="connecting-square">Step-by-step guide</HelpLink>
         </p>
         <label className="flex flex-col gap-1 text-sm">
           <span className="font-medium text-slate-700">Access token</span>

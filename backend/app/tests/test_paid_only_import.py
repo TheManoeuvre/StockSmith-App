@@ -196,6 +196,11 @@ async def test_hold_keeps_the_window_open_behind_the_watermark(session, session_
     platform that doesn't bump last_modified on settlement would lose it forever."""
     t_old = datetime.now(timezone.utc) - timedelta(days=2)
     t_new = datetime.now(timezone.utc) - timedelta(hours=1)
+    # A floor well before both orders, so the assertion below is about the hold alone. The
+    # connection's default floor is the day it was created — today — which would sit in front
+    # of t_old on its own and make the hold unobservable.
+    connection.sync_start_date = (datetime.now(timezone.utc) - timedelta(days=30)).date()
+    await session.commit()
     use_adapter(
         [
             make_order("R-UNPAID", payment_state=PaymentState.unsettled, last_modified=t_old),

@@ -1,4 +1,4 @@
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 
 from sqlalchemy import Date, DateTime, String, func
 from sqlalchemy import true as sa_true
@@ -11,7 +11,10 @@ from app.services.crypto import EncryptedString
 
 
 def _default_sync_start_date() -> date:
-    return date.today() - timedelta(days=14)
+    # Today, not a window into the past: an imported historical order has no cost of goods
+    # recorded against it and arrives as a backlog of "awaiting" work that was already done.
+    # Anyone with recent orders still to send moves the date back by hand.
+    return date.today()
 
 
 class PlatformConnection(Base):
@@ -57,9 +60,9 @@ class PlatformConnection(Base):
     shop_name: Mapped[str | None] = mapped_column(String, nullable=True)
     shop_icon_path: Mapped[str | None] = mapped_column(String, nullable=True)
     # Floor on order sync — never import orders placed before this date, regardless of
-    # last_orders_synced_at. Defaults to 14 days before the connection is first created,
-    # so a first sync doesn't pull in a shop's entire historical order backlog. Editable
-    # afterward from the Etsy sync panel.
+    # last_orders_synced_at. Defaults to the day a shop is first connected (and is reset to
+    # that day when a *different* shop connects — see routers/platforms.py), so a first sync
+    # doesn't pull in a shop's historical orders. Editable afterward from the store's page.
     sync_start_date: Mapped[date | None] = mapped_column(Date, nullable=True, default=_default_sync_start_date)
     last_orders_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # How far back the order fetch window is being held open to keep re-checking orders

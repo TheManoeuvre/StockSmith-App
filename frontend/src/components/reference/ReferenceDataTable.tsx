@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient, type QueryKey } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { DirtyPath } from "../../hooks/useDirtyRegistry";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { useGuard } from "../../hooks/useUnsavedChangesGuard";
@@ -150,7 +150,7 @@ export function ReferenceDataTable<T extends ReferenceRow>({
   expandedExtras,
 }: {
   title: string;
-  description?: string;
+  description?: ReactNode;
   /** DirtyPath segment, e.g. "manufacturers". Must be unique within the page. */
   segment: string;
   queryKey: QueryKey;

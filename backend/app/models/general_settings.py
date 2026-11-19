@@ -1,7 +1,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, Numeric, String, func
+from sqlalchemy import Boolean, DateTime, Integer, Numeric, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.abc_classification import ABCClass
@@ -58,6 +58,14 @@ class GeneralSettings(Base):
     default_product_abc_class: Mapped["ABCClass"] = mapped_column(
         portable_enum(ABCClass, name="abc_class"), nullable=False, default=ABCClass.C
     )
+    # The first-launch "what do you make?" answer — a key from services/business_presets.py.
+    # NULL means a fresh install that hasn't been asked yet; the frontend shows the picker on
+    # exactly that. Installs that predate the picker are stamped "3d_printing" by the migration
+    # that added this column, so they are never asked.
+    business_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # The Dashboard's setup checklist (services/onboarding.py) shows until every step is done or
+    # this is set. Settable both ways: Help offers "show the setup checklist again".
+    setup_checklist_dismissed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

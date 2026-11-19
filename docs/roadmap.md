@@ -29,7 +29,7 @@ Written 2026-08-15, against 0.6.3.
 | Receiving by line | Shipped — deliveries are their own records, dated and costed individually | `CHANGELOG.md` |
 | Backlog quick wins (CI, line endings, Build-now link) | **In flight** — PR #23 | `backlog.md` |
 | Always-on sync | **Next up** — tray chosen as first step; `plan-background-sync.md` now carries the build plan and the Windows 11 uptime design | `plan-background-sync.md` §6-8, `plan-always-on-sync.md` |
-| **New-user onboarding** | **Unplanned — this document is where it enters** | below |
+| **New-user onboarding** | **Planned** (2026-11-19) — public distribution, UK-first, sample workspace, in-app docs decided | `plan-onboarding.md` |
 | Print-queue management | Never started, never planned | `plan-phase0-phase1.md` names it as a later phase |
 | Shipping automation | Parked deliberately, not deferred | `plan-marketplace-integrations.md` §2 |
 
@@ -151,6 +151,11 @@ Sketch only — the planning pass decides the shape:
 
 ### The decision this forces
 
+> **Decided 2026-11-19: per-user developer apps.** StockSmith is shared publicly as a
+> courtesy, with no additional responsibility taken on — so no shared credentials and no
+> StockSmith-operated services. See `plan-onboarding.md` §8 for what that means for
+> onboarding, and note it also closes `plan-always-on-sync.md` options D and an operated C.
+
 Finding 5 is the one that cannot be designed around, and it is shared with
 `plan-always-on-sync.md`: either every user registers their own developer apps — which
 caps StockSmith at users who can follow a developer portal — or StockSmith ships **shared
@@ -175,6 +180,6 @@ Offered for confirmation, not settled:
 1. Everything in flight merged and released.
 2. Always-on sync working, in whatever shape `plan-always-on-sync.md` settles on.
 3. `backlog.md` empty of correctness items (nice-to-haves may survive).
-4. A decision recorded on shared vs. per-user marketplace app credentials.
+4. ✅ A decision recorded on shared vs. per-user marketplace app credentials — per-user.
 5. Onboarding built against the finished feature set.
 6. A print-queue decision — in scope, or explicitly post-1.0.

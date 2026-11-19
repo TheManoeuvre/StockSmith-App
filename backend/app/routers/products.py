@@ -59,6 +59,7 @@ from app.services.buildability import (
     get_ready_to_ship_by_bundle,
 )
 from app.services import abc, attribute_values, listing_push, platform_fees, product_platforms, variant_merge, variant_platform_conflicts
+from app.services import catalogue_csv
 from app.services.csv_io import export_products_csv, import_products_csv
 from app.services.kitting import (
     _clamp_value_to_ceiling,
@@ -459,6 +460,36 @@ async def export_products(session: AsyncSession = Depends(get_db)) -> Response:
 async def import_products(file: UploadFile, session: AsyncSession = Depends(get_db)) -> dict:
     content = await file.read()
     return await import_products_csv(session, content)
+
+
+# Variants and BOMs CSV (services/catalogue_csv.py). Registered before /{product_id} so these
+# fixed paths are matched first.
+def _csv_response(text: str, filename: str) -> Response:
+    return Response(
+        content=text,
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
+
+
+@router.get("/variants/export")
+async def export_variants(session: AsyncSession = Depends(get_db)) -> Response:
+    return _csv_response(await catalogue_csv.export_variants_csv(session), "variants.csv")
+
+
+@router.post("/variants/import")
+async def import_variants(file: UploadFile, session: AsyncSession = Depends(get_db)) -> dict:
+    return await catalogue_csv.import_variants_csv(session, await file.read())
+
+
+@router.get("/boms/export")
+async def export_boms(session: AsyncSession = Depends(get_db)) -> Response:
+    return _csv_response(await catalogue_csv.export_boms_csv(session), "boms.csv")
+
+
+@router.post("/boms/import")
+async def import_boms(file: UploadFile, session: AsyncSession = Depends(get_db)) -> dict:
+    return await catalogue_csv.import_boms_csv(session, await file.read())
 
 
 @router.post("", response_model=ProductRead, status_code=status.HTTP_201_CREATED)

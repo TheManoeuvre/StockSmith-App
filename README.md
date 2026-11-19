@@ -5,6 +5,9 @@ Windows desktop inventory & BOM tracker for a small maker business (3D printing/
 - `backend/` — FastAPI + SQLite API, bundled into the desktop app as a sidecar process.
 - `frontend/` — Tauri (React + TypeScript) desktop client.
 
+**Using StockSmith?** The user guide is in [docs/help](docs/help/README.md) — the same pages
+are built into the app under Help.
+
 See [docs/plan-phase0-phase1.md](docs/plan-phase0-phase1.md) for the original build plan, and
 [docs/roadmap.md](docs/roadmap.md) for where things stand now and what's planned to 1.0.
 
@@ -56,6 +59,8 @@ Everything the app stores lives under `%LOCALAPPDATA%\StockSmith\`:
 - `assets\` — uploaded product/material images and files.
 - `config.json` — the auto-generated connection password and encryption key for this install.
 - `backend.log` — backend startup/error log, useful if the app fails to start.
+- `sample\` and `workspace.json` — only while exploring the sample data (Help › "Look around with
+  sample data"). Leaving it deletes both.
 
 Back this folder up if you want to preserve your data; delete it to reset the app to a
 fresh, empty state (a new one is created automatically on the next launch).
@@ -199,4 +204,5 @@ manually reinstall) would be needed.
 
 ## License
 
-All rights reserved — see [LICENSE](LICENSE). The source is public to read, not to reuse.
+MIT — see [LICENSE](LICENSE). Free to use, change and share. Provided as-is, with no warranty
+or support.

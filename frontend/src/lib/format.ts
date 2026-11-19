@@ -122,25 +122,24 @@ export function formatDayMonth(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { day: "2-digit", month: "short" });
 }
 
-// A due-date span for a row that stands for several orders: "17 Oct" when they all fall on one
-// day, "15–18 Oct" within a month, "28 Sep – 02 Oct" across months. Null/missing dates are
-// skipped; "—" when none of them has one.
-export function formatDayMonthRange(isos: (string | null | undefined)[]): string {
+// A due-date span for a row that stands for several orders: one date when they all fall on one
+// day, otherwise a range — "15 – 18 Aug" on a UK computer, "Aug 15 – 18" on a US one. Formatted by
+// the computer's own locale (Intl's formatRange knows how each language shortens a range; the
+// hand-built "15–Aug 18" it replaced read wrongly outside the UK). Null/missing dates are skipped;
+// "-" when none of them has one. `locale` is for tests.
+export function formatDayMonthRange(isos: (string | null | undefined)[], locale?: string): string {
   const times = isos
     .filter((v): v is string => !!v)
     .map((v) => new Date(v))
     .sort((a, b) => a.getTime() - b.getTime());
   if (times.length === 0) return "-";
+  const format = new Intl.DateTimeFormat(locale, { day: "2-digit", month: "short" });
   const first = times[0];
   const last = times[times.length - 1];
-  const start = formatDayMonth(first.toISOString());
-  const end = formatDayMonth(last.toISOString());
-  if (start === end) return start;
-  if (first.getMonth() === last.getMonth() && first.getFullYear() === last.getFullYear()) {
-    const day = first.toLocaleDateString(undefined, { day: "2-digit" });
-    return `${day}–${end}`;
-  }
-  return `${start} – ${end}`;
+  if (format.format(first) === format.format(last)) return format.format(first);
+  // formatRange is ES2021; this project's TypeScript lib is ES2020, though every webview StockSmith
+  // runs in has had it for years.
+  return (format as Intl.DateTimeFormat & { formatRange(a: Date, b: Date): string }).formatRange(first, last);
 }
 
 // The quantity fields every sellable-bearing row carries. Both Product and Variant

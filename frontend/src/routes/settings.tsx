@@ -22,6 +22,8 @@ import { SettingsNav, type SettingsNavGroup } from "../components/settings/Setti
 import { StoresHub } from "../components/settings/stores/StoresHub";
 import { StorePage } from "../components/settings/stores/StorePage";
 import { STORE_PANEL_IDS, type StorePanelId } from "../components/settings/stores/storePanels";
+import { HelpLink } from "../components/help/HelpLink";
+import { PAGE_HELP } from "../lib/help";
 
 const PAGE_IDS = [
   "stores-sync",
@@ -128,7 +130,10 @@ function Settings() {
 
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="text-xl font-semibold tracking-[-.35px]">Settings</h1>
+      <div className="flex items-center gap-2">
+        <h1 className="text-xl font-semibold tracking-[-.35px]">Settings</h1>
+        <HelpLink doc={PAGE_HELP.settings.doc} anchor={PAGE_HELP.settings.anchor} />
+      </div>
 
       <div className="flex items-start gap-6">
         <SettingsNav groups={navGroups(updateAvailable)}active={activePage} onChange={setActivePage} />

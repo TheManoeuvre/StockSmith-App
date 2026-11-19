@@ -1,9 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db, require_auth
 from app.models.kitting import DefaultKittingMaterial
 from app.models.listing import ListingPlatform
+from app.models.material import Material
+from app.schemas.business_type import BusinessPresetRead, BusinessTypeRead, BusinessTypeUpdate
 from app.models.platform_fee import PlatformFeeComponent
 from app.schemas.abc import StockCountSettingsRead, StockCountSettingsUpdate
 from app.schemas.kitting import DefaultKittingBomLineRead, KittingBomLine
@@ -18,7 +21,7 @@ from app.schemas.platform_fee import (
     PlatformFeeComponentRead,
     PlatformFeeComponentUpdate,
 )
-from app.services import abc, general_settings, platform_fees
+from app.services import abc, business_presets, general_settings, platform_fees
 from app.services.kitting import get_default_kitting_bom, replace_default_kitting_bom
 from app.services.validation import validate_lines_against_units
 
@@ -37,6 +40,42 @@ async def update_default_currency(
 ) -> DefaultCurrencyRead:
     settings = await general_settings.set_default_currency(session, payload.default_currency)
     return DefaultCurrencyRead(default_currency=settings.default_currency)
+
+
+async def _business_type_state(session: AsyncSession) -> BusinessTypeRead:
+    settings = await general_settings.get_general_settings(session)
+    material_count = await session.scalar(select(func.count()).select_from(Material))
+    return BusinessTypeRead(
+        business_type=settings.business_type,
+        can_choose=settings.business_type is None and not material_count,
+        presets=[
+            BusinessPresetRead(
+                key=p.key,
+                label=p.label,
+                description=p.description,
+                categories=[c["name"] for c in p.categories],
+                units=sorted({c["default_unit"] for c in p.categories}),
+                material_types=list(p.material_types),
+            )
+            for p in business_presets.PRESETS
+        ],
+    )
+
+
+@router.get("/business-type", response_model=BusinessTypeRead)
+async def get_business_type(session: AsyncSession = Depends(get_db)) -> BusinessTypeRead:
+    return await _business_type_state(session)
+
+
+@router.put("/business-type", response_model=BusinessTypeRead)
+async def set_business_type(payload: BusinessTypeUpdate, session: AsyncSession = Depends(get_db)) -> BusinessTypeRead:
+    try:
+        await business_presets.apply_preset(session, payload.business_type)
+    except KeyError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Unknown business type")
+    except business_presets.PresetRefused as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    return await _business_type_state(session)
 
 
 @router.get("/stock-count-settings", response_model=StockCountSettingsRead)
