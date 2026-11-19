@@ -10,6 +10,7 @@ import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { BomLineTable } from "../products/BomLineTable";
 import { useMaterialCategories } from "../../hooks/useMaterialCategories";
 import { SettingsCard } from "./SettingsCard";
+import { HelpLink } from "../help/HelpLink";
 
 const toLines = (rows: { material_id: number; qty_required: string }[]): KittingBomLine[] =>
   rows.map((l) => ({ material_id: l.material_id, qty_required: l.qty_required }));
@@ -70,8 +71,9 @@ export function DefaultKittingBomSettings() {
           Packaging materials (box, label, tape) automatically added to every new product's kitting BOM when
           it's created: pick materials you already track stock for. This is a one-time snapshot: changing it
           here only affects products created afterward, not ones that already exist. Whether a material is
-          consumed once per order rather than once per unit is set per material category, under Stock → Lists →
-          Material categories ("Kitting: one per order, not per unit").
+          consumed once per order rather than once per unit is set per material category, under Lists → Material
+          categories ("Kitting: one per order, not per unit").{" "}
+          <HelpLink doc="concepts" anchor="kitting">How kitting works</HelpLink>
         </>
       }
     >

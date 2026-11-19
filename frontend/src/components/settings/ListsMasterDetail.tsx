@@ -9,6 +9,7 @@ import { coloursApi } from "../../api/colours";
 import { useGuard } from "../../hooks/useUnsavedChangesGuard";
 import { materialUnitsApi } from "../../api/materialUnits";
 import { useMaterialUnits } from "../../hooks/useMaterialUnits";
+import { HelpLink } from "../help/HelpLink";
 import { ReferenceDataTable } from "../reference/ReferenceDataTable";
 
 type ListId =
@@ -133,7 +134,14 @@ export function ListsMasterDetail() {
       render: () => (
         <ReferenceDataTable
           title="Material categories"
-          description="What kind of thing a material is. The checkboxes are the behaviour that used to be hardcoded to filament and packaging: set them on any category, including ones you add. Order decides how the materials list groups and sorts."
+          description={
+            <>
+              What kind of thing a material is. Each category's settings change how its materials behave,
+              for example whether a failed build uses them up, or whether they're packaging. Order decides how
+              the materials list groups and sorts.{" "}
+              <HelpLink doc="material-categories">What each setting does</HelpLink>
+            </>
+          }
           segment="material-categories"
           queryKey={["material-categories"]}
           api={{
@@ -153,11 +161,38 @@ export function ListsMasterDetail() {
               placeholder: "Leave unchanged",
               options: units.map((u) => ({ value: u.name, label: u.name })),
             },
-            { key: "tracks_colour", label: "Has a colour", type: "checkbox" },
-            { key: "tracks_material_type", label: "Has a material type (groups substitutable materials)", type: "checkbox" },
-            { key: "cost_per_kg_display", label: "Show cost per kg", type: "checkbox" },
-            { key: "consumed_on_failed_build", label: "Consumed by failed builds", type: "checkbox" },
-            { key: "show_in_kitting_bom_list", label: "Show in Kitting BOM list", type: "checkbox" },
+            {
+              key: "tracks_colour",
+              label: "Has a colour",
+              type: "checkbox",
+              tooltip: "Shows a Colour field on materials in this category, for things that come in several colours.",
+            },
+            {
+              key: "tracks_material_type",
+              label: "Has a material type (groups substitutable materials)",
+              type: "checkbox",
+              tooltip:
+                "Shows a Material type field (PLA, soy wax, sterling silver…). Materials in this category with the same type can stand in for each other.",
+            },
+            {
+              key: "cost_per_kg_display",
+              label: "Show cost per kg",
+              type: "checkbox",
+              tooltip: "Shows average cost per kilogram rather than per gram. Display only: stock is still kept in grams.",
+            },
+            {
+              key: "consumed_on_failed_build",
+              label: "Consumed by failed builds",
+              type: "checkbox",
+              tooltip:
+                "When a build has failures, these materials are taken out of stock for the failed items too: they're used up even when a make goes wrong.",
+            },
+            {
+              key: "show_in_kitting_bom_list",
+              label: "Show in Kitting BOM list",
+              type: "checkbox",
+              tooltip: "Lets these materials be chosen as packaging in a product's kitting BOM. Turn on for packaging, labels and inserts.",
+            },
             // The two below only make sense for a category that is kitting material at all, and
             // the second only for one that is capped to one per order: each needs the one above.
             {
@@ -165,6 +200,7 @@ export function ListsMasterDetail() {
               label: "Kitting: one per order, not per unit",
               type: "checkbox",
               requires: "show_in_kitting_bom_list",
+              tooltip: "Used once per order however many items are in it: one mailer for three candles, not three.",
             },
             {
               key: "kitting_check_duplicates",
