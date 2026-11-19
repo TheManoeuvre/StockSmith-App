@@ -30,6 +30,6 @@ These pages are also built into the app: open **Help** at the bottom of the side
 
 ---
 
-StockSmith is shared as-is, free of charge, with no support service. These pages are the
-documentation — if something here is wrong or unclear, the GitHub repository is the place to
-say so.
+StockSmith is free and open source under the MIT licence, shared as-is with no support service.
+These pages are the documentation. If something here is wrong or unclear, or you've found a bug,
+[open an issue on GitHub](https://github.com/TheManoeuvre/StockSmith-App/issues).

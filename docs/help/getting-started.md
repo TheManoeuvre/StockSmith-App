@@ -72,15 +72,17 @@ page.
   your own developer account on each platform, so allow an afternoon, and longer if the platform
   has to approve your account.
 
-**Before your first sync, set the "Import orders from" date.** If you leave it empty, StockSmith
-fetches your whole order history and reserves stock for orders you've long since sent.
+**Orders are imported from the day you connect.** Older orders would arrive with no costs
+recorded and look like work still to do. If you have orders waiting to be sent, move the store's
+**Import orders from** date back to cover them before your first sync.
 
 ## 7. Check your fees and postage
 
 For your margins to be right:
 
-- **Settings › Pricing & fees** has Etsy and eBay's standard UK fees filled in. Check they match
-  your account — fees change, and some (like offsite ads) only apply to some sellers.
+- **Settings › Pricing & fees** has Etsy and eBay's standard UK fees filled in. Selling from
+  elsewhere? Replace them with your country's. Either way, check they match your account — fees
+  change, and some (like offsite ads) only apply to some sellers.
 - **Settings › Shipping & packaging** is where your postage options go.
 
 ## 8. Keep a backup somewhere else

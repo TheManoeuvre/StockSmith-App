@@ -37,7 +37,7 @@ out with Square's test shop rather than your real one.
 1. Go to **Settings › Stores & sync** and choose **Square**.
 2. Click **Connect**.
 3. Paste the access token.
-4. Under **Environment**, choose **Production** for your real shop (the dialog starts on Sandbox).
+4. Leave **Environment** on **Production** for your real shop.
 5. Click **Continue**. StockSmith checks the token with Square and lists your locations.
 6. Choose the location your orders come from and click **Confirm**.
 
@@ -48,11 +48,10 @@ can switch later from the Square store page without pasting the token again.
 
 On the Square store page, under **Order sync**:
 
-1. Set **Import orders from** to the date you want StockSmith to start from. Orders placed before
-   this date are never imported. For a new install, today (or the day you counted your stock) is
-   usually right — importing months of old orders would reserve stock for things you've already
-   sent.
-2. Click **Save**.
+1. Check **Import orders from**. It starts as the day you connected, so only new orders come in —
+   old orders have no costs recorded against them, and would show up as work waiting to be done.
+   **If you have orders still to send**, move the date back to cover them.
+2. Click **Save** if you changed it.
 3. Click **Preview** to see what would be imported without changing anything.
 4. When the preview looks right, click **Sync now**.
 5. Turn on **Automatic sync** to keep checking for new orders (every 15 minutes by default) while

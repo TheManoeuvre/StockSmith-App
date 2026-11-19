@@ -278,8 +278,8 @@ function OrdersListContent() {
           }
         >
           Orders arrive here from connected stores — Square, Etsy or eBay — or you can add one by hand with{" "}
-          <strong>New order</strong>. Each order reserves stock as soon as it arrives. Before your first sync, set the
-          store's <strong>Import orders from</strong> date, or your whole order history comes in.
+          <strong>New order</strong>. Each order reserves stock as soon as it arrives. A store imports orders from the
+          day you connect it; if you have orders still to send, move its <strong>Import orders from</strong> date back.
         </EmptyState>
       )}
       <table className="w-full border-collapse overflow-hidden rounded-lg bg-white text-left text-[12.5px] shadow-sm">

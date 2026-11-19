@@ -13,7 +13,12 @@ impact on new users. Before finishing any change, check against `docs/plan-onboa
 - Does it make any existing doc, intro or seed wrong?
 
 Fill in the "Onboarding & docs impact" section of the PR template. "None" is a valid
-answer; leaving it blank is not. Defaults are UK-only for now — flag anything UK-specific.
+answer; leaving it blank is not.
+
+StockSmith is for sellers anywhere — dates and numbers follow the computer's locale, and currency
+is a setting. Its author tests in the UK, so UK defaults (fees, Royal Mail postage) are the ones
+seeded first. Flag anything UK-specific so other markets can be handled, and never hard-code a
+locale for display.
 
 ## User-facing help lives in `docs/help/`
 

@@ -100,9 +100,9 @@ one; the old one can't be recovered.
 
 Under **Order sync**:
 
-1. Set **Import orders from**. Leave it empty and StockSmith fetches your entire history. For a new
-   install, choose today or the day you counted your stock.
-2. Click **Save**, then **Preview**, then **Sync now**, then turn on **Automatic sync**.
+1. Check **Import orders from**. It starts as the day you connected, so only new orders come in.
+   **If you have orders still to send**, move it back to cover them, and click **Save**.
+2. Click **Preview**, then **Sync now**, then turn on **Automatic sync**.
 
 ## 9. Link your existing listings
 

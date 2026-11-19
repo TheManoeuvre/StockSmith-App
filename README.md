@@ -202,4 +202,5 @@ manually reinstall) would be needed.
 
 ## License
 
-All rights reserved — see [LICENSE](LICENSE). The source is public to read, not to reuse.
+MIT — see [LICENSE](LICENSE). Free to use, change and share. Provided as-is, with no warranty
+or support.

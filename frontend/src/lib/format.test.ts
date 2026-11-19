@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   displayQty,
+  formatDayMonthRange,
   isWholeNumberUnit,
   normalizeQtyForUnit,
   qtyWithUnit,
@@ -177,5 +178,25 @@ describe("units added in Settings", () => {
 
   it("falls back to showing the name for a unit it has no row for", () => {
     expect(unitSuffix("furlong")).toBe(" furlong");
+  });
+});
+
+describe("formatDayMonthRange", () => {
+  const span = ["2026-08-18T12:00:00Z", null, "2026-08-15T12:00:00Z"];
+
+  // Intl puts thin spaces around the dash; compare on ordinary ones.
+  const plain = (s: string) => s.replace(/\s+/g, " ");
+
+  it("writes a range the way the computer's locale does", () => {
+    expect(plain(formatDayMonthRange(span, "en-GB"))).toBe("15 – 18 Aug");
+    expect(plain(formatDayMonthRange(span, "en-US"))).toBe("Aug 15 – 18");
+  });
+
+  it("collapses to one date when every order falls on the same day", () => {
+    expect(formatDayMonthRange(["2026-08-15T09:00:00Z", "2026-08-15T17:00:00Z"], "en-GB")).toBe("15 Aug");
+  });
+
+  it("shows a dash when no order has a date", () => {
+    expect(formatDayMonthRange([null, undefined])).toBe("-");
   });
 });

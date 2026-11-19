@@ -161,3 +161,60 @@ async def test_reconnecting_as_a_different_shop_switches_auto_sync_off(session, 
 
     connection = await _refresh(session, connection)
     assert connection.auto_sync_enabled is False
+
+
+# The "Import orders from" date. A shop's historical orders arrive with no cost of goods and as a
+# backlog of work already done, so a newly connected shop starts from the day it connects.
+_SET_BY_HAND = datetime(2026, 1, 5, tzinfo=timezone.utc).date()
+
+
+async def test_first_ever_connection_imports_from_today(session, complete_oauth):
+    await complete_oauth(session, account_id="777")
+
+    connection = await platforms_router._get_or_create_connection(
+        session, ListingPlatform.etsy, PlatformEnvironment.production
+    )
+    assert connection.sync_start_date == datetime.now(timezone.utc).date()
+
+
+async def test_reconnecting_the_same_shop_keeps_its_import_date(session, connection, complete_oauth):
+    connection.sync_start_date = _SET_BY_HAND
+    await session.commit()
+    await platforms_router.disconnect_platform(ListingPlatform.etsy, session)
+
+    await complete_oauth(session, account_id="12345")
+
+    connection = await _refresh(session, connection)
+    assert connection.sync_start_date == _SET_BY_HAND
+
+
+async def test_a_different_shop_imports_from_today(session, connection, complete_oauth):
+    connection.sync_start_date = _SET_BY_HAND
+    await session.commit()
+    await platforms_router.disconnect_platform(ListingPlatform.etsy, session)
+
+    await complete_oauth(session, account_id="99999")
+
+    connection = await _refresh(session, connection)
+    assert connection.sync_start_date == datetime.now(timezone.utc).date()
+
+
+async def test_choosing_a_different_square_location_imports_from_today(session):
+    from app.models.platform_connection import PlatformConnection
+
+    square = PlatformConnection(
+        platform=ListingPlatform.square,
+        access_token="sq-token",
+        external_account_id="LOC-1",
+        sync_start_date=_SET_BY_HAND,
+    )
+    session.add(square)
+    await session.commit()
+
+    await platforms_router.set_square_location(platforms_router.SquareLocationRequest(location_id="LOC-1"), session)
+    await session.refresh(square)
+    assert square.sync_start_date == _SET_BY_HAND
+
+    await platforms_router.set_square_location(platforms_router.SquareLocationRequest(location_id="LOC-2"), session)
+    await session.refresh(square)
+    assert square.sync_start_date == datetime.now(timezone.utc).date()

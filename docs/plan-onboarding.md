@@ -12,7 +12,7 @@ is the *what*.
 |---|---|---|
 | Who is StockSmith for? | **Public distribution, as a courtesy** — no support commitment, no operated services | Onboarding and docs must be fully self-serve: nobody can ask. |
 | Marketplace credentials | **Per-user developer apps (decided 2026-11-19)** | StockSmith takes on no custody of anyone's tokens or data and runs no servers. Etsy/eBay setup stays developer-grade; onboarding answers it with guides, not a "Connect" button — see §8. |
-| Which market? | **UK for now** | Seeded fees (already UK) and a UK shipping starter set are legitimate defaults. Every UK-specific default is listed in §4 so a later "where do you sell?" step knows what to switch. |
+| Which market? | **Anywhere; UK defaults first** (revised 2026-11-19) | Dates follow the computer's locale and currency is a setting. UK defaults (Etsy/eBay UK fees, Royal Mail postage) are seeded because that's where StockSmith is tested; every UK-specific default is marked in §4 so other markets can be added. |
 | Sample data? | **Yes — and not necessarily 3D-print related** | A discardable sample workspace (§6). A non-3D business also proves the app is general, which public distribution needs. |
 | Where do docs live? | **Inside the app** | Bundled with the frontend, versioned with the release, works offline (§7). Not top priority; scaffolding first. |
 | Process | **Every feature and PR considers onboarding & docs impact** | PR template section + `CLAUDE.md` rule (§9). |
@@ -231,31 +231,32 @@ work.
 
 ---
 
-## 11. Open questions (2026-11-19)
+## 11. Decisions on the open questions (2026-11-19)
 
-Decisions needed before the remaining items can be built:
+| # | Question | Decision | Status |
+|---|---|---|---|
+| 1 | Licence | **MIT** | ✅ `LICENSE`, README and Settings › About updated |
+| 2 | Sample workspace | **Separate database file** | See build order item 9 |
+| 3 | Default "Import orders from" date | **The day a shop is connected** (reset when a different shop or Square location connects). Historical orders carry no cost of goods and arrive as a backlog of "awaiting" work | ✅ Built; help tells users with orders still to send to move it back |
+| 4 | Square dialog environment | **Production by default** | ✅ |
+| 5 | Royal Mail starter set | **Seed it**: Large Letter, Small Parcel, Medium Parcel. **Re-check prices quarterly** | See §12 |
+| 6 | CSV for BOMs and variants | **Build it** | See build order |
+| 7 | GitHub as the public home | **Yes** — public repository with Issues | ✅ Help links to Issues |
+| 8 | Unverified portal steps | Author will walk through them | Open |
+| 9 | Date locale | **Follow the computer.** "UK-only" was a misstatement: StockSmith is for sellers anywhere; the UK is where it's tested | ✅ Range formatting now locale-correct (it read "15–Aug 18" on US machines); test fixed |
+| 10 | Code signing | **Not now** | — |
 
-1. **Licence.** `LICENSE` currently forbids use without written permission, which contradicts
-   public distribution.
-2. **Sample workspace (§6).** Separate database file the backend switches to, or sample rows
-   in the real database that can be wiped? The first needs the backend to swap databases at
-   runtime (it currently picks one at start-up); the second risks mixing with real data.
-   Candle maker as the sample business?
-3. **Default "Import orders from" date.** A new store connection starts with no date, which
-   imports the shop's entire history. Default it to the connection date instead?
-4. **Square connect dialog defaults to Sandbox.** Fine for development, wrong for a public
-   user with a real shop. Default to Production?
-5. **Royal Mail shipping starter set.** Seed UK postage profiles (prices go stale and need
-   upkeep), or leave empty and point at the help?
-6. **CSV import for BOMs and variants** — build it, or document hand entry as the supported
-   route?
-7. **GitHub as the public home.** The help says to report problems on GitHub, and public
-   users need somewhere to download releases. Will the repository (with Issues) be public?
-8. **Unverified portal steps.** The Etsy and eBay guides describe those platforms' developer
-   sites from the codebase's notes, not a fresh walk-through. One run-through with screenshots
-   would firm them up — including whether Etsy accepts the `http://127.0.0.1` callback.
-9. **Date display locale.** Dates follow the computer's locale ("15–18 Aug" on a UK machine,
-   "15–Aug 18" on a US one). One dashboard test fails on non-UK machines for this reason. Pin
-   to en-GB while StockSmith is UK-only?
-10. **Unsigned installer.** SmartScreen and antivirus warnings are the first thing a public user
-    meets. Code signing costs money annually; is it in scope?
+---
+
+## 12. Seed data that goes stale
+
+Some defaults are real-world prices that change. Each is listed here with where it lives and
+when it was last checked. **Re-check quarterly** (January, April, July, October) and update the
+seed, its "last verified" comment and this table together. A changed seed only affects new
+installs; existing installs keep the values they have, which users edit in Settings.
+
+| Seed | Lives in | Last verified |
+|---|---|---|
+| Etsy UK fee components | `backend/app/seed.py` `_FEE_COMPONENTS` | July 2026 |
+| eBay UK fee components | `backend/app/seed.py` `_FEE_COMPONENTS` | July 2026 |
+| Royal Mail postage | `backend/app/seed.py` (see build) | — |

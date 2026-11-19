@@ -7,6 +7,7 @@ import {
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
+import { formatDayMonthRange } from "../lib/format";
 
 vi.mock("../api/client", async () =>
   (await import("../test/fakeBackend")).clientMock(),
@@ -308,7 +309,12 @@ it("collapses stock-short lines for one variation into a row with a due-date ran
   const blue = (await screen.findByText("Pencil Pot (6 Stud / Blue)")).closest("tr")!;
   expect(within(blue).getByText("#394")).toBeInTheDocument();
   expect(within(blue).getByText("#395")).toBeInTheDocument();
-  expect(within(blue).getByText("15–18 Aug")).toBeInTheDocument();
+  // Whatever the machine's locale writes for that span ("15 – 18 Aug" in the UK, "Aug 15 – 18" in
+  // the US): this test is about the grouping, and dates follow the computer's own format.
+  expect(
+    // Testing Library collapses the thin spaces Intl puts around the dash, so the expectation must too.
+    within(blue).getByText(formatDayMonthRange(["2026-08-15T12:00:00Z", "2026-08-18T12:00:00Z"]).replace(/\s+/g, " ")),
+  ).toBeInTheDocument();
   // Exactly one row per variation.
   expect(screen.getAllByText(/Pencil Pot \(6 Stud/)).toHaveLength(2);
 });

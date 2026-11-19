@@ -56,10 +56,9 @@ callback address above in place of eBay's.
 
 Under **Order sync**:
 
-1. Set **Import orders from**. Orders placed before this date are never imported — leave it empty
-   and StockSmith fetches your entire history. For a new install, choose today or the day you
-   counted your stock.
-2. Click **Save**, then **Preview** to check what would be imported.
+1. Check **Import orders from**. It starts as the day you connected, so only new orders come in.
+   **If you have orders still to send**, move it back to cover them, and click **Save**.
+2. Click **Preview** to check what would be imported.
 3. Click **Sync now**, then turn on **Automatic sync**.
 
 ## 5. Link your existing listings

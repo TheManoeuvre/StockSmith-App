@@ -233,8 +233,8 @@ export function AboutSettings() {
           </dd>
           <dt className="text-slate-500">Licence</dt>
           <dd className="text-slate-700">
-            Copyright © 2026 Benjamin Hinett. All rights reserved. The source is available for viewing only;
-            using, copying or distributing it needs written permission.{" "}
+            Copyright © 2026 Benjamin Hinett. Free and open source under the MIT licence: use, change and share it
+            freely. Provided as-is, with no warranty or support.{" "}
             <ExternalLink href={`${GITHUB_REPO_URL}/blob/main/LICENSE`}>Full licence</ExternalLink>
           </dd>
         </dl>

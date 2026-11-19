@@ -26,7 +26,7 @@ export function SquareConnectDialog({
 }) {
   const queryClient = useQueryClient();
   const [accessToken, setAccessToken] = useState("");
-  const [environment, setEnvironment] = useState<PlatformEnvironment>("sandbox");
+  const [environment, setEnvironment] = useState<PlatformEnvironment>("production");
   const [locations, setLocations] = useState<NamedOption[] | null>(null);
   const [selectedLocationId, setSelectedLocationId] = useState<string>("");
 

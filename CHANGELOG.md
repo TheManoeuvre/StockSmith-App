@@ -12,6 +12,19 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **StockSmith is now open source under the MIT licence.** Free to use, change and share.
+- **New store connections import orders from the day you connect.** Older orders have no costs
+  recorded and would arrive as work already done. If you have orders still to send, move the store's
+  "Import orders from" date back before your first sync. Reconnecting the same shop keeps your date.
+- **Square's connect dialog starts on Production**, for your real shop, rather than Sandbox.
+
+### Fixed
+
+- **Due-date ranges read correctly outside the UK.** A span of orders on the Dashboard showed as
+  "15–Aug 18" on computers set to US English; dates now follow your computer's own format.
+
 ### Added
 
 - **New installs ask what you make.** The first time StockSmith opens, it asks which kind of business
