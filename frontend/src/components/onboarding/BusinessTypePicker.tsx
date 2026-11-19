@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { appSettingsApi } from "../../api/appSettings";
 import { ErrorBanner } from "../common/ErrorBanner";
+import { ExploreSampleButton } from "./SampleWorkspace";
 
 /**
  * First launch: "what do you make?". The answer decides which material categories, units and
@@ -93,13 +94,16 @@ export function BusinessTypePicker() {
         <ErrorBanner error={choose.error} />
 
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <button
-            type="button"
-            className="text-sm text-slate-600 underline hover:text-slate-900"
-            onClick={() => navigate({ to: "/settings", search: { page: "backup-restore" } })}
-          >
-            Moving from another computer? Restore a backup instead
-          </button>
+          <div className="flex flex-col items-start gap-1">
+            <ExploreSampleButton />
+            <button
+              type="button"
+              className="text-sm text-slate-600 underline hover:text-slate-900"
+              onClick={() => navigate({ to: "/settings", search: { page: "backup-restore" } })}
+            >
+              Moving from another computer? Restore a backup instead
+            </button>
+          </div>
           <button
             type="button"
             disabled={!selected || choose.isPending}

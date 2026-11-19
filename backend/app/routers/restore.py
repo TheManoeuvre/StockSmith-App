@@ -19,6 +19,7 @@ from app.services import (
 )
 from app.services.backup_archive import BackupError
 from app.services.restore import RestoreError, RestoreVersionError
+from app.services import workspace
 
 logger = logging.getLogger("stocksmith.restore")
 
@@ -95,8 +96,19 @@ async def cancel_pending_restore() -> None:
     _resume_background_work()
 
 
+def _refuse_in_sample() -> None:
+    """A restore always replaces the *real* database (see bootstrap.maybe_apply_staged_restore),
+    so starting one from inside the sample would be confusing at best. Leave the sample first."""
+    if workspace.current() == "sample":
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            detail="You're exploring sample data. Leave the sample workspace first, then restore your backup.",
+        )
+
+
 @router.post("/stage", response_model=BackupManifestRead)
 async def stage_existing_backup(payload: StageByFilename) -> BackupManifestRead:
+    _refuse_in_sample()
     try:
         archive = backup.resolve_archive(payload.filename)
     except BackupError as exc:
@@ -117,6 +129,7 @@ async def stage_uploaded_backup(file: UploadFile = File(...)) -> BackupManifestR
 
     Streamed to a temp file rather than read into memory — these carry every product image.
     """
+    _refuse_in_sample()
     suffix = Path(file.filename or "backup.zip").name
     tmp_dir = Path(tempfile.mkdtemp(prefix="stocksmith-upload-"))
     tmp_path = tmp_dir / suffix

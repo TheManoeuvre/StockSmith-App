@@ -37,7 +37,8 @@ this computer and the ones in your "also copy to" folder.
 2. Type `RESTORE` to confirm, and choose **Restore and restart**.
 
 Restoring replaces everything currently in StockSmith. A snapshot of your current data is taken
-first, so a restore can be undone by restoring that snapshot.
+first, so a restore can be undone by restoring that snapshot. (You can't restore while exploring
+the sample data — leave it first.)
 
 ## Moving to a new computer
 

@@ -59,6 +59,8 @@ Everything the app stores lives under `%LOCALAPPDATA%\StockSmith\`:
 - `assets\` — uploaded product/material images and files.
 - `config.json` — the auto-generated connection password and encryption key for this install.
 - `backend.log` — backend startup/error log, useful if the app fails to start.
+- `sample\` and `workspace.json` — only while exploring the sample data (Help › "Look around with
+  sample data"). Leaving it deletes both.
 
 Back this folder up if you want to preserve your data; delete it to reset the app to a
 fresh, empty state (a new one is created automatically on the next launch).

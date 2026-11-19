@@ -361,6 +361,74 @@ def _roll_back(db_path: Path, displaced_db: Path, assets_path: Path, displaced_a
         log.exception("Could not roll back the assets directory")
 
 
+# --- Sample workspace --------------------------------------------------------------------------
+#
+# StockSmith can open a separate, throwaway database of invented data so a new user can try
+# everything before entering their own (docs/plan-onboarding.md §6). Which database opens is
+# decided here, at start-up, by a small marker file — switching is "write the marker, restart",
+# the same shape as a restore, and for the same reason: it's the one moment no connection is open.
+#
+# The real database is never touched. The sample lives entirely under <data dir>/sample/, with
+# its own data/, assets/ and backups/ (services/paths.py derives everything from ASSET_ROOT's
+# parent), and leaving deletes that folder at the next start — never while it might be locked.
+
+WORKSPACE_MARKER = "workspace.json"
+WORKSPACE_ENV = "STOCKSMITH_WORKSPACE"
+
+
+def workspace_marker_path() -> Path:
+    return data_dir() / WORKSPACE_MARKER
+
+
+def request_workspace(mode: str) -> None:
+    """Ask for `mode` ("sample" or "real") at the next start. Leaving the sample also asks for
+    its folder to be removed."""
+    payload = {"mode": mode}
+    if mode == "real":
+        payload["discard_sample"] = True
+    _write_json(workspace_marker_path(), payload)
+
+
+def _resolve_workspace(root: Path) -> tuple[str, Path, Path]:
+    """(mode, database path, assets path) for this start, tidying up a left sample on the way."""
+    log = logging.getLogger("stocksmith.bootstrap")
+    marker = root / WORKSPACE_MARKER
+    try:
+        wanted = json.loads(marker.read_text(encoding="utf-8")) if marker.exists() else {}
+    except (OSError, ValueError):
+        log.exception("Unreadable workspace marker; opening the real database")
+        wanted = {}
+
+    sample_root = root / "sample"
+    if wanted.get("discard_sample"):
+        shutil.rmtree(sample_root, ignore_errors=True)
+        try:
+            marker.unlink()
+        except OSError:
+            log.exception("Could not remove the workspace marker")
+        log.info("Left the sample workspace")
+
+    if wanted.get("mode") == "sample":
+        (sample_root / "data").mkdir(parents=True, exist_ok=True)
+        (sample_root / "assets").mkdir(parents=True, exist_ok=True)
+        return "sample", sample_root / "data" / "stocksmith.db", sample_root / "assets"
+    return "real", root / "data" / "stocksmith.db", root / "assets"
+
+
+async def _build_sample(db_path: Path) -> None:
+    from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+    from app.db import enforce_sqlite_foreign_keys
+    from app.services.sample_data import build_sample
+
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_path.as_posix()}")
+    enforce_sqlite_foreign_keys(engine)
+    session_factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with session_factory() as session:
+        await build_sample(session)
+    await engine.dispose()
+
+
 def run() -> Path:
     """Idempotent — safe to call on every launch. Returns the resolved data directory."""
     root = data_dir()
@@ -376,9 +444,11 @@ def run() -> Path:
 
     config = _load_or_create_config(config_path())
 
-    db_path = root / "data" / "stocksmith.db"
+    mode, db_path, assets_path = _resolve_workspace(root)
+    sample_is_new = mode == "sample" and not db_path.exists()
     os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{db_path.as_posix()}"
-    os.environ["ASSET_ROOT"] = str(root / "assets")
+    os.environ["ASSET_ROOT"] = str(assets_path)
+    os.environ[WORKSPACE_ENV] = mode
     os.environ["SHARED_PASSWORD_HASH"] = config["shared_password_hash"]
     os.environ["TOKEN_ENCRYPTION_KEY"] = config["token_encryption_key"]
 
@@ -388,6 +458,21 @@ def run() -> Path:
 
     _run_migrations(db_path)
     asyncio.run(_seed(db_path))
+    if sample_is_new:
+        logging.getLogger("stocksmith.bootstrap").info("Building the sample workspace")
+        try:
+            asyncio.run(_build_sample(db_path))
+        except Exception:
+            # A half-built sample is worse than none: drop it and open the real database, so a
+            # generator bug can never stop the app from starting.
+            logging.getLogger("stocksmith.bootstrap").exception("Sample workspace failed to build")
+            request_workspace("real")
+            mode, db_path, assets_path = _resolve_workspace(root)
+            os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{db_path.as_posix()}"
+            os.environ["ASSET_ROOT"] = str(assets_path)
+            os.environ[WORKSPACE_ENV] = mode
+            _run_migrations(db_path)
+            asyncio.run(_seed(db_path))
 
     logging.getLogger("stocksmith.bootstrap").info("Bootstrap complete")
     return root

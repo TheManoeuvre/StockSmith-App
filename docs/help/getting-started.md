@@ -15,6 +15,15 @@ Nothing here is fixed — rename, add or delete any of it in **Settings › List
 Moving from another computer? Choose **Restore a backup instead** and follow
 [Moving to a new computer](backup-and-restore.md#moving-to-a-new-computer).
 
+### Want to look around first?
+
+Choose **Look around with sample data first** on that screen, or from **Help** at any time.
+StockSmith restarts into a made-up candle shop with three months of products, stock, orders and
+sales, so you can try every page without touching your own data. Change anything you like.
+
+A yellow bar across the top shows you're in the sample. **Leave sample data** restarts StockSmith
+with your own data and deletes the sample. While you're in the sample, your own stores don't sync.
+
 ## 2. Add your materials
 
 Materials are everything you buy and use up: raw materials, components and packaging.

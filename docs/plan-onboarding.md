@@ -220,12 +220,17 @@ work.
    not yet.
 6. ✅ `/onboarding/status` + Dashboard checklist (§5.3). Seven steps; existing installs start
    with it hidden; Help's home page brings it back.
-7. ✅ Partly: the business-type picker offers "Restore a backup instead". A separate
-   first-launch "fresh / restore / sample" screen waits on the sample workspace (§6).
+7. ✅ The first-launch screen offers all three: choose a business type (fresh), "Look around
+   with sample data first", or "Restore a backup instead".
 8. ✅ "?" beside every page title, targets in `PAGE_HELP`. Per-page first-visit intros not
    built — the "?" and the empty states cover the same need with less to maintain; revisit if
    users miss them.
-9. Sample workspace (§6) — not started, see §11.
+9. ✅ Sample workspace (§6). `bootstrap.py` opens `<data dir>/sample/` instead of the real
+   database when `workspace.json` asks for it, and builds the sample on first entry through
+   the app's own functions (`services/sample_data.py`: Ember & Fig Candle Co., 13 materials,
+   3 products, 4 variants, 23 orders over 90 days, a purchase in transit). Leaving deletes the
+   folder at the next start. Restores are refused inside the sample. Store sync for the real
+   shop pauses while the sample is open — said in the banner.
 10. ✅ Store-connection guides written; Square's dialog and the Etsy/eBay developer-app card
     link to them. Per-field validation on the connection forms — not started.
 

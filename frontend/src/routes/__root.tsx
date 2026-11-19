@@ -17,6 +17,7 @@ import { SyncStatusIndicator } from "../components/common/SyncStatusIndicator";
 import { NotificationCenter } from "../components/common/NotificationCenter";
 import { MaintenanceOverlay } from "../components/common/MaintenanceOverlay";
 import { BusinessTypePicker } from "../components/onboarding/BusinessTypePicker";
+import { SampleWorkspaceBanner } from "../components/onboarding/SampleWorkspace";
 import { UnsavedChangesDialog } from "../components/common/UnsavedChangesDialog";
 import { useRefreshOnSync } from "../hooks/useRefreshOnSync";
 import { useAppUpdate } from "../hooks/useAppUpdate";
@@ -290,6 +291,7 @@ function RootChrome() {
         </div>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
+        <SampleWorkspaceBanner />
         <main className="flex-1 overflow-auto p-6">
           <Outlet />
         </main>
