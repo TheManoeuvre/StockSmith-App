@@ -3,6 +3,7 @@ import { createRootRoute, Link, Outlet, useMatchRoute, useNavigate } from "@tans
 import { useQuery } from "@tanstack/react-query";
 import {
   DashboardIcon,
+  HelpIcon,
   InsightsIcon,
   MaterialsIcon,
   OrdersIcon,
@@ -273,6 +274,9 @@ function RootChrome() {
         <div className="flex flex-col gap-px border-t border-slate-200 pt-1.5">
           <NotificationCenter />
           <SyncStatusIndicator />
+          <NavButton
+            item={{ label: "Help", to: "/help", icon: <HelpIcon />, tone: "neutral", hint: "How StockSmith works and how to set it up" }}
+          />
           <NavButton
             item={{
               label: "Settings",

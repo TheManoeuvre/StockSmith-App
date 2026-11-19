@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as HelpRouteImport } from './routes/help'
 import { Route as InsightsRouteImport } from './routes/insights'
 import { Route as MaterialsRouteRouteImport } from './routes/materials/route'
 import { Route as OrdersRouteRouteImport } from './routes/orders/route'
@@ -40,6 +41,11 @@ import { Route as SuppliersIndexRouteImport } from './routes/suppliers/index'
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HelpRoute = HelpRouteImport.update({
+  id: '/help',
+  path: '/help',
   getParentRoute: () => rootRouteImport,
 } as any)
 const InsightsRoute = InsightsRouteImport.update({
@@ -180,6 +186,7 @@ export interface FileRoutesByFullPath {
   '/products': typeof ProductsRouteRouteWithChildren
   '/purchases': typeof PurchasesRouteRouteWithChildren
   '/stock-takes': typeof StockTakesRouteRouteWithChildren
+  '/help': typeof HelpRoute
   '/insights': typeof InsightsRoute
   '/settings': typeof SettingsRoute
   '/dev/bom-preview': typeof DevBomPreviewRoute
@@ -204,6 +211,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/help': typeof HelpRoute
   '/insights': typeof InsightsRoute
   '/settings': typeof SettingsRoute
   '/dev/bom-preview': typeof DevBomPreviewRoute
@@ -234,6 +242,7 @@ export interface FileRoutesById {
   '/products': typeof ProductsRouteRouteWithChildren
   '/purchases': typeof PurchasesRouteRouteWithChildren
   '/stock-takes': typeof StockTakesRouteRouteWithChildren
+  '/help': typeof HelpRoute
   '/insights': typeof InsightsRoute
   '/settings': typeof SettingsRoute
   '/dev/bom-preview': typeof DevBomPreviewRoute
@@ -265,6 +274,7 @@ export interface FileRouteTypes {
     | '/products'
     | '/purchases'
     | '/stock-takes'
+    | '/help'
     | '/insights'
     | '/settings'
     | '/dev/bom-preview'
@@ -289,6 +299,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/help'
     | '/insights'
     | '/settings'
     | '/dev/bom-preview'
@@ -318,6 +329,7 @@ export interface FileRouteTypes {
     | '/products'
     | '/purchases'
     | '/stock-takes'
+    | '/help'
     | '/insights'
     | '/settings'
     | '/dev/bom-preview'
@@ -348,6 +360,7 @@ export interface RootRouteChildren {
   ProductsRouteRoute: typeof ProductsRouteRouteWithChildren
   PurchasesRouteRoute: typeof PurchasesRouteRouteWithChildren
   StockTakesRouteRoute: typeof StockTakesRouteRouteWithChildren
+  HelpRoute: typeof HelpRoute
   InsightsRoute: typeof InsightsRoute
   SettingsRoute: typeof SettingsRoute
   DevBomPreviewRoute: typeof DevBomPreviewRoute
@@ -365,6 +378,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/help': {
+      id: '/help'
+      path: '/help'
+      fullPath: '/help'
+      preLoaderRoute: typeof HelpRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/insights': {
@@ -635,6 +655,7 @@ const rootRouteChildren: RootRouteChildren = {
   ProductsRouteRoute: ProductsRouteRouteWithChildren,
   PurchasesRouteRoute: PurchasesRouteRouteWithChildren,
   StockTakesRouteRoute: StockTakesRouteRouteWithChildren,
+  HelpRoute: HelpRoute,
   InsightsRoute: InsightsRoute,
   SettingsRoute: SettingsRoute,
   DevBomPreviewRoute: DevBomPreviewRoute,

@@ -19,6 +19,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   print, or something else — and sets up material categories, units and example material types to
   match. Everything it creates can be renamed or removed in Settings › Lists. Existing installs are
   not asked and keep their categories exactly as they are.
+- **Help, built in.** A new Help page at the bottom of the sidebar explains how StockSmith works and
+  how to set it up: getting started, the ideas behind each page, what each material category setting
+  does, connecting Square, Etsy and eBay, backups and moving to a new computer, and troubleshooting.
+  It works offline, and the "Reconnecting" screen now links straight to the troubleshooting page.
 
 ## [0.27.0] - 2026-11-16
 

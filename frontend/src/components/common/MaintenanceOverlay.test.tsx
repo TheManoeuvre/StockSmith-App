@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../api/client", async () => (await import("../../test/fakeBackend")).clientMock());
@@ -8,6 +8,9 @@ const routerState = { pathname: "/products" };
 vi.mock("@tanstack/react-router", () => ({
   useRouterState: ({ select }: { select: (s: unknown) => unknown }) =>
     select({ location: { pathname: routerState.pathname } }),
+  Link: ({ children, search }: { children: React.ReactNode; search: { page: string } }) => (
+    <a href={`/help?page=${search.page}`}>{children}</a>
+  ),
 }));
 
 const tauriSettings: { backendUrl?: string } = { backendUrl: "http://127.0.0.1:8000" };
@@ -86,6 +89,20 @@ describe("MaintenanceOverlay", () => {
       setRoutes([]);
       renderOverlay();
 
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(screen.queryByText("Reconnecting")).not.toBeInTheDocument();
+    });
+
+    it("never covers Help, and points to its troubleshooting page", async () => {
+      // Help is bundled into the app and its Troubleshooting page explains this very screen.
+      setRoutes([]);
+      renderOverlay();
+      const link = await screen.findByRole("link", { name: "What to do if this doesn't clear" });
+      expect(link.getAttribute("href")).toBe("/help?page=troubleshooting");
+
+      cleanup();
+      routerState.pathname = "/help";
+      renderOverlay();
       await new Promise((resolve) => setTimeout(resolve, 300));
       expect(screen.queryByText("Reconnecting")).not.toBeInTheDocument();
     });

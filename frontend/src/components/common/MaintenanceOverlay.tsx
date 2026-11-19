@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useRouterState } from "@tanstack/react-router";
+import { Link, useRouterState } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
 import { fetchSystemStatus } from "../../api/client";
 import type { SystemStatus } from "../../api/restore";
@@ -32,7 +32,10 @@ export function MaintenanceOverlay() {
   const [status, setStatus] = useState<SystemStatus | null>(null);
   const [unreachable, setUnreachable] = useState(false);
   const lastFingerprint = useRef<string | null>(null);
-  const onSettings = useRouterState({ select: (state) => state.location.pathname.startsWith("/settings") });
+  // Settings and Help are never covered: see the comment above the early return below.
+  const onSettings = useRouterState({
+    select: (state) => state.location.pathname.startsWith("/settings") || state.location.pathname.startsWith("/help"),
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -92,7 +95,9 @@ export function MaintenanceOverlay() {
 
   // Never cover Settings. It holds the Connection tab — the one place a wrong or missing backend
   // URL can be corrected — and also the Cancel-restore button. An overlay that hid either would
-  // turn a recoverable problem into a stuck app with no way out from inside it.
+  // turn a recoverable problem into a stuck app with no way out from inside it. Help is left
+  // uncovered for the same reason: its Troubleshooting page explains this exact screen, and the
+  // help is bundled into the app, so it reads fine with the backend down.
   if (onSettings) return null;
 
   return (
@@ -107,6 +112,15 @@ export function MaintenanceOverlay() {
             : "Can't reach StockSmith right now. This will clear as soon as it's back."}
         </p>
         {!inMaintenance && <UpdateFromOverlay />}
+        {!inMaintenance && (
+          <Link
+            to="/help"
+            search={{ page: "troubleshooting" }}
+            className="text-sm text-slate-600 underline underline-offset-2 hover:text-slate-900"
+          >
+            What to do if this doesn't clear
+          </Link>
+        )}
       </div>
     </div>
   );
