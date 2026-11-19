@@ -207,14 +207,55 @@ work.
 ## 10. Build order
 
 1. ✅ This plan; PR template + `CLAUDE.md` process rule.
-2. Docs scaffolding (§7) — route, `HelpLink`, slug test, first concept pages.
+2. ✅ Docs scaffolding (§7). Pages live in `docs/help/*.md` — readable on GitHub as-is — and
+   are bundled into the app's **Help** page (`frontend/src/lib/help.ts`). Tests fail the build
+   on a page missing from the sidebar, a broken cross-link or anchor, or an index that doesn't
+   list every page. First pages: getting started, concepts, material categories, Square /
+   Etsy / eBay, backup & restore, troubleshooting.
 3. ✅ §4 category question decided and built (business-type picker). ✅ §8 credentials
    decided: per-user apps.
-4. Seed additions (§4) and flag help text.
-5. Empty states across all pages (§3).
-6. `/onboarding/status` endpoint + Dashboard checklist (§5.3).
-7. First-launch choice + restore path (§5.1).
-8. Per-page intros + "?" buttons (§5.4).
-9. Sample workspace (§6).
-10. Store-connection guides (Square first, then Etsy, eBay) and per-field validation on
-    the connection forms (§8).
+4. ✅ Flag help text: a tooltip on every category switch, and the Lists description links to
+   the help page. Seed additions beyond the presets (shipping profiles) — open, see §11.
+5. ✅ Empty states on Materials, Products, Purchases, Orders and Stock takes (§3). Insights
+   not yet.
+6. ✅ `/onboarding/status` + Dashboard checklist (§5.3). Seven steps; existing installs start
+   with it hidden; Help's home page brings it back.
+7. ✅ Partly: the business-type picker offers "Restore a backup instead". A separate
+   first-launch "fresh / restore / sample" screen waits on the sample workspace (§6).
+8. ✅ "?" beside every page title, targets in `PAGE_HELP`. Per-page first-visit intros not
+   built — the "?" and the empty states cover the same need with less to maintain; revisit if
+   users miss them.
+9. Sample workspace (§6) — not started, see §11.
+10. ✅ Store-connection guides written; Square's dialog and the Etsy/eBay developer-app card
+    link to them. Per-field validation on the connection forms — not started.
+
+---
+
+## 11. Open questions (2026-11-19)
+
+Decisions needed before the remaining items can be built:
+
+1. **Licence.** `LICENSE` currently forbids use without written permission, which contradicts
+   public distribution.
+2. **Sample workspace (§6).** Separate database file the backend switches to, or sample rows
+   in the real database that can be wiped? The first needs the backend to swap databases at
+   runtime (it currently picks one at start-up); the second risks mixing with real data.
+   Candle maker as the sample business?
+3. **Default "Import orders from" date.** A new store connection starts with no date, which
+   imports the shop's entire history. Default it to the connection date instead?
+4. **Square connect dialog defaults to Sandbox.** Fine for development, wrong for a public
+   user with a real shop. Default to Production?
+5. **Royal Mail shipping starter set.** Seed UK postage profiles (prices go stale and need
+   upkeep), or leave empty and point at the help?
+6. **CSV import for BOMs and variants** — build it, or document hand entry as the supported
+   route?
+7. **GitHub as the public home.** The help says to report problems on GitHub, and public
+   users need somewhere to download releases. Will the repository (with Issues) be public?
+8. **Unverified portal steps.** The Etsy and eBay guides describe those platforms' developer
+   sites from the codebase's notes, not a fresh walk-through. One run-through with screenshots
+   would firm them up — including whether Etsy accepts the `http://127.0.0.1` callback.
+9. **Date display locale.** Dates follow the computer's locale ("15–18 Aug" on a UK machine,
+   "15–Aug 18" on a US one). One dashboard test fails on non-UK machines for this reason. Pin
+   to en-GB while StockSmith is UK-only?
+10. **Unsigned installer.** SmartScreen and antivirus warnings are the first thing a public user
+    meets. Code signing costs money annually; is it in scope?

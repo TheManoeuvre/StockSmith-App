@@ -8,6 +8,7 @@ import { Disclosure } from "../Disclosure";
 import { EbaySigningKeyPanel } from "../EbaySigningKeyPanel";
 import { PlatformCredentialsForm } from "../PlatformCredentialsForm";
 import { SettingsCard } from "../SettingsCard";
+import { HelpLink } from "../../help/HelpLink";
 
 /**
  * The set-up-once section: the developer app registered with the marketplace, and for eBay
@@ -48,7 +49,14 @@ export function DeveloperAppCard({
   return (
     <SettingsCard
       title="Developer app"
-      help={`The app registered in ${label}'s developer portal. Set once; only changes if you re-register it.`}
+      help={
+        <>
+          The app registered in {label}'s developer portal. Set once; only changes if you re-register it.{" "}
+          {(platform === "etsy" || platform === "ebay") && (
+            <HelpLink doc={platform === "etsy" ? "connecting-etsy" : "connecting-ebay"}>Step-by-step setup guide</HelpLink>
+          )}
+        </>
+      }
       action={
         platform === "ebay" ? (
           <div

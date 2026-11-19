@@ -14,3 +14,11 @@ impact on new users. Before finishing any change, check against `docs/plan-onboa
 
 Fill in the "Onboarding & docs impact" section of the PR template. "None" is a valid
 answer; leaving it blank is not. Defaults are UK-only for now — flag anything UK-specific.
+
+## User-facing help lives in `docs/help/`
+
+Plain markdown, readable on GitHub and bundled into the app's Help page (see
+`frontend/src/lib/help.ts`). When a change alters what a user sees or does, update the
+matching page in the same PR. Adding a page means adding its file, its slug in `HELP_SECTIONS`
+and a link from `docs/help/README.md` — `frontend/src/lib/help.test.ts` fails otherwise. Link
+into help from the UI with `<HelpLink doc="…" anchor="…">`, which is typed against the page list.
