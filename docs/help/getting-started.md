@@ -83,7 +83,10 @@ For your margins to be right:
 - **Settings › Pricing & fees** has Etsy and eBay's standard UK fees filled in. Selling from
   elsewhere? Replace them with your country's. Either way, check they match your account — fees
   change, and some (like offsite ads) only apply to some sellers.
-- **Settings › Shipping & packaging** is where your postage options go.
+- **Settings › Shipping & packaging** starts with three Royal Mail 2nd Class options (large letter,
+  small parcel, medium parcel) at Post Office counter prices, charged to the buyer at cost. Change
+  them to what you actually pay — buying postage online is usually cheaper — and to what you charge.
+  Not in the UK? Archive them and add your own carrier's.
 
 ## 8. Keep a backup somewhere else
 

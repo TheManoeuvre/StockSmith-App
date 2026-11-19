@@ -32,6 +32,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   print, or something else — and sets up material categories, units and example material types to
   match. Everything it creates can be renamed or removed in Settings › Lists. Existing installs are
   not asked and keep their categories exactly as they are.
+- **New installs start with Royal Mail postage options.** Three Royal Mail 2nd Class shipping profiles
+  (large letter, small parcel, medium parcel) at Post Office prices, ready to edit to what you pay.
+  Existing installs are unchanged.
 - **Help, built in.** A new Help page at the bottom of the sidebar explains how StockSmith works and
   how to set it up: getting started, the ideas behind each page, what each material category setting
   does, connecting Square, Etsy and eBay, backups and moving to a new computer, and troubleshooting.

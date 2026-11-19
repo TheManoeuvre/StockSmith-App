@@ -120,3 +120,40 @@ def test_migration_dismisses_the_checklist_only_for_installs_with_data(tmp_path,
 
     assert run(with_material=True) == 1
     assert run(with_material=False) == 0
+
+
+class TestRoyalMailSeed:
+    async def test_a_new_install_gets_the_starter_set(self, session):
+        from app.models.shipping_profile import ShippingProfile
+        from app.seed import _ensure_shipping_profiles
+
+        await _fresh(session)
+        await _ensure_shipping_profiles(session)
+        await session.commit()
+        profiles = (await session.scalars(select(ShippingProfile).order_by(ShippingProfile.id))).all()
+        assert [p.name for p in profiles] == [
+            "Royal Mail 2nd Class — Large Letter (up to 100g)",
+            "Royal Mail 2nd Class — Small Parcel (up to 2kg)",
+            "Royal Mail 2nd Class — Medium Parcel (up to 2kg)",
+        ]
+        # Passed on at cost, on every channel, so margins neither gain nor ignore postage.
+        for p in profiles:
+            assert p.price == p.cost_manual == p.cost_etsy == p.cost_ebay > 0
+
+        # Idempotent: a second start adds nothing.
+        await _ensure_shipping_profiles(session)
+        await session.commit()
+        assert len((await session.scalars(select(ShippingProfile))).all()) == 3
+
+    async def test_an_existing_install_never_gets_them(self, session):
+        from app.models.general_settings import GeneralSettings
+        from app.models.shipping_profile import ShippingProfile
+        from app.seed import _ensure_shipping_profiles
+
+        await _fresh(session)
+        settings = await session.get(GeneralSettings, 1)
+        settings.business_type = "3d_printing"
+        await session.commit()
+        await _ensure_shipping_profiles(session)
+        await session.commit()
+        assert (await session.scalars(select(ShippingProfile))).all() == []

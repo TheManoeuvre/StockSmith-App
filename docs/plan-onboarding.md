@@ -70,7 +70,7 @@ material categories (filament, resin, pigment, hardware, packaging, blanks, othe
   Add a description to each seeded category and help text to each flag in Lists.
 - **Material types** — a handful of examples, because type drives substitution and an
   example teaches that faster than prose. Deletable.
-- **Shipping profiles** — a Royal Mail starter set *(UK-specific)*.
+- ✅ **Shipping profiles** — a Royal Mail starter set *(UK-specific)*, new installs only. See §12.
 - **Not seeded, deliberately:** suppliers, manufacturers, product categories. Business-
   specific; seeded rows are clutter to delete.
 
@@ -259,4 +259,4 @@ installs; existing installs keep the values they have, which users edit in Setti
 |---|---|---|
 | Etsy UK fee components | `backend/app/seed.py` `_FEE_COMPONENTS` | July 2026 |
 | eBay UK fee components | `backend/app/seed.py` `_FEE_COMPONENTS` | July 2026 |
-| Royal Mail postage | `backend/app/seed.py` (see build) | — |
+| Royal Mail 2nd Class: Large Letter ≤100g £1.55, Small Parcel ≤2kg £4.60, Medium Parcel ≤2kg £7.50 (stamp prices from 5 Oct 2026; online prices conflicted between sources and Royal Mail's site refuses automated reads, so check them by hand) | `backend/app/seed.py` `_SHIPPING_PROFILES`, `ROYAL_MAIL_VERIFIED` | 19 Nov 2026 |

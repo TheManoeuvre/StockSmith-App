@@ -6,6 +6,8 @@ migrations that could be squashed again later — this runs once at startup (see
 app/bootstrap.py) and is a no-op on every run after the first.
 """
 
+from decimal import Decimal
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -15,6 +17,7 @@ from app.models.material_category import MaterialCategory
 from app.models.material_unit import MaterialUnitRow
 from app.models.notification import ALERT_TYPES, DEFAULT_IMMEDIATE_ALERT_TYPES, NotificationDeliveryMode, NotificationSettings, NotificationTypeSettings
 from app.models.platform_fee import FeeBasis, MarginFeeConfig, MarginFeeSource, PlatformFeeComponent
+from app.models.shipping_profile import ShippingProfile
 from app.services.material_categories import DEFAULT_CATEGORIES
 from app.services.units import DEFAULT_UNITS
 
@@ -108,6 +111,23 @@ _FEE_COMPONENTS: list[dict] = [
 ]
 
 
+# Royal Mail 2nd Class, UK. Stamp (Post Office counter) prices from the 5 October 2026 change —
+# point-in-time, like the fees above. RE-CHECK QUARTERLY: see docs/plan-onboarding.md §12, which
+# records when these were last verified. Stamp prices rather than online (Click & Drop) prices
+# because they're the figures every source agrees on; online is usually cheaper, and the help
+# tells users to replace these with what they actually pay.
+#
+# Seeded as cost on every channel *and* as the buyer price — postage passed on at cost — so a
+# new install's margins neither invent postage profit nor ignore postage cost. UK-specific: a
+# seller elsewhere archives them.
+ROYAL_MAIL_VERIFIED = "2026-11-19"
+_SHIPPING_PROFILES: list[tuple[str, str]] = [
+    ("Royal Mail 2nd Class — Large Letter (up to 100g)", "1.55"),
+    ("Royal Mail 2nd Class — Small Parcel (up to 2kg)", "4.60"),
+    ("Royal Mail 2nd Class — Medium Parcel (up to 2kg)", "7.50"),
+]
+
+
 async def _ensure_general_settings(session: AsyncSession) -> None:
     existing = await session.execute(select(GeneralSettings).where(GeneralSettings.id == 1))
     if existing.scalar_one_or_none() is None:
@@ -192,6 +212,21 @@ async def _ensure_material_units(session: AsyncSession) -> None:
         session.add(MaterialUnitRow(**row))
 
 
+async def _ensure_shipping_profiles(session: AsyncSession) -> None:
+    """Seed the Royal Mail starter set into a brand-new install only: no shipping profiles, and no
+    business type chosen yet (existing installs were stamped with one by migration d2e7a4c19f60,
+    so one that simply never set up postage doesn't find these appear after an update)."""
+    settings = await session.get(GeneralSettings, 1)
+    if settings is None or settings.business_type is not None:
+        return
+    existing = await session.execute(select(ShippingProfile.id).limit(1))
+    if existing.first() is not None:
+        return
+    for name, amount in _SHIPPING_PROFILES:
+        value = Decimal(amount)
+        session.add(ShippingProfile(name=name, price=value, cost_manual=value, cost_etsy=value, cost_ebay=value))
+
+
 async def ensure_seed_data(session: AsyncSession) -> None:
     """Idempotent — safe to call on every startup, only inserts what's missing."""
     await _ensure_general_settings(session)
@@ -202,4 +237,5 @@ async def ensure_seed_data(session: AsyncSession) -> None:
     await _ensure_platform_fee_components(session)
     await _ensure_material_units(session)
     await _ensure_material_categories(session)
+    await _ensure_shipping_profiles(session)
     await session.commit()
