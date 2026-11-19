@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { createFileRoute, Link, useLocation } from "@tanstack/react-router";
 import { HelpMarkdown } from "../components/help/HelpMarkdown";
+import { ShowSetupChecklist } from "../components/onboarding/SetupChecklist";
 import { getHelpPage, HELP_SECTIONS, isHelpSlug, type HelpSlug } from "../lib/help";
 
 /**
@@ -47,6 +48,7 @@ function HelpRoute() {
       <article className="min-w-0 max-w-3xl flex-1">
         {page ? (
           <>
+            {slug === "index" && <ShowSetupChecklist />}
             <h1 className="mb-1 text-xl font-semibold text-slate-900">{page.title}</h1>
             <HelpMarkdown markdown={page.body} />
           </>

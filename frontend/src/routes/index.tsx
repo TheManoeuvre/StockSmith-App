@@ -21,6 +21,7 @@ import {
   STOCKOUT_TEXT_CLASS,
 } from "../lib/forecast";
 import { PLATFORM_COLORS, PLATFORM_LABELS } from "../lib/platforms";
+import { SetupChecklist } from "../components/onboarding/SetupChecklist";
 
 function groupBySupplier(
   materials: LowStockMaterial[],
@@ -256,6 +257,8 @@ function Dashboard() {
 
   return (
     <div className="flex flex-col gap-6">
+      {/* New installs only: hides itself once every step is done, or when dismissed. */}
+      <SetupChecklist />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Link
           to="/orders"

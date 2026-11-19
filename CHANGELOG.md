@@ -23,6 +23,12 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   how to set it up: getting started, the ideas behind each page, what each material category setting
   does, connecting Square, Etsy and eBay, backups and moving to a new computer, and troubleshooting.
   It works offline, and the "Reconnecting" screen now links straight to the troubleshooting page.
+- **A setup checklist on the Dashboard for new installs.** Seven steps in the order that works best —
+  materials, an opening count, packaging, products, a store, an off-computer backup — each ticking
+  itself off as you do it, with a link to where it's done and how. Hide it whenever you like and bring
+  it back from Help. Existing installs don't see it unless they ask for it.
+- **Each material category setting is explained.** Hover the ⓘ beside any switch in Settings › Lists ›
+  Material categories, or follow the link to the full explanation.
 
 ## [0.27.0] - 2026-11-16
 
