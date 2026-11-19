@@ -10,7 +10,8 @@ is the *what*.
 
 | Question | Decision | Consequence |
 |---|---|---|
-| Who is StockSmith for? | **Public distribution** | Onboarding must work for someone who has never spoken to us. The shared-vs-per-user marketplace credential decision (roadmap §"The decision this forces") is no longer optional — see §8. |
+| Who is StockSmith for? | **Public distribution, as a courtesy** — no support commitment, no operated services | Onboarding and docs must be fully self-serve: nobody can ask. |
+| Marketplace credentials | **Per-user developer apps (decided 2026-11-19)** | StockSmith takes on no custody of anyone's tokens or data and runs no servers. Etsy/eBay setup stays developer-grade; onboarding answers it with guides, not a "Connect" button — see §8. |
 | Which market? | **UK for now** | Seeded fees (already UK) and a UK shipping starter set are legitimate defaults. Every UK-specific default is listed in §4 so a later "where do you sell?" step knows what to switch. |
 | Sample data? | **Yes — and not necessarily 3D-print related** | A discardable sample workspace (§6). A non-3D business also proves the app is general, which public distribution needs. |
 | Where do docs live? | **Inside the app** | Bundled with the frontend, versioned with the release, works offline (§7). Not top priority; scaffolding first. |
@@ -168,11 +169,22 @@ changes most releases; anchored tours break silently.
 
 ## 8. Blockers carried from the roadmap
 
-- **Marketplace credentials.** Public distribution means per-user Etsy/eBay developer apps
-  cap the audience at people who can follow a developer portal. Shared app credentials are
-  a strategic/legal decision (platform review, shared quotas, eBay data-deletion exemption
-  at application level). Onboarding for Etsy/eBay cannot be designed until this is decided.
-  Square is unaffected (token paste).
+- **Marketplace credentials — decided: per-user developer apps.** StockSmith is shared as a
+  courtesy and its author takes on no additional responsibility, which rules out shared app
+  credentials (platform review, shared quotas, an operated token-exchange service, holding
+  other people's account access, application-level eBay data-deletion obligations). It also
+  rules out any StockSmith-operated relay or hosted backend (`plan-always-on-sync.md` options
+  C-operated and D); a relay each user deploys to their own account remains possible.
+
+  What this means for onboarding:
+  - **Square and manual orders are the easy path** and should be presented first.
+  - **Etsy and eBay are an advanced path**, labelled honestly as needing a developer account
+    and roughly how long it takes, so nobody starts it by accident.
+  - Their guides (§7 item 3) become the most important docs in the app: step-by-step, with
+    screenshots, covering the developer app, the https redirect relay and eBay signing keys.
+  - The connection forms should validate each pasted value and say *which* one is wrong —
+    with no support channel, the error message is the support.
+  - The existing per-user path is unchanged; nothing to build on the credential model itself.
 - **CSV for BOMs and variants.** Missing; a shop with an existing catalogue hand-keys them.
   Either build it or document hand entry as the supported route.
 
@@ -196,12 +208,13 @@ work.
 
 1. ✅ This plan; PR template + `CLAUDE.md` process rule.
 2. Docs scaffolding (§7) — route, `HelpLink`, slug test, first concept pages.
-3. ✅ §4 category question decided and built (business-type picker). §8 credentials
-   question still open.
+3. ✅ §4 category question decided and built (business-type picker). ✅ §8 credentials
+   decided: per-user apps.
 4. Seed additions (§4) and flag help text.
 5. Empty states across all pages (§3).
 6. `/onboarding/status` endpoint + Dashboard checklist (§5.3).
 7. First-launch choice + restore path (§5.1).
 8. Per-page intros + "?" buttons (§5.4).
 9. Sample workspace (§6).
-10. Store-connection guides, once §8 is decided.
+10. Store-connection guides (Square first, then Etsy, eBay) and per-field validation on
+    the connection forms (§8).

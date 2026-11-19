@@ -151,6 +151,11 @@ Sketch only — the planning pass decides the shape:
 
 ### The decision this forces
 
+> **Decided 2026-11-19: per-user developer apps.** StockSmith is shared publicly as a
+> courtesy, with no additional responsibility taken on — so no shared credentials and no
+> StockSmith-operated services. See `plan-onboarding.md` §8 for what that means for
+> onboarding, and note it also closes `plan-always-on-sync.md` options D and an operated C.
+
 Finding 5 is the one that cannot be designed around, and it is shared with
 `plan-always-on-sync.md`: either every user registers their own developer apps — which
 caps StockSmith at users who can follow a developer portal — or StockSmith ships **shared
@@ -175,6 +180,6 @@ Offered for confirmation, not settled:
 1. Everything in flight merged and released.
 2. Always-on sync working, in whatever shape `plan-always-on-sync.md` settles on.
 3. `backlog.md` empty of correctness items (nice-to-haves may survive).
-4. A decision recorded on shared vs. per-user marketplace app credentials.
+4. ✅ A decision recorded on shared vs. per-user marketplace app credentials — per-user.
 5. Onboarding built against the finished feature set.
 6. A print-queue decision — in scope, or explicitly post-1.0.
