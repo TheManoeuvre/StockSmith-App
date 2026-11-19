@@ -12,6 +12,11 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **The window opens larger and can't be shrunk past 820 × 600.** Below that size an open product
+  or order panel covered the side menu, and the bottom of the menu (Settings) could be cut off.
+
 ## [0.28.0] - 2026-11-19
 
 ### Changed

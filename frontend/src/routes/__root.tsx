@@ -251,7 +251,10 @@ function RootChrome() {
   return (
     <div className="flex h-screen overflow-hidden bg-slate-50 text-slate-900">
       {/* Collapses to an icon rail below the lg breakpoint to give the page more room; the labels
-          come back as hover/focus tooltips (NavTip). */}
+          come back as hover/focus tooltips (NavTip). The window's minWidth (820 = this 52px rail +
+          the 768px slide-over) keeps the rail visible beside an open DetailPanel, and its minHeight
+          (600) fits the whole menu. The aside must not scroll: that would clip NavTip and the
+          notification popover, which both overflow its edge. */}
       <aside className="flex w-[52px] flex-none flex-col border-r border-slate-200 bg-white p-1.5 pt-3.5 lg:w-[198px] lg:p-2.5 lg:pt-3.5">
         <div className="flex items-center gap-2 px-2 pb-4 max-lg:justify-center max-lg:px-0">
           <img src={appIcon} alt="StockSmith" className="block h-[26px] w-[26px] flex-none" />
