@@ -29,7 +29,7 @@ Written 2026-08-15, against 0.6.3.
 | Receiving by line | Shipped — deliveries are their own records, dated and costed individually | `CHANGELOG.md` |
 | Backlog quick wins (CI, line endings, Build-now link) | **In flight** — PR #23 | `backlog.md` |
 | Always-on sync | **Next up** — tray chosen as first step; `plan-background-sync.md` now carries the build plan and the Windows 11 uptime design | `plan-background-sync.md` §6-8, `plan-always-on-sync.md` |
-| **New-user onboarding** | **Unplanned — this document is where it enters** | below |
+| **New-user onboarding** | **Planned** (2026-11-19) — public distribution, UK-first, sample workspace, in-app docs decided | `plan-onboarding.md` |
 | Print-queue management | Never started, never planned | `plan-phase0-phase1.md` names it as a later phase |
 | Shipping automation | Parked deliberately, not deferred | `plan-marketplace-integrations.md` §2 |
 
