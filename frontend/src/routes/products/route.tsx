@@ -29,6 +29,9 @@ import { NewProductStoreChips, useNewProductStores, type StoreChoices } from "..
 import { storeState } from "../../components/products/ProductStoreSection";
 import { inclFallbacksNote, sellableSummary } from "../../lib/format";
 import { formatUnitCost } from "../../lib/money";
+import { HelpLink } from "../../components/help/HelpLink";
+import { PAGE_HELP } from "../../lib/help";
+import { EmptyState } from "../../components/common/EmptyState";
 
 /**
  * Pathless layout for /products: the list lives here (not in index.tsx) so it stays mounted
@@ -251,7 +254,10 @@ function ProductsListContent() {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">Products</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-semibold">Products</h1>
+            <HelpLink doc={PAGE_HELP.products.doc} anchor={PAGE_HELP.products.anchor} />
+          </div>
           <p className="mt-0.5 text-[12.5px] text-slate-500">
             {tab === "cost-gaps"
               ? `${total} with cost gaps`
@@ -404,44 +410,55 @@ function ProductsListContent() {
         </form>
       )}
 
-      <table className="w-full border-collapse overflow-hidden rounded-lg bg-white text-left text-[12.5px] shadow-sm">
-        <thead>
-          <tr className="border-b border-slate-200 bg-slate-50/60">
-            <Th>{""}</Th>
-            <Th>Name</Th>
-            <Th>SKU</Th>
-            <Th>On hand</Th>
-            <Th>Sellable</Th>
-            <Th>Sale price</Th>
-            {/* The three deductions that make up an order's cost of goods, stacked in one
-                column rather than three: at eleven columns wide the table stopped being
-                scannable, and these are read together or not at all. */}
-            <Th>Costs</Th>
-            <Th>Stores</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {groups.map((group) => (
-            <Fragment key={group.key}>
-              <GroupHeaderRow
-                label={group.label}
-                count={group.products.length}
-                colSpan={8}
-                collapsed={collapsedGroups.has(group.label)}
-                onToggle={() => toggleGroup(group.label)}
-              />
-              {!collapsedGroups.has(group.label) &&
-                group.products.map((p) => (
-                  <ProductRow
-                    key={p.id}
-                    product={p}
-                    storeStatuses={storeStatuses}
-                  />
-                ))}
-            </Fragment>
-          ))}
-        </tbody>
-      </table>
+      {data !== undefined && total === 0 && !q && tab === "all" && !showInactive && !soldOn ? (
+        <EmptyState
+          title="No products yet"
+          actions={<HelpLink doc="getting-started" anchor="5-add-your-products-and-their-recipes">How to add products</HelpLink>}
+        >
+          A product is something you sell. Click <strong>Add product</strong>, then give it a <strong>BOM</strong>: the
+          materials one of them uses. With a BOM, StockSmith can work out what each costs to make and how many you
+          could make from the stock you have. Add your materials first, so they're there to choose from.
+        </EmptyState>
+      ) : (
+        <table className="w-full border-collapse overflow-hidden rounded-lg bg-white text-left text-[12.5px] shadow-sm">
+          <thead>
+            <tr className="border-b border-slate-200 bg-slate-50/60">
+              <Th>{""}</Th>
+              <Th>Name</Th>
+              <Th>SKU</Th>
+              <Th>On hand</Th>
+              <Th>Sellable</Th>
+              <Th>Sale price</Th>
+              {/* The three deductions that make up an order's cost of goods, stacked in one
+                  column rather than three: at eleven columns wide the table stopped being
+                  scannable, and these are read together or not at all. */}
+              <Th>Costs</Th>
+              <Th>Stores</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {groups.map((group) => (
+              <Fragment key={group.key}>
+                <GroupHeaderRow
+                  label={group.label}
+                  count={group.products.length}
+                  colSpan={8}
+                  collapsed={collapsedGroups.has(group.label)}
+                  onToggle={() => toggleGroup(group.label)}
+                />
+                {!collapsedGroups.has(group.label) &&
+                  group.products.map((p) => (
+                    <ProductRow
+                      key={p.id}
+                      product={p}
+                      storeStatuses={storeStatuses}
+                    />
+                  ))}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      )}
 
       <div className="flex items-center justify-between text-sm text-slate-500">
         <span>

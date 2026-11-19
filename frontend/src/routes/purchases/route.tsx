@@ -16,6 +16,9 @@ import { Th } from "../../components/common/ListTable";
 import { PurchaseStatusPill } from "../../components/purchases/PurchaseStatusPill";
 import { formatMoney } from "../../lib/money";
 import { formatDayMonth, qtyWithUnit } from "../../lib/format";
+import { HelpLink } from "../../components/help/HelpLink";
+import { PAGE_HELP } from "../../lib/help";
+import { EmptyState } from "../../components/common/EmptyState";
 
 /**
  * Pathless layout for /purchases: the list lives here (not in index.tsx) so it stays mounted
@@ -99,7 +102,10 @@ function PurchasesListContent() {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">Purchases</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-semibold">Purchases</h1>
+            <HelpLink doc={PAGE_HELP.purchases.doc} anchor={PAGE_HELP.purchases.anchor} />
+          </div>
           <p className="mt-0.5 text-[12.5px] text-slate-500">
             {openN} awaiting delivery · {partN} part received ·{" "}
             {formatMoney(String(onOrderTotal), "GBP")} on order
@@ -131,36 +137,47 @@ function PurchasesListContent() {
         onChange={(id) => setTab(id as PurchaseStatus | "all")}
       />
 
-      <table className="w-full border-collapse overflow-hidden rounded-lg bg-white text-left text-[12.5px] shadow-sm">
-        <thead>
-          <tr className="border-b border-slate-200 bg-slate-50/60">
-            <Th>Order</Th>
-            <Th>Supplier</Th>
-            <Th>Due</Th>
-            <Th>Lines · ordered / in</Th>
-            <Th>Status</Th>
-            <Th align="right">Total</Th>
-            <Th>{""}</Th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((purchase) => (
-            <PurchaseRow
-              key={purchase.id}
-              purchase={purchase}
-              materialById={materialById}
-              onOpen={(receiving) =>
-                navigate({
-                  to: "/purchases/$purchaseId",
-                  params: { purchaseId: String(purchase.id) },
-                  search: receiving ? { tab: "receiving" } : {},
-                })
-              }
-              onReceiveAll={() => receiveMutation.mutate(purchase.id)}
-            />
-          ))}
-        </tbody>
-      </table>
+      {data !== undefined && purchases.length === 0 ? (
+        <EmptyState
+          title="No purchases yet"
+          actions={<HelpLink doc="concepts" anchor="purchases">How purchases work</HelpLink>}
+        >
+          A purchase is an order you've placed with a supplier. Record one with <strong>New purchase</strong> when you
+          order, then mark lines received as they arrive. Receiving adds the stock and updates what each material
+          costs, and anything on order stops being flagged for reordering.
+        </EmptyState>
+      ) : (
+        <table className="w-full border-collapse overflow-hidden rounded-lg bg-white text-left text-[12.5px] shadow-sm">
+          <thead>
+            <tr className="border-b border-slate-200 bg-slate-50/60">
+              <Th>Order</Th>
+              <Th>Supplier</Th>
+              <Th>Due</Th>
+              <Th>Lines · ordered / in</Th>
+              <Th>Status</Th>
+              <Th align="right">Total</Th>
+              <Th>{""}</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((purchase) => (
+              <PurchaseRow
+                key={purchase.id}
+                purchase={purchase}
+                materialById={materialById}
+                onOpen={(receiving) =>
+                  navigate({
+                    to: "/purchases/$purchaseId",
+                    params: { purchaseId: String(purchase.id) },
+                    search: receiving ? { tab: "receiving" } : {},
+                  })
+                }
+                onReceiveAll={() => receiveMutation.mutate(purchase.id)}
+              />
+            ))}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }

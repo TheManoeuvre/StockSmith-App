@@ -5,6 +5,7 @@ import {
   headingAnchor,
   headingAnchors,
   HELP_SLUGS,
+  PAGE_HELP,
   resolveHelpHref,
 } from "./help";
 
@@ -48,6 +49,14 @@ describe("help pages", () => {
         .map((t) => (t as { slug: string }).slug),
     );
     expect(HELP_SLUGS.filter((s) => s !== "index" && !linked.has(s))).toEqual([]);
+  });
+});
+
+describe("PAGE_HELP", () => {
+  it.each(Object.entries(PAGE_HELP))("%s's help link lands on a real heading", (_page, target) => {
+    const page = getHelpPage(target.doc);
+    expect(page).not.toBeNull();
+    if (target.anchor) expect(headingAnchors(page!.body)).toContain(target.anchor);
   });
 });
 

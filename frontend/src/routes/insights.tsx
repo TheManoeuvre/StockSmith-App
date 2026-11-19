@@ -11,6 +11,8 @@ import { EmptyState, TilesSkeleton, ToggleChip } from "../components/insights/pa
 import { ProductsTab } from "../components/insights/ProductsTab";
 import { QUALITY_NOTES, QualityTab } from "../components/insights/QualityTab";
 import { CHANNEL_LABELS, RANGE_PRESETS, resolveRange, type RangePreset } from "../lib/insights";
+import { HelpLink } from "../components/help/HelpLink";
+import { PAGE_HELP } from "../lib/help";
 
 export const Route = createFileRoute("/insights")({
   component: InsightsPage,
@@ -79,7 +81,10 @@ function InsightsPage() {
     <div className="mx-auto max-w-[1200px]">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">Insights</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-semibold">Insights</h1>
+            <HelpLink doc={PAGE_HELP.insights.doc} anchor={PAGE_HELP.insights.anchor} />
+          </div>
           <p className="text-xs text-slate-500">{range.label} · all figures by order placed date</p>
         </div>
         <div className="relative">

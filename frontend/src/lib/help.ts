@@ -29,6 +29,21 @@ export const HELP_SECTIONS = [
 
 export type HelpSlug = (typeof HELP_SECTIONS)[number]["pages"][number] | "index";
 
+/**
+ * The help each page's "?" opens. Kept in one place so help.test.ts can check every anchor lands
+ * on a real heading — a renamed heading would otherwise leave the "?" quietly opening the top of
+ * the page.
+ */
+export const PAGE_HELP = {
+  materials: { doc: "concepts", anchor: "materials-and-products" },
+  products: { doc: "concepts", anchor: "boms-recipes" },
+  orders: { doc: "concepts", anchor: "orders-and-allocation" },
+  purchases: { doc: "concepts", anchor: "purchases" },
+  stockTakes: { doc: "concepts", anchor: "stock-takes" },
+  insights: { doc: "concepts", anchor: "insights" },
+  settings: { doc: "getting-started", anchor: undefined },
+} as const satisfies Record<string, { doc: HelpSlug; anchor: string | undefined }>;
+
 export const HELP_SLUGS: HelpSlug[] = ["index", ...HELP_SECTIONS.flatMap((s) => [...s.pages])];
 
 function slugFromPath(path: string): string {

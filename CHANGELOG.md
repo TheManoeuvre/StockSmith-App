@@ -27,6 +27,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   materials, an opening count, packaging, products, a store, an off-computer backup — each ticking
   itself off as you do it, with a link to where it's done and how. Hide it whenever you like and bring
   it back from Help. Existing installs don't see it unless they ask for it.
+- **Empty pages say what to do next.** Materials, Products, Purchases, Orders and Stock takes now explain
+  what they're for and how to get started when there's nothing in them yet, instead of a blank table.
+- **A ? beside every page title** opens the help for that page.
 - **Each material category setting is explained.** Hover the ⓘ beside any switch in Settings › Lists ›
   Material categories, or follow the link to the full explanation.
 

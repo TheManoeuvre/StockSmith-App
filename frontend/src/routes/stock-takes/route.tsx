@@ -19,6 +19,9 @@ import { Badge } from "../../components/common/Badge";
 import { FilterTabs } from "../../components/common/FilterTabs";
 import { Th } from "../../components/common/ListTable";
 import { formatDayMonth } from "../../lib/format";
+import { HelpLink } from "../../components/help/HelpLink";
+import { PAGE_HELP } from "../../lib/help";
+import { EmptyState } from "../../components/common/EmptyState";
 
 /**
  * Pathless layout for /stock-takes: the list lives here (not in index.tsx) so it stays
@@ -268,7 +271,10 @@ function StockTakesListContent() {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">Stock takes</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-semibold">Stock takes</h1>
+            <HelpLink doc={PAGE_HELP.stockTakes.doc} anchor={PAGE_HELP.stockTakes.anchor} />
+          </div>
           <p className="mt-0.5 text-[12.5px] text-slate-500">
             {openN} open · {all.length - openN} closed
           </p>
@@ -446,7 +452,14 @@ function StockTakesListContent() {
       )}
 
       {all.length === 0 ? (
-        <p className="text-slate-500">No stock takes yet.</p>
+        <EmptyState
+          title="No stock takes yet"
+          actions={<HelpLink doc="concepts" anchor="stock-takes">How stock takes work</HelpLink>}
+        >
+          A stock take is a count of what's actually on your shelves. Approving one corrects StockSmith's figures
+          to match, and records the difference. Your first one is the quickest way to enter opening stock for
+          everything at once: start one above, count, then <strong>Review and approve</strong>.
+        </EmptyState>
       ) : (
         <table className="w-full border-collapse overflow-hidden rounded-lg bg-white text-left text-[12.5px] shadow-sm">
           <thead>

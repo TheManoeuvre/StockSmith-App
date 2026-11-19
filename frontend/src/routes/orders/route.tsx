@@ -24,6 +24,9 @@ import { maskBuyerName } from "../../lib/names";
 import { effectiveDueDate, orderFulfilment } from "../../lib/orderFulfilment";
 import { PLATFORM_COLORS, PLATFORM_LABELS } from "../../lib/platforms";
 import { decodeHtmlEntities } from "../../lib/personalization";
+import { HelpLink } from "../../components/help/HelpLink";
+import { PAGE_HELP } from "../../lib/help";
+import { EmptyState } from "../../components/common/EmptyState";
 
 /**
  * Pathless layout for /orders: the list lives here (not in index.tsx) so it stays mounted
@@ -157,6 +160,8 @@ function OrdersListContent() {
   );
   const countFor = (id: OrderTab) =>
     ({ awaiting: awaitingCount, shipped: shippedCount, cancelled: cancelledCount })[id];
+  // All three tabs empty: a shop with no orders at all, not just none awaiting.
+  const noOrdersAtAll = awaitingCount === 0 && shippedCount === 0 && cancelledCount === 0;
   const total = data?.total ?? 0;
   // Cheap count for the filter chip, off the ["orders", …] key like the tab counts above.
   const { data: boxCheckCount } = useQuery({
@@ -205,7 +210,10 @@ function OrdersListContent() {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">Orders</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-semibold">Orders</h1>
+            <HelpLink doc={PAGE_HELP.orders.doc} anchor={PAGE_HELP.orders.anchor} />
+          </div>
           <p className="mt-0.5 text-[12.5px] text-slate-500">
             {awaitingCount ?? "…"} awaiting shipment · {shippedCount ?? "…"}{" "}
             shipped
@@ -257,6 +265,23 @@ function OrdersListContent() {
         />
       </div>
 
+      {noOrdersAtAll && (
+        <EmptyState
+          title="No orders yet"
+          actions={
+            <>
+              <Link to="/settings" search={{ page: "stores-sync" }} className="font-medium text-slate-900 underline underline-offset-2">
+                Connect a store
+              </Link>
+              <HelpLink doc="connecting-square">Connecting Square</HelpLink>
+            </>
+          }
+        >
+          Orders arrive here from connected stores — Square, Etsy or eBay — or you can add one by hand with{" "}
+          <strong>New order</strong>. Each order reserves stock as soon as it arrives. Before your first sync, set the
+          store's <strong>Import orders from</strong> date, or your whole order history comes in.
+        </EmptyState>
+      )}
       <table className="w-full border-collapse overflow-hidden rounded-lg bg-white text-left text-[12.5px] shadow-sm">
         <thead>
           <tr className="border-b border-slate-200 bg-slate-50/60">
