@@ -12,6 +12,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-11-19
+
 ### Changed
 
 - **StockSmith is now open source under the MIT licence.** Free to use, change and share.
@@ -19,11 +21,21 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   recorded and would arrive as work already done. If you have orders still to send, move the store's
   "Import orders from" date back before your first sync. Reconnecting the same shop keeps your date.
 - **Square's connect dialog starts on Production**, for your real shop, rather than Sandbox.
+- **Units of measure are now a list you can edit.** Settings › Lists › Units holds g, ml and each to
+  start with; add your own (metres, say) and choose how many decimal places each one shows. Quantities
+  across Materials, the Dashboard, stock takes and deliveries follow each unit's rule.
+- **New purchases fill in the expected delivery date** from the supplier's lead time once you pick an
+  order date. Type a date to override it; clear the field to go back to the suggestion.
+- **Quantity arrows on a new purchase step by the material's typical reorder quantity**, so one click
+  adds a whole reorder. Typing still accepts any amount.
 
 ### Fixed
 
 - **Due-date ranges read correctly outside the UK.** A span of orders on the Dashboard showed as
   "15–Aug 18" on computers set to US English; dates now follow your computer's own format.
+- **Switching lists in Settings no longer leaves a row open** from the previous list, and asks before
+  discarding unsaved changes.
+- **The "background service version doesn't match" message** no longer has stray gaps in its text.
 
 ### Added
 
@@ -53,6 +65,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Empty pages say what to do next.** Materials, Products, Purchases, Orders and Stock takes now explain
   what they're for and how to get started when there's nothing in them yet, instead of a blank table.
 - **A ? beside every page title** opens the help for that page.
+- **Correct an order line that went out short.** If a shipped order line had fewer units sent than
+  recorded, "Fewer sent" puts the missing units back into stock and notes the shortfall, while the order
+  stays shipped.
 - **Each material category setting is explained.** Hover the ⓘ beside any switch in Settings › Lists ›
   Material categories, or follow the link to the full explanation.
 
