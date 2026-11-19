@@ -6,6 +6,7 @@ import { materialCategoriesApi } from "../../api/materialCategories";
 import { materialTypesApi } from "../../api/materialTypes";
 import { productCategoriesApi } from "../../api/productCategories";
 import { coloursApi } from "../../api/colours";
+import { useGuard } from "../../hooks/useUnsavedChangesGuard";
 import { materialUnitsApi } from "../../api/materialUnits";
 import { useMaterialUnits } from "../../hooks/useMaterialUnits";
 import { ReferenceDataTable } from "../reference/ReferenceDataTable";
@@ -35,6 +36,7 @@ interface ListDef {
  */
 export function ListsMasterDetail() {
   const [activeId, setActiveId] = useState<ListId>("manufacturers");
+  const guard = useGuard();
   const { units } = useMaterialUnits();
 
   const lists: ListDef[] = [
@@ -272,14 +274,25 @@ export function ListsMasterDetail() {
 
   const active = lists.find((l) => l.id === activeId)!;
 
+  // Switching lists unmounts the open table, and with it any unsaved edit in an expanded row, so
+  // ask first. List ids double as the tables' DirtyPath segments.
+  const selectList = (id: ListId) => {
+    if (id === activeId) return;
+    guard.attempt(() => setActiveId(id), { prefix: `${activeId}/` });
+  };
+
   return (
     <div className="flex items-start gap-4">
       <nav className="flex w-[196px] shrink-0 flex-col gap-0.5 rounded-[9px] border border-slate-200 bg-white p-2">
         {lists.map((list) => (
-          <ListNavItem key={list.id} list={list} active={list.id === activeId} onSelect={() => setActiveId(list.id)} />
+          <ListNavItem key={list.id} list={list} active={list.id === activeId} onSelect={() => selectList(list.id)} />
         ))}
       </nav>
-      <div className="min-w-0 flex-1">{active.render()}</div>
+      {/* Keyed so each list gets fresh state: every list renders the same component type in the
+          same spot, so without it the expanded row id carries over to the next list. */}
+      <div key={active.id} className="min-w-0 flex-1">
+        {active.render()}
+      </div>
     </div>
   );
 }
