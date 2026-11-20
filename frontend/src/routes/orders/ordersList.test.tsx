@@ -311,3 +311,34 @@ it("says what the empty search matched nothing against", async () => {
 
   expect(await screen.findByText('No orders match "zzz"')).toBeInTheDocument();
 });
+
+it("flags an order the marketplace shipped but that is still open here, and filters to them", async () => {
+  const user = userEvent.setup();
+  const held = order({
+    id: 902,
+    external_order_id: "E-902",
+    status: "allocated",
+    marketplace_shipped_at: "2026-11-19T11:40:00Z",
+    lines: [line({ order_id: 902, product_name: "Held Planter", allocated_qty: 2 })],
+  });
+  setRoutes([
+    {
+      method: "GET" as const,
+      path: /^\/orders\?.*marketplace_shipped=true/,
+      respond: () => ({ items: [held], total: 1 }),
+    },
+    ...routes([held, order({ id: 903, external_order_id: "E-903" })]),
+  ]);
+  await renderList();
+
+  expect(await screen.findByText("Shipped on Etsy")).toBeInTheDocument();
+
+  await user.click(await screen.findByRole("button", { name: "Store mismatch (1)" }));
+
+  await waitFor(() =>
+    expect(calls.some((c) => c.method === "GET" && /marketplace_shipped=true&?/.test(c.path) && /limit=50/.test(c.path))).toBe(
+      true,
+    ),
+  );
+  expect(await screen.findByText("Held Planter")).toBeInTheDocument();
+});

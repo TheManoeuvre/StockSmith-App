@@ -49,6 +49,8 @@ class BoxCheckRead(BaseModel):
     applies: bool
     # True while the order is blocked (pre_ship) or awaiting review (shipped).
     needs_check: bool
+    # The marketplace already shipped this open order, so confirming ships it here too.
+    ships_on_confirm: bool = False
     confirmed_at: datetime | None
     boxes: list[BoxCheckBoxRead]
 

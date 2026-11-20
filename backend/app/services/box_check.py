@@ -50,10 +50,17 @@ from app.services.kitting import _apply_kitting_overrides, _compute_auto_kitting
 BOX_CHECK_SYNC_ISSUE_PREFIX = "Box check needed"
 BOX_CHECK_SYNC_ISSUE = (
     BOX_CHECK_SYNC_ISSUE_PREFIX + ": {platform} shows this order as shipped, but its items use more than one "
-    "parcel box. Confirm which box was used on the order page, then ship it."
+    "parcel box. Confirm which box was used on the order page and it will be marked shipped."
 )
 
-_ACTIVE = (OrderStatus.pending, OrderStatus.allocated)
+ACTIVE_STATUSES = (OrderStatus.pending, OrderStatus.allocated)
+_ACTIVE = ACTIVE_STATUSES
+
+
+def ships_on_confirm(order: Order) -> bool:
+    """The marketplace already shipped this order, so confirming its boxes ships it here too.
+    Nothing else would: the sync never fetches an unchanged order again."""
+    return order.status in _ACTIVE and order.marketplace_shipped_at is not None
 
 
 def signature(box_ids: set[int]) -> str:
@@ -213,7 +220,9 @@ async def get_box_check(session: AsyncSession, order: Order) -> BoxCheckRead:
     mode = _mode(order)
     flagged = await flagged_material_ids(session)
     if mode == "none" or not flagged:
-        return BoxCheckRead(mode=mode, applies=False, needs_check=False, confirmed_at=None, boxes=[])
+        return BoxCheckRead(
+            mode=mode, applies=False, needs_check=False, ships_on_confirm=False, confirmed_at=None, boxes=[]
+        )
 
     lines = await _get_lines(session, order.id)
     candidates = await candidate_box_ids(session, lines, flagged)
@@ -258,6 +267,7 @@ async def get_box_check(session: AsyncSession, order: Order) -> BoxCheckRead:
         mode=mode,
         applies=applies,
         needs_check=needs_check,
+        ships_on_confirm=ships_on_confirm(order),
         confirmed_at=order.box_check_confirmed_at,
         boxes=boxes,
     )
@@ -373,8 +383,14 @@ def _stamp(order: Order, candidates: set[int]) -> None:
 
 
 async def confirm_boxes(session: AsyncSession, order: Order, payload: BoxCheckConfirm) -> None:
-    """Records which boxes were used. Does not commit."""
+    """Records which boxes were used. Does not commit.
+
+    An order the marketplace already shows shipped is shipped here too (ships_on_confirm). The
+    marketplace will not report it again: the sync only fetches orders changed since its last
+    run, so nothing else would ever ship it, and the order would sit as "Ready to ship" with its
+    stock still reserved."""
     _require_changeable(order)
+    marketplace_shipped = ships_on_confirm(order)
     flagged = await flagged_material_ids(session)
     selected = await _validate_selection(session, payload, flagged)
     rows = await _rows(session, order, selected, flagged)
@@ -398,6 +414,15 @@ async def confirm_boxes(session: AsyncSession, order: Order, payload: BoxCheckCo
         await session.flush()
         await reconcile_order_kitting(session, order)
     _stamp(order, candidates)
+
+    if marketplace_shipped:
+        # Imported here: allocation imports this module for assert_can_ship.
+        from app.services import allocation
+
+        lines = await _get_lines(session, order.id)
+        if any(line.allocated_qty > line.shipped_qty for line in lines):
+            await session.flush()
+            await allocation.ship_order(session, order)
 
 
 async def _correct_shipped(session: AsyncSession, order: Order, rows: list[_Row], return_to_stock: bool) -> None:

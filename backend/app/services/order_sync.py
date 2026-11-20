@@ -703,8 +703,11 @@ async def _reconcile_status(session: AsyncSession, order: Order, ext_order: Exte
         # later sync may never see this receipt again if nothing about it changes further).
         await allocation.allocate_order(session, order, source=f"{platform.value}-sync")
 
+    if ext_order.is_shipped and order.marketplace_shipped_at is None:
+        order.marketplace_shipped_at = datetime.now(timezone.utc)
+
     if ext_order.is_shipped and order.status not in (OrderStatus.shipped, OrderStatus.cancelled):
-        lines = list((await session.execute(select(OrderLine).where(OrderLine.order_id == order.id))).scalars())
+        lines =list((await session.execute(select(OrderLine).where(OrderLine.order_id == order.id))).scalars())
         has_allocated = any(line.allocated_qty > line.shipped_qty for line in lines)
         if not has_allocated:
             # This platform's is_shipped can't be reconciled locally — allocation.

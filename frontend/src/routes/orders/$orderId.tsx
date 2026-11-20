@@ -430,7 +430,7 @@ function OrderDetail() {
               only shipped units.
             </p>
 
-            <OrderBoxCheckSection orderId={id} currency={order.currency} />
+            <OrderBoxCheckSection orderId={id} currency={order.currency} platform={order.platform} />
 
             <OrderKittingSection orderId={id} currency={order.currency} />
 

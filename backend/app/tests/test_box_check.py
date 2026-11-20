@@ -305,17 +305,61 @@ async def test_sync_does_not_auto_ship_an_order_awaiting_a_box_check(
     assert Decimal(large.current_qty) == Decimal(10)
 
 
-async def test_confirming_clears_the_sync_flag(session, session_factory, connection, use_adapter):
+async def test_confirming_an_order_the_marketplace_shipped_ships_it(
+    session, session_factory, connection, use_adapter
+):
+    """The sync only fetches orders changed since its last run, so it never reports this order
+    shipped again — confirming the boxes is the last chance to ship it (order #640)."""
     order, small, large = await _two_box_order(session, use_adapter, shipped=True)
     await session.refresh(order)
+    assert order.marketplace_shipped_at is not None
+    assert (await box_check.get_box_check(session, order)).ships_on_confirm is True
 
     await box_check.confirm_boxes(session, order, _confirm((small, "1")))
     await session.commit()
     await session.refresh(order)
 
     assert order.sync_issue is None
-    await allocation.ship_order(session, order)
     assert order.status == OrderStatus.shipped
+    await session.refresh(small)
+    await session.refresh(large)
+    assert Decimal(small.current_qty) == Decimal(9)
+    assert Decimal(large.current_qty) == Decimal(10)
+
+
+async def test_confirming_before_the_marketplace_ships_leaves_shipping_to_the_person(
+    session, session_factory, connection, use_adapter
+):
+    order, small, large = await _two_box_order(session, use_adapter)
+    assert order.marketplace_shipped_at is None
+    assert (await box_check.get_box_check(session, order)).ships_on_confirm is False
+
+    await box_check.confirm_boxes(session, order, _confirm((small, "1")))
+    await session.commit()
+    await session.refresh(order)
+
+    assert order.status != OrderStatus.shipped
+
+
+async def test_orders_list_filters_to_orders_shipped_on_the_marketplace_but_open_here(
+    session, session_factory, connection, use_adapter
+):
+    from app.routers import orders as orders_router
+
+    held, small, large = await _two_box_order(session, use_adapter, shipped=True)
+    held_id = held.id
+    await _product(session, "SKU-C", small)
+    await _sync(session, use_adapter, "R-OPEN", ["SKU-C"])
+
+    page = await orders_router.list_orders(marketplace_shipped=True, limit=50, offset=0, session=session)
+    assert [o.id for o in page.items] == [held_id] and page.total == 1
+    assert page.items[0].marketplace_shipped_at is not None
+
+    # Once it ships here the two agree, and it leaves the filter.
+    await box_check.confirm_boxes(session, held, _confirm((small, "1")))
+    await session.commit()
+    page = await orders_router.list_orders(marketplace_shipped=True, limit=50, offset=0, session=session)
+    assert page.total == 0
 
 
 # --- Already-shipped orders ---------------------------------------------------------------------

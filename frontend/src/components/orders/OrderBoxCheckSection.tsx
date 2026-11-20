@@ -3,7 +3,8 @@ import { useEffect, useMemo, useState } from "react";
 import { materialsApi } from "../../api/materials";
 import { materialCategoriesApi } from "../../api/materialCategories";
 import { ordersApi } from "../../api/orders";
-import type { BoxCheck, BoxCheckConfirmInput, BoxCheckPreview } from "../../api/types";
+import type { BoxCheck, BoxCheckConfirmInput, BoxCheckPreview, ListingPlatform } from "../../api/types";
+import { PLATFORM_LABELS } from "../../lib/platforms";
 import { formatMoney } from "../../lib/money";
 import { displayQty } from "../../lib/format";
 import { ErrorBanner } from "../common/ErrorBanner";
@@ -22,7 +23,15 @@ interface Pick {
 // After shipping, the same panel corrects an order that already went out with the wrong boxes
 // recorded. That one moves stock (an unused box goes back on the shelf) and changes the order's
 // packaging cost, so it shows a preview of exactly that before anything is saved.
-export function OrderBoxCheckSection({ orderId, currency }: { orderId: number; currency: string | null }) {
+export function OrderBoxCheckSection({
+  orderId,
+  currency,
+  platform,
+}: {
+  orderId: number;
+  currency: string | null;
+  platform: ListingPlatform | null;
+}) {
   const queryClient = useQueryClient();
   const { data } = useQuery({
     queryKey: ["orders", orderId, "box-check"],
@@ -94,6 +103,7 @@ export function OrderBoxCheckSection({ orderId, currency }: { orderId: number; c
   if (!data || !data.applies) return null;
 
   const shipped = data.mode === "shipped";
+  const marketplace = platform ? PLATFORM_LABELS[platform] : "The marketplace";
   const rows = [
     ...data.boxes,
     ...extraIds
@@ -196,13 +206,24 @@ export function OrderBoxCheckSection({ orderId, currency }: { orderId: number; c
 
       {preview && valid && <BoxCheckPreviewPanel preview={preview} currency={currency} />}
 
+      {data.ships_on_confirm && (
+        <p
+          className="mt-3 rounded border border-blue-300 bg-blue-50 px-3 py-2 text-sm text-blue-900"
+          data-testid="box-check-ships-on-confirm"
+        >
+          <strong>Confirming will ship this order.</strong> {marketplace} already shows it shipped, so
+          StockSmith marks it shipped as soon as you confirm: the items and the boxes you tick are
+          taken out of stock.
+        </p>
+      )}
+
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <button
           onClick={() => confirmMutation.mutate()}
           disabled={!valid || confirmMutation.isPending || (preview?.warnings.length ?? 0) > 0}
           className="rounded bg-slate-900 px-3 py-1.5 text-sm text-white disabled:opacity-50"
         >
-          {shipped ? "Correct boxes" : "Confirm boxes"}
+          {shipped ? "Correct boxes" : data.ships_on_confirm ? "Confirm boxes and ship" : "Confirm boxes"}
         </button>
         {shipped && data.needs_check && (
           <button
@@ -223,7 +244,9 @@ function BoxCheckBanner({ data }: { data: BoxCheck }) {
   if (data.mode === "pre_ship" && data.needs_check) {
     return (
       <p className="mb-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900" role="alert">
-        This order uses more than one parcel box. It can't be shipped until you confirm which was used.
+        {data.ships_on_confirm
+          ? "This order uses more than one parcel box. It's shipped on the marketplace but still open here until you confirm which box was used."
+          : "This order uses more than one parcel box. It can't be shipped until you confirm which was used."}
       </p>
     );
   }

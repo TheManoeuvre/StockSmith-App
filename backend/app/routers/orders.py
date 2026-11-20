@@ -440,6 +440,7 @@ def _serialize_order(
         box_check_confirmed_at=order.box_check_confirmed_at,
         tracking_number=order.tracking_number,
         carrier=order.carrier,
+        marketplace_shipped_at=order.marketplace_shipped_at,
         lines=lines,
     )
 
@@ -531,6 +532,7 @@ async def list_orders(
     status_filter: str | None = None,
     q: str | None = None,
     needs_box_check: bool = False,
+    marketplace_shipped: bool = False,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     session: AsyncSession = Depends(get_db),
@@ -611,7 +613,12 @@ async def list_orders(
         box_clause = Order.id.in_(await box_check.order_ids_needing_box_check(session))
         count_query = count_query.where(box_clause)
         query = query.where(box_clause)
-    total = await session.scalar(count_query)
+    if marketplace_shipped:
+        # The marketplace shipped it, StockSmith hasn't: stock still reserved, nothing consumed.
+        mismatch = Order.marketplace_shipped_at.is_not(None) & Order.status.in_(box_check.ACTIVE_STATUSES)
+        count_query = count_query.where(mismatch)
+        query = query.where(mismatch)
+    total =await session.scalar(count_query)
     result = await session.execute(query)
     orders = list(result.scalars())
     # One aggregate for the whole page rather than one per order — this endpoint serves up
