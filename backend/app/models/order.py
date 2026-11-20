@@ -155,6 +155,13 @@ class Order(Base):
     tracking_number: Mapped[str | None] = mapped_column(String, nullable=True)
     carrier: Mapped[str | None] = mapped_column(String, nullable=True)
 
+    # When a sync first saw the marketplace report this order shipped. Kept apart from status:
+    # an order can be shipped on the marketplace yet still open here (held for a box check, or
+    # nothing allocated), and the sync only fetches orders changed since its last run, so it
+    # may never report it again. Open + set = the two disagree (the Orders list "Shipped on
+    # marketplace" filter).
+    marketplace_shipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     lines: Mapped[list["OrderLine"]] = relationship(back_populates="order", cascade="all, delete-orphan")
     shipping_profile: Mapped["ShippingProfile | None"] = relationship()
     # Parcels sent after the original shipment and the marketplace label purchases behind

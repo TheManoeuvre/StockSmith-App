@@ -40,6 +40,21 @@ doesn't change any of them:
   "make my device sleep after" = Never. Turning the screen off is fine.
 - **Active hours** in Windows Update, so restarts happen overnight rather than mid-afternoon.
 
+## An order is shipped on the marketplace but not in StockSmith
+
+The Orders list marks these with a red **Shipped on Etsy** (or eBay, Square) badge, and the
+**Store mismatch** filter lists them all. Their stock is still reserved, not taken out.
+
+StockSmith ships an order itself when a sync sees the marketplace has shipped it, except when:
+
+- **It needs a box check** — the items use more than one parcel box. Open the order and confirm
+  which box you used; that ships it.
+- **Nothing is allocated** — there wasn't stock for it when it synced. Allocate it, then click
+  **Ship**.
+
+Either way, the sync won't fix it later on its own: it only looks at orders the marketplace has
+changed since the last sync.
+
 ## Where StockSmith keeps things
 
 Everything is under `%LOCALAPPDATA%\StockSmith\` — paste that into the File Explorer address bar.

@@ -1280,6 +1280,9 @@ export interface Order {
   box_check_confirmed_at: string | null;
   tracking_number: string | null;
   carrier: string | null;
+  // When a sync first saw the marketplace report it shipped. Set on an order still open here
+  // means the two disagree.
+  marketplace_shipped_at: string | null;
   lines: OrderLine[];
 }
 
@@ -1303,6 +1306,8 @@ export interface BoxCheck {
   mode: "pre_ship" | "shipped" | "none";
   applies: boolean;
   needs_check: boolean;
+  // The marketplace already shipped this open order, so confirming ships it here too.
+  ships_on_confirm: boolean;
   confirmed_at: string | null;
   boxes: BoxCheckBox[];
 }

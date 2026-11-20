@@ -111,18 +111,24 @@ export interface ReplacementParcelUpdateInput {
   needs_review?: boolean;
 }
 
+// "box-check": several parcel boxes nobody has confirmed. "marketplace-shipped": the marketplace
+// shipped it but it's still open here, with its stock reserved.
+export type OrderListFilter = "box-check" | "marketplace-shipped";
+
 export const ordersApi = {
   list: (
     limit: number,
     offset: number,
     status?: OrderStatus | "awaiting",
     q?: string,
-    needsBoxCheck?: boolean,
+    // A cross-tab filter: replaces the status tab rather than narrowing it.
+    filter?: OrderListFilter,
   ) => {
     const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
     if (status) params.set("status_filter", status);
     if (q) params.set("q", q);
-    if (needsBoxCheck) params.set("needs_box_check", "true");
+    if (filter === "box-check") params.set("needs_box_check", "true");
+    if (filter === "marketplace-shipped") params.set("marketplace_shipped", "true");
     return api.get<OrderPage>(`/orders?${params.toString()}`);
   },
   get: (id: number) => api.get<Order>(`/orders/${id}`),

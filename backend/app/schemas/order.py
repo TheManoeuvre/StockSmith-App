@@ -185,6 +185,9 @@ class OrderRead(BaseModel):
     box_check_confirmed_at: datetime | None = None
     tracking_number: str | None = None
     carrier: str | None = None
+    # When a sync first saw the marketplace report it shipped. On an order still open here, the
+    # two disagree — see Order.marketplace_shipped_at.
+    marketplace_shipped_at: datetime | None = None
     lines: list[OrderLineRead] = []
 
 

@@ -63,6 +63,10 @@ different box sizes — the order is held until you confirm which packaging you 
 Use it for parcel boxes. Keep labels and tape in a category of their own, so they don't trigger
 the check.
 
+If the marketplace already shows the order as shipped (you bought the label there), the panel
+says so and the button reads **Confirm boxes and ship**: confirming marks it shipped in
+StockSmith too. Otherwise, ship it as usual once you've confirmed.
+
 Needs **Kitting: one per order, not per unit** turned on first.
 
 ## Units

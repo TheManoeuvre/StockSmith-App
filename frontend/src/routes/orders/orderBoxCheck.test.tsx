@@ -68,6 +68,7 @@ function order(over: Record<string, unknown> = {}) {
     box_check_confirmed_at: null,
     tracking_number: null,
     carrier: null,
+    marketplace_shipped_at: null,
     lines: [line()],
     ...over,
   };
@@ -79,7 +80,15 @@ const BOXES = [
 ];
 
 function boxCheck(over: Record<string, unknown> = {}) {
-  return { mode: "pre_ship", applies: true, needs_check: true, confirmed_at: null, boxes: BOXES, ...over };
+  return {
+    mode: "pre_ship",
+    applies: true,
+    needs_check: true,
+    ships_on_confirm: false,
+    confirmed_at: null,
+    boxes: BOXES,
+    ...over,
+  };
 }
 
 function renderOrder(orderOver: Record<string, unknown>, check: Record<string, unknown>, extra: unknown[] = []) {
@@ -187,4 +196,23 @@ it("previews the stock and profit effect of correcting a shipped order", async (
   await waitFor(() =>
     expect(calls.some((c) => c.method === "POST" && c.path === "/orders/42/box-check/reviewed")).toBe(true),
   );
+});
+
+it("says plainly that confirming ships an order the marketplace already shipped", async () => {
+  renderOrder(
+    { needs_box_check: true, platform: "etsy", marketplace_shipped_at: "2026-11-19T11:40:00Z" },
+    { ships_on_confirm: true },
+  );
+
+  expect(await screen.findByTestId("box-check-ships-on-confirm")).toHaveTextContent(
+    /Confirming will ship this order.*Etsy already shows it shipped/,
+  );
+  expect(screen.getByRole("button", { name: "Confirm boxes and ship" })).toBeInTheDocument();
+});
+
+it("doesn't warn about shipping when the marketplace hasn't shipped it", async () => {
+  renderOrder({ needs_box_check: true }, {});
+
+  expect(await screen.findByRole("button", { name: "Confirm boxes" })).toBeInTheDocument();
+  expect(screen.queryByTestId("box-check-ships-on-confirm")).not.toBeInTheDocument();
 });

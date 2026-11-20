@@ -12,7 +12,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { useEffect, useState, type MouseEvent } from "react";
-import { ordersApi } from "../../api/orders";
+import { ordersApi, type OrderListFilter } from "../../api/orders";
 import type { Order, OrderStatus } from "../../api/types";
 import { CopyButton } from "../../components/common/CopyButton";
 import { CsvImportExport } from "../../components/common/CsvImportExport";
@@ -123,9 +123,9 @@ function OrdersListContent() {
   const [page, setPage] = useState(0);
   const [searchInput, setSearchInput] = useState("");
   const [q, setQ] = useState("");
-  // Orders with several parcel boxes nobody has confirmed — held from shipping, or already
-  // shipped and awaiting review. Across every tab, so it overrides the tab's own status filter.
-  const [boxCheckOnly, setBoxCheckOnly] = useState(false);
+  // A cross-tab filter chip, overriding the tab's own status filter: orders with several parcel
+  // boxes nobody has confirmed, or orders the marketplace shipped that are still open here.
+  const [filter, setFilter] = useState<OrderListFilter | null>(null);
 
   // Debounce the search box into the query key so a keystroke isn't a request, same as the
   // products list. A change to the effective term sends us back to page 0 — a later page of
@@ -140,9 +140,9 @@ function OrdersListContent() {
   }, [searchInput]);
 
   const { data, isLoading, error } = useQuery({
-    queryKey: ["orders", boxCheckOnly ? "box-check" : tab, page, q],
+    queryKey: ["orders", filter ?? tab, page, q],
     queryFn: () =>
-      ordersApi.list(ORDERS_PAGE_SIZE, page * ORDERS_PAGE_SIZE, boxCheckOnly ? undefined : tab, q, boxCheckOnly),
+      ordersApi.list(ORDERS_PAGE_SIZE, page * ORDERS_PAGE_SIZE, filter ? undefined : tab, q, filter ?? undefined),
     placeholderData: keepPreviousData,
   });
 
@@ -163,11 +163,19 @@ function OrdersListContent() {
   // All three tabs empty: a shop with no orders at all, not just none awaiting.
   const noOrdersAtAll = awaitingCount === 0 && shippedCount === 0 && cancelledCount === 0;
   const total = data?.total ?? 0;
-  // Cheap count for the filter chip, off the ["orders", …] key like the tab counts above.
+  // Cheap counts for the filter chips, off the ["orders", …] key like the tab counts above.
   const { data: boxCheckCount } = useQuery({
     queryKey: ["order-counts", "box-check"],
-    queryFn: () => ordersApi.list(1, 0, undefined, undefined, true).then((p) => p.total),
+    queryFn: () => ordersApi.list(1, 0, undefined, undefined, "box-check").then((p) => p.total),
   });
+  const { data: marketplaceShippedCount } = useQuery({
+    queryKey: ["order-counts", "marketplace-shipped"],
+    queryFn: () => ordersApi.list(1, 0, undefined, undefined, "marketplace-shipped").then((p) => p.total),
+  });
+  const toggleFilter = (next: OrderListFilter) => {
+    setFilter((current) => (current === next ? null : next));
+    setPage(0);
+  };
 
   const actionMutation = useMutation({
     mutationFn: ({ id, kind }: { id: number; kind: "allocate" | "ship" }) =>
@@ -239,23 +247,25 @@ function OrdersListContent() {
           active={tab}
           onChange={changeTab}
         />
-        {((boxCheckCount ?? 0) > 0 || boxCheckOnly) && (
-          <button
-            type="button"
-            aria-pressed={boxCheckOnly}
-            onClick={() => {
-              setBoxCheckOnly((v) => !v);
-              setPage(0);
-            }}
-            className={`rounded border px-2.5 py-1.5 text-sm ${
-              boxCheckOnly
-                ? "border-amber-400 bg-amber-100 text-amber-900"
-                : "border-slate-300 bg-white text-slate-700"
-            }`}
-          >
-            Needs box check{boxCheckCount != null ? ` (${boxCheckCount})` : ""}
-          </button>
-        )}
+        <div className="flex flex-wrap items-center gap-2">
+          {((boxCheckCount ?? 0) > 0 || filter === "box-check") && (
+            <FilterChip
+              active={filter === "box-check"}
+              onClick={() => toggleFilter("box-check")}
+              label="Needs box check"
+              count={boxCheckCount}
+            />
+          )}
+          {((marketplaceShippedCount ?? 0) > 0 || filter === "marketplace-shipped") && (
+            <FilterChip
+              active={filter === "marketplace-shipped"}
+              onClick={() => toggleFilter("marketplace-shipped")}
+              label="Store mismatch"
+              count={marketplaceShippedCount}
+              title="The marketplace shows these shipped, but they're still open here with their stock reserved."
+            />
+          )}
+        </div>
         <input
           className="w-64 rounded border border-slate-300 px-2.5 py-1.5 text-sm"
           placeholder="Search order no., item, SKU, notes…"
@@ -394,6 +404,14 @@ function OrderRow({
               Box check
             </span>
           )}
+          {order.marketplace_shipped_at && (order.status === "pending" || order.status === "allocated") && (
+            <span
+              title={`${order.platform ? PLATFORM_LABELS[order.platform] : "The marketplace"} shows this order shipped, but it's still open here with its stock reserved. Open it to finish shipping.`}
+              className="ml-1.5 rounded border border-red-300 bg-red-50 px-1.5 py-0.5 text-[10.5px] font-semibold text-red-800"
+            >
+              Shipped on {order.platform ? PLATFORM_LABELS[order.platform] : "marketplace"}
+            </span>
+          )}
         </div>
         <div className="text-[11px] text-slate-400">
           {maskBuyerName(order.buyer_name) ?? "-"}
@@ -490,5 +508,34 @@ function OrderRow({
         )}
       </td>
     </tr>
+  );
+}
+
+function FilterChip({
+  active,
+  onClick,
+  label,
+  count,
+  title,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+  count: number | undefined;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={active}
+      title={title}
+      onClick={onClick}
+      className={`rounded border px-2.5 py-1.5 text-sm ${
+        active ? "border-amber-400 bg-amber-100 text-amber-900" : "border-slate-300 bg-white text-slate-700"
+      }`}
+    >
+      {label}
+      {count != null ? ` (${count})` : ""}
+    </button>
   );
 }
