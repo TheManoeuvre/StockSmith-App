@@ -238,7 +238,7 @@ export function OverviewTab({
     .join(" · ");
 
   function exportChannels() {
-    saveCsv(
+    void saveCsv(
       "insights-channels.csv",
       toCsv(
         ["Channel", "Orders", "Units", "Revenue", "Fees", "Net profit", "Margin %", "AOV"],

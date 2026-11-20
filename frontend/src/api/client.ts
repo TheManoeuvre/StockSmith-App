@@ -1,4 +1,4 @@
-import { getSettings } from "../lib/tauri";
+import { getSettings, saveBytesAs } from "../lib/tauri";
 
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -168,19 +168,11 @@ export async function uploadCsv(path: string, fileBytes: Uint8Array, filename: s
   return (await response.json()) as CsvImportResult;
 }
 
-export async function downloadCsv(path: string, filename: string): Promise<void> {
+/** Fetch a CSV export and let the user choose where to save it. Resolves null if they cancel. */
+export async function downloadCsv(path: string, filename: string): Promise<string | null> {
   const url = `${await baseUrl()}/api/v1${path}`;
   const response = await platformFetch(url, { headers: await authHeaders() });
   if (!response.ok) throw new ApiError(response.status, await response.text().catch(() => response.statusText));
-  const blob = await response.blob();
-  const objectUrl = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = objectUrl;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  // Revoking on the same tick as click() can invalidate the blob URL before the
-  // browser has actually started the download.
-  setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  return saveBytesAs(filename, bytes, "text/csv;charset=utf-8");
 }
