@@ -106,7 +106,7 @@ export function ProductsTab({ scope, granularity }: { scope: InsightsScope; gran
       rows.push(...chunk.rows);
       if (rows.length >= chunk.total_rows) break;
     }
-    saveCsv(
+    await saveCsv(
       `insights-${view}.csv`,
       toCsv(
         ["Name", "Detail", "Units", "Fail rate %", "Revenue", "COGS", "Failed builds", "Net profit", "Margin %", "Profit per unit", "Share of profit %"],

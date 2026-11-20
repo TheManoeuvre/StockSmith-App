@@ -9,7 +9,7 @@ export function CsvImportExport({
   invalidateKey,
   className = "flex flex-col gap-2",
 }: {
-  onExport: () => Promise<void>;
+  onExport: () => Promise<unknown>;
   /** Omit when the list has no CSV import yet — the Import button/input is hidden. */
   onImport?: (fileBytes: Uint8Array, filename: string) => Promise<CsvImportResult>;
   invalidateKey: string | string[];

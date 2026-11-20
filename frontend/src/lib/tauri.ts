@@ -200,8 +200,7 @@ export async function pickDirectory(): Promise<string | null> {
 /**
  * Save a URL's response straight to a file the user picks.
  *
- * Deliberately not the Blob + `<a download>` trick that downloadCsv uses (api/client.ts). That
- * buffers the entire response in the webview's memory before writing a byte, which is fine for
+ * Deliberately not saveBytesAs, which downloadCsv uses (api/client.ts). That buffers the entire response in the webview's memory before writing a byte, which is fine for
  * a few hundred KB of CSV and not fine for a backup archive carrying every product image. The
  * upload plugin's `download` streams to disk and reports progress while it does.
  *
@@ -227,6 +226,44 @@ export async function saveFileTo(
     (progress) => onProgress?.(progress.progress, progress.total),
     new Map(Object.entries(headers))
   );
+  return target;
+}
+
+/**
+ * Save in-memory bytes to a file, asking the user where with the system save dialog.
+ *
+ * Used by every "Export CSV" button. In the desktop app it opens a Save As dialog (seeded with
+ * `suggestedName`) and writes the file there; in a plain browser preview there is no dialog to
+ * call, so it falls back to the browser's own download. Returns the chosen path (or the
+ * suggested name in the browser), or null if the dialog was dismissed.
+ */
+export async function saveBytesAs(
+  suggestedName: string,
+  bytes: Uint8Array,
+  mimeType = "application/octet-stream"
+): Promise<string | null> {
+  if (!isTauri) {
+    const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: mimeType }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = suggestedName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    // Revoking on the same tick as click() can invalidate the blob URL before the
+    // browser has actually started the download.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+    return suggestedName;
+  }
+  const { save } = await import("@tauri-apps/plugin-dialog");
+  const extension = suggestedName.includes(".") ? suggestedName.split(".").pop()! : "";
+  const target = await save({
+    defaultPath: suggestedName,
+    filters: extension ? [{ name: extension.toUpperCase(), extensions: [extension] }] : undefined,
+  });
+  if (!target) return null;
+  const { writeFile } = await import("@tauri-apps/plugin-fs");
+  await writeFile(target, bytes);
   return target;
 }
 

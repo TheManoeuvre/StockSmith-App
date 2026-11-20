@@ -1,4 +1,5 @@
 import type { InsightsChannel, InsightsGranularity } from "../api/insights";
+import { saveBytesAs } from "./tauri";
 
 // --- Dates ------------------------------------------------------------------------------
 // ISO calendar days ("2026-10-25") throughout, handled in UTC so a day is never lost to a
@@ -265,14 +266,7 @@ export function toCsv(header: string[], rows: (string | number | null | undefine
   return [header, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n");
 }
 
-/** Saves text as a file through a throwaway link, the same way api/client.downloadCsv does. */
-export function saveCsv(filename: string, csv: string): void {
-  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+/** Saves text as a CSV file wherever the user chooses. Resolves null if they cancel. */
+export function saveCsv(filename: string, csv: string): Promise<string | null> {
+  return saveBytesAs(filename, new TextEncoder().encode(csv), "text/csv;charset=utf-8");
 }
