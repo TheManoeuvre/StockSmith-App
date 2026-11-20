@@ -16,6 +16,16 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **The window opens larger and can't be shrunk past 820 × 600.** Below that size an open product
   or order panel covered the side menu, and the bottom of the menu (Settings) could be cut off.
+- **Orders shipped on your store but still open in StockSmith are now flagged.** They get a red
+  "Shipped on Etsy" (or eBay, Square) badge, and a new **Store mismatch** filter on the Orders
+  page lists them. Their stock is still reserved until you finish shipping them here.
+
+### Fixed
+
+- **Confirming the boxes on an order your store already shipped now ships it.** Before, an order
+  held for a box check stayed "Ready to ship" after you confirmed, with its stock still reserved.
+  The box panel now tells you confirming will ship it, and the button reads "Confirm boxes and
+  ship".
 
 ## [0.28.0] - 2026-11-19
 
