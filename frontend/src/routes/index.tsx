@@ -1,5 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
-import { Fragment, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { dashboardApi } from "../api/dashboard";
 import type {
@@ -78,6 +78,48 @@ type FulfillmentRow = {
   materialId: number | null;
   suggestedSubstitutes: SubstituteSuggestion[];
 };
+
+const earliestDue = (r: FulfillmentRow) =>
+  r.dueDates.length > 0
+    ? Math.min(...r.dueDates.map((d) => new Date(d).getTime()))
+    : Number.POSITIVE_INFINITY;
+
+type AwaitingSortKey = "order" | "channel" | "shortOn" | "item" | "shortBy" | "due";
+type AwaitingSort = { key: AwaitingSortKey; dir: "asc" | "desc" } | null;
+
+const channelLabel = (r: FulfillmentRow) =>
+  r.platforms.map((p) => (p ? PLATFORM_LABELS[p] : "Manual")).join(", ");
+
+/** Re-orders the awaiting-products rows by a clicked column. `null` keeps the default
+ * most-urgent-first order. Rows with no due date always sort last, whichever way it goes. */
+function sortAwaitingRows(rows: FulfillmentRow[], sort: AwaitingSort): FulfillmentRow[] {
+  if (!sort) return rows;
+  const dir = sort.dir === "asc" ? 1 : -1;
+  const sorted = [...rows];
+  sorted.sort((a, b) => {
+    switch (sort.key) {
+      case "order":
+        return (Math.min(...a.orderIds) - Math.min(...b.orderIds)) * dir;
+      case "channel":
+        return channelLabel(a).localeCompare(channelLabel(b)) * dir;
+      case "shortOn":
+        return a.shortOn.localeCompare(b.shortOn) * dir;
+      case "item":
+        return a.item.localeCompare(b.item) * dir;
+      case "shortBy":
+        return (Number(a.shortBy) - Number(b.shortBy)) * dir;
+      case "due": {
+        const da = earliestDue(a);
+        const db = earliestDue(b);
+        if (da === db) return 0;
+        if (da === Number.POSITIVE_INFINITY) return 1;
+        if (db === Number.POSITIVE_INFINITY) return -1;
+        return (da - db) * dir;
+      }
+    }
+  });
+  return sorted;
+}
 
 /** Order lines short on stock or packaging they could still be built/assembled from — the
  * common, expected case for a maker. Excludes lines with no BOM at all (see blockedRows). */
@@ -159,10 +201,6 @@ function awaitingProductRows(data: DashboardSummary): FulfillmentRow[] {
     });
   }
   // Most urgent first: earliest due date, rows with none after, ties by when placed.
-  const earliestDue = (r: FulfillmentRow) =>
-    r.dueDates.length > 0
-      ? Math.min(...r.dueDates.map((d) => new Date(d).getTime()))
-      : Number.POSITIVE_INFINITY;
   rows.sort((a, b) => {
     const da = earliestDue(a);
     const db = earliestDue(b);
@@ -227,6 +265,27 @@ function Dashboard() {
       },
     });
 
+  const [awaitingSort, setAwaitingSort] = useState<AwaitingSort>(null);
+  // Click cycles ascending → descending → back to the default most-urgent-first order.
+  const toggleAwaitingSort = (key: AwaitingSortKey) =>
+    setAwaitingSort((prev) =>
+      prev?.key !== key
+        ? { key, dir: "asc" }
+        : prev.dir === "asc"
+          ? { key, dir: "desc" }
+          : null,
+    );
+  const awaitingHeader = (
+    key: AwaitingSortKey,
+    label: string,
+    align: "left" | "right" = "left",
+  ) => (
+    <Th align={align} onClick={() => toggleAwaitingSort(key)}>
+      {label}{" "}
+      {awaitingSort?.key === key ? (awaitingSort.dir === "asc" ? "▲" : "▼") : ""}
+    </Th>
+  );
+
   if (isLoading) return <p>Loading dashboard…</p>;
   if (error) return <p className="text-red-600">{(error as Error).message}</p>;
   if (!data) return null;
@@ -235,7 +294,7 @@ function Dashboard() {
   const awaitingPackaging = data.orders_awaiting_packaging.length;
   const awaitingMapping = (data.orders_awaiting_mapping ?? []).length;
   const awaitingCount = awaitingInventory + awaitingPackaging + awaitingMapping;
-  const rows = awaitingProductRows(data);
+  const rows = sortAwaitingRows(awaitingProductRows(data), awaitingSort);
   const blocked = blockedRows(data);
 
   const criticalCount = data.low_stock_materials.filter(
@@ -428,12 +487,12 @@ function Dashboard() {
           <table className="w-full border-collapse text-left text-[12.5px]">
             <thead>
               <tr className="border-b border-slate-200">
-                <Th>Order</Th>
-                <Th>Channel</Th>
-                <Th>Short on</Th>
-                <Th>Item</Th>
-                <Th align="right">Short by</Th>
-                <Th>Due</Th>
+                {awaitingHeader("order", "Order")}
+                {awaitingHeader("channel", "Channel")}
+                {awaitingHeader("shortOn", "Short on")}
+                {awaitingHeader("item", "Item")}
+                {awaitingHeader("shortBy", "Short by", "right")}
+                {awaitingHeader("due", "Due")}
                 <Th>{""}</Th>
               </tr>
             </thead>
