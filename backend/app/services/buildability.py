@@ -17,6 +17,7 @@ from app.schemas.dashboard import (
     OpenStockTake,
     OrderAwaitingInventory,
     OrderAwaitingMapping,
+    OrderShippedOnStore,
 )
 from app.schemas.variant import VariantBomLine
 from app.services.abc import compute_due_for_count
@@ -46,7 +47,23 @@ _ORDERS_AWAITING_INVENTORY_SQL = text(
     WHERE ol.allocated_qty + ol.short_shipped_qty < ol.ordered_qty
       AND ol.needs_mapping = false
       AND o.status NOT IN ('cancelled', 'shipped')
+      AND o.marketplace_shipped_at IS NULL
     ORDER BY (ol.ordered_qty - ol.allocated_qty - ol.short_shipped_qty) DESC, o.order_placed_at ASC
+    """
+)
+
+# Open here but already shipped on the marketplace — nothing left to build for these (see the
+# marketplace_shipped_at exclusions above and in kitting), but their stock is still reserved, so
+# they're listed apart for reconciling rather than counted as work.
+_ORDERS_SHIPPED_ON_STORE_SQL = text(
+    """
+    SELECT o.id AS order_id, o.platform AS platform, o.order_placed_at,
+           o.marketplace_shipped_at,
+           (SELECT COALESCE(SUM(ol.ordered_qty), 0) FROM order_lines ol WHERE ol.order_id = o.id) AS item_count
+    FROM orders o
+    WHERE o.marketplace_shipped_at IS NOT NULL
+      AND o.status IN ('pending', 'allocated')
+    ORDER BY o.marketplace_shipped_at ASC
     """
 )
 
@@ -61,6 +78,7 @@ _ORDERS_AWAITING_MAPPING_SQL = text(
     WHERE ol.needs_mapping = true
       AND ol.allocated_qty + ol.short_shipped_qty < ol.ordered_qty
       AND o.status NOT IN ('cancelled', 'shipped')
+      AND o.marketplace_shipped_at IS NULL
     ORDER BY o.order_placed_at ASC
     """
 )
@@ -606,6 +624,22 @@ async def get_orders_awaiting_mapping(session: AsyncSession) -> list[OrderAwaiti
     ]
 
 
+async def get_orders_shipped_on_store(session: AsyncSession) -> list[OrderShippedOnStore]:
+    """Orders the marketplace shows shipped that are still open here — the same set as the
+    Orders page's "Store mismatch" filter. Excluded from the awaiting lists above."""
+    result = await session.execute(_ORDERS_SHIPPED_ON_STORE_SQL)
+    return [
+        OrderShippedOnStore(
+            order_id=row.order_id,
+            platform=row.platform,
+            order_placed_at=row.order_placed_at,
+            marketplace_shipped_at=row.marketplace_shipped_at,
+            item_count=int(row.item_count),
+        )
+        for row in result
+    ]
+
+
 async def compute_dashboard_summary(session: AsyncSession) -> DashboardSummary:
     # str() before Decimal for the same reason as get_cost_per_unit_range_by_product: SQLite
     # hands these SUMs back as floats. Money, so quantised to pence here rather than leaving
@@ -675,6 +709,7 @@ async def compute_dashboard_summary(session: AsyncSession) -> DashboardSummary:
     orders_awaiting_inventory = await get_orders_awaiting_inventory(session)
     orders_awaiting_packaging = await get_orders_awaiting_packaging(session)
     orders_awaiting_mapping = await get_orders_awaiting_mapping(session)
+    orders_shipped_on_store = await get_orders_shipped_on_store(session)
 
     # Capped like lowest_buildable_products. On a database that has never had a stock take
     # this is the entire catalogue, and the dashboard wants the worst offenders, not a
@@ -732,6 +767,7 @@ async def compute_dashboard_summary(session: AsyncSession) -> DashboardSummary:
         orders_awaiting_inventory=orders_awaiting_inventory,
         orders_awaiting_packaging=orders_awaiting_packaging,
         orders_awaiting_mapping=orders_awaiting_mapping,
+        orders_shipped_on_store=orders_shipped_on_store,
         items_due_for_count=[DueForCountItemRead.model_validate(item) for item in items_due_for_count[:10]],
         items_due_for_count_total=len(items_due_for_count),
         unresolved_variance_count=unresolved_variance_count,

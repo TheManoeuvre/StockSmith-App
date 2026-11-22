@@ -319,6 +319,26 @@ it("collapses stock-short lines for one variation into a row with a due-date ran
   expect(screen.getAllByText(/Pencil Pot \(6 Stud/)).toHaveLength(2);
 });
 
+it("lists orders shipped on the store in their own card and notes them on the KPI", async () => {
+  await renderDashboard({
+    orders_awaiting_inventory: [],
+    orders_awaiting_packaging: [],
+    orders_shipped_on_store: [
+      {
+        order_id: 640,
+        platform: null,
+        order_placed_at: "2026-08-10T09:00:00Z",
+        marketplace_shipped_at: "2026-08-12T09:00:00Z",
+        item_count: 2,
+      },
+    ],
+  });
+  expect(await screen.findByText("Shipped on store, not recorded here")).toBeInTheDocument();
+  const row = screen.getByText("#640").closest("tr")!;
+  expect(within(row).getByRole("link", { name: "Reconcile" })).toHaveAttribute("href", "/orders/640");
+  expect(screen.getByText(/1 shipped on store/)).toBeInTheDocument();
+});
+
 it("lists unmapped-SKU orders as awaiting products with a Map order link instead of Build now", async () => {
   await renderDashboard({
     orders_awaiting_inventory: [],

@@ -1015,7 +1015,11 @@ async def get_orders_awaiting_packaging(session: AsyncSession) -> list[OrderAwai
     orders = list(
         (
             await session.execute(
-                select(Order).where(Order.status.in_([OrderStatus.pending, OrderStatus.allocated]))
+                select(Order).where(
+                    Order.status.in_([OrderStatus.pending, OrderStatus.allocated]),
+                    # Already shipped on the marketplace: nothing left to pack, so not "awaiting".
+                    Order.marketplace_shipped_at.is_(None),
+                )
             )
         ).scalars()
     )
