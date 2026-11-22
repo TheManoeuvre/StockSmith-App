@@ -294,6 +294,7 @@ function Dashboard() {
   const awaitingPackaging = data.orders_awaiting_packaging.length;
   const awaitingMapping = (data.orders_awaiting_mapping ?? []).length;
   const awaitingCount = awaitingInventory + awaitingPackaging + awaitingMapping;
+  const shippedOnStore = data.orders_shipped_on_store ?? [];
   const rows = sortAwaitingRows(awaitingProductRows(data), awaitingSort);
   const blocked = blockedRows(data);
 
@@ -329,7 +330,7 @@ function Dashboard() {
             unit="right now"
             note={`${awaitingInventory} short on stock · ${awaitingPackaging} short on packaging${
               awaitingMapping > 0 ? ` · ${awaitingMapping} unmapped` : ""
-            }`}
+            }${shippedOnStore.length > 0 ? ` · ${shippedOnStore.length} shipped on store` : ""}`}
             accent={
               awaitingCount > 0 ? "border-l-amber-500" : "border-l-slate-400"
             }
@@ -392,6 +393,69 @@ function Dashboard() {
           />
         </Link>
       </div>
+
+      {shippedOnStore.length > 0 && (
+        <Card
+          title="Shipped on store, not recorded here"
+          hint="The marketplace shows these shipped but they're still open here, so they're not counted as awaiting products. Open each to record it: their stock is still reserved."
+          action={
+            <Link to="/orders" className="text-xs text-blue-700 hover:underline">
+              Open Orders →
+            </Link>
+          }
+        >
+          <table className="w-full border-collapse text-left text-[12.5px]">
+            <thead>
+              <tr className="border-b border-slate-200">
+                <Th>Order</Th>
+                <Th>Channel</Th>
+                <Th align="right">Items</Th>
+                <Th>Placed</Th>
+                <Th>Shipped on store</Th>
+                <Th>{""}</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {shippedOnStore.map((o) => (
+                <tr key={o.order_id} className="border-b border-slate-100">
+                  <td className="p-2">
+                    <Link
+                      to="/orders/$orderId"
+                      params={{ orderId: String(o.order_id) }}
+                      className="text-slate-900 underline"
+                    >
+                      #{o.order_id}
+                    </Link>
+                  </td>
+                  <td className="p-2">
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-[10.5px] font-semibold ${
+                        o.platform
+                          ? PLATFORM_COLORS[o.platform].muted
+                          : "border border-slate-200 bg-slate-50 text-slate-600"
+                      }`}
+                    >
+                      {o.platform ? PLATFORM_LABELS[o.platform] : "Manual"}
+                    </span>
+                  </td>
+                  <td className="p-2 text-right tabular-nums">{o.item_count}</td>
+                  <td className="p-2">{formatDayMonth(o.order_placed_at)}</td>
+                  <td className="p-2">{formatDayMonth(o.marketplace_shipped_at)}</td>
+                  <td className="p-2">
+                    <Link
+                      to="/orders/$orderId"
+                      params={{ orderId: String(o.order_id) }}
+                      className="rounded border border-amber-300 bg-amber-50 px-2 py-1 text-xs text-amber-800"
+                    >
+                      Reconcile
+                    </Link>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      )}
 
       {blocked.length > 0 && (
         <Card

@@ -86,6 +86,18 @@ class OrderAwaitingMapping(BaseModel):
     platform: ListingPlatform | None = None
 
 
+class OrderShippedOnStore(BaseModel):
+    """An order the marketplace shows shipped but that's still open here, so its stock is still
+    reserved. Kept out of the "awaiting products" lists: there's nothing left to build, only a
+    build/shipment to record."""
+
+    order_id: int
+    platform: ListingPlatform | None = None
+    order_placed_at: datetime
+    marketplace_shipped_at: datetime
+    item_count: int = 0
+
+
 class OrderAwaitingPackaging(BaseModel):
     order_id: int
     material_id: int
@@ -121,6 +133,7 @@ class DashboardSummary(BaseModel):
     orders_awaiting_inventory: list[OrderAwaitingInventory]
     orders_awaiting_packaging: list[OrderAwaitingPackaging] = []
     orders_awaiting_mapping: list[OrderAwaitingMapping] = []
+    orders_shipped_on_store: list[OrderShippedOnStore] = []
     # Capped at 10; items_due_for_count_total is the uncapped count, so the dashboard can
     # say how many it isn't showing. Both default so an older client parsing this payload
     # doesn't break on the new fields.

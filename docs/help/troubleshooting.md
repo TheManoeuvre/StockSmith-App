@@ -45,6 +45,10 @@ doesn't change any of them:
 The Orders list marks these with a red **Shipped on Etsy** (or eBay, Square) badge, and the
 **Store mismatch** filter lists them all. Their stock is still reserved, not taken out.
 
+The Dashboard doesn't count these as "Orders awaiting products", since there's nothing left to
+build. They get their own **Shipped on store, not recorded here** card instead, with a link to
+each order.
+
 StockSmith ships an order itself when a sync sees the marketplace has shipped it, except when:
 
 - **It needs a box check** — the items use more than one parcel box. Open the order and confirm
