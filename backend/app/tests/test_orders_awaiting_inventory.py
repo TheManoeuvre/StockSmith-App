@@ -78,6 +78,32 @@ async def test_due_date_is_collect_by_for_collect_orders_else_ship_by(session):
     assert due[collected.id] == collect_by
 
 
+async def test_order_shipped_on_the_marketplace_is_listed_apart_not_awaiting(session):
+    """Built and shipped but never recorded here: nothing left to build, so it leaves every
+    awaiting list and shows up as a store mismatch to reconcile instead."""
+    from app.services.buildability import get_orders_awaiting_mapping, get_orders_shipped_on_store
+    from app.services.kitting import get_orders_awaiting_packaging
+
+    product = Product(name="Widget")
+    session.add(product)
+    await session.flush()
+    mismatched = _short_order(product.id)
+    mismatched.marketplace_shipped_at = datetime.now(timezone.utc)
+    unmapped = Order(status=OrderStatus.pending, order_placed_at=datetime.now(timezone.utc))
+    unmapped.marketplace_shipped_at = datetime.now(timezone.utc)
+    unmapped.lines = [OrderLine(ordered_qty=1, allocated_qty=0, sku="X", needs_mapping=True)]
+    normal = _short_order(product.id)
+    session.add_all([mismatched, unmapped, normal])
+    await session.commit()
+
+    assert [l.order_id for l in await get_orders_awaiting_inventory(session)] == [normal.id]
+    assert await get_orders_awaiting_mapping(session) == []
+    assert await get_orders_awaiting_packaging(session) == []
+    listed = await get_orders_shipped_on_store(session)
+    assert {o.order_id for o in listed} == {mismatched.id, unmapped.id}
+    assert next(o for o in listed if o.order_id == mismatched.id).item_count == 5
+
+
 async def test_unmapped_line_is_awaiting_mapping_not_inventory(session):
     from app.services.buildability import get_orders_awaiting_mapping
 

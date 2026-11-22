@@ -994,6 +994,15 @@ export interface OrderAwaitingMapping {
   platform: ListingPlatform | null;
 }
 
+/** Open here but already shipped on the marketplace: excluded from the awaiting lists. */
+export interface OrderShippedOnStore {
+  order_id: number;
+  platform: ListingPlatform | null;
+  order_placed_at: string;
+  marketplace_shipped_at: string;
+  item_count: number;
+}
+
 export interface OrderAwaitingInventory {
   line_id: number;
   order_id: number;
@@ -1094,6 +1103,8 @@ export interface DashboardSummary {
   orders_awaiting_packaging: OrderAwaitingPackaging[];
   /** Optional: absent on older payloads. */
   orders_awaiting_mapping?: OrderAwaitingMapping[];
+  /** Optional: absent on older payloads. */
+  orders_shipped_on_store?: OrderShippedOnStore[];
   /** Capped at 10 by the backend; the _total is the uncapped figure, so the section can say
    * how many it isn't showing. */
   items_due_for_count: DueForCountItem[];
