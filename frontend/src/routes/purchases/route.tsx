@@ -14,6 +14,7 @@ import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { FilterTabs } from "../../components/common/FilterTabs";
 import { Th } from "../../components/common/ListTable";
 import { PurchaseStatusPill } from "../../components/purchases/PurchaseStatusPill";
+import { SupplierLogo } from "../../components/suppliers/SupplierLogo";
 import { formatMoney } from "../../lib/money";
 import { formatDayMonth, qtyWithUnit } from "../../lib/format";
 import { HelpLink } from "../../components/help/HelpLink";
@@ -222,7 +223,12 @@ function PurchaseRow({
           placed {formatDayMonth(purchase.order_date)}
         </div>
       </td>
-      <td className="p-2 align-top">{purchase.supplier_name ?? "-"}</td>
+      <td className="p-2 align-top">
+        <span className="flex items-center gap-2">
+          <SupplierLogo supplierId={purchase.supplier_id} updatedAt={purchase.supplier_logo_updated_at} />
+          {purchase.supplier_name ?? "-"}
+        </span>
+      </td>
       <td className="p-2 align-top">
         <div className={late ? "text-red-600" : "text-slate-500"}>
           {purchase.expected_arrival_date

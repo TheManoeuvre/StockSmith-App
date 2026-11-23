@@ -106,6 +106,8 @@ export function clientMock() {
     materialImageDownloadUrl: notImplemented,
     materialImageThumbnailUrl: notImplemented,
     materialImageUploadUrl: notImplemented,
+    supplierLogoUrl: notImplemented,
+    supplierLogoUploadUrl: notImplemented,
     shopIconUrl: notImplemented,
     backupDownloadUrl: notImplemented,
     uploadCsv: notImplemented,

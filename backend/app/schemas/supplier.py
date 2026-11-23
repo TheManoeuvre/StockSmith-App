@@ -30,6 +30,10 @@ class SupplierRead(SupplierBase):
 
     id: int
     created_at: datetime
+    # "favicon" | "upload" | None. logo_updated_at is None exactly when there is no logo; it
+    # doubles as the client's cache key for GET /suppliers/{id}/logo.
+    logo_source: str | None = None
+    logo_updated_at: datetime | None = None
     # How many rows reference this. Computed per request, not stored — see
     # routers/_reference_crud.py list_with_usage.
     usage_count: int = 0

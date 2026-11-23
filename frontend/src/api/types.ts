@@ -110,6 +110,11 @@ export interface Supplier {
   /** How many records reference this. Computed per request — see the backend's list_with_usage. */
   usage_count: number;
   website_url: string | null;
+  /** Where the logo came from: fetched from the website's favicon, or uploaded (which wins).
+   *  Null when there is none. */
+  logo_source: "favicon" | "upload" | null;
+  /** Null exactly when there is no logo; otherwise the cache key for GET /suppliers/{id}/logo. */
+  logo_updated_at: string | null;
   /** Typical delivery time in business days (Mon-Fri). Null means "use the shop-wide default
    *  lead time". Feeds the materials time-to-stockout forecast — see lib/forecast.ts. */
   default_lead_time_days: number | null;
@@ -406,6 +411,8 @@ export interface Purchase {
   id: number;
   supplier_id: number | null;
   supplier_name: string | null;
+  /** Non-null when the supplier has a logo — see Supplier.logo_updated_at. */
+  supplier_logo_updated_at: string | null;
   /** The supplier's own reference for this order (their PO/order/invoice number), free
    *  text. Null when not recorded. Shown as the primary order number on the list. */
   supplier_order_number: string | null;
