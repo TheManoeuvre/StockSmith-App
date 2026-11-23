@@ -19,5 +19,6 @@ async def record_build(payload: BuildCreate, session: AsyncSession = Depends(get
         payload.notes,
         qty_failed=payload.qty_failed,
         failed_consumption=payload.failed_consumption,
+        failed_units=payload.failed_units,
         substitutions=payload.substitutions,
     )

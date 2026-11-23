@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict
 
@@ -12,6 +13,9 @@ class BuildCreate(BaseModel):
     # when omitted and qty_failed > 0, the service defaults to "filament consumed,
     # everything else not".
     failed_consumption: dict[int, bool] | None = None
+    # material_id -> units' worth of that material scrapped (defaults to qty_failed). Lets one
+    # of two coasters, or half a print, be recorded without scrapping the full count.
+    failed_units: dict[int, Decimal] | None = None
     # material_id -> substitute_material_id: BOM lines to draw from a curated fallback
     # (an active MaterialSubstitute for that material) instead of the material itself.
     # Keys are the resolved BOM's own material ids, the same ones failed_consumption uses.

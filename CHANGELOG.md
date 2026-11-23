@@ -14,6 +14,10 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Recording a failed build can now scrap only part of it.** Each consumed material gets a
+  **Units scrapped** box (fractions allowed) with the total shown beside it — so one failed
+  coaster of a pair, or a print that died half way, no longer scraps the full count. New help
+  page: Recording builds and failures.
 - **The window opens larger and can't be shrunk past 820 × 600.** Below that size an open product
   or order panel covered the side menu, and the bottom of the menu (Settings) could be cut off.
 - **Orders shipped on your store but still open in StockSmith are now flagged.** They get a red

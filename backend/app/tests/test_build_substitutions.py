@@ -104,6 +104,45 @@ async def test_failed_units_consume_the_fallback_too(session):
     assert Decimal(usage.qty) == Decimal(84)
 
 
+async def test_failed_units_can_scrap_only_part_of_the_failed_count(session):
+    product, petg, _ = await _setup(session)
+    await session.refresh(petg)
+    session.add(MaterialAdjustment(material_id=petg.id, qty_delta=Decimal(1000), reason="top up"))
+    await recompute_material(session, petg.id)
+    await session.commit()
+
+    # 2 failed products, but only 0.5 of a unit's worth of material actually lost each time.
+    await create_build(
+        session, product.id, None, qty_built=0, notes=None, qty_failed=2, failed_units={petg.id: Decimal("0.5")}
+    )
+
+    await session.refresh(petg)
+    assert Decimal(petg.current_qty) == Decimal(1000) - Decimal(14)
+    failed = (await session.execute(select(BuildFailedConsumption))).scalar_one()
+    assert Decimal(failed.qty_consumed) == Decimal(14)
+
+
+async def test_failed_units_default_to_the_full_failed_count(session):
+    product, petg, _ = await _setup(session)
+    session.add(MaterialAdjustment(material_id=petg.id, qty_delta=Decimal(1000), reason="top up"))
+    await recompute_material(session, petg.id)
+    await session.commit()
+
+    await create_build(session, product.id, None, qty_built=0, notes=None, qty_failed=2)
+
+    failed = (await session.execute(select(BuildFailedConsumption))).scalar_one()
+    assert Decimal(failed.qty_consumed) == Decimal(56)
+
+
+async def test_negative_failed_units_are_rejected(session):
+    product, petg, _ = await _setup(session)
+    with pytest.raises(HTTPException) as exc:
+        await create_build(
+            session, product.id, None, qty_built=0, notes=None, qty_failed=1, failed_units={petg.id: Decimal(-1)}
+        )
+    assert exc.value.status_code == 400
+
+
 async def test_substitute_must_be_an_active_curated_fallback(session):
     product, petg, _ = await _setup(session)
     stranger = await _material(session, "ABS Grey", Decimal(1000))

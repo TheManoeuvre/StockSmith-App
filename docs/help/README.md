@@ -13,6 +13,8 @@ These pages are also built into the app: open **Help** at the bottom of the side
 
 ## Stock
 
+- [Recording builds and failures](builds-and-failures.md) — including scrapping only part of a
+  failed run.
 - [Material categories](material-categories.md) — what each category setting does, and how to
   add your own.
 

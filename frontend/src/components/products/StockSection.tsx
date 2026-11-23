@@ -18,6 +18,8 @@ interface BuildForm {
   qtyFailed: string;
   notes: string;
   consumption: Record<number, boolean>;
+  /** material_id -> units' worth scrapped, as typed. Absent means "all failed units". */
+  scrapUnits: Record<number, string>;
   /** material_id -> substitute_material_id, for BOM lines the build can't cover from the
    *  material's own shelf. Only entries for materials still short at submit time are sent. */
   substitutions: Record<number, number>;
@@ -30,6 +32,7 @@ const EMPTY_BUILD_FORM: BuildForm = {
   qtyFailed: "0",
   notes: "",
   consumption: {},
+  scrapUnits: {},
   substitutions: {},
 };
 
@@ -145,7 +148,7 @@ export function StockSection({
     seed: buildSeed,
     seedKey: "const",
   });
-  const { variantId, qtyBuilt, qtyFailed, notes, consumption, substitutions } = buildForm;
+  const { variantId, qtyBuilt, qtyFailed, notes, consumption, scrapUnits, substitutions } = buildForm;
   const setBuildField = <K extends keyof BuildForm>(field: K, next: BuildForm[K]) =>
     setBuildForm((prev) => ({ ...prev, [field]: next }));
   const setVariantId = (next: number | "") => setBuildField("variantId", next);
@@ -154,6 +157,8 @@ export function StockSection({
   const setNotes = (next: string) => setBuildField("notes", next);
   const setConsumption = (updater: (prev: Record<number, boolean>) => Record<number, boolean>) =>
     setBuildForm((prev) => ({ ...prev, consumption: updater(prev.consumption) }));
+  const setScrapUnits = (materialId: number, next: string) =>
+    setBuildForm((prev) => ({ ...prev, scrapUnits: { ...prev.scrapUnits, [materialId]: next } }));
   const setSubstitution = (materialId: number, substituteId: number | null) =>
     setBuildForm((prev) => {
       const next = { ...prev.substitutions };
@@ -191,6 +196,16 @@ export function StockSection({
     );
   };
 
+  // How many units' worth of this material the failed run scrapped. Blank/absent means all of
+  // the failed units; a typed value (possibly fractional, e.g. 0.5 for a half-failed print)
+  // overrides it. Never negative or NaN.
+  const scrapUnitsFor = (materialId: number) => {
+    const typed = scrapUnits[materialId];
+    if (typed === undefined || typed.trim() === "") return qtyFailedNum;
+    const n = Number(typed);
+    return Number.isFinite(n) && n >= 0 ? n : qtyFailedNum;
+  };
+
   // The categories that actually carry the flag, for the sentence below the checkboxes. Naming
   // filament there stopped being true the moment the flag became editable.
   const consumedByDefault = categories.filter((c) => c.consumed_on_failed_build).map((c) => c.name);
@@ -213,7 +228,7 @@ export function StockSection({
   const shortLines = [...qtyPerUnitByMaterial.entries()].flatMap(([materialId, qtyPerUnit]) => {
     const material = materialById.get(materialId);
     if (!material || !bomIsSettled) return [];
-    const units = qtyBuiltNum + (consumptionFor(materialId) ? qtyFailedNum : 0);
+    const units = qtyBuiltNum + (consumptionFor(materialId) ? scrapUnitsFor(materialId) : 0);
     const needed = qtyPerUnit * units;
     const onHand = Number(material.current_qty);
     return needed > onHand ? [{ material, needed, onHand }] : [];
@@ -257,6 +272,10 @@ export function StockSection({
         failed_consumption:
           qtyFailedNum > 0
             ? Object.fromEntries(resolvedBom.map((line) => [line.material_id, consumptionFor(line.material_id)]))
+            : null,
+        failed_units:
+          qtyFailedNum > 0
+            ? Object.fromEntries(resolvedBom.map((line) => [line.material_id, scrapUnitsFor(line.material_id)]))
             : null,
         substitutions:
           activeSubstitutions.length > 0
@@ -445,19 +464,53 @@ export function StockSection({
               )}
               {consumedByDefault.length > 0 && " is checked by default. "}
               {consumedByDefault.length === 0 && "Nothing is checked by default. "}
-              Uncheck anything the failed run never reached.
+              Uncheck anything the failed run never reached. If only part of the run failed (one
+              of two coasters, a print that died half way), lower the units scrapped for that
+              material — it can be fractional.
             </p>
-            <div className="flex flex-wrap gap-4">
-              {resolvedBom.map((line) => (
-                <label key={line.material_id} className="flex items-center gap-1.5">
-                  <input
-                    type="checkbox"
-                    checked={consumptionFor(line.material_id)}
-                    onChange={(e) => setConsumption((prev) => ({ ...prev, [line.material_id]: e.target.checked }))}
-                  />
-                  {materialById.get(line.material_id)?.name ?? `Material #${line.material_id}`}
-                </label>
-              ))}
+            <div className="flex flex-col gap-2">
+              {resolvedBom.map((line) => {
+                const material = materialById.get(line.material_id);
+                const name = material?.name ?? `Material #${line.material_id}`;
+                const consumed = consumptionFor(line.material_id);
+                const units = scrapUnitsFor(line.material_id);
+                const perUnit = qtyPerUnitByMaterial.get(line.material_id) ?? Number(line.qty_required);
+                const total = units * perUnit;
+                return (
+                  <div key={line.material_id} className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <label className="flex items-center gap-1.5">
+                      <input
+                        type="checkbox"
+                        checked={consumed}
+                        onChange={(e) => setConsumption((prev) => ({ ...prev, [line.material_id]: e.target.checked }))}
+                      />
+                      {name}
+                    </label>
+                    {consumed && (
+                      <>
+                        <label className="flex items-center gap-1.5">
+                          <span className="text-slate-600">Units scrapped</span>
+                          <input
+                            type="number"
+                            min={0}
+                            step="any"
+                            aria-label={`Units of ${name} scrapped`}
+                            className="w-20 rounded border border-slate-300 px-2 py-0.5"
+                            value={scrapUnits[line.material_id] ?? String(qtyFailedNum)}
+                            onChange={(e) => setScrapUnits(line.material_id, e.target.value)}
+                          />
+                        </label>
+                        <span className="text-slate-600">
+                          × {qtyWithUnit(perUnit, material?.unit ?? "")} per unit ={" "}
+                          <span className="font-medium">
+                            {qtyWithUnit(total, material?.unit ?? "")} scrapped
+                          </span>
+                        </span>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}

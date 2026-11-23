@@ -22,7 +22,7 @@ const sources = import.meta.glob("../../../docs/help/*.md", {
 /** Sidebar order. Adding a page means adding its file and its slug here. */
 export const HELP_SECTIONS = [
   { title: "Start here", pages: ["getting-started", "concepts"] },
-  { title: "Stock", pages: ["material-categories"] },
+  { title: "Stock", pages: ["builds-and-failures", "material-categories"] },
   { title: "Stores", pages: ["connecting-square", "connecting-etsy", "connecting-ebay"] },
   { title: "Your data", pages: ["backup-and-restore", "troubleshooting"] },
 ] as const;
