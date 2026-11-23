@@ -22,3 +22,12 @@ class Supplier(Base):
     # day lead is treated the same as 6 weeks with none.
     default_lead_time_days: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # The supplier's logo, shown beside its name on purchases. One file, relative to the asset
+    # root. logo_source says where it came from: "favicon" (fetched from website_url, replaced
+    # whenever the URL changes or is refreshed) or "upload" (chosen by the user, never touched
+    # by a favicon fetch — removing it falls back to the favicon). NULL path means no logo.
+    logo_path: Mapped[str | None] = mapped_column(String, nullable=True)
+    logo_source: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Bumped on every change to the logo. The file always has the same name, so clients use this
+    # as the cache key — and as the "has a logo" signal without needing the path.
+    logo_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

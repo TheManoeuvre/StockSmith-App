@@ -8,6 +8,7 @@ import {
   type ReceiptLineInput,
 } from "../../api/purchases";
 import { suppliersApi } from "../../api/suppliers";
+import { SupplierLogo } from "../../components/suppliers/SupplierLogo";
 import { PurchaseLineEditor } from "../../components/purchases/PurchaseLineEditor";
 import { PurchaseStatusPill } from "../../components/purchases/PurchaseStatusPill";
 import { ReceiptHistoryPanel } from "../../components/purchases/ReceiptHistoryPanel";
@@ -353,7 +354,13 @@ function PurchaseDetail() {
       <div className="flex flex-col gap-6">
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-3">
-            <div className="h-14 w-14 shrink-0 rounded border border-slate-200 bg-slate-50" />
+            <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded border border-slate-200 bg-slate-50">
+              <SupplierLogo
+                supplierId={purchase.supplier_id}
+                updatedAt={purchase.supplier_logo_updated_at}
+                className="h-12 w-12"
+              />
+            </div>
             <div className="min-w-0">
               <p className="truncate text-sm font-medium text-slate-700">
                 {purchase.supplier_name ?? "No supplier"}

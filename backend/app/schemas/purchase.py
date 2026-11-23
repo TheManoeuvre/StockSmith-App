@@ -145,6 +145,8 @@ class PurchaseRead(BaseModel):
     id: int
     supplier_id: int | None
     supplier_name: str | None = None
+    # Non-null when the supplier has a logo; the cache key for GET /suppliers/{id}/logo.
+    supplier_logo_updated_at: datetime | None = None
     supplier_order_number: str | None = None
     order_date: date
     expected_arrival_date: date | None = None

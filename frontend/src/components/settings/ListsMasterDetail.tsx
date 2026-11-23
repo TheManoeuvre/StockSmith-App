@@ -11,6 +11,8 @@ import { materialUnitsApi } from "../../api/materialUnits";
 import { useMaterialUnits } from "../../hooks/useMaterialUnits";
 import { HelpLink } from "../help/HelpLink";
 import { ReferenceDataTable } from "../reference/ReferenceDataTable";
+import { SupplierLogo } from "../suppliers/SupplierLogo";
+import { SupplierLogoEditor } from "../suppliers/SupplierLogoEditor";
 
 type ListId =
   | "manufacturers"
@@ -77,7 +79,7 @@ export function ListsMasterDetail() {
       render: () => (
         <ReferenceDataTable
           title="Suppliers"
-          description="Who you buy from. Renaming one updates every material and purchase that uses it. Default lead time feeds the materials time-to-stockout forecast: leave it blank to use the shop-wide default."
+          description="Who you buy from. Renaming one updates every material and purchase that uses it. A website address fetches the supplier's icon as its logo on purchases; upload a logo to override it. Default lead time feeds the materials time-to-stockout forecast: leave it blank to use the shop-wide default."
           segment="suppliers"
           queryKey={["suppliers"]}
           api={{
@@ -98,6 +100,10 @@ export function ListsMasterDetail() {
             },
           ]}
           usageLabel={(n) => `${n} record${n === 1 ? "" : "s"}`}
+          rowLeading={(row) => (
+            <SupplierLogo supplierId={row.id} updatedAt={row.logo_updated_at} className="h-5 w-5" />
+          )}
+          expandedExtras={({ row }) => <SupplierLogoEditor supplier={row} />}
         />
       ),
     },

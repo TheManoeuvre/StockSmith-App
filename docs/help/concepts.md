@@ -84,6 +84,11 @@ A **purchase** is an order you've placed with a supplier. Record it when you ord
 each line as received when it arrives. Receiving adds the material to stock and updates its
 average cost from what you actually paid.
 
+Give a supplier a **logo** to make its purchases easier to spot. In **Settings › Lists ›
+Suppliers**, enter the supplier's website and StockSmith fetches the site's icon automatically.
+If the icon is missing or poor, upload your own image instead — an uploaded logo always wins, and
+removing it goes back to the website's icon. Purchases show the logo beside the supplier's name.
+
 Materials you've ordered but not yet received count as **on order**, so StockSmith doesn't keep
 telling you to reorder something that's already on its way.
 

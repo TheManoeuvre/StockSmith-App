@@ -69,6 +69,10 @@ class Purchase(Base):
     def supplier_name(self) -> str | None:
         return self.supplier.name if self.supplier else None
 
+    @property
+    def supplier_logo_updated_at(self) -> datetime | None:
+        return self.supplier.logo_updated_at if self.supplier else None
+
 
 class MaterialPurchase(Base):
     """A single material line item within a Purchase order.
