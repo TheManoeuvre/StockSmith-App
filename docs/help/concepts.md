@@ -50,7 +50,8 @@ When you make products, **record a build** on the product's **Stock** tab. A bui
 - adds the finished products to stock.
 
 If some didn't come out right, record them as failed. Materials in categories marked "consumed by
-failed builds" are taken out for those too, because a failed pour or print still uses them up.
+failed builds" are taken out for those too, because a failed pour or print still uses them up. You can scrap only part of a failed run — see
+[Recording builds and failures](builds-and-failures.md).
 
 **Made to order** products are made after they're sold rather than kept in stock.
 

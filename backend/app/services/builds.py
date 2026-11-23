@@ -29,6 +29,7 @@ async def create_build(
     qty_failed: int = 0,
     failed_consumption: dict[int, bool] | None = None,
     substitutions: dict[int, int] | None = None,
+    failed_units: dict[int, Decimal] | None = None,
 ) -> Build:
     """Records a build event: qty_built units successfully produced, plus qty_failed
     units attempted but not (e.g. a print that failed partway).
@@ -38,6 +39,12 @@ async def create_build(
     not given and qty_failed > 0, defaults to "filament consumed, everything else not" â€”
     the common case for a 3D-print failure, still overridable by passing an explicit map.
     Ignored entirely when qty_failed is 0.
+
+    failed_units maps material_id -> how many units' worth of that material was scrapped
+    (qty_required * units is what leaves stock). Defaults to qty_failed for any material not
+    listed, which is the old "scrap the full count" behaviour. It lets a partial failure be
+    recorded honestly: one coaster of a pair, or a print that died half way (0.5). May be
+    fractional; must not be negative. Only applies to materials marked consumed.
 
     substitutions maps material_id -> substitute_material_id for BOM lines that should
     draw their stock from a curated fallback instead (the pooled *_incl_fallbacks
@@ -52,6 +59,9 @@ async def create_build(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="qty_built/qty_failed cannot be negative")
     if qty_built == 0 and qty_failed == 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Must record at least one built or failed unit")
+
+    if any(units < 0 for units in (failed_units or {}).values()):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Scrapped units cannot be negative")
 
     product = await session.get(Product, product_id)
     if product is None:
@@ -190,7 +200,8 @@ async def create_build(
             # The material actually burned — the fallback when one was chosen — so the
             # cost snapshot prices what really left the shelf.
             material = materials_by_id[consumed_material_id(line.material_id)]
-            qty_consumed = Decimal(qty_failed) * line.qty_required if was_consumed else Decimal(0)
+            units_scrapped = Decimal((failed_units or {}).get(line.material_id, qty_failed))
+            qty_consumed = units_scrapped * line.qty_required if was_consumed else Decimal(0)
             if was_consumed and qty_consumed != 0:
                 session.add(
                     MaterialAdjustment(

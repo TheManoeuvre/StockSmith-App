@@ -138,6 +138,9 @@ export const buildsApi = {
     qty_built: number;
     qty_failed?: number;
     failed_consumption?: Record<number, boolean> | null;
+    /** material_id -> units' worth of that material scrapped (qty_required x units leaves
+     *  stock). Omitted materials default to qty_failed. May be fractional. */
+    failed_units?: Record<number, number> | null;
     /** material_id -> substitute_material_id: BOM lines to draw from a curated fallback
      *  instead. Only ever sent after the person has confirmed the swap. */
     substitutions?: Record<number, number> | null;
