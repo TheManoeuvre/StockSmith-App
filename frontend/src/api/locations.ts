@@ -96,6 +96,14 @@ export interface StoredIn {
   drift: string;
   /** Exactly one placement: the quantity follows stock changes automatically. */
   follows_stock: boolean;
+  /** Set when the primary place is empty but another still holds stock. */
+  replenish?: {
+    to_location_id: number;
+    to_path: string[];
+    from_location_id: number;
+    from_path: string[];
+    qty: string;
+  } | null;
   placements: StoredPlacement[];
 }
 

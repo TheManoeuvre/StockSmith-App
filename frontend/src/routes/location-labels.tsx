@@ -46,6 +46,8 @@ function LocationLabelsPage() {
   const [size, setSize] = useLabelSize();
   const [selected, setSelected] = useState<Set<number>>(() => new Set((ids ?? "").split(",").filter(Boolean).map(Number)));
   const [beneath, setBeneath] = useState(false);
+  // Sheet printing lays several labels out on A4 for sticky label sheets; one-per-page is for roll printers.
+  const [onSheet, setOnSheet] = useState(false);
 
   const rows = useMemo(() => tree?.locations ?? [], [tree]);
   const flat = useMemo(() => flatten(buildTree(rows, false)), [rows]);
@@ -79,6 +81,16 @@ function LocationLabelsPage() {
       return next;
     });
 
+  // A4 with a 10 mm margin all round. Labels bigger than half a sheet can't be tiled usefully.
+  const sheetFits = size.widthMm <= 95 && size.heightMm <= 138;
+  const sheet = onSheet && sheetFits;
+  const perRow = Math.max(1, Math.floor(190 / size.widthMm));
+  const perPage = perRow * Math.max(1, Math.floor(277 / size.heightMm));
+  const pages = useMemo(() => {
+    const out: (typeof printing)[] = [];
+    for (let i = 0; i < printing.length; i += perPage) out.push(printing.slice(i, i + perPage));
+    return out;
+  }, [printing, perPage]);
   const large = size.widthMm >= 100;
   const previewMm = large ? "3px" : "6px";
   const count = printing.length;
@@ -121,9 +133,13 @@ function LocationLabelsPage() {
             <input type="checkbox" checked={beneath} onChange={(e) => setBeneath(e.target.checked)} />
             Include everything beneath each tick
           </label>
+          <label className={`flex items-center gap-2 text-[12.5px] ${sheetFits ? "" : "text-slate-400"}`}>
+            <input type="checkbox" checked={sheet} disabled={!sheetFits} onChange={(e) => setOnSheet(e.target.checked)} />
+            Several to a page on A4 (label sheets)
+          </label>
           <div className="flex items-center gap-2">
             <span className="flex-1 text-[12.5px] text-slate-500">
-              {count} label{count === 1 ? "" : "s"} · one per page
+              {count} label{count === 1 ? "" : "s"} · {sheet ? `${perPage} per A4 page` : "one per page"}
             </span>
             <button
               onClick={() => window.print()}
@@ -139,7 +155,9 @@ function LocationLabelsPage() {
           <p className="text-xs text-slate-500">
             {count === 0
               ? "Tick a location to see its label."
-              : `Preview — ${count} label${count === 1 ? "" : "s"}. Your printer’s paper size should be set to ${describeSize(size)}.`}
+              : sheet
+                ? `Preview — ${count} label${count === 1 ? "" : "s"} across ${pages.length} A4 page${pages.length === 1 ? "" : "s"}, ${perRow} across. Print at 100% scale, not “fit to page”.`
+                : `Preview — ${count} label${count === 1 ? "" : "s"}. Your printer’s paper size should be set to ${describeSize(size)}.`}
           </p>
           <div className="flex flex-wrap gap-4">
             {printing.slice(0, 12).map((l) => (
@@ -159,7 +177,7 @@ function LocationLabelsPage() {
           <style>{`
             .location-label-print { display: none; }
             @media print {
-              @page { size: ${size.widthMm}mm ${size.heightMm}mm; margin: 0; }
+              @page { size: ${sheet ? "A4" : `${size.widthMm}mm ${size.heightMm}mm`}; margin: ${sheet ? "10mm" : "0"}; }
               html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
               body > *:not(.location-label-print) { display: none !important; }
               .location-label-print { display: block; }
@@ -168,13 +186,31 @@ function LocationLabelsPage() {
                 overflow: hidden; break-after: page; page-break-after: always;
               }
               .location-label-print .label-page:last-child { break-after: auto; page-break-after: auto; }
+              .location-label-print .label-sheet {
+                display: flex; flex-wrap: wrap; align-content: flex-start; width: ${perRow * size.widthMm}mm;
+                break-after: page; page-break-after: always;
+              }
+              .location-label-print .label-sheet:last-child { break-after: auto; page-break-after: auto; }
+              .location-label-print .label-sheet .label-cell {
+                width: ${size.widthMm}mm; height: ${size.heightMm}mm; overflow: hidden; flex: none;
+              }
             }
           `}</style>
-          {printing.map((l) => (
-            <div key={l.id} className="label-page">
-              <LocationLabel ancestors={l.ancestors} name={l.name} code={l.code} size={size} mm="1mm" />
-            </div>
-          ))}
+          {sheet
+            ? pages.map((page, n) => (
+                <div key={n} className="label-sheet">
+                  {page.map((l) => (
+                    <div key={l.id} className="label-cell">
+                      <LocationLabel ancestors={l.ancestors} name={l.name} code={l.code} size={size} mm="1mm" />
+                    </div>
+                  ))}
+                </div>
+              ))
+            : printing.map((l) => (
+                <div key={l.id} className="label-page">
+                  <LocationLabel ancestors={l.ancestors} name={l.name} code={l.code} size={size} mm="1mm" />
+                </div>
+              ))}
         </div>,
         document.body,
       )}

@@ -17,7 +17,7 @@ from app.models.variant import ProductVariant
 from app.services import locations as locs
 from app.services import placements
 from app.services.costing import create_adjustment
-from app.services.placement_hooks import ItemRef
+from app.services.placement_hooks import ItemRef, following_paused
 
 
 async def _material(session, mid=1, name="Soy wax", unit=MaterialUnit.g, qty=0):
@@ -263,7 +263,8 @@ class TestPlacing:
 
 
 class TestAutomaticFollowing:
-    """An item in exactly one location follows its stock; none or several is left alone."""
+    """One location follows its stock both ways; several take decreases primary-first and leave
+    increases Unassigned; none is left alone."""
 
     async def test_a_single_placement_is_reduced_by_a_decrease(self, session):
         shelf = await locs.create_location(session, "Shelf", None)
@@ -291,16 +292,87 @@ class TestAutomaticFollowing:
         view = await placements.stored_in(session, item)
         assert view.placed == 0 and view.unassigned == 2 and view.drift == 0
 
-    async def test_several_placements_are_left_alone_and_drift_shows(self, session):
+    async def test_several_placements_take_a_decrease_from_the_primary_first(self, session):
+        a = await locs.create_location(session, "A", None)
+        b = await locs.create_location(session, "B", None)
+        item = await _material(session, qty=12)
+        await placements.place(session, item, a.id, Decimal(4))  # primary
+        await placements.place(session, item, b.id, Decimal(8))
+        await create_adjustment(session, 1, MaterialAdjustmentMode.adjust, Decimal(-3), "used")
+        assert await _qty(session, item) == {a.id: Decimal(1), b.id: Decimal(8)}
+        view = await placements.stored_in(session, item)
+        assert (view.drift, view.follows_stock) == (Decimal(0), False)
+
+    async def test_a_decrease_overflows_to_the_fullest_other_place(self, session):
+        a = await locs.create_location(session, "A", None)
+        b = await locs.create_location(session, "B", None)
+        c = await locs.create_location(session, "C", None)
+        item = await _material(session, qty=12)
+        await placements.place(session, item, a.id, Decimal(2))  # primary
+        await placements.place(session, item, b.id, Decimal(3))
+        await placements.place(session, item, c.id, Decimal(7))
+        await create_adjustment(session, 1, MaterialAdjustmentMode.adjust, Decimal(-5), "used")
+        assert await _qty(session, item) == {a.id: Decimal(0), b.id: Decimal(3), c.id: Decimal(4)}
+        events = await _events(session, PlacementEventKind.auto_deduct)
+        assert sorted((e.from_location_id, e.qty) for e in events) == [(a.id, 2), (c.id, 3)]
+
+    async def test_a_named_place_is_taken_from_first(self, session):
+        from app.services.placement_hooks import taking_from
+
         a = await locs.create_location(session, "A", None)
         b = await locs.create_location(session, "B", None)
         item = await _material(session, qty=10)
         await placements.place(session, item, a.id, Decimal(5))
         await placements.place(session, item, b.id, Decimal(5))
-        await create_adjustment(session, 1, MaterialAdjustmentMode.adjust, Decimal(-4), "used")
+        with taking_from(b.id):
+            await create_adjustment(session, 1, MaterialAdjustmentMode.adjust, Decimal(-4), "used")
+        assert await _qty(session, item) == {a.id: Decimal(5), b.id: Decimal(1)}
+
+    async def test_the_adjustment_endpoints_accept_a_place_to_take_from(self, session):
+        from app.routers.materials import create_material_adjustment
+        from app.routers.stock_adjustments import record_stock_adjustment
+        from app.schemas.material import MaterialAdjustmentCreate
+        from app.schemas.stock_adjustment import StockAdjustmentCreate
+
+        a = await locs.create_location(session, "A", None)
+        b = await locs.create_location(session, "B", None)
+        wax = await _material(session, qty=10)
+        await placements.place(session, wax, a.id, Decimal(5))
+        await placements.place(session, wax, b.id, Decimal(5))
+        await create_material_adjustment(
+            1, MaterialAdjustmentCreate(mode=MaterialAdjustmentMode.adjust, value=Decimal(-2), reason="used", from_location_id=b.id), session
+        )
+        assert await _qty(session, wax) == {a.id: Decimal(5), b.id: Decimal(3)}
+
+        candle = await _product(session, stock=10)
+        await placements.place(session, candle, a.id, Decimal(5))
+        await placements.place(session, candle, b.id, Decimal(5))
+        await record_stock_adjustment(
+            StockAdjustmentCreate(product_id=1, value=-3, reason="gift", from_location_id=b.id), session
+        )
+        assert await _qty(session, candle) == {a.id: Decimal(5), b.id: Decimal(2)}
+
+    async def test_several_placements_leave_an_increase_unassigned(self, session):
+        a = await locs.create_location(session, "A", None)
+        b = await locs.create_location(session, "B", None)
+        item = await _material(session, qty=10)
+        await placements.place(session, item, a.id, Decimal(5))
+        await placements.place(session, item, b.id, Decimal(5))
+        await create_adjustment(session, 1, MaterialAdjustmentMode.adjust, Decimal(6), "delivery")
         assert await _qty(session, item) == {a.id: Decimal(5), b.id: Decimal(5)}
         view = await placements.stored_in(session, item)
-        assert (view.placed, view.drift, view.follows_stock) == (Decimal(10), Decimal(4), False)
+        assert view.unassigned == 6
+
+    async def test_an_empty_primary_suggests_restocking_from_the_fullest_other(self, session):
+        a = await locs.create_location(session, "A", None)
+        b = await locs.create_location(session, "B", None)
+        item = await _material(session, qty=9)
+        await placements.place(session, item, a.id, Decimal(2))  # primary
+        await placements.place(session, item, b.id, Decimal(7))
+        assert (await placements.stored_in(session, item)).replenish is None
+        await create_adjustment(session, 1, MaterialAdjustmentMode.adjust, Decimal(-2), "used")
+        r = (await placements.stored_in(session, item)).replenish
+        assert (r.to_location_id, r.from_location_id, r.qty) == (a.id, b.id, Decimal(7))
 
     async def test_an_unplaced_item_is_left_alone(self, session):
         item = await _material(session, qty=10)
@@ -369,7 +441,8 @@ class TestDrift:
         item = await _material(session, qty=10)
         await placements.place(session, item, a.id, Decimal(5))
         pb = await placements.place(session, item, b.id, Decimal(5))
-        await create_adjustment(session, 1, MaterialAdjustmentMode.adjust, Decimal(-2), "used")
+        with following_paused():  # how drift arises now: a past record edited with no event to follow
+            await create_adjustment(session, 1, MaterialAdjustmentMode.adjust, Decimal(-2), "used")
         await placements.reduce_placement(session, pb.id, Decimal(2))
         view = await placements.stored_in(session, item)
         assert (view.placed, view.item.total, view.drift) == (Decimal(8), Decimal(8), Decimal(0))
@@ -382,7 +455,8 @@ class TestDrift:
         await _material(session, 2, "Wicks", MaterialUnit.each, qty=5)  # never placed
         await placements.place(session, drifting, shelf.id, Decimal(5))
         await placements.place(session, drifting, other.id, Decimal(5))
-        await create_adjustment(session, 1, MaterialAdjustmentMode.adjust, Decimal(-3), "used")
+        with following_paused():
+            await create_adjustment(session, 1, MaterialAdjustmentMode.adjust, Decimal(-3), "used")
         tree = await placements.tree_summary(session)
         by_name = {r.node.name: r for r in tree.rows}
         assert by_name["Shelf"].needs_attention and by_name["Room"].needs_attention

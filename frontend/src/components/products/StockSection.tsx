@@ -3,6 +3,7 @@ import { StoredInSection } from "../locations/StoredInSection";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useMaterialCategories } from "../../hooks/useMaterialCategories";
+import { TakingFromSelect } from "../locations/TakingFromSelect";
 import { buildsApi, productsApi, stockAdjustmentsApi } from "../../api/products";
 import { materialsApi } from "../../api/materials";
 import { materialSubstitutesApi } from "../../api/materialSubstitutes";
@@ -322,6 +323,7 @@ export function StockSection({
   const effectiveAdjReason =
     adjReason === OTHER_REASON ? adjReasonOther.trim() : adjReason;
 
+  const [takingFrom, setTakingFrom] = useState<number | null>(null);
   const adjustMutation = useMutation({
     mutationFn: () =>
       stockAdjustmentsApi.create({
@@ -330,6 +332,7 @@ export function StockSection({
         mode: adjMode,
         value: Number(adjValue),
         reason: effectiveAdjReason,
+        from_location_id: takingFrom,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["products", productId] });
@@ -337,6 +340,7 @@ export function StockSection({
       queryClient.invalidateQueries({ queryKey: ["products", productId, "stock-history"] });
       queryClient.invalidateQueries({ queryKey: ["products"] });
       markAdjDone(EMPTY_ADJUST_FORM);
+      setTakingFrom(null);
     },
   });
 
@@ -658,6 +662,12 @@ export function StockSection({
               onChange={(e) => setAdjValue(e.target.value)}
             />
           </label>
+          <TakingFromSelect
+            item={{ product_id: productId, variant_id: hasActiveVariants && adjVariantId !== "" ? Number(adjVariantId) : null }}
+            decreasing={adjMode === "adjust" && Number(adjValue) < 0}
+            value={takingFrom}
+            onChange={setTakingFrom}
+          />
           <label className="flex flex-col gap-1">
             <span className="text-sm">Reason</span>
             <select

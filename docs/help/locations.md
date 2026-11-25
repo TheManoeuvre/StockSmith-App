@@ -72,8 +72,19 @@ Each move is recorded in the location's **History**.
 If an item is placed in **exactly one** location, StockSmith keeps that quantity right for you:
 builds and sales take stock off it, and deliveries, returns and corrections add to it.
 
-Items placed in **several** locations, or none, aren't changed automatically, because StockSmith
-can't know which place you took from. See the next section.
+Items placed in **several** places work like this:
+
+- **Stock going down** (a build, a sale, scrap, a correction) is taken from the **primary** place
+  first, then from whichever other place holds the most, never taking a place below zero. On a
+  manual adjustment you can choose **Taking from** to say which place instead.
+- **Stock coming in** isn't added anywhere, because StockSmith can't know which place a delivery
+  went to. It shows as **Unassigned** until you put it away. After you record a delivery,
+  StockSmith asks where each such item went, with the primary place filled in for you. **Not now**
+  leaves it Unassigned.
+- When the **primary place runs out** but another still has some, the item's **Stored in** section
+  offers to move that stock across, for example "Wax shelf is empty, but Loft still has 7 kg."
+
+Items placed nowhere aren't changed automatically.
 
 ## When the numbers drift
 
@@ -114,6 +125,9 @@ page.
 2. On the print screen, tick the locations you want. **Include everything beneath each tick** adds
    the locations inside them too.
 3. Pick a size and check the preview, then **Print**. Each label prints on its own page.
+   For sticky label sheets, tick **Several to a page on A4** instead: labels are laid out edge to
+   edge, as many as fit, and the page margin is 10 mm. Print at 100% scale, not "fit to page", or
+   the labels won't line up with the sheet. This needs a label under about 95 mm wide.
 
 Two sizes are built in, and each has its own layout:
 

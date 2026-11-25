@@ -119,6 +119,22 @@ describe("Print labels", () => {
     await waitFor(() => expect(screen.getByText(/paper size should be set to 70 × 20 mm/)).toBeInTheDocument());
   });
 
+  it("A4 sheet mode tiles the labels on A4 pages, and is unavailable for a label too big to tile", async () => {
+    renderAt("/location-labels?ids=1,2,3,4");
+    await screen.findByText(/4 labels · one per page/);
+    fireEvent.click(screen.getByLabelText(/Several to a page on A4/));
+    // 51 x 25 mm: 3 across (190 / 51) and 11 down (277 / 25), so 33 to a page.
+    expect(await screen.findByText(/4 labels · 33 per A4 page/)).toBeInTheDocument();
+    const css = document.body.querySelector(".location-label-print style")?.textContent ?? "";
+    expect(css).toMatch(/@page \{ size: A4; margin: 10mm; \}/);
+    expect(document.body.querySelectorAll(".location-label-print .label-sheet")).toHaveLength(1);
+    expect(document.body.querySelectorAll(".location-label-print .label-cell")).toHaveLength(4);
+
+    fireEvent.click(screen.getByRole("button", { name: "6 × 4 in" }));
+    await waitFor(() => expect(screen.getByLabelText(/Several to a page on A4/)).toBeDisabled());
+    expect(await screen.findByText(/4 labels · one per page/)).toBeInTheDocument();
+  });
+
   it("the print stylesheet sets the page to the label size and hides the rest of the app", async () => {
     renderAt("/location-labels?ids=2");
     await screen.findByText(/1 label · one per page/);

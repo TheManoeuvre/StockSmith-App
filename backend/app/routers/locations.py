@@ -22,6 +22,7 @@ from app.schemas.location import (
     RangePreviewName,
     RangePreviewRead,
     RangeRequest,
+    ReplenishRead,
     StoredInRead,
 )
 from app.services import locations as locs
@@ -208,6 +209,7 @@ async def stored_in(
         unassigned=v.unassigned,
         drift=v.drift,
         follows_stock=v.follows_stock,
+        replenish=ReplenishRead(**vars(v.replenish)) if v.replenish else None,
         placements=[
             PlacementRead(
                 id=p.id, location_id=p.location_id, location_path=p.location_path, qty=p.qty, is_primary=p.is_primary

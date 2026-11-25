@@ -123,6 +123,17 @@ class PlacementView:
 
 
 @dataclass
+class Replenishment:
+    """The primary place has run out while another still holds stock: move some back."""
+
+    to_location_id: int
+    to_path: list[str]
+    from_location_id: int
+    from_path: list[str]
+    qty: Decimal
+
+
+@dataclass
 class ItemStoredView:
     item: ItemInfo
     placements: list[PlacementView]
@@ -130,6 +141,7 @@ class ItemStoredView:
     unassigned: Decimal
     drift: Decimal  # how much more is placed than exists; 0 when healthy
     follows_stock: bool  # exactly one placement: stock changes update it automatically
+    replenish: "Replenishment | None" = None
 
 
 async def stored_in(session: AsyncSession, ref: ItemRef) -> ItemStoredView:
@@ -141,6 +153,14 @@ async def stored_in(session: AsyncSession, ref: ItemRef) -> ItemStoredView:
         PlacementView(r.id, r.location_id, locs.path_names(nodes, r.location_id), Decimal(r.qty or 0), r.is_primary)
         for r in sorted(rows, key=lambda r: (not r.is_primary, r.id))
     ]
+    replenish = None
+    primary = next((v for v in views if v.is_primary), None)
+    if primary is not None and primary.qty == 0:
+        fullest = max((v for v in views if v.qty > 0), key=lambda v: v.qty, default=None)
+        if fullest is not None:
+            replenish = Replenishment(
+                primary.location_id, primary.location_path, fullest.location_id, fullest.location_path, fullest.qty
+            )
     return ItemStoredView(
         item=item,
         placements=views,
@@ -148,6 +168,7 @@ async def stored_in(session: AsyncSession, ref: ItemRef) -> ItemStoredView:
         unassigned=max(item.total - placed, ZERO),
         drift=max(placed - item.total, ZERO),
         follows_stock=len(rows) == 1,
+        replenish=replenish,
     )
 
 

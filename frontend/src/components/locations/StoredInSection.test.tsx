@@ -104,7 +104,7 @@ describe("StoredInSection", () => {
     expect(await screen.findByText("Unassigned")).toBeInTheDocument();
     expect(screen.getByText("Primary")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Put away" })).toBeInTheDocument();
-    expect(screen.getByText(/aren.t taken from a location automatically/)).toBeInTheDocument();
+    expect(screen.getByText(/taken from the primary place first/)).toBeInTheDocument();
     expect(screen.queryByText(/Updates automatically/)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Make primary" }));
@@ -136,5 +136,45 @@ describe("StoredInSection", () => {
     renderSection();
     await waitFor(() => expect(calls.length).toBeGreaterThan(0));
     expect(screen.queryByText("Stored in")).not.toBeInTheDocument();
+  });
+});
+
+describe("Restocking an empty primary place", () => {
+  const multi = (o: Partial<StoredIn> = {}) =>
+    stored({
+      total: "7",
+      placed: "7",
+      unassigned: "0",
+      placements: [
+        { id: 7, location_id: 2, location_path: ["Workshop", "Wax shelf"], qty: "0", is_primary: true },
+        { id: 8, location_id: 1, location_path: ["Loft"], qty: "7", is_primary: false },
+      ],
+      ...o,
+    });
+
+  it("offers to move stock from the overflow to the empty primary", async () => {
+    serve(
+      multi({
+        replenish: { to_location_id: 2, to_path: ["Workshop", "Wax shelf"], from_location_id: 1, from_path: ["Loft"], qty: "7" },
+      }),
+    );
+    setRoutes([
+      { method: "GET", path: /^\/placements\/stored-in/, respond: () => multi({ replenish: { to_location_id: 2, to_path: ["Workshop", "Wax shelf"], from_location_id: 1, from_path: ["Loft"], qty: "7" } }) },
+      { method: "GET", path: "/locations", respond: () => TREE },
+      { method: "POST", path: "/placements/move", respond: () => undefined },
+    ]);
+    renderSection();
+    expect(await screen.findByText(/Wax shelf is empty/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Move 7 kg to Wax shelf" }));
+    await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/placements/move")).toBe(true));
+    const move = calls.find((c) => c.path === "/placements/move");
+    expect(move?.body).toMatchObject({ material_id: 1, from_location_id: 1, to_location_id: 2, qty: "7" });
+  });
+
+  it("says nothing when the primary still has stock", async () => {
+    serve(multi({ replenish: null }));
+    renderSection();
+    await screen.findByText("Loft");
+    expect(screen.queryByText(/is empty/)).not.toBeInTheDocument();
   });
 });

@@ -13,6 +13,7 @@ import { PurchaseLineEditor } from "../../components/purchases/PurchaseLineEdito
 import { PurchaseStatusPill } from "../../components/purchases/PurchaseStatusPill";
 import { ReceiptHistoryPanel } from "../../components/purchases/ReceiptHistoryPanel";
 import { ReceiveDialog } from "../../components/purchases/ReceiveDialog";
+import { PutAwayModal, type PutAwayItem } from "../../components/locations/PutAwayModal";
 import { DetailPanel } from "../../components/common/DetailPanel";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { ConfirmDialog } from "../../components/common/ConfirmDialog";
@@ -113,6 +114,7 @@ function PurchaseDetail() {
   });
 
   const [receiving, setReceiving] = useState(false);
+  const [putAway, setPutAway] = useState<PutAwayItem[] | null>(null);
   const [closingLineId, setClosingLineId] = useState<number | null>(null);
   const [closeApportion, setCloseApportion] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -246,9 +248,19 @@ function PurchaseDetail() {
         received_at: receivedAt,
         lines: receiptLines,
       }),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       setReceiving(false);
       invalidate();
+      // Items kept in one place follow the delivery on their own; the rest get asked where it went.
+      const seen = new Set<number>();
+      const items: PutAwayItem[] = [];
+      for (const r of variables.lines) {
+        const materialId = purchase?.lines.find((l) => l.id === r.line_id)?.material_id;
+        if (materialId == null || seen.has(materialId) || Number(r.qty) <= 0) continue;
+        seen.add(materialId);
+        items.push({ ref: { material_id: materialId }, name: materials?.find((m) => m.id === materialId)?.name ?? "Material" });
+      }
+      if (items.length > 0) setPutAway(items);
     },
   });
   const undoBatchMutation = useMutation({
@@ -556,6 +568,8 @@ function PurchaseDetail() {
           }}
           onCancel={() => setConfirmingDelete(false)}
         />
+
+        {putAway && <PutAwayModal title="Where did this go?" items={putAway} onClose={() => setPutAway(null)} />}
 
         {receiving && (
           <ReceiveDialog

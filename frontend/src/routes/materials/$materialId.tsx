@@ -46,6 +46,7 @@ import {
   STOCKOUT_LABEL,
   STOCKOUT_TEXT_CLASS,
 } from "../../lib/forecast";
+import { TakingFromSelect } from "../../components/locations/TakingFromSelect";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { SaveButton } from "../../components/common/SaveButton";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
@@ -410,16 +411,18 @@ function MaterialDetail() {
   const effectiveReason =
     adjustReason === OTHER_REASON ? adjustReasonOther.trim() : adjustReason;
   const canAdjust = adjustValue.trim() !== "" && effectiveReason !== "";
+  const [takingFrom, setTakingFrom] = useState<number | null>(null);
 
   const adjustStockMutation = useMutation({
     mutationFn: () =>
-      materialsApi.adjust(id, adjustMode, adjustValue, effectiveReason),
+      materialsApi.adjust(id, adjustMode, adjustValue, effectiveReason, takingFrom),
     onSuccess: () => {
       invalidateMaterial();
       queryClient.invalidateQueries({
         queryKey: ["materials", id, "stock-history"],
       });
       markAdjustDone(EMPTY_ADJUST);
+      setTakingFrom(null);
     },
   });
 
@@ -1056,6 +1059,12 @@ function MaterialDetail() {
                   }
                 />
               </label>
+              <TakingFromSelect
+                item={{ material_id: id }}
+                decreasing={adjustMode === "adjust" && Number(adjustValue) < 0}
+                value={takingFrom}
+                onChange={setTakingFrom}
+              />
               <label className="flex flex-col gap-1">
                 <span className="text-sm">Reason</span>
                 <select

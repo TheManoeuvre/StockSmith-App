@@ -32,6 +32,11 @@ export function StoredInSection({ item, itemName }: { item: ItemRef; itemName: s
     onSuccess: invalidate,
   });
   const unplace = useMutation({ mutationFn: locationsApi.unplace, onSuccess: invalidate });
+  const restock = useMutation({
+    mutationFn: (r: NonNullable<StoredIn["replenish"]>) =>
+      locationsApi.moveItem(item, r.from_location_id, r.to_location_id, r.qty),
+    onSuccess: invalidate,
+  });
 
   // Renders nothing until a well-formed answer arrives, so a slow or unexpected response can never
   // get in the way of the material or product page it sits on.
@@ -109,6 +114,23 @@ export function StoredInSection({ item, itemName }: { item: ItemRef; itemName: s
         </div>
       )}
 
+      {stored.replenish && (
+        <div className="flex items-center gap-2.5 rounded-md bg-amber-50 px-2.5 py-2 text-[12.5px] text-amber-800 ring-1 ring-amber-200">
+          <span aria-hidden="true" className="h-[7px] w-[7px] flex-none rounded-full bg-amber-500" />
+          <span className="flex-1">
+            <b className="font-semibold">{last(stored.replenish.to_path)} is empty</b>, but{" "}
+            {last(stored.replenish.from_path)} still has {qtyWithUnit(stored.replenish.qty, stored.unit)}.
+          </span>
+          <button
+            onClick={() => restock.mutate(stored.replenish!)}
+            disabled={restock.isPending}
+            className="rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs"
+          >
+            Move {qtyWithUnit(stored.replenish.qty, stored.unit)} to {last(stored.replenish.to_path)}
+          </button>
+        </div>
+      )}
+
       {places.length === 0 ? (
         noLocationsYet ? (
           <p className="text-[12.5px] text-slate-500">
@@ -138,12 +160,12 @@ export function StoredInSection({ item, itemName }: { item: ItemRef; itemName: s
       )}
       {places.length > 1 && (
         <p className="text-xs text-slate-500">
-          <span aria-hidden="true">ⓘ </span>Stock changes for this item aren’t taken from a location automatically. Move
-          or count stock to keep these in step.
+          <span aria-hidden="true">ⓘ </span>Stock used or sold is taken from the primary place first, then the fullest
+          other. New stock stays Unassigned until you put it away.
         </p>
       )}
 
-      <ErrorBanner error={makePrimary.error ?? reduce.error ?? unplace.error} />
+      <ErrorBanner error={makePrimary.error ?? reduce.error ?? unplace.error ?? restock.error} />
 
       {dialog && (
         <PlaceItemModal

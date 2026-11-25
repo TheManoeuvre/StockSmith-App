@@ -3,7 +3,10 @@
 Written 2026-11-24 against 0.28.0. **Phases 1, 2 and 3 are built** (2026-11-25): labels at 51 × 25 mm and
 6 × 4 in, the print screen, Settings › Labels, scan-to-jump, CSV import and export of the layout, and count by
 location (a scope on Stock Take, §7.1). The QR code option was left out because nothing can use it
-yet. The phase 4 hooks are still to do.
+yet. **Phase 4 is built in part** (2026-11-25): automatic fallback for multi-placement items, the
+"Taking from" choice on manual adjustments, the replenishment nudge, the put-away prompt after a
+delivery, the pick location on order lines and the A4 label sheet. Not built: "Taking from" on
+builds and scrap, put-away after a build, and a pick list sorted by location (see §10).
 
 StockSmith tracks *how much* of everything there is, but not *where it is*. This plan adds
 **locations**: a free-form tree (`Office › Shelf 01 › Grey Box 03`, or just `Box A1`) that
@@ -419,6 +422,21 @@ like the rest of the sample so derived figures are genuine:
   already auto-adds from phase 1.)
 - Put-away after builds, pick location on orders and a location-sorted pick list.
 - A4 label sheet.
+
+**Built (2026-11-25).** Multi-placement decreases take from the named place, then the primary,
+then the fullest others, clamped (`apply_stock_delta`); increases stay Unassigned. *Taking from* is
+an optional `from_location_id` on material and product manual adjustments only. The replenishment
+nudge is computed in `stored_in` and shown on the item's Stored in card. The put-away chooser
+(`PutAwayModal`) opens after **Record a delivery** for materials that aren't in exactly one place,
+pre-filled with the primary place. That primary place **is** the per-item default, so no new column
+was added. Order lines show *Pick from* (primary place, plus how many others). The A4 sheet is a
+mode on the print screen.
+
+**Not built, deliberately.** *Taking from* on a build or scrap (a build consumes many materials, so
+a per-material choice is heavy; builds take from the primary first). Put-away after a build.
+A pick list sorted by location (the order page shows the location per line, but lines stay in
+their natural order so substitutions keep their grouping). The whole-order **Receive** shorthand on
+the Purchases list does not prompt; use **Record a delivery** or the item's Put away.
 
 ---
 

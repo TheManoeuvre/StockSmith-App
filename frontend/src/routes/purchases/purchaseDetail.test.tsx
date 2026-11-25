@@ -52,8 +52,11 @@ function purchase(over: Record<string, unknown> = {}) {
   };
 }
 
+let extraRoutes: { method: "GET" | "POST"; path: string | RegExp; respond: () => unknown }[] = [];
+
 function routes(over: Record<string, unknown> = {}) {
   return [
+    ...extraRoutes,
     { method: "GET" as const, path: "/system/status", respond: () => ({ status: "ok" }) },
     { method: "GET" as const, path: "/purchases/5", respond: () => purchase(over) },
     {
@@ -84,7 +87,10 @@ async function renderDetail(over: Record<string, unknown> = {}) {
   return router;
 }
 
-beforeEach(() => setRoutes([]));
+beforeEach(() => {
+  setRoutes([]);
+  extraRoutes = [];
+});
 
 it("shows the stat tiles and both tabs", async () => {
   await renderDetail();
@@ -198,4 +204,28 @@ it("asks before deleting", async () => {
   expect(
     await screen.findByRole("heading", { name: "Delete this purchase?" }),
   ).toBeInTheDocument();
+});
+
+it("asks where a delivery went when the material has nowhere to follow it", async () => {
+  const user = userEvent.setup();
+  const loc = { id: 1, parent_id: null, name: "Shelf", code: "LOC-000001", notes: null, archived: false, own_items: 0, rolled_up_items: 0, needs_attention: false };
+  extraRoutes = [
+    {
+      method: "GET",
+      path: "/locations",
+      respond: () => ({ locations: [loc], total_locations: 1, attention_locations: 0, empty_locations: 1, unplaced_items: 1, placeable_items: 1 }),
+    },
+    {
+      method: "GET",
+      path: /^\/placements\/stored-in/,
+      respond: () => ({ name: "PLA Black", unit: "g", total: "1000", placed: "0", unassigned: "1000", drift: "0", follows_stock: false, replenish: null, placements: [] }),
+    },
+    { method: "POST", path: "/purchases/5/receipts", respond: () => purchase() },
+  ];
+  await renderDetail();
+  await user.click(await screen.findByRole("button", { name: "Record a delivery" }));
+  await user.click(await screen.findByRole("button", { name: "Receive everything outstanding" }));
+  await user.click(await screen.findByRole("button", { name: /^Record 1 line/ }));
+  expect(await screen.findByText("Where did this go?", undefined, { timeout: 5000 })).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Where PLA Black went" })).toBeInTheDocument();
 });

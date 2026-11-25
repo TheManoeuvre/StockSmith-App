@@ -22,6 +22,7 @@ from app.services.material_categories import resolve_updates as resolve_category
 from app.schemas.purchase import MaterialStockHistoryRead
 from app.services import abc, material_merge, units
 from app.services.reference_data import InUseError, ReferenceDataError
+from app.services.placement_hooks import taking_from
 from app.services.costing import create_adjustment, get_on_order_qty_by_material
 from app.services.csv_io import export_materials_csv, import_materials_csv
 from app.services.file_storage import delete_asset_file, resolve_asset_path, save_material_image, thumbnail_path_for
@@ -370,7 +371,8 @@ async def get_stock_history(
 async def create_material_adjustment(
     material_id: int, payload: MaterialAdjustmentCreate, session: AsyncSession = Depends(get_db)
 ) -> Material:
-    await create_adjustment(session, material_id, payload.mode, payload.value, payload.reason)
+    with taking_from(payload.from_location_id):
+        await create_adjustment(session, material_id, payload.mode, payload.value, payload.reason)
     return await _get_material_with_manufacturer(session, material_id)
 
 

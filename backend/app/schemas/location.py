@@ -140,6 +140,14 @@ class PlacementRead(BaseModel):
     is_primary: bool
 
 
+class ReplenishRead(BaseModel):
+    to_location_id: int
+    to_path: list[str]
+    from_location_id: int
+    from_path: list[str]
+    qty: Decimal
+
+
 class StoredInRead(BaseModel):
     name: str
     unit: str
@@ -148,6 +156,8 @@ class StoredInRead(BaseModel):
     unassigned: Decimal
     drift: Decimal
     follows_stock: bool
+    # Set when the primary place is empty but another still holds stock.
+    replenish: ReplenishRead | None = None
     placements: list[PlacementRead]
 
 
