@@ -1,4 +1,5 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { StoredInSection } from "../../components/locations/StoredInSection";
 import { LayersIcon, ProductImage } from "../../components/products/ProductImage";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo, useState } from "react";
@@ -997,6 +998,10 @@ function MaterialDetail() {
               <PurchaseOrderHistory history={history} unit={material.unit} />
             )}
           </section>
+        )}
+
+        {activeTab === "stock" && (
+          <StoredInSection item={{ material_id: material.id }} itemName={material.name} />
         )}
 
         {activeTab === "stock" && (

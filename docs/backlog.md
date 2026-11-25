@@ -54,6 +54,22 @@ The trigger is narrow and not fully isolated: a UNIQUE violation on a session th
 
 ---
 
+## Identifying stock: SKUs and barcodes
+
+### Material SKUs
+
+**Problem:** Products have a SKU (unique, with generation in `services/sku_generation.py`), but materials have only a free-text `barcode` and no SKU at all. Anywhere the app lists items side by side it has a SKU column for products and a blank for materials: the location contents table, the "Place an item here" picker, and the stock-take sheets all show nothing for a material, and a material can only be found by name or barcode. Suppliers' own part numbers have nowhere to live either.
+
+**Ask:** A `sku` on `Material` (nullable, unique when set), editable on the material, included in the CSV import/export and in list search, and shown wherever a material appears next to a product. Decide whether to offer generated SKUs the way products do, and whether the supplier's part number is a separate field or this one. `services/placements.py` already passes a `sku` through for materials as `None`; that becomes the real value.
+
+### Barcodes that carry a quantity, for faster stock takes
+
+**Problem:** A material's barcode today only identifies the material. Counting a shelf means finding each item and typing a number, which is the slow part of a stock take. A barcode could carry a quantity as well as an identity: a bag, spool or box is sold in a fixed amount, so scanning its label could mean "one more of these, N units".
+
+**Ask:** Let a material have more than one barcode, each with an optional quantity (a case of 12, a 1 kg bag, a single spool). On the count sheet a scan finds the line and either adds that quantity or confirms it, so a counter scans instead of typing. Open questions to settle first: whether a scan adds to or sets the counted figure; how a scan behaves for an item in several locations, where scanning a location label first (see `docs/plan-locations.md` §7) says where the count belongs; and how this squares with `MaterialAdjustment`'s set versus adjust modes. Depends on Material SKUs only loosely, but both want the same "find an item by what's printed on it" lookup.
+
+---
+
 ## Catalogue tidy-up
 
 ### Merge two products

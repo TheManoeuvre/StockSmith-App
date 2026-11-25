@@ -5,6 +5,7 @@ import {
   DashboardIcon,
   HelpIcon,
   InsightsIcon,
+  LocationsIcon,
   MaterialsIcon,
   OrdersIcon,
   ProductsIcon,
@@ -237,6 +238,7 @@ function RootChrome() {
       items: [
         { label: "Materials", to: "/materials", icon: <MaterialsIcon />, hint: "Raw materials and how much is left", ...badges.materials },
         { label: "Purchases", to: "/purchases", icon: <PurchasesIcon />, hint: "Supplier orders and deliveries", ...badges.purchases },
+        { label: "Locations", to: "/locations", icon: <LocationsIcon />, tone: "neutral", hint: "Where each material and product is kept" },
         { label: "Stock Take", to: "/stock-takes", icon: <StockTakeIcon />, hint: "Count stock and correct the books", ...badges.stockTake },
       ],
     },

@@ -86,6 +86,11 @@ have, and what each one costs to make.
 
 **You're at your second milestone:** StockSmith knows what you can make and what it costs.
 
+### Optional: say where things are kept
+
+Once your stock is in, you can record **where** it lives, from a room down to a box, on the
+**Locations** page. It's optional and can wait. See [Locations](locations.md).
+
 ## 6. Bring in your orders
 
 Either connect a store so orders arrive by themselves, or add orders by hand on the **Orders**

@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.material import Material, MaterialAdjustment, MaterialAdjustmentMode
+from app.services.placement_hooks import ItemRef, apply_stock_delta
 from app.services.purchase_sql import ON_ORDER_BY_MATERIAL_SQL
 from app.services.validation import validate_qty_for_unit
 
@@ -142,9 +143,24 @@ async def recompute_material(session: AsyncSession, material_id: int) -> Materia
         else:  # adjustment — qty delta only, never touches avg_cost
             qty = qty + Decimal(row.qty)
 
+    previous_qty = Decimal(material.current_qty or 0)
     material.current_qty = qty
     material.avg_unit_cost = avg_cost
     await session.flush()
+
+    # A material kept in exactly one location follows its stock automatically. Done here, on
+    # the change in the derived total, because this is the one place current_qty is written —
+    # so it also covers edits to old purchases and builds. See services/placement_hooks.py.
+    if qty != previous_qty:
+        delta = qty - previous_qty
+        await session.run_sync(
+            lambda sync_session: apply_stock_delta(
+                sync_session,
+                ItemRef(material_id=material_id),
+                delta,
+                "Stock went down" if delta < 0 else "Stock went up",
+            )
+        )
 
     # Deferred import: avoids a module-load-time cycle (listing_push pulls in kitting.py,
     # which is otherwise unrelated to costing.py). Fans this material's changed qty out

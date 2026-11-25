@@ -34,6 +34,7 @@ from app.routers import (
     restore,
     shipping_profiles,
     stock_adjustments,
+    locations,
     stock_takes,
     suppliers,
     system,
@@ -169,6 +170,8 @@ app.include_router(platform_config.router, prefix="/api/v1")
 app.include_router(shipping_profiles.router, prefix="/api/v1")
 app.include_router(stock_adjustments.router, prefix="/api/v1")
 app.include_router(stock_takes.router, prefix="/api/v1")
+app.include_router(locations.router, prefix="/api/v1")
+app.include_router(locations.placements_router, prefix="/api/v1")
 app.include_router(backups.router, prefix="/api/v1")
 app.include_router(restore.router, prefix="/api/v1")
 app.include_router(notifications.settings_router, prefix="/api/v1")

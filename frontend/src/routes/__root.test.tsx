@@ -56,7 +56,7 @@ beforeEach(() => setRoutes([]));
 it("orders the nav by the daily loop, grouped under Sell, Stock and Analyse", async () => {
   const nav = await renderShell();
   const labels = nav.getAllByRole("link").map((a) => a.textContent?.replace(/\d+$/, ""));
-  expect(labels).toEqual(["Dashboard", "Orders", "Products", "Materials", "Purchases", "Stock Take", "Insights"]);
+  expect(labels).toEqual(["Dashboard", "Orders", "Products", "Materials", "Purchases", "Locations", "Stock Take", "Insights"]);
   expect(nav.getByText("Sell")).toBeInTheDocument();
   expect(nav.getByText("Stock")).toBeInTheDocument();
   expect(nav.getByText("Analyse")).toBeInTheDocument();

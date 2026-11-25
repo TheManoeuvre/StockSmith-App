@@ -83,6 +83,15 @@ export function StockTakeIcon() {
   );
 }
 
+export function LocationsIcon() {
+  return (
+    <NavIcon>
+      <path d="M12 21.5s7-6.1 7-11.5a7 7 0 0 0-14 0c0 5.4 7 11.5 7 11.5Z" />
+      <circle cx="12" cy="10" r="2.5" />
+    </NavIcon>
+  );
+}
+
 export function InsightsIcon() {
   return (
     <NavIcon>

@@ -1,6 +1,9 @@
 # Plan — Storage locations
 
-Written 2026-11-24 against 0.28.0. Not started.
+Written 2026-11-24 against 0.28.0. **Phases 1 and 2 are built** (2026-11-25): labels at 51 × 25 mm and
+6 × 4 in, the print screen, Settings › Labels, scan-to-jump, and CSV import and export of the layout. The QR
+code option was left out because nothing can use it yet. Count by location (phase 3) and the phase 4 hooks
+are still to do.
 
 StockSmith tracks *how much* of everything there is, but not *where it is*. This plan adds
 **locations**: a free-form tree (`Office › Shelf 01 › Grey Box 03`, or just `Box A1`) that

@@ -35,7 +35,10 @@ from app.schemas.product import BomLine, ProductCreate
 from app.schemas.purchase import PurchaseCreate, PurchaseLineInput
 from app.schemas.variant import VariantBomLine, VariantCreate
 from app.services import business_presets
+from app.services import locations as locs
+from app.services import placements
 from app.services.kitting import replace_default_kitting_bom
+from app.services.placement_hooks import ItemRef
 from app.services.costing import create_adjustment
 from app.services.variant_boms import apply_variant_bom_overrides
 
@@ -66,6 +69,64 @@ _BUYERS = [
 
 async def _ids(session: AsyncSession) -> dict[str, int]:
     return {m.name: m.id for m in (await session.scalars(select(Material))).all()}
+
+
+async def _place_materials(session: AsyncSession, ids: dict[str, int]) -> dict[str, int]:
+    """Gives the sample a storage layout and puts the opening stock in it.
+
+    Most items sit in a single location, so the builds and shipped orders that follow visibly
+    take their stock off the shelf by themselves. The amber jars are split between two places
+    with a little left unassigned, and the product labels are deliberately left unplaced, so the
+    Locations page has every kind of state to show.
+    """
+    workshop = await locs.create_location(session, "Workshop", None)
+    stockroom = await locs.create_location(session, "Stockroom", None)
+    loft = await locs.create_location(session, "Loft", None)
+    wax_shelf = await locs.create_location(session, "Wax shelf", workshop.id)
+    oils_rack = await locs.create_location(session, "Oils rack", workshop.id)
+    jar_store = await locs.create_location(session, "Jar store", workshop.id)
+    packing = await locs.create_location(session, "Packing bench", workshop.id)
+    bins = await locs.generate_range(session, oils_rack.id, "Bin {1-3}")  # the range generator at work
+    shelves = await locs.generate_range(session, stockroom.id, "Shelf {A-B}")
+    bin1, bin2, bin3 = bins
+    shelf_a, shelf_b = shelves
+
+    layout: list[tuple[str, int, int]] = [
+        ("Soy container wax", wax_shelf.id, 20000),
+        ("Rapeseed wax", wax_shelf.id, 10000),
+        ("Fig & cassis fragrance oil", bin1.id, 1000),
+        ("Sea salt & sage fragrance oil", bin2.id, 1000),
+        ("Lavender essential oil", bin3.id, 500),
+        ("Cotton wick, small", shelf_a.id, 300),
+        ("Cotton wick, large", shelf_a.id, 200),
+        ("Amber jar 20cl", jar_store.id, 96),
+        ("Travel tin 100ml", jar_store.id, 100),
+        ("Mailer box", shelf_b.id, 150),
+        ("Thank-you card", shelf_b.id, 250),
+        # Amber jar 30cl is split below; Product label is left unplaced on purpose.
+    ]
+    for name, location_id, qty in layout:
+        await placements.place(session, ItemRef(material_id=ids[name]), location_id, Decimal(qty))
+    jars30 = ItemRef(material_id=ids["Amber jar 30cl"])
+    await placements.place(session, jars30, jar_store.id, Decimal(40))
+    await placements.place(session, jars30, loft.id, Decimal(20))  # 12 of the 72 stay unassigned
+    return {"packing": packing.id}
+
+
+async def _place_finished_goods(
+    session: AsyncSession, loc: dict[str, int], candle_id: int, variants: dict[str, int], tin_id: int, melt_id: int
+) -> None:
+    """Puts the freshly built candles on the packing bench, so shipping an order takes them off."""
+    for variant_id in variants.values():
+        stock = (await session.get(ProductVariant, variant_id)).current_stock
+        if stock > 0:
+            await placements.place(
+                session, ItemRef(product_id=candle_id, variant_id=variant_id), loc["packing"], Decimal(stock)
+            )
+    for product_id in (tin_id, melt_id):
+        stock = (await session.get(Product, product_id)).current_stock
+        if stock > 0:
+            await placements.place(session, ItemRef(product_id=product_id), loc["packing"], Decimal(stock))
 
 
 async def build_sample(session: AsyncSession) -> None:
@@ -114,6 +175,7 @@ async def build_sample(session: AsyncSession) -> None:
         session,
     )
     await purchases.receive_purchase(opening.id, session)
+    loc = await _place_materials(session, ids)
 
     # Usual packaging first, so every product created below starts with it.
     await replace_default_kitting_bom(
@@ -237,6 +299,7 @@ async def build_sample(session: AsyncSession) -> None:
         await builds.record_build(BuildCreate(product_id=candle.id, variant_id=variants[variant_name], qty_built=qty), session)
     await builds.record_build(BuildCreate(product_id=tin.id, qty_built=14, qty_failed=2), session)
     await builds.record_build(BuildCreate(product_id=melt.id, qty_built=20), session)
+    await _place_finished_goods(session, loc, candle.id, variants, tin.id, melt.id)
 
     # Orders over the last three months. Most are sent; the newest few are waiting, and the
     # last asks for more large sea-salt candles than are on the shelf — so the Dashboard has

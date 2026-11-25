@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router";
+import { StoredInSection } from "../locations/StoredInSection";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useMaterialCategories } from "../../hooks/useMaterialCategories";
@@ -390,6 +391,22 @@ export function StockSection({
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Where it's kept. A product with variants is placed per variant, because the variants
+          hold the stock. */}
+      <div className="flex flex-col gap-3">
+        {hasActiveVariants ? (
+          activeVariants.map((v) => (
+            <StoredInSection
+              key={v.id}
+              item={{ product_id: productId, variant_id: v.id }}
+              itemName={`${product?.name ?? "Product"} — ${v.variant_name}`}
+            />
+          ))
+        ) : (
+          <StoredInSection item={{ product_id: productId }} itemName={product?.name ?? "Product"} />
+        )}
+      </div>
+
       <div className="flex flex-col gap-3">
         <h3 className="text-md font-semibold">Record a build</h3>
         <form

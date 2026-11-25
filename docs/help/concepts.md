@@ -99,6 +99,13 @@ From recent orders, StockSmith works out how fast each material is being used an
 weeks your stock will last. The Materials page and Dashboard warn you when a material is running
 low. The thresholds are in **Settings › Forecasting**.
 
+## Locations
+
+A **location** is a place you keep stock: a shelf, a box, a room. Locations nest, so a box can sit on
+a shelf in a workshop, and you say how much of each material or product is in each one. An item in
+exactly one place keeps that quantity up to date by itself as you build and sell. See
+[Locations](locations.md).
+
 ## Stock takes
 
 A **stock take** is a count of what's actually on your shelves. Approving one corrects
