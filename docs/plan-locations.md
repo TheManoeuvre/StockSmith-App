@@ -1,9 +1,9 @@
 # Plan — Storage locations
 
-Written 2026-11-24 against 0.28.0. **Phases 1 and 2 are built** (2026-11-25): labels at 51 × 25 mm and
-6 × 4 in, the print screen, Settings › Labels, scan-to-jump, and CSV import and export of the layout. The QR
-code option was left out because nothing can use it yet. Count by location (phase 3) and the phase 4 hooks
-are still to do.
+Written 2026-11-24 against 0.28.0. **Phases 1, 2 and 3 are built** (2026-11-25): labels at 51 × 25 mm and
+6 × 4 in, the print screen, Settings › Labels, scan-to-jump, CSV import and export of the layout, and count by
+location (a scope on Stock Take, §7.1). The QR code option was left out because nothing can use it
+yet. The phase 4 hooks are still to do.
 
 StockSmith tracks *how much* of everything there is, but not *where it is*. This plan adds
 **locations**: a free-form tree (`Office › Shelf 01 › Grey Box 03`, or just `Box A1`) that
@@ -258,7 +258,50 @@ Extends Stock Take with a **By location** scope. Pick a location; its subtree is
 - Existing item-scope stock takes are unchanged.
 
 > This is the fiddliest phase because it is where the placement ledger and the stock ledger meet
-> in both directions. It gets its own plan section before it is built.
+> in both directions. It gets its own design note, below, before it is built.
+
+### 7.1 Design note (phase 3)
+
+**Not a new process: a scope on Stock Take.** A stock take can be limited **by location**, picked
+alongside Materials and Finished stock (and combined with their category and "due" filters). The
+sheet then has **one line per item per place**, grouped by place in shelf order, instead of one
+line per item. Everything else about Stock Take (the sheet, CSV, review of flagged lines,
+approve and close) is unchanged. An early draft built this as a separate "count" with its own
+tables; that was dropped because it duplicated the whole lifecycle.
+
+Under the hood: `stock_takes.location_id` and, on each line, `location_id`, a `location_label`
+snapshot of the path (so the sheet survives a rename), and `found`. The per-take uniqueness of a
+line now includes the place. Item-scope takes leave all of these empty and behave as before.
+
+**What approving a by-location line does.** Let *expected* be the placement's quantity when the
+take started, *counted* what was entered, *delta* = counted − expected.
+
+1. Blank → skipped; nothing changes and the item is not dated (leaving it blank asserts nothing).
+2. The placement's quantity has changed since the take started → **conflict**, resolved by hand
+   (*Accept counted* re-baselines against what is there now; *Keep system* drops the line).
+3. A short count on a product with units allocated to open orders → conflict, the same rule and
+   reason as an item-scope line (the boxed units are off the shelf but still in stock).
+4. Otherwise the placement is set to *counted*, and the item's total moves by what the count
+   **proves**, through the ordinary adjust path:
+   - **Fewer than expected:** the whole shortfall comes off the total.
+   - **More than expected:** found stock is taken from the item's **Unassigned** first, because
+     stock that was never placed has to be somewhere. Only the excess over Unassigned raises the
+     total. *(Refinement of the plan above: a plain delta would double-count the first time anyone
+     counts stock they hadn't yet placed.)*
+5. If the placement is the item's only one and nothing is Unassigned, the count is a full count
+   of the item, so it is a `set` and dates the item. Anything else is an `adjust` and does not.
+
+The automatic following of single-placement items is paused while a line applies, so one count
+writes one history row (`count`), not a count plus an auto-add. The adjustment reason reads
+*"Stock take #n at Workshop › Shelf"*.
+
+**Found items.** *Add an item found here* puts a line on the sheet for an item with no placement
+in that spot (or one placed since). Expected is whatever the placement holds, nothing if it
+doesn't exist; it follows the same rules, so found stock is taken from Unassigned first.
+
+**Starting one.** *Count* on the Locations page opens the Stock Take start form with that place
+chosen and "only what's due" off, or goes straight to the take already open for that place. A
+place with nothing recorded in it can still be counted, which is how stock found there is entered.
 
 ---
 

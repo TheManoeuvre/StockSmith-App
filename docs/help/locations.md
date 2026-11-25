@@ -129,6 +129,29 @@ you pick is remembered on this computer, and you can also set it under **Setting
 Set your printer's paper size to match the label before printing. If labels come out cut off or
 on the wrong size of page, that is almost always the printer's paper size setting.
 
+## Counting a location
+
+Counting what is on a shelf is a [stock take](concepts.md#stock-takes) limited to that place. Open
+the location and press **Count**, or start a stock take and use **Only what is kept in** to pick
+one. Everything inside the location you choose is included.
+
+The sheet has a line for each item in each place, grouped by place in shelf order, with the amount
+you expect there. Enter what you actually find, as on any stock take. Leave a line blank to leave it
+alone. If something turns up that the sheet doesn't list, use **Add an item found here**.
+
+When you approve:
+
+- Each place is set to the amount you counted.
+- The item's **total** changes only by what the count proves. If you count fewer than expected,
+  the shortfall comes off your stock. If you count more, StockSmith first assumes it is stock
+  you hadn't placed anywhere yet (the **Unassigned** amount) and only adds to your stock for
+  anything beyond that. So placing stock for the first time, by counting it, never doubles it.
+- An item kept in several places isn't dated as counted from one shelf, because the others
+  haven't been looked at. An item kept in one place, with nothing unassigned, is.
+- If the amount changed while you were counting (someone moved stock), or finished goods are
+  allocated to open orders and you counted fewer, that line is held back for you to settle, the
+  same as any stock take line.
+
 ## Archiving and deleting
 
 A location that has never held anything can be **deleted**. Once it has, it can only be

@@ -116,6 +116,10 @@ You don't have to count everything every time. Each item has a **count class** â
 saying how often it's worth counting. A is counted most often, C least. Set the classes and how
 often each is counted in **Settings â€º Stock counts**. The Dashboard shows what's due.
 
+Once you have [locations](locations.md#counting-a-location) you can also count **one place**: a
+stock take limited to a shelf or box (and everything inside it), with a line for each item in each
+place.
+
 ## Stores and listings
 
 A connected **store** (Square, Etsy, eBay) brings its orders in. For Etsy and eBay, StockSmith

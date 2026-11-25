@@ -7,6 +7,7 @@ import {
   type LocationHistoryEntry,
   type LocationRow,
 } from "../api/locations";
+import { stockTakesApi } from "../api/stockTakes";
 import { AddLocationModal } from "../components/locations/AddLocationModal";
 import { GenerateRangeModal } from "../components/locations/GenerateRangeModal";
 import { LocationTree } from "../components/locations/LocationTree";
@@ -369,6 +370,14 @@ function LocationPane({
   });
   const [moveItemStored, setMoveItemStored] = useState<Awaited<ReturnType<typeof locationsApi.storedIn>> | null>(null);
   const unplace = useMutation({ mutationFn: locationsApi.unplace, onSuccess: invalidate });
+  // Counting a place is an ordinary stock take scoped to it. If one is already open for this
+  // location the button goes back to it; otherwise it opens the start form with the place chosen.
+  const { data: takes } = useQuery({ queryKey: ["stock-takes"], queryFn: stockTakesApi.list });
+  const openTake = takes?.find((t) => t.status === "open" && t.location_id === locationId);
+  const startCount = () =>
+    void (openTake
+      ? navigate({ to: "/stock-takes/$stockTakeId", params: { stockTakeId: String(openTake.id) } })
+      : navigate({ to: "/stock-takes", search: { location: locationId } }));
   const reduce = useMutation({
     mutationFn: ({ id, qty }: { id: number; qty: string }) => locationsApi.reduce(id, qty),
     onSuccess: invalidate,
@@ -447,6 +456,7 @@ function LocationPane({
               Print label
             </ActionButton>
             {hasStock && <ActionButton onClick={() => setDialog({ kind: "empty" })}>Empty into…</ActionButton>}
+            <ActionButton onClick={startCount}>{openTake ? "Continue count" : "Count"}</ActionButton>
             <span className="flex-1" />
             {canDelete ? (
               <button onClick={() => setDialog({ kind: "delete" })} className="rounded-md border border-slate-300 px-3 py-1.5 text-sm text-red-700">

@@ -22,6 +22,7 @@ from app.models.stock_take import StockTake, StockTakeLine, StockTakeLineStatus,
 from app.models.variant import ProductVariant
 from app.schemas.abc import DueForCountItemRead
 from app.schemas.stock_take import (
+    FoundLine,
     ApproveResult,
     BulkLineCountRequest,
     LineCountUpdate,
@@ -37,7 +38,8 @@ from app.schemas.stock_take import (
     StockTakeScope,
     UnresolvedVariance,
 )
-from app.services import abc, stock_takes
+from app.services import abc, stock_take_locations, stock_takes
+from app.services.placement_hooks import ItemRef
 from app.services.csv_io import export_stock_take_csv, import_stock_take_csv
 
 router = APIRouter(prefix="/stock-takes", tags=["stock-takes"], dependencies=[Depends(require_auth)])
@@ -106,6 +108,9 @@ def _to_line_read(grouped: stock_takes.GroupedLine, unit_cost: Decimal | None = 
         material_id=line.material_id,
         product_id=line.product_id,
         variant_id=line.variant_id,
+        location_id=line.location_id,
+        location_label=line.location_label,
+        found=line.found,
         name=grouped.name,
         unit=grouped.unit,
         section=grouped.section,
@@ -175,6 +180,7 @@ def _take_fields(take: StockTake, lines: list[StockTakeLine]) -> dict:
         "includes_materials": take.includes_materials,
         "includes_products": take.includes_products,
         "overdue_only": take.overdue_only,
+        "location_id": take.location_id,
         "scope_description": take.scope_description,
         "started_at": take.started_at,
         "closed_at": take.closed_at,
@@ -333,6 +339,23 @@ async def resolve_line(
 ) -> StockTakeDetail:
     await stock_takes.resolve_line(session, stock_take_id, line_id, payload.action)
     return await _read_take(session, await stock_takes.get_take_or_404(session, stock_take_id))
+
+
+@router.post("/{stock_take_id}/lines", response_model=StockTakeDetail, status_code=status.HTTP_201_CREATED)
+async def add_found_line(
+    stock_take_id: int, payload: FoundLine, session: AsyncSession = Depends(get_db)
+) -> StockTakeDetail:
+    """Adds an item to a by-location take that turned up where it was not expected."""
+    take = await stock_takes.get_take_or_404(session, stock_take_id)
+    if take.status is StockTakeStatus.closed:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="This stock take is closed")
+    ref = ItemRef(material_id=payload.material_id, product_id=payload.product_id, variant_id=payload.variant_id)
+    line = await stock_take_locations.add_found(session, take, payload.location_id, ref, payload.counted_qty, payload.notes)
+    if payload.counted_qty is not None:
+        await stock_takes.set_line_count(session, stock_take_id, line.id, payload.counted_qty, payload.notes)
+    else:
+        await session.commit()
+    return await _read_take(session, take)
 
 
 @router.get("/{stock_take_id}/export")

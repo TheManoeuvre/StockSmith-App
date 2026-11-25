@@ -20,6 +20,8 @@ import { FilterTabs } from "../../components/common/FilterTabs";
 import { Th } from "../../components/common/ListTable";
 import { formatDayMonth } from "../../lib/format";
 import { HelpLink } from "../../components/help/HelpLink";
+import { LocationPicker } from "../../components/locations/LocationPicker";
+import { useLocationTree } from "../../components/locations/useLocations";
 import { PAGE_HELP } from "../../lib/help";
 import { EmptyState } from "../../components/common/EmptyState";
 
@@ -152,8 +154,14 @@ export const Route = createFileRoute("/stock-takes")({
   component: StockTakesLayout,
   // Preselects the scope picker with "due for counting only", so the dashboard's due list
   // can link straight into starting a take for exactly those items.
-  validateSearch: (search: Record<string, unknown>): { overdue?: boolean } =>
-    search.overdue ? { overdue: true } : {},
+  // `location` comes from "Count" on the Locations page: start a take scoped to that place.
+  validateSearch: (search: Record<string, unknown>): { overdue?: boolean; location?: number } => {
+    const location = Number(search.location);
+    return {
+      ...(search.overdue ? { overdue: true } : {}),
+      ...(Number.isInteger(location) && location > 0 ? { location } : {}),
+    };
+  },
 });
 
 function StockTakesLayout() {
@@ -168,7 +176,9 @@ function StockTakesLayout() {
 function StockTakesListContent() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const overdueFromUrl = Route.useSearch().overdue ?? false;
+  const { overdue: overdueFromUrl = false, location: locationFromUrl } = Route.useSearch();
+  const { data: locationTree } = useLocationTree();
+  const [locationId, setLocationId] = useState<number | null>(locationFromUrl ?? null);
 
   const {
     data: takes,
@@ -180,7 +190,7 @@ function StockTakesListContent() {
     queryFn: productCategoriesApi.list,
   });
 
-  const [showPicker, setShowPicker] = useState(overdueFromUrl);
+  const [showPicker, setShowPicker] = useState(overdueFromUrl || locationFromUrl != null);
   const [tab, setTab] = useState<"all" | "open" | "closed">("all");
   const [includeMaterials, setIncludeMaterials] = useState(true);
   const [includeProducts, setIncludeProducts] = useState(true);
@@ -189,7 +199,9 @@ function StockTakesListContent() {
   const [typeIds, setTypeIds] = useState<Set<number>>(new Set());
   // On by default: a take is normally "what's due", and counting everything is the
   // deliberate exception.
-  const [overdueOnly, setOverdueOnly] = useState(true);
+  // Counting a particular place is the other deliberate exception: you are about to walk it, so
+  // count everything in it.
+  const [overdueOnly, setOverdueOnly] = useState(locationFromUrl == null);
   // null = every item the filters match; a set = a hand-picked subset (keys from itemKey).
   const [selected, setSelected] = useState<Set<string> | null>(null);
   const [showItems, setShowItems] = useState(false);
@@ -201,8 +213,9 @@ function StockTakesListContent() {
       material_category_ids: [...categoryIds],
       product_category_ids: [...typeIds],
       overdue_only: overdueOnly,
+      location_id: locationId,
     }),
-    [includeMaterials, includeProducts, categoryIds, typeIds, overdueOnly],
+    [includeMaterials, includeProducts, categoryIds, typeIds, overdueOnly, locationId],
   );
   // A pick only makes sense against the filters it was made under.
   useEffect(() => {
@@ -334,6 +347,36 @@ function StockTakesListContent() {
             </label>
           </div>
 
+          {/* Only offered once locations exist: until then it would be a field that can't be used. */}
+          {locationTree && locationTree.locations.length > 0 && (
+            <div className="flex flex-col gap-1">
+              <p className="text-sm">Only what is kept in (anywhere if none chosen)</p>
+              <div className="flex max-w-md items-center gap-2">
+                <div className="flex-1">
+                  <LocationPicker
+                    rows={locationTree.locations}
+                    value={locationId}
+                    onChange={setLocationId}
+                    disabled={new Map(locationTree.locations.filter((r) => r.archived).map((r) => [r.id, "archived"]))}
+                    placeholder="Anywhere"
+                    label="Count only this location"
+                  />
+                </div>
+                {locationId != null && (
+                  <button type="button" onClick={() => setLocationId(null)} className="text-xs text-blue-700 hover:underline">
+                    Clear
+                  </button>
+                )}
+              </div>
+              {locationId != null && (
+                <p className="text-xs text-slate-500">
+                  The sheet has a line for each item in each place inside it, in shelf order. Each place is set to what you
+                  count, and your stock changes only by the difference.
+                </p>
+              )}
+            </div>
+          )}
+
           {includeMaterials && (
             <div>
               <p className="mb-1 text-sm">
@@ -423,7 +466,7 @@ function StockTakesListContent() {
               disabled={
                 createMutation.isPending ||
                 !preview ||
-                preview.candidate_count === 0
+                (preview.candidate_count === 0 && locationId == null)
               }
               className="rounded bg-slate-900 px-4 py-2 text-white disabled:cursor-not-allowed disabled:opacity-50"
             >

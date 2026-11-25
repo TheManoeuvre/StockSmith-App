@@ -27,7 +27,14 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   at 51 × 25 mm (the default), 6 × 4 in, or a size you choose. Print one, or tick several (or a
   whole branch) and print them a page each, straight after generating a range if you like. The
   size is under **Settings › Labels**. A scanner can type a location's code into the new box on
-  the Locations page to jump straight to it. Counting by location comes later.
+  the Locations page to jump straight to it.
+- **Count one place in a stock take.** Press **Count** on a location, or pick **Only what is kept
+  in** when you start a stock take, to count a shelf or box and everything inside it. The sheet has a
+  line for each item in each place, in shelf order. Approving sets each place to your count, and your
+  stock changes only by what the count proves: extra stock you find is taken from what you hadn't
+  placed yet before it adds anything, so counting stock for the first time never doubles it. Items
+  that turn up unexpectedly can be added to the sheet, and a line is held back for you to settle if
+  the numbers moved while you were counting.
 - **Import and export locations as a spreadsheet.** **Export CSV** on the Locations page saves your
   whole layout, one row per location with its path (`Workshop > Oils rack > Bin 1`), and
   **Import CSV** reads one back, creating any missing parents along the way. A row with a problem

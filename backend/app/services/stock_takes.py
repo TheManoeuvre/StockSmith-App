@@ -24,6 +24,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
 
+from dataclasses import replace
+
 from fastapi import HTTPException, status
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,6 +33,7 @@ from sqlalchemy.orm import selectinload
 
 from app.db import async_session_factory
 from app.models.material import LegacyMaterialCategory, Material, MaterialAdjustment, MaterialAdjustmentMode
+from app.models.location import StockPlacement
 from app.models.material_category import MaterialCategory
 from app.models.product import Product
 from app.models.product_category import ProductCategory
@@ -41,6 +44,8 @@ from app.models.stock_take import StockTake, StockTakeLine, StockTakeLineStatus,
 from app.models.variant import ProductVariant
 from app.schemas.stock_take import ScopeItemRead, ScopePreview, ScopeWarning, StockTakeScope
 from app.services import abc
+from app.services import locations as locs
+from app.services import stock_take_locations as place_counts
 from app.services.costing import create_adjustment
 from app.services.platforms.base import ensure_utc
 from app.services.stock_adjustments import create_stock_adjustment
@@ -62,9 +67,13 @@ class _Candidate:
     # When this row was last counted, or None if it never has been. Read here rather than
     # looked up again later so the unmoved check costs no extra queries.
     last_stock_take_at: datetime | None = None
+    # By-location takes: the place this line is about, and its path as it reads now.
+    location_id: int | None = None
+    location_label: str | None = None
 
     @property
     def key(self) -> tuple:
+        """The item, whichever place it is counted in: what scope filters and warnings match on."""
         return (self.material_id, self.product_id, self.variant_id)
 
 
@@ -177,7 +186,37 @@ async def resolve_candidates(session: AsyncSession, scope: StockTakeScope) -> li
     if scope.selected_items is not None:
         picked = {(i.material_id, i.product_id, i.variant_id) for i in scope.selected_items}
         candidates = [c for c in candidates if c.key in picked]
+    if scope.location_id is not None:
+        candidates = await _by_location(session, scope.location_id, candidates)
     return candidates
+
+
+async def _by_location(session: AsyncSession, location_id: int, items: list[_Candidate]) -> list[_Candidate]:
+    """Narrows item candidates to what is placed in the location or inside it, one per place.
+
+    The same filters (categories, due, hand-picked) decide which items are eligible; this only
+    swaps "the item" for "the item in each place it is kept", expecting what that place holds.
+    """
+    location = await locs.get_location(session, location_id)
+    if location.archived_at is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="That location is archived")
+    nodes = await locs.load_nodes(session)
+    in_scope = {location_id} | locs.descendant_ids(nodes, location_id)
+    by_key = {c.key: c for c in items}
+    rows = (await session.scalars(select(StockPlacement).where(StockPlacement.location_id.in_(in_scope)))).all()
+    out = []
+    for row in rows:
+        item = by_key.get((row.material_id, row.product_id, row.variant_id))
+        if item is not None:
+            out.append(
+                replace(
+                    item,
+                    expected_qty=Decimal(row.qty or 0),
+                    location_id=row.location_id,
+                    location_label=locs.display_path(nodes, row.location_id),
+                )
+            )
+    return out
 
 
 async def list_scope_items(session: AsyncSession, scope: StockTakeScope) -> list[ScopeItemRead]:
@@ -207,7 +246,11 @@ async def list_scope_items(session: AsyncSession, scope: StockTakeScope) -> list
         else {}
     )
     out = []
+    seen: set[tuple] = set()
     for c in candidates:
+        if c.key in seen:  # a by-location scope lists an item once however many places hold it
+            continue
+        seen.add(c.key)
         if c.material_id is not None:
             section, group = "Materials", materials[c.material_id].category_name or ""
         else:
@@ -262,6 +305,10 @@ async def describe_scope(session: AsyncSession, scope: StockTakeScope) -> str:
     if scope.selected_items is not None:
         n = len(scope.selected_items)
         description += f", {n} hand-picked item{'s' if n != 1 else ''}"
+    if scope.location_id is not None:
+        nodes = await locs.load_nodes(session)
+        if scope.location_id in nodes:
+            description += f", in {locs.display_path(nodes, scope.location_id)}"
     return description[0].upper() + description[1:]
 
 
@@ -405,7 +452,9 @@ async def preview_scope(session: AsyncSession, scope: StockTakeScope) -> ScopePr
 
 async def create_stock_take(session: AsyncSession, scope: StockTakeScope) -> tuple[StockTake, list[ScopeWarning]]:
     candidates = await resolve_candidates(session, scope)
-    if not candidates:
+    # A place with nothing recorded in it can still be counted: that is how stock found there is
+    # entered. An item-scope take with nothing in it is just a mistake.
+    if not candidates and scope.location_id is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Nothing to count: no items match that scope",
@@ -446,6 +495,7 @@ async def create_stock_take(session: AsyncSession, scope: StockTakeScope) -> tup
         includes_materials=scope.include_materials,
         includes_products=scope.include_products,
         overdue_only=scope.overdue_only,
+        location_id=scope.location_id,
         scope_description=description,
     )
     session.add(take)
@@ -462,6 +512,8 @@ async def create_stock_take(session: AsyncSession, scope: StockTakeScope) -> tup
                 expected_qty=c.expected_qty,
                 allocated_qty_at_start=c.allocated_qty,
                 unmoved_since=unmoved.get(c.key),
+                location_id=c.location_id,
+                location_label=c.location_label,
                 status=StockTakeLineStatus.pending,
             )
         )
@@ -747,6 +799,9 @@ async def _approve_one_line(line_id: int, take_id: int) -> StockTakeLineStatus |
         ):
             return None
 
+        if line.location_id is not None:
+            return await _approve_location_line(line_session, line, take_id)
+
         current_qty, allocated, _owner = await _current_qty_and_allocated(line_session, line)
         outcome = _decide(line, current_qty, allocated)
 
@@ -769,6 +824,32 @@ async def _approve_one_line(line_id: int, take_id: int) -> StockTakeLineStatus |
             # write. This session is now unusable; record the outcome from a clean one.
             await _record_conflict_in_new_session(line_id, str(exc.detail), current_qty)
             return StockTakeLineStatus.conflict
+
+
+async def _approve_location_line(session: AsyncSession, line: StockTakeLine, take_id: int) -> StockTakeLineStatus:
+    """A by-location line: judged against its own place, applied as a delta (stock_take_locations)."""
+    if line.counted_qty is None:
+        line.status = StockTakeLineStatus.skipped
+        await session.commit()
+        return StockTakeLineStatus.skipped
+    line_id = line.id
+    line.status = StockTakeLineStatus.applied
+    line.conflict_reason = None
+    try:
+        reason = await place_counts.apply_location_line(session, line, take_id)
+        if reason is None:
+            await session.commit()
+            return StockTakeLineStatus.applied
+        line.status = StockTakeLineStatus.conflict
+        line.conflict_reason = reason
+        await session.commit()
+        return StockTakeLineStatus.conflict
+    except HTTPException as exc:
+        # Pre-checked by the plan, so this means something changed in between. The session is
+        # unusable; record the outcome from a clean one.
+        reason = str(exc.detail)
+    await _record_conflict_in_new_session(line_id, reason, Decimal(0))
+    return StockTakeLineStatus.conflict
 
 
 async def _record_conflict_in_new_session(line_id: int, reason: str, system_qty: Decimal) -> None:
@@ -846,7 +927,15 @@ async def _accept_counted_in_new_session(line_id: int, take_id: int) -> str | No
         line.conflict_reason = None
         line.resolved_at = datetime.now(timezone.utc)
         try:
-            await _apply_line(line_session, line, take_id)
+            if line.location_id is not None:
+                # What the place held has moved on since the take started, so count against now.
+                await place_counts.rebaseline(line_session, line)
+                reason = await place_counts.apply_location_line(line_session, line, take_id)
+                if reason is not None:
+                    await line_session.rollback()
+                    return reason
+            else:
+                await _apply_line(line_session, line, take_id)
             await line_session.commit()
             return None
         except HTTPException as exc:
@@ -1026,6 +1115,27 @@ def group_lines(
     out: list[GroupedLine] = []
     for line in lines:
         name, unit = line_display_name(line, materials, products, variants)
+        if line.location_id is not None or line.location_label:
+            # A by-location sheet is arranged by place, so someone walking the shelves meets
+            # them in order: the path's own natural order, then the item.
+            label = line.location_label or ""
+            out.append(
+                GroupedLine(
+                    line=line,
+                    section="Location",
+                    group=label,
+                    subgroup="",
+                    name=name,
+                    unit=unit,
+                    sort_key=(
+                        -1,
+                        [locs._natural_key(part.strip()) for part in label.split(locs.PATH_SEPARATOR.strip()) if part.strip()],
+                        name.lower(),
+                        line.id,
+                    ),
+                )
+            )
+            continue
         if line.material_id is not None:
             material = materials.get(line.material_id)
             group = (material.category_name if material else None) or ""

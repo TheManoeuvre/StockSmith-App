@@ -14,6 +14,8 @@ current_stock is assigned directly in many places.
 Deliberately imports only models, so app.models can register the listener without a cycle.
 """
 
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -23,6 +25,20 @@ from sqlalchemy.orm import Session, attributes
 from app.models.location import PlacementEvent, PlacementEventKind, StockPlacement
 from app.models.product import Product
 from app.models.variant import ProductVariant
+
+
+# Switched on while a location count applies, which sets the placement itself and writes its own
+# history row; following the stock as well would record the same change twice.
+_following_paused: ContextVar[bool] = ContextVar("placement_following_paused", default=False)
+
+
+@contextmanager
+def following_paused():
+    token = _following_paused.set(True)
+    try:
+        yield
+    finally:
+        _following_paused.reset(token)
 
 
 @dataclass(frozen=True)
@@ -50,7 +66,7 @@ def apply_stock_delta(session: Session, item: ItemRef, delta: Decimal, reason: s
     Takes the plain (sync) Session so it can run inside a flush; async callers reach it through
     ``await session.run_sync(...)``. Never commits.
     """
-    if delta == 0:
+    if delta == 0 or _following_paused.get():
         return
     placements = session.execute(select(StockPlacement).where(*item.owner_filters())).scalars().all()
     if len(placements) != 1:

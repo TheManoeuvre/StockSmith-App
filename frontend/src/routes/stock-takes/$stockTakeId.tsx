@@ -2,6 +2,8 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useCallback, useMemo, useState } from "react";
 import { stockTakesApi } from "../../api/stockTakes";
+import { AddFoundItemModal } from "../../components/locations/AddFoundItemModal";
+import { useLocationTree } from "../../components/locations/useLocations";
 import type { StockTakeDetail, StockTakeLine } from "../../api/types";
 import { Badge } from "../../components/common/Badge";
 import { ConfirmDialog } from "../../components/common/ConfirmDialog";
@@ -96,6 +98,8 @@ function StockTakeDetailPage() {
   );
   const [confirmingApprove, setConfirmingApprove] = useState(false);
   const [confirmingAbandon, setConfirmingAbandon] = useState(false);
+  const [addingFound, setAddingFound] = useState(false);
+  const { data: locationTree } = useLocationTree();
   // Collapsed groups, by key. A two-hundred-line sheet is unusable as one list, and the
   // point of grouping it is to be able to work through one shelf at a time.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -250,6 +254,15 @@ function StockTakeDetailPage() {
               >
                 Review and approve
               </button>
+              {take.location_id != null && (
+                <button
+                  type="button"
+                  onClick={() => setAddingFound(true)}
+                  className="rounded border border-slate-300 px-3 py-1.5 text-sm"
+                >
+                  Add an item found here
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setConfirmingAbandon(true)}
@@ -416,6 +429,11 @@ function StockTakeDetailPage() {
                               >
                                 <td className="p-2 pl-6">
                                   {line.name}
+                                  {line.found && (
+                                    <span className="ml-2 rounded bg-blue-100 px-1.5 py-0.5 text-[11px] text-blue-800">
+                                      found here
+                                    </span>
+                                  )}
                                   {unmoved && (
                                     <span
                                       className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[11px] text-emerald-800"
@@ -562,6 +580,18 @@ function StockTakeDetailPage() {
           onConfirm={() => abandonMutation.mutate()}
           onCancel={() => setConfirmingAbandon(false)}
         />
+        {addingFound && take.location_id != null && locationTree && (
+          <AddFoundItemModal
+            stockTakeId={id}
+            rootId={take.location_id}
+            rows={locationTree.locations}
+            onClose={() => setAddingFound(false)}
+            onAdded={() => {
+              setAddingFound(false);
+              invalidate();
+            }}
+          />
+        )}
       </div>
     </DetailPanel>
   );

@@ -8,7 +8,6 @@ from sqlalchemy import (
     Index,
     Numeric,
     String,
-    UniqueConstraint,
     func,
     text,
 )
@@ -62,6 +61,9 @@ class StockTake(Base):
     includes_materials: Mapped[bool] = mapped_column(default=False, nullable=False)
     includes_products: Mapped[bool] = mapped_column(default=False, nullable=False)
     overdue_only: Mapped[bool] = mapped_column(default=False, nullable=False)
+    # A take scoped "by location" counts what each place inside this one holds, one line per item
+    # per place (docs/plan-locations.md §7.1). NULL is the ordinary item-scope take.
+    location_id: Mapped[int | None] = mapped_column(ForeignKey("locations.id", ondelete="SET NULL"), nullable=True)
     # Rendered once at creation ("Materials in resin, filament") rather than recomputed on
     # read. The scope inputs that produced it can be edited or deleted afterwards — a
     # product category can be renamed or merged away — and the log should still say what was
@@ -102,7 +104,14 @@ class StockTakeLine(Base):
             name="ck_stock_take_lines_exactly_one_owner",
         ),
         CheckConstraint("counted_qty IS NULL OR counted_qty >= 0", name="ck_stock_take_lines_counted_nonneg"),
-        UniqueConstraint("stock_take_id", "material_id", name="uq_stock_take_lines_take_material"),
+        # One line per item, or per item per place on a by-location take (location_id is then set).
+        Index(
+            "uq_stock_take_lines_take_material",
+            "stock_take_id",
+            "material_id",
+            text("COALESCE(location_id, -1)"),
+            unique=True,
+        ),
         # An expression index rather than a plain UniqueConstraint on the three columns:
         # SQLite and Postgres both treat NULLs as distinct in a unique index, so a bare
         # constraint would happily allow two (take, product, NULL) rows — exactly the
@@ -112,6 +121,7 @@ class StockTakeLine(Base):
             "stock_take_id",
             "product_id",
             text("COALESCE(variant_id, -1)"),
+            text("COALESCE(location_id, -1)"),
             unique=True,
         ),
         Index("ix_stock_take_lines_stock_take_id", "stock_take_id"),
@@ -130,6 +140,13 @@ class StockTakeLine(Base):
     variant_id: Mapped[int | None] = mapped_column(
         ForeignKey("product_variants.id", ondelete="CASCADE"), nullable=True
     )
+
+    # By-location takes only: the place this line is about (the counted location or one inside it),
+    # and its path as it read when the take started, so the sheet survives a later rename or move.
+    location_id: Mapped[int | None] = mapped_column(ForeignKey("locations.id", ondelete="SET NULL"), nullable=True)
+    location_label: Mapped[str | None] = mapped_column(String, nullable=True)
+    # Added to the sheet by hand because it was found in a place it wasn't expected.
+    found: Mapped[bool] = mapped_column(default=False, nullable=False)
 
     # The snapshot taken when the take started — what the system believed then, not now.
     # Comparing this against the live quantity at approval is how movement mid-count is
