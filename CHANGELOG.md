@@ -47,6 +47,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   **Import CSV** reads one back, creating any missing parents along the way. A row with a problem
   is skipped and listed; the rest still import.
 
+## [0.29.0] - 2026-11-24
+
 ### Changed
 
 - **Recording a failed build can now scrap only part of it.** Each consumed material gets a
@@ -58,9 +60,21 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Orders shipped on your store but still open in StockSmith are now flagged.** They get a red
   "Shipped on Etsy" (or eBay, Square) badge, and a new **Store mismatch** filter on the Orders
   page lists them. Their stock is still reserved until you finish shipping them here.
+- **Export CSV asks where to save.** Every CSV export now opens a Save As box with the usual file
+  name filled in, instead of dropping the file into Downloads. Cancel it and nothing is saved.
+- **Sort Orders awaiting products by any column** on the Dashboard.
+
+### Added
+
+- **Supplier logos.** Enter a supplier's website and StockSmith fetches its icon; or upload your own
+  under Settings › Lists › Suppliers. Logos show on the Purchases list and on each purchase.
+- **A Dashboard card for orders shipped on your store but not recorded here**, so they can be
+  reconciled. They no longer count as orders still to build.
 
 ### Fixed
 
+- **Orders already shipped on your store no longer inflate the "to build" count** on the Dashboard.
+- **The Shipped figure on an order line stays level** when a "never sent" note sits beneath it.
 - **Confirming the boxes on an order your store already shipped now ships it.** Before, an order
   held for a box check stayed "Ready to ship" after you confirmed, with its stock still reserved.
   The box panel now tells you confirming will ship it, and the button reads "Confirm boxes and
