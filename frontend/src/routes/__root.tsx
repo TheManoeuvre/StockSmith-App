@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { createRootRoute, Link, Outlet, useMatchRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -171,11 +171,18 @@ function useNavBadges() {
 function NavButton({ item }: { item: NavItem }) {
   const matchRoute = useMatchRoute();
   const isActive = !!matchRoute({ to: item.to, fuzzy: item.to !== "/" });
+  // Clicking leaves the pointer (and focus) on the link, which would keep the tooltip open on
+  // the new page. Dismiss it on click; it returns on the next hover.
+  const [dismissed, setDismissed] = useState(false);
   return (
-    <div className="group relative">
+    <div className="group relative" onMouseLeave={() => setDismissed(false)}>
       <Link
         to={item.to}
         aria-label={item.label}
+        onClick={(e) => {
+          setDismissed(true);
+          e.currentTarget.blur();
+        }}
         className={`flex w-full items-center gap-2 rounded-md px-[9px] py-[7px] text-left text-[13px] font-medium hover:bg-slate-100 max-lg:justify-center ${
           isActive ? "bg-slate-100 text-slate-900" : "text-slate-600"
         }`}
@@ -205,7 +212,7 @@ function NavButton({ item }: { item: NavItem }) {
           />
         )}
       </Link>
-      <NavTip label={item.label} hint={item.hint} badge={item.badge} />
+      {!dismissed && <NavTip label={item.label} hint={item.hint} badge={item.badge} />}
     </div>
   );
 }
