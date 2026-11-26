@@ -11,6 +11,8 @@ class StockAdjustmentCreate(BaseModel):
     mode: StockAdjustmentMode = StockAdjustmentMode.adjust
     value: int
     reason: str
+    # Where a decrease comes from when the item is kept in several places. Optional.
+    from_location_id: int | None = None
 
 
 class StockAdjustmentRead(BaseModel):

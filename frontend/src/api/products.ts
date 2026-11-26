@@ -155,5 +155,7 @@ export const stockAdjustmentsApi = {
     mode: "adjust" | "set";
     value: number;
     reason: string;
+    /** Where a decrease comes from when the item is kept in several places. */
+    from_location_id?: number | null;
   }) => api.post<StockAdjustment>("/stock-adjustments", input),
 };

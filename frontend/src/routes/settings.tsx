@@ -23,6 +23,8 @@ import { StoresHub } from "../components/settings/stores/StoresHub";
 import { StorePage } from "../components/settings/stores/StorePage";
 import { STORE_PANEL_IDS, type StorePanelId } from "../components/settings/stores/storePanels";
 import { HelpLink } from "../components/help/HelpLink";
+import { LabelSizeControl } from "../components/locations/LabelSizeControl";
+import { useLabelSize } from "../lib/labels";
 import { PAGE_HELP } from "../lib/help";
 
 const PAGE_IDS = [
@@ -32,6 +34,7 @@ const PAGE_IDS = [
   "forecasting",
   "stock-counts",
   "lists",
+  "labels",
   "backup-restore",
   "notifications",
   "connection",
@@ -55,6 +58,7 @@ function navGroups(updateAvailable: boolean): SettingsNavGroup[] {
         { id: "forecasting", label: "Forecasting" },
         { id: "stock-counts", label: "Stock counts" },
         { id: "lists", label: "Lists" },
+        { id: "labels", label: "Labels" },
       ],
     },
     {
@@ -151,6 +155,7 @@ function Settings() {
           {activePage === "forecasting" && <ForecastSettings />}
           {activePage === "stock-counts" && <StockCountSettings />}
           {activePage === "lists" && <ListsMasterDetail />}
+          {activePage === "labels" && <LabelSettings />}
           {activePage === "backup-restore" && <BackupSettings />}
           {activePage === "notifications" && <NotificationSettings />}
           {activePage === "connection" && <ConnectionSettings />}
@@ -158,6 +163,18 @@ function Settings() {
         </div>
       </div>
     </div>
+  );
+}
+
+function LabelSettings() {
+  const [size, setSize] = useLabelSize();
+  return (
+    <SettingsCard
+      title="Labels"
+      help="The size location labels print at. It is kept on this computer, because the label printer is attached to it."
+    >
+      <LabelSizeControl size={size} onChange={setSize} hint="Used when you print location labels, and as the starting size on the print screen." />
+    </SettingsCard>
   );
 }
 

@@ -14,8 +14,8 @@ vi.mock("@tanstack/react-router", () => ({
 const { setRoutes, calls } = await import("../../test/fakeBackend");
 const { SetupChecklist, ShowSetupChecklist, STEP_COPY } = await import("./SetupChecklist");
 
-const KEYS = ["business_type", "materials", "opening_stock", "kitting", "products", "orders", "offsite_backup"] as const;
-const OPTIONAL = new Set(["kitting", "orders", "offsite_backup"]);
+const KEYS = ["business_type", "materials", "opening_stock", "locations", "kitting", "products", "orders", "offsite_backup"] as const;
+const OPTIONAL = new Set(["locations", "kitting", "orders", "offsite_backup"]);
 
 function status(doneUpTo: number, extra: { dismissed?: boolean } = {}) {
   const steps = KEYS.map((key, i) => ({ key, done: i < doneUpTo, optional: OPTIONAL.has(key) }));
@@ -48,14 +48,14 @@ describe("SetupChecklist", () => {
     renderWith(<SetupChecklist />);
 
     const region = await screen.findByRole("region", { name: "Set up StockSmith" });
-    expect(within(region).getByText(/2 of 7 done/)).toBeInTheDocument();
+    expect(within(region).getByText(/2 of 8 done/)).toBeInTheDocument();
     expect(within(region).getByRole("progressbar")).toHaveAttribute("aria-valuenow", "2");
 
     // The next step is opening stock: it alone gets a call to action.
     const action = within(region).getByRole("link", { name: "Start a stock take" });
     expect(action).toHaveAttribute("href", "/stock-takes");
     expect(within(region).queryByRole("link", { name: "Go to Products" })).not.toBeInTheDocument();
-    expect(within(region).getAllByText("Optional")).toHaveLength(3);
+    expect(within(region).getAllByText("Optional")).toHaveLength(4);
   });
 
   it("hides when dismissed, and when everything is done", async () => {

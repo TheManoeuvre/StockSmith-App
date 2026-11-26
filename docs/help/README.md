@@ -15,6 +15,8 @@ These pages are also built into the app: open **Help** at the bottom of the side
 
 - [Recording builds and failures](builds-and-failures.md) — including scrapping only part of a
   failed run.
+- [Locations](locations.md) — where your stock is kept: nesting, ranges, moves, and stock that
+  follows itself.
 - [Material categories](material-categories.md) — what each category setting does, and how to
   add your own.
 

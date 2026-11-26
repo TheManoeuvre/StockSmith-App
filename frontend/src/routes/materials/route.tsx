@@ -39,6 +39,9 @@ import {
 import { HelpLink } from "../../components/help/HelpLink";
 import { PAGE_HELP } from "../../lib/help";
 import { EmptyState } from "../../components/common/EmptyState";
+import { locationsApi, type ItemLocationSummary } from "../../api/locations";
+import { useLocationTree } from "../../components/locations/useLocations";
+import { pathLabel } from "../../lib/locations";
 
 /** At risk = the forecast flags it critical/warning (by weeks-to-stockout or the user's own
  *  reorder floor), or it's simply at/below its reorder threshold — the latter covers a new
@@ -49,6 +52,10 @@ const isAtRisk = (m: Material) =>
   isLowStock(m.current_qty, m.reorder_threshold);
 
 export const Route = createFileRoute("/materials")({
+  // `?location=unplaced` opens the list on its Unplaced tab — the Locations page links here from
+  // "Place your stock".
+  validateSearch: (search: Record<string, unknown>): { location?: "unplaced" } =>
+    search.location === "unplaced" ? { location: "unplaced" } : {},
   component: MaterialsLayout,
 });
 
@@ -125,7 +132,26 @@ function MaterialsListContent() {
   const [productUrl, setProductUrl] = useState("");
 
   const [search, setSearch] = useState("");
-  const [tab, setTab] = useState<"all" | "low" | "on-order">("all");
+  const { location: locationFilter } = Route.useSearch();
+  const [tab, setTab] = useState<"all" | "low" | "on-order" | "unplaced">(
+    locationFilter === "unplaced" ? "unplaced" : "all",
+  );
+  // The Location column and Unplaced tab only appear once someone has created a location, so a
+  // shop that doesn't use them never sees them.
+  const { data: locationTree } = useLocationTree();
+  const usesLocations = (locationTree?.total_locations ?? 0) > 0;
+  const { data: locationSummaries } = useQuery({
+    queryKey: ["location-summaries"],
+    queryFn: locationsApi.summaries,
+    enabled: usesLocations,
+  });
+  const locationByMaterial = useMemo(() => {
+    const m = new Map<number, ItemLocationSummary>();
+    for (const s of locationSummaries ?? []) if (s.material_id != null) m.set(s.material_id, s);
+    return m;
+  }, [locationSummaries]);
+  const isUnplaced = (m: Material) =>
+    usesLocations && Number(m.current_qty) > 0 && !locationByMaterial.get(m.id)?.primary_path;
   const [showInactive, setShowInactive] = useState(false);
   // Collapsed category groups, by name. Session-only, like the stock-take count sheet's
   // collapse — it resets on reload, which is fine for a view toggle.
@@ -245,7 +271,7 @@ function MaterialsListContent() {
       grouped: [] as (readonly [string, Material[]])[],
       inactiveCount: 0,
       shownCount: 0,
-      tabCounts: { all: 0, low: 0, "on-order": 0 },
+      tabCounts: { all: 0, low: 0, "on-order": 0, unplaced: 0 },
       trackedCount: 0,
       atRiskCount: 0,
       onHandValue: 0,
@@ -260,6 +286,7 @@ function MaterialsListContent() {
       all: active.length,
       low: active.filter(isAtRisk).length,
       "on-order": active.filter((m) => Number(m.on_order_qty ?? 0) > 0).length,
+      unplaced: active.filter(isUnplaced).length,
     };
     const onHandValue = active.reduce(
       (sum, m) => sum + Number(m.current_qty) * Number(m.avg_unit_cost),
@@ -269,6 +296,7 @@ function MaterialsListContent() {
     const preFiltered = data.filter((m) => {
       if (tab === "low" && !isAtRisk(m)) return false;
       if (tab === "on-order" && !(Number(m.on_order_qty ?? 0) > 0)) return false;
+      if (tab === "unplaced" && !isUnplaced(m)) return false;
       if (needle) {
         const haystack =
           `${m.name} ${m.barcode ?? ""} ${m.material_type_name ?? ""}`.toLowerCase();
@@ -528,6 +556,7 @@ function MaterialsListContent() {
             { id: "all", label: "All materials", count: tabCounts.all },
             { id: "low", label: "Low stock", count: tabCounts.low },
             { id: "on-order", label: "On order", count: tabCounts["on-order"] },
+            ...(usesLocations ? [{ id: "unplaced", label: "Unplaced", count: tabCounts.unplaced }] : []),
           ]}
           active={tab}
           onChange={(id) => setTab(id as typeof tab)}
@@ -574,6 +603,7 @@ function MaterialsListContent() {
               {sortHeader("reorder_threshold", "Reorder at")}
               {sortHeader("avg_unit_cost", "Unit cost")}
               {sortHeader("weeks_of_supply", "To stockout")}
+              {usesLocations && <Th>Location</Th>}
               <Th>Supplier</Th>
             </tr>
           </thead>
@@ -582,7 +612,7 @@ function MaterialsListContent() {
               <GroupHeaderRow
                 label={cat}
                 count={materials.length}
-                colSpan={9}
+                colSpan={usesLocations ? 10 : 9}
                 capitalize
                 collapsed={collapsedGroups.has(cat)}
                 onToggle={() => toggleGroup(cat)}
@@ -595,6 +625,7 @@ function MaterialsListContent() {
                     costPerKg={
                       categoriesByName.get(cat)?.cost_per_kg_display ?? false
                     }
+                    location={usesLocations ? (locationByMaterial.get(m.id) ?? null) : undefined}
                   />
                 ))}
             </tbody>
@@ -615,9 +646,12 @@ function MaterialsListContent() {
 function MaterialRow({
   material: m,
   costPerKg,
+  location,
 }: {
   material: Material;
   costPerKg: boolean;
+  /** undefined: the column isn't shown. null: shown, but this material hasn't been placed. */
+  location?: ItemLocationSummary | null;
 }) {
   const status = m.stockout_status;
   const atRisk = status === "critical" || status === "warning";
@@ -727,6 +761,23 @@ function MaterialRow({
           formatWeeksShort(m.weeks_of_supply)
         )}
       </td>
+      {location !== undefined && (
+        <td className="px-2 py-2 text-slate-600">
+          {location?.primary_path ? (
+            <>
+              {pathLabel(location.primary_path.slice(-2))}
+              {location.extra_places > 0 && (
+                <span className="ml-1.5 text-xs text-slate-400">+{location.extra_places} more</span>
+              )}
+              {Number(location.drift) > 0 && <Badge className="ml-1.5 bg-amber-100 text-amber-800">Drift</Badge>}
+            </>
+          ) : Number(m.current_qty) > 0 ? (
+            <Badge className="bg-amber-100 text-amber-800">Unplaced</Badge>
+          ) : (
+            <span className="text-slate-400">-</span>
+          )}
+        </td>
+      )}
       <td className="px-2 py-2 text-slate-500">
         {m.default_supplier_name ?? "-"}
         {formatLeadTime(m.lead_time_days) && (

@@ -33,6 +33,7 @@ from app.models.order_parcel import (
 )
 from app.models.order_return import OrderLineReturn, ReturnDisposition, ReturnScope, ReturnSource
 from app.models.order_substitution import OrderLineSubstitution
+from app.models.location import Location, PlacementEvent, PlacementEventKind, PutAwayOptOut, StockPlacement
 from app.models.manufacturer import Manufacturer
 from app.models.material import (
     LegacyMaterialCategory,
@@ -153,6 +154,11 @@ __all__ = [
     "SkuAlias",
     "StockAdjustment",
     "StockAdjustmentMode",
+    "Location",
+    "PlacementEvent",
+    "PlacementEventKind",
+    "StockPlacement",
+    "PutAwayOptOut",
     "StockTake",
     "StockTakeLine",
     "StockTakeStatus",
@@ -177,3 +183,7 @@ __all__ = [
     "ALERT_TYPES",
     "DEFAULT_IMMEDIATE_ALERT_TYPES",
 ]
+
+# Registers the before_flush listener that keeps single-placement items' location quantities in
+# step with their stock. Last, so every model it touches is already loaded.
+import app.services.placement_hooks  # noqa: E402,F401

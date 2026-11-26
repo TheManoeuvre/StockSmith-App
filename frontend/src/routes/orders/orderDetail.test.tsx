@@ -90,8 +90,11 @@ const PROFILES = [
   },
 ];
 
+let extraRoutes: { method: "GET"; path: string | RegExp; respond: () => unknown }[] = [];
+
 function routes(o: Record<string, unknown>) {
   return [
+    ...extraRoutes,
     { method: "GET" as const, path: "/system/status", respond: () => ({ status: "ok" }) },
     { method: "GET" as const, path: "/orders/42", respond: () => order(o) },
     {
@@ -130,7 +133,10 @@ async function renderOrder(over: Record<string, unknown> = {}) {
   return router;
 }
 
-beforeEach(() => setRoutes([]));
+beforeEach(() => {
+  setRoutes([]);
+  extraRoutes = [];
+});
 
 it("renders the four tabs in the body under the stat tiles", async () => {
   await renderOrder();
@@ -185,4 +191,33 @@ it("synthesises a timeline from the order's timestamps", async () => {
 
   expect(await screen.findByText("Order placed")).toBeInTheDocument();
   expect(screen.getByText(/Marked shipped/)).toBeInTheDocument();
+});
+
+it("says where to pick a line from once locations exist, while units are still to ship", async () => {
+  const loc = { id: 1, parent_id: null, name: "Shelf", code: "LOC-000001", notes: null, archived: false, own_items: 1, rolled_up_items: 1, needs_attention: false };
+  extraRoutes = [
+    {
+      method: "GET",
+      path: "/locations",
+      respond: () => ({ locations: [loc], total_locations: 1, attention_locations: 0, empty_locations: 0, unplaced_items: 0, placeable_items: 1 }),
+    },
+    {
+      method: "GET",
+      path: "/placements/summary",
+      respond: () => [
+        { material_id: null, product_id: 9, variant_id: null, name: "Candle", sku: null, unit: "each", primary_path: ["Workshop", "Shelf"], extra_places: 1, placed: "5", total: "5", drift: "0" },
+      ],
+    },
+  ];
+  await renderOrder({
+    lines: [
+      {
+        id: 1, order_id: 42, product_id: 9, variant_id: null, product_name: "Candle", variant_name: null, sku: null,
+        ordered_qty: 2, allocated_qty: 0, shipped_qty: 0, short_shipped_qty: 0, unit_price: "5.00", currency: "GBP",
+        external_line_id: null, needs_mapping: false, cost_per_unit_snapshot: null, variation_text: null,
+        substituted_from: null, substituted_to: [],
+      },
+    ],
+  });
+  expect(await screen.findByText(/Pick from Workshop › Shelf \(\+1 more place\)/)).toBeInTheDocument();
 });

@@ -138,3 +138,26 @@ it("opens the slide-over on a row click", async () => {
     expect(router.state.location.pathname).toBe("/purchases/1"),
   );
 });
+
+it("asks where a whole-order receipt went", async () => {
+  const user = userEvent.setup();
+  const loc = { id: 1, parent_id: null, name: "Shelf", code: "LOC-000001", notes: null, archived: false, own_items: 0, rolled_up_items: 0, needs_attention: false };
+  setRoutes([
+    {
+      method: "GET" as const,
+      path: "/locations",
+      respond: () => ({ locations: [loc], total_locations: 1, attention_locations: 0, empty_locations: 1, unplaced_items: 1, placeable_items: 1 }),
+    },
+    {
+      method: "GET" as const,
+      path: /^\/placements\/stored-in/,
+      respond: () => ({ name: "PLA Black", unit: "g", total: "1500", placed: "0", unassigned: "1500", drift: "0", follows_stock: false, replenish: null, placements: [] }),
+    },
+    ...routes([purchase()]),
+  ]);
+  await renderList();
+  await user.click(await screen.findByRole("button", { name: "Receive all" }));
+  expect(await screen.findByText("Where did this go?", undefined, { timeout: 5000 })).toBeInTheDocument();
+  // The 1,000 that just arrived, not all 1,500 that happen to be unplaced.
+  expect(screen.getByLabelText("How much of PLA Black")).toHaveValue(1000);
+});

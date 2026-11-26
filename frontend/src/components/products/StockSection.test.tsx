@@ -12,8 +12,13 @@ const productsApi = {
 const buildsApi = { create: vi.fn() };
 const stockAdjustmentsApi = { create: vi.fn() };
 const listMaterials = vi.fn();
+const locationsApi = { tree: vi.fn(), storedIn: vi.fn(), place: vi.fn() };
 const listSubstitutes = vi.fn();
 
+vi.mock("../../api/locations", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../api/locations")>()),
+  locationsApi,
+}));
 vi.mock("../../api/products", () => ({ productsApi, buildsApi, stockAdjustmentsApi }));
 vi.mock("../../api/materials", () => ({ materialsApi: { list: () => listMaterials() } }));
 vi.mock("../../api/materialSubstitutes", () => ({
@@ -157,5 +162,41 @@ describe("StockSection build substitution", () => {
     await waitFor(() => expect(buildsApi.create).toHaveBeenCalledTimes(1));
     expect(buildsApi.create.mock.calls[0][0].substitutions).toBeNull();
     expect(screen.queryByText("Build with substitute materials?")).not.toBeInTheDocument();
+  });
+});
+
+describe("StockSection put-away after a build", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    productsApi.get.mockResolvedValue({ id: 1, name: "Candle", current_stock: 12, allocated_qty: 0, push_buildable_capacity: false });
+    productsApi.listVariants.mockResolvedValue([]);
+    productsApi.getBom.mockResolvedValue([]);
+    productsApi.listStockHistory.mockResolvedValue([]);
+    listMaterials.mockResolvedValue([]);
+    locationsApi.tree.mockResolvedValue({
+      locations: [{ id: 1, parent_id: null, name: "Shelf", code: "LOC-000001", archived: false }],
+      total_locations: 1,
+    });
+    locationsApi.storedIn.mockResolvedValue({
+      name: "Candle", unit: "each", total: "15", placed: "0", unassigned: "15", drift: "0", follows_stock: false, replenish: null, placements: [],
+    });
+  });
+
+  it("asks where the units just built went", async () => {
+    buildsApi.create.mockResolvedValue({ id: 9, product_id: 1, variant_id: null, qty_built: 3, qty_failed: 0 });
+    const user = userEvent.setup();
+    renderSection();
+    await user.click(await screen.findByRole("button", { name: "Record" }));
+    expect(await screen.findByText("Where did these go?")).toBeInTheDocument();
+    expect(screen.getByLabelText("How much of Candle")).toHaveValue(3);
+  });
+
+  it("asks nothing when every unit failed", async () => {
+    buildsApi.create.mockResolvedValue({ id: 9, product_id: 1, variant_id: null, qty_built: 0, qty_failed: 1 });
+    const user = userEvent.setup();
+    renderSection();
+    await user.click(await screen.findByRole("button", { name: "Record" }));
+    await waitFor(() => expect(buildsApi.create).toHaveBeenCalled());
+    expect(screen.queryByText("Where did these go?")).not.toBeInTheDocument();
   });
 });

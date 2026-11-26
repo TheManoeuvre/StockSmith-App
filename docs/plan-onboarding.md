@@ -45,6 +45,7 @@ supported marketplace.
 | Products | ≥1 material | "Add materials first" if none, else "Add your first product" |
 | Purchases | Suppliers, materials | "Record a supplier order" |
 | Stock Take | Materials | "Count your opening stock" — doubles as tier-1 opening balance |
+| Locations | Nothing (optional) | "Where do you keep things?" with Add a location / Generate a range; optional checklist step after opening stock |
 | Orders | Store connection or manual entry | "Connect a store" / "Add an order by hand" |
 | Insights | Orders + product costs | Explain that it fills as orders arrive; link to tier 2 |
 | Settings → Stores & sync | — | Per-store connect guide (§7) |

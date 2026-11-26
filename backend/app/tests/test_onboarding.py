@@ -44,6 +44,7 @@ async def test_fresh_install_has_nothing_done(session):
         "business_type",
         "materials",
         "opening_stock",
+        "locations",
         "kitting",
         "products",
         "orders",
@@ -51,7 +52,7 @@ async def test_fresh_install_has_nothing_done(session):
     ]
     assert not any(s.done for s in result.steps)
     assert result.dismissed is False and result.complete is False
-    assert {s.key for s in result.steps if s.optional} == {"kitting", "orders", "offsite_backup"}
+    assert {s.key for s in result.steps if s.optional} == {"locations", "kitting", "orders", "offsite_backup"}
 
 
 async def test_a_material_with_no_stock_is_not_an_opening_count(session):
@@ -157,3 +158,12 @@ class TestRoyalMailSeed:
         await _ensure_shipping_profiles(session)
         await session.commit()
         assert (await session.scalars(select(ShippingProfile))).all() == []
+
+
+async def test_locations_step_is_done_once_any_location_exists(session):
+    from app.services import locations as locs
+
+    await _fresh(session)
+    assert (await _status(session))["locations"] is False
+    await locs.create_location(session, "Workshop", None)
+    assert (await _status(session))["locations"] is True

@@ -1,7 +1,10 @@
 import { Link } from "@tanstack/react-router";
+import { StoredInSection } from "../locations/StoredInSection";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { useMaterialCategories } from "../../hooks/useMaterialCategories";
+import { TakingFromSelect } from "../locations/TakingFromSelect";
+import { PutAwayModal, type PutAwayItem } from "../locations/PutAwayModal";
 import { buildsApi, productsApi, stockAdjustmentsApi } from "../../api/products";
 import { materialsApi } from "../../api/materials";
 import { materialSubstitutesApi } from "../../api/materialSubstitutes";
@@ -262,6 +265,7 @@ export function StockSection({
     return substitute ? [{ material, substitute, needed }] : [];
   });
 
+  const [putAway, setPutAway] = useState<PutAwayItem[] | null>(null);
   const buildMutation = useMutation({
     mutationFn: () =>
       buildsApi.create({
@@ -283,8 +287,20 @@ export function StockSection({
             : null,
         notes: notes || null,
       }),
-    onSuccess: () => {
+    onSuccess: (build) => {
       setSubstitutionConfirmOpen(false);
+      // A product kept in one place has already followed the build; otherwise ask where it went.
+      if (build.qty_built > 0) {
+        const variant = variants?.find((v) => v.id === build.variant_id);
+        const name = product?.name ?? "Product";
+        setPutAway([
+          {
+            ref: { product_id: productId, variant_id: build.variant_id },
+            name: variant ? `${name} — ${variant.variant_name}` : name,
+            qty: build.qty_built,
+          },
+        ]);
+      }
       queryClient.invalidateQueries({ queryKey: ["products", productId] });
       queryClient.invalidateQueries({ queryKey: ["products", productId, "variants"] });
       queryClient.invalidateQueries({ queryKey: ["products", productId, "stock-history"] });
@@ -321,6 +337,7 @@ export function StockSection({
   const effectiveAdjReason =
     adjReason === OTHER_REASON ? adjReasonOther.trim() : adjReason;
 
+  const [takingFrom, setTakingFrom] = useState<number | null>(null);
   const adjustMutation = useMutation({
     mutationFn: () =>
       stockAdjustmentsApi.create({
@@ -329,6 +346,7 @@ export function StockSection({
         mode: adjMode,
         value: Number(adjValue),
         reason: effectiveAdjReason,
+        from_location_id: takingFrom,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["products", productId] });
@@ -336,6 +354,7 @@ export function StockSection({
       queryClient.invalidateQueries({ queryKey: ["products", productId, "stock-history"] });
       queryClient.invalidateQueries({ queryKey: ["products"] });
       markAdjDone(EMPTY_ADJUST_FORM);
+      setTakingFrom(null);
     },
   });
 
@@ -390,6 +409,23 @@ export function StockSection({
 
   return (
     <div className="flex flex-col gap-6">
+      {/* Where it's kept. A product with variants is placed per variant, because the variants
+          hold the stock. */}
+      <div className="flex flex-col gap-3">
+        {hasActiveVariants ? (
+          activeVariants.map((v) => (
+            <StoredInSection
+              key={v.id}
+              item={{ product_id: productId, variant_id: v.id }}
+              itemName={`${product?.name ?? "Product"} — ${v.variant_name}`}
+              variantLabel={v.variant_name}
+            />
+          ))
+        ) : (
+          <StoredInSection item={{ product_id: productId }} itemName={product?.name ?? "Product"} />
+        )}
+      </div>
+
       <div className="flex flex-col gap-3">
         <h3 className="text-md font-semibold">Record a build</h3>
         <form
@@ -564,6 +600,7 @@ export function StockSection({
         <ErrorBanner error={buildMutation.error} />
       </div>
 
+      {putAway && <PutAwayModal title="Where did these go?" items={putAway} onClose={() => setPutAway(null)} />}
       <ConfirmDialog
         open={substitutionConfirmOpen}
         title="Build with substitute materials?"
@@ -641,6 +678,12 @@ export function StockSection({
               onChange={(e) => setAdjValue(e.target.value)}
             />
           </label>
+          <TakingFromSelect
+            item={{ product_id: productId, variant_id: hasActiveVariants && adjVariantId !== "" ? Number(adjVariantId) : null }}
+            decreasing={adjMode === "adjust" && Number(adjValue) < 0}
+            value={takingFrom}
+            onChange={setTakingFrom}
+          />
           <label className="flex flex-col gap-1">
             <span className="text-sm">Reason</span>
             <select

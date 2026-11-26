@@ -13,6 +13,8 @@ import { PurchaseLineEditor } from "../../components/purchases/PurchaseLineEdito
 import { PurchaseStatusPill } from "../../components/purchases/PurchaseStatusPill";
 import { ReceiptHistoryPanel } from "../../components/purchases/ReceiptHistoryPanel";
 import { ReceiveDialog } from "../../components/purchases/ReceiveDialog";
+import { PutAwayModal, type PutAwayItem } from "../../components/locations/PutAwayModal";
+import { putAwayItemsFor } from "../../lib/putAway";
 import { DetailPanel } from "../../components/common/DetailPanel";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { ConfirmDialog } from "../../components/common/ConfirmDialog";
@@ -113,6 +115,7 @@ function PurchaseDetail() {
   });
 
   const [receiving, setReceiving] = useState(false);
+  const [putAway, setPutAway] = useState<PutAwayItem[] | null>(null);
   const [closingLineId, setClosingLineId] = useState<number | null>(null);
   const [closeApportion, setCloseApportion] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
@@ -246,9 +249,18 @@ function PurchaseDetail() {
         received_at: receivedAt,
         lines: receiptLines,
       }),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       setReceiving(false);
       invalidate();
+      // Items kept in one place follow the delivery on their own; the rest get asked where it went.
+      const items = putAwayItemsFor(
+        variables.lines.map((r) => ({
+          materialId: purchase?.lines.find((l) => l.id === r.line_id)?.material_id,
+          qty: Number(r.qty),
+        })),
+        materials,
+      );
+      if (items.length > 0) setPutAway(items);
     },
   });
   const undoBatchMutation = useMutation({
@@ -556,6 +568,8 @@ function PurchaseDetail() {
           }}
           onCancel={() => setConfirmingDelete(false)}
         />
+
+        {putAway && <PutAwayModal title="Where did this go?" items={putAway} onClose={() => setPutAway(null)} />}
 
         {receiving && (
           <ReceiveDialog

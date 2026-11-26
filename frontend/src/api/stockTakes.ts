@@ -1,3 +1,4 @@
+import type { ItemRef } from "./locations";
 import { api, baseUrl, authHeaders, platformFetch, downloadCsv } from "./client";
 import type {
   ApproveResult,
@@ -43,6 +44,14 @@ export const stockTakesApi = {
 
   setLineCounts: (id: number, lines: { line_id: number; counted_qty: string | null; notes: string | null }[]) =>
     api.put<StockTakeDetail>(`/stock-takes/${id}/lines`, { lines }),
+
+  /** By-location takes: an item found in a place the sheet didn't expect it. */
+  addFound: (id: number, ref: ItemRef, locationId: number, countedQty: string) =>
+    api.post<StockTakeDetail>(`/stock-takes/${id}/lines`, {
+      ...ref,
+      location_id: locationId,
+      counted_qty: countedQty,
+    }),
 
   resolveLine: (id: number, lineId: number, action: "accept_counted" | "accept_system" | "reset") =>
     api.post<StockTakeDetail>(`/stock-takes/${id}/lines/${lineId}/resolve`, { action }),

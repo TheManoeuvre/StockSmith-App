@@ -12,6 +12,41 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Locations: record where your stock is kept.** A new **Locations** page (under Stock) lets you
+  build a tree of places as deep as you like — `Workshop › Oils rack › Bin 1`, or just `Box A1` —
+  and say how much of each material and product is in each one. **Generate range** makes a run at
+  once (`Box{01-05}`, `{A-D}{1-6}`) with a preview before anything is saved, and stock can be moved
+  by item, by location, or by emptying one location into another. Materials and products get a
+  **Stored in** section, and Materials gets a Location column and an Unplaced tab once you have
+  locations. An item kept in exactly one place stays right on its own as you build, sell and
+  receive. Setting up locations is an optional step on the Dashboard checklist, the sample data
+  includes a layout, and there's a new help page.
+- **Print location labels.** Each location gets a barcoded label with its name and where it sits,
+  at 51 × 25 mm (the default), 6 × 4 in, or a size you choose. Print one, or tick several (or a
+  whole branch) and print them a page each, straight after generating a range if you like. The
+  size is under **Settings › Labels**. A scanner can type a location's code into the new box on
+  the Locations page to jump straight to it.
+- **Count one place in a stock take.** Press **Count** on a location, or pick **Only what is kept
+  in** when you start a stock take, to count a shelf or box and everything inside it. The sheet has a
+  line for each item in each place, in shelf order. Approving sets each place to your count, and your
+  stock changes only by what the count proves: extra stock you find is taken from what you hadn't
+  placed yet before it adds anything, so counting stock for the first time never doubles it. Items
+  that turn up unexpectedly can be added to the sheet, and a line is held back for you to settle if
+  the numbers moved while you were counting.
+- **Stock kept in several places now follows builds and sales.** A decrease comes from the primary
+  place first, then the fullest other, and manual adjustments can say **Taking from** which place.
+  When the primary place runs out and another still has stock, the item offers to move it across.
+  After you receive a purchase or record a build, StockSmith asks where items kept in several
+  places (or none yet, unless you tell it not to) went. Order lines show where to pick each item
+  from.
+- **Print location labels several to a page on A4** for sticky label sheets, from the print screen.
+- **Import and export locations as a spreadsheet.** **Export CSV** on the Locations page saves your
+  whole layout, one row per location with its path (`Workshop > Oils rack > Bin 1`), and
+  **Import CSV** reads one back, creating any missing parents along the way. A row with a problem
+  is skipped and listed; the rest still import.
+
 ## [0.29.0] - 2026-11-24
 
 ### Changed

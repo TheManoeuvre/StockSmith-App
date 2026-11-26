@@ -1,7 +1,10 @@
+import { stockChanges } from "../../lib/stockChange";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useCallback, useMemo, useState } from "react";
 import { stockTakesApi } from "../../api/stockTakes";
+import { AddFoundItemModal } from "../../components/locations/AddFoundItemModal";
+import { useLocationTree } from "../../components/locations/useLocations";
 import type { StockTakeDetail, StockTakeLine } from "../../api/types";
 import { Badge } from "../../components/common/Badge";
 import { ConfirmDialog } from "../../components/common/ConfirmDialog";
@@ -96,6 +99,8 @@ function StockTakeDetailPage() {
   );
   const [confirmingApprove, setConfirmingApprove] = useState(false);
   const [confirmingAbandon, setConfirmingAbandon] = useState(false);
+  const [addingFound, setAddingFound] = useState(false);
+  const { data: locationTree } = useLocationTree();
   // Collapsed groups, by key. A two-hundred-line sheet is unusable as one list, and the
   // point of grouping it is to be able to work through one shelf at a time.
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -209,6 +214,10 @@ function StockTakeDetailPage() {
       Number(l.counted_qty) !== Number(l.expected_qty),
   ).length;
   const confirmingLines = pendingApproval - changingLines;
+  const changes = stockChanges(take.lines, counts);
+  // A count by location moves stock between "in this place" and "not placed", so say separately
+  // how many lines change the total.
+  const stockChangingLines = countedLines.filter((l) => (changes.get(l.id) ?? 0) !== 0).length;
   const blanks = take.lines.filter(
     (l) => l.counted_qty === null && l.status === "pending",
   ).length;
@@ -223,7 +232,15 @@ function StockTakeDetailPage() {
     pendingApproval === 0
       ? `Nothing has been counted, so approving closes the take without changing any stock. ` +
         `${blanks} blank ${plural(blanks, "line is", "lines are")} left alone.`
-      : `Approving writes your counts to stock. Of ${pendingApproval} counted ` +
+      : take.location_id != null
+        ? `Approving sets each place to your count. Of ${pendingApproval} counted ` +
+          `${plural(pendingApproval, "line", "lines")}, ${changingLines} ` +
+          `${plural(changingLines, "changes", "change")} what a place holds and ${confirmingLines} ` +
+          `${plural(confirmingLines, "confirms", "confirm")} it. Your total stock changes on ${stockChangingLines} of them: ` +
+          `extra found is taken from stock you hadn't placed before it adds anything. ` +
+          `${blanks} blank ${plural(blanks, "line is", "lines are")} left alone. Any line that moved since the take ` +
+          `started, or is short with units allocated to open orders, is held for you to settle. The take closes either way.`
+        : `Approving writes your counts to stock. Of ${pendingApproval} counted ` +
         `${plural(pendingApproval, "line", "lines")}, ${changingLines} ` +
         `${plural(changingLines, "adjusts", "adjust")} the recorded quantity and ${confirmingLines} ` +
         `${plural(confirmingLines, "confirms", "confirm")} it unchanged. ${blanks} blank ` +
@@ -250,6 +267,15 @@ function StockTakeDetailPage() {
               >
                 Review and approve
               </button>
+              {take.location_id != null && (
+                <button
+                  type="button"
+                  onClick={() => setAddingFound(true)}
+                  className="rounded border border-slate-300 px-3 py-1.5 text-sm"
+                >
+                  Add an item found here
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setConfirmingAbandon(true)}
@@ -395,12 +421,14 @@ function StockTakeDetailPage() {
                               typed === ""
                                 ? null
                                 : Number(typed) - Number(line.expected_qty);
-                            // Money at stake: the delta priced at today's unit cost. Null
-                            // when there's no count yet or no cost to price it with.
+                            // Money at stake: what total stock changes by, priced at today's
+                            // unit cost. On a count by location that can be less than the
+                            // difference in the place. Null when there is nothing to price.
+                            const change = changes.get(line.id) ?? null;
                             const liveValue =
-                              liveDelta == null || line.unit_cost == null
+                              change == null || line.unit_cost == null
                                 ? null
-                                : liveDelta * Number(line.unit_cost);
+                                : change * Number(line.unit_cost);
                             // Nothing has touched this item since it was last counted, so
                             // it should already be at the figure on the sheet. Tinted rather
                             // than hidden or reordered: it is still a line to count, just a
@@ -416,6 +444,11 @@ function StockTakeDetailPage() {
                               >
                                 <td className="p-2 pl-6">
                                   {line.name}
+                                  {line.found && (
+                                    <span className="ml-2 rounded bg-blue-100 px-1.5 py-0.5 text-[11px] text-blue-800">
+                                      found here
+                                    </span>
+                                  )}
                                   {unmoved && (
                                     <span
                                       className="ml-2 rounded bg-emerald-100 px-1.5 py-0.5 text-[11px] text-emerald-800"
@@ -465,6 +498,13 @@ function StockTakeDetailPage() {
                                     : liveDelta > 0
                                       ? `+${roundQty(String(liveDelta), line.unit)}`
                                       : roundQty(String(liveDelta), line.unit)}
+                                  {line.location_id != null && liveDelta != null && change != null && change !== liveDelta && (
+                                    <span className="block text-[11px] text-slate-500">
+                                      {change === 0
+                                        ? "total stock unchanged"
+                                        : `total stock +${roundQty(String(change), line.unit)}`}
+                                    </span>
+                                  )}
                                 </td>
                                 <td
                                   className={`p-2 text-right tabular-nums ${
@@ -562,6 +602,18 @@ function StockTakeDetailPage() {
           onConfirm={() => abandonMutation.mutate()}
           onCancel={() => setConfirmingAbandon(false)}
         />
+        {addingFound && take.location_id != null && locationTree && (
+          <AddFoundItemModal
+            stockTakeId={id}
+            rootId={take.location_id}
+            rows={locationTree.locations}
+            onClose={() => setAddingFound(false)}
+            onAdded={() => {
+              setAddingFound(false);
+              invalidate();
+            }}
+          />
+        )}
       </div>
     </DetailPanel>
   );

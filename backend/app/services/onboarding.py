@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.backup_settings import BackupSettings
 from app.models.kitting import DefaultKittingMaterial, ProductKittingMaterial
+from app.models.location import Location
 from app.models.material import Material
 from app.models.order import Order
 from app.models.platform_connection import PlatformConnection
@@ -46,12 +47,14 @@ async def setup_steps(session: AsyncSession) -> list[SetupStep]:
         session, select(ProductKittingMaterial.product_id)
     )
     has_bom = await _exists(session, select(ProductMaterial.product_id))
+    has_locations = await _exists(session, select(Location.id))
     has_orders = bool(await session.scalar(select(func.count()).select_from(Order)))
 
     return [
         SetupStep("business_type", settings.business_type is not None),
         SetupStep("materials", has_materials),
         SetupStep("opening_stock", has_stock),
+        SetupStep("locations", has_locations, optional=True),
         SetupStep("kitting", has_kitting, optional=True),
         SetupStep("products", has_bom),
         SetupStep("orders", has_orders or any(c.is_connected for c in connections), optional=True),

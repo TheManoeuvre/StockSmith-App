@@ -232,6 +232,15 @@ export interface StockTakeLine {
   material_id: number | null;
   product_id: number | null;
   variant_id: number | null;
+  /** By-location takes: the place this line is about, and its path ("Workshop › Shelf"). */
+  location_id?: number | null;
+  location_label?: string | null;
+  /** By-location lines: what applying did to the item's total; null until applied. */
+  stock_change?: string | null;
+  /** By-location lines on an open take: how much of the item is in no place at all. */
+  unassigned_qty?: string | null;
+  /** Added by hand because it turned up where it wasn't expected. */
+  found?: boolean;
   name: string;
   unit: string;
   /**
@@ -272,6 +281,8 @@ export interface StockTake {
   includes_materials: boolean;
   includes_products: boolean;
   overdue_only: boolean;
+  /** Set on a by-location take: the place being counted. */
+  location_id?: number | null;
   scope_description: string;
   started_at: string;
   closed_at: string | null;
@@ -308,6 +319,8 @@ export interface StockTakeScope {
   overdue_only: boolean;
   /** A hand-picked subset of what the filters match; omit (or null) for all of it. */
   selected_items?: ScopeItemRef[] | null;
+  /** Count by place: what is kept in this location and everything inside it, one line per item per place. */
+  location_id?: number | null;
 }
 
 export interface ScopeItemRef {

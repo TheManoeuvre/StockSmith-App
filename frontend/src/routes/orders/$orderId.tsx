@@ -24,6 +24,9 @@ import { OrderBoxCheckSection } from "../../components/orders/OrderBoxCheckSecti
 import { OrderKittingSection } from "../../components/orders/OrderKittingSection";
 import { OrderReplacementParcelsSection } from "../../components/orders/OrderReplacementParcelsSection";
 import { OrderShippingForm } from "../../components/orders/OrderShippingForm";
+import { locationsApi } from "../../api/locations";
+import { useLocationTree } from "../../components/locations/useLocations";
+import { pathLabel } from "../../lib/locations";
 import { OrderTimeline } from "../../components/orders/OrderTimeline";
 import { formatMoney } from "../../lib/money";
 import { effectiveDueDate, orderFulfilment } from "../../lib/orderFulfilment";
@@ -768,6 +771,18 @@ function OrderLineRow({
       ? Number(line.cost_per_unit_snapshot) * line.ordered_qty
       : null;
 
+  // Where to pick it from, once there are locations. Shown only while units are still to ship.
+  const { data: locationTree } = useLocationTree();
+  const { data: locationSummaries } = useQuery({
+    queryKey: ["location-summaries"],
+    queryFn: locationsApi.summaries,
+    enabled: (locationTree?.total_locations ?? 0) > 0 && line.product_id != null,
+  });
+  const pickFrom = locationSummaries?.find(
+    (s) => s.product_id === line.product_id && (s.variant_id ?? null) === (line.variant_id ?? null),
+  );
+  const toShip = line.ordered_qty - line.shipped_qty - line.short_shipped_qty > 0;
+
   const undoMutation = useMutation({
     mutationFn: (substitutionId: number) => ordersApi.undoSubstitution(substitutionId),
     onSuccess: () => {
@@ -805,6 +820,12 @@ function OrderLineRow({
             {line.product_name ?? "-"}
             {line.variant_name ? ` (${line.variant_name})` : ""}
           </span>
+        )}
+        {toShip && pickFrom?.primary_path && Number(pickFrom.placed) > 0 && (
+          <div className="mt-0.5 text-[11px] text-slate-500">
+            Pick from {pathLabel(pickFrom.primary_path)}
+            {pickFrom.extra_places > 0 ? ` (+${pickFrom.extra_places} more place${pickFrom.extra_places === 1 ? "" : "s"})` : ""}
+          </div>
         )}
         {line.variation_text && (
           <div className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-slate-500">

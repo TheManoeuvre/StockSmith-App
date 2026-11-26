@@ -4,6 +4,7 @@ export type SetupStepKey =
   | "business_type"
   | "materials"
   | "opening_stock"
+  | "locations"
   | "kitting"
   | "products"
   | "orders"

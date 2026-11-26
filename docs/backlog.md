@@ -19,6 +19,12 @@ Grouped by feature area; within each group, roughly most-valuable first.
 
 **Ask:** The §6c watchdog — a lightweight external check (Scheduled Task or a second tiny process) that relaunches StockSmith `--hidden` when it finds the shell gone *and* no `backend.stopped` marker present. Small, but it's the difference between "restarts a crash" and "restarts something the user closed on purpose".
 
+### An unreadable store token breaks pages that don't need it
+
+**Problem:** Stored tokens and secrets are decrypted as their rows are loaded, so if `token_encryption_key` is missing, wrong or rotated, anything that loads those rows fails with a bare 500. Seen on 2026-11-26, running against a copy of a real database with a stand-in key: `GET /onboarding/status`, `GET /settings/notifications` and `GET /shipping-profiles/refresh-status` all failed, though none of them needs the secret itself. All three loaded once the tokens were blanked. On a real install this could follow a restore or move that brings the database without its key.
+
+**Ask:** Don't decrypt until the value is used (deferred columns, or queries that select only what they need), and where it is needed, report "reconnect this store" rather than a 500.
+
 ---
 
 ## Stock-take workflow
@@ -51,6 +57,22 @@ The trigger is narrow and not fully isolated: a UNIQUE violation on a session th
 **It does block a planned design.** The stock-take approve loop (`docs/plan-stock-take.md`, Phase B) was specified to catch a refused adjustment, mark that line for manual review, and carry on. It cannot do that on a shared session. Phase B works around it two ways — pre-checking allocation and movement in Python so a refusal is rare, and giving each line its own session — but the underlying fault stays.
 
 **Ask:** Isolate the exact trigger and decide whether it's an aiosqlite 0.22 regression (0.22 is recent and changed the connection/threading model) or a SQLAlchemy dialect incompatibility, then pin or bump accordingly. A dependency change wants its own commit and its own green run, not to ride along inside a feature.
+
+---
+
+## Identifying stock: SKUs and barcodes
+
+### Material SKUs
+
+**Problem:** Products have a SKU (unique, with generation in `services/sku_generation.py`), but materials have only a free-text `barcode` and no SKU at all. Anywhere the app lists items side by side it has a SKU column for products and a blank for materials: the location contents table, the "Place an item here" picker, and the stock-take sheets all show nothing for a material, and a material can only be found by name or barcode. Suppliers' own part numbers have nowhere to live either.
+
+**Ask:** A `sku` on `Material` (nullable, unique when set), editable on the material, included in the CSV import/export and in list search, and shown wherever a material appears next to a product. Decide whether to offer generated SKUs the way products do, and whether the supplier's part number is a separate field or this one. `services/placements.py` already passes a `sku` through for materials as `None`; that becomes the real value.
+
+### Barcodes that carry a quantity, for faster stock takes
+
+**Problem:** A material's barcode today only identifies the material. Counting a shelf means finding each item and typing a number, which is the slow part of a stock take. A barcode could carry a quantity as well as an identity: a bag, spool or box is sold in a fixed amount, so scanning its label could mean "one more of these, N units".
+
+**Ask:** Let a material have more than one barcode, each with an optional quantity (a case of 12, a 1 kg bag, a single spool). On the count sheet a scan finds the line and either adds that quantity or confirms it, so a counter scans instead of typing. Open questions to settle first: whether a scan adds to or sets the counted figure; how a scan behaves for an item in several locations, where scanning a location label first (see `docs/plan-locations.md` §7) says where the count belongs; and how this squares with `MaterialAdjustment`'s set versus adjust modes. Depends on Material SKUs only loosely, but both want the same "find an item by what's printed on it" lookup.
 
 ---
 
@@ -176,7 +198,27 @@ Worth measuring first: run the dev build with the browser tools, capture per-rou
 
 ---
 
+## Test suite
+
+### Frontend tests that time out on a slow first render
+
+**Problem:** On a Windows development machine, a full `npm test` run often fails a few tests that wait for the first heading of a route: the help index (`help.test.tsx`), settings nav (`settings.test.tsx`) and product detail (`productDetail.test.tsx`), with others when the machine is busy. They generally pass when the file is run alone, and CI passes, so a real failure is easy to wave away.
+
+**Ask:** Find where the first render spends its time (the whole route tree and lazy chunks are loaded per file), then warm it up or give the first lookup a longer shared timeout.
+
+---
+
 ## Schema debt
+
+### Models and the migrated schema disagree in a few places
+
+**Problem:** `alembic check` fails on a database upgraded to head. Found on 2026-11-26 on a copy of a real database; none of it causes a known fault, but the noise would hide a real missing migration.
+
+- `notifications`: the migration creates `ix_notifications_created_at` and `ix_notifications_read_at`, which the model doesn't declare, so autogenerate would drop them.
+- `order_postage_charges.platform`: the column is `VARCHAR(4)`, narrower than the current platform names (`shopify`, `square`). SQLite doesn't enforce the length.
+- Nullable in the database but not in the model: `product_categories.created_at`; `stock_takes.started_at`, `created_at`, `updated_at`; `stock_take_lines.created_at`, `updated_at`.
+
+**Ask:** Declare the two indexes on the model, add one migration for the column width and the NOT NULLs (backfilling any nulls first), then run `alembic check` in CI so it stays clean.
 
 ### Drop the superseded `materials.colour` and `materials.category` columns
 

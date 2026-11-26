@@ -5,7 +5,7 @@ import type { HelpSlug } from "../../lib/help";
 import { HelpLink } from "../help/HelpLink";
 
 type StepLink =
-  | { to: "/materials" | "/products" | "/stock-takes" }
+  | { to: "/materials" | "/products" | "/stock-takes" | "/locations" }
   | { to: "/settings"; page: "lists" | "shipping-packaging" | "stores-sync" | "backup-restore" };
 
 interface StepCopy {
@@ -42,6 +42,13 @@ export const STEP_COPY: Record<SetupStepKey, StepCopy> = {
     action: "Start a stock take",
     link: { to: "/stock-takes" },
     help: { doc: "getting-started", anchor: "3-count-what-you-have" },
+  },
+  locations: {
+    title: "Set up your storage locations",
+    description: "Record where each material and product is kept, so you can find it and print shelf labels.",
+    action: "Set up locations",
+    link: { to: "/locations" },
+    help: { doc: "locations", anchor: "what-locations-are" },
   },
   kitting: {
     title: "Set up your usual packaging",

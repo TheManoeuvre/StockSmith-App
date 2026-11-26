@@ -45,6 +45,9 @@ class StockTakeScope(BaseModel):
     # A hand-picked subset of whatever the filters above match. None means "everything the
     # filters match"; a list (even an empty one) means only those rows.
     selected_items: list[ScopeItemRef] | None = None
+    # Count by place: what is kept in this location and everything inside it, one line per item
+    # per place. Combines with the item filters above.
+    location_id: int | None = None
 
 
 class ScopeItemRead(ScopeItemRef):
@@ -93,6 +96,15 @@ class StockTakeLineRead(BaseModel):
     section: str
     group: str
     subgroup: str
+    # By-location takes: the place this line is about, as a path ("Workshop › Shelf"), and whether
+    # it was added by hand because it turned up where it was not expected.
+    location_id: int | None = None
+    location_label: str | None = None
+    # By-location lines: what applying did to the item's total (null until applied), and, while it
+    # is still to apply, how much of the item is unplaced and so can absorb extra stock found.
+    stock_change: Decimal | None = None
+    unassigned_qty: Decimal | None = None
+    found: bool = False
     expected_qty: Decimal
     # Finished-goods lines only: how much of expected_qty is picked for open orders and so
     # probably boxed rather than on the shelf.
@@ -124,6 +136,7 @@ class StockTakeRead(BaseModel):
     includes_materials: bool
     includes_products: bool
     overdue_only: bool
+    location_id: int | None = None
     scope_description: str
     started_at: datetime
     closed_at: datetime | None
@@ -205,3 +218,11 @@ class StockTakeImportResult(BaseModel):
     # False for a dry run, and false when on_error="fail" refused the whole file. The
     # client uses this to decide whether it still needs to confirm.
     applied: bool
+
+
+class FoundLine(ScopeItemRef):
+    """An item found in a place a by-location take did not expect it."""
+
+    location_id: int
+    counted_qty: Decimal | None = Field(default=None, ge=0)
+    notes: str | None = None

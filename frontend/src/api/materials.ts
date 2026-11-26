@@ -40,8 +40,8 @@ export const materialsApi = {
     api.get<MaterialStockHistoryEntry[]>(
       `/materials/${id}/stock-history${limit != null ? `?limit=${limit}` : ""}`
     ),
-  adjust: (id: number, mode: "adjust" | "set", value: string, reason: string) =>
-    api.post<Material>(`/materials/${id}/adjustments`, { mode, value, reason }),
+  adjust: (id: number, mode: "adjust" | "set", value: string, reason: string, from_location_id?: number | null) =>
+    api.post<Material>(`/materials/${id}/adjustments`, { mode, value, reason, from_location_id: from_location_id ?? null }),
   uploadImage: async (
     materialId: number,
     filePath: string,
