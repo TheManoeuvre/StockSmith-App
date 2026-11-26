@@ -10,6 +10,13 @@ import { useInvalidateLocations, useLocationTree } from "./useLocations";
 export interface PutAwayItem {
   ref: ItemRef;
   name: string;
+  /** How much just arrived or was built. The suggestion is this, not all the unplaced stock. */
+  qty: number;
+}
+
+/** What arrived, but never more than is actually unplaced. */
+function suggestedQty(item: PutAwayItem, stored: StoredIn): string {
+  return Number(stored.unassigned) <= item.qty ? stored.unassigned : String(item.qty);
 }
 
 /**
@@ -31,10 +38,17 @@ export function PutAwayModal({
 }) {
   const { data: tree } = useLocationTree();
   const invalidate = useInvalidateLocations();
+  // Opened straight after stock changed, so a cached answer is the one from before the change:
+  // wait for a fresh one rather than deciding there is nothing to ask.
   const answers = useQueries({
-    queries: items.map((i) => ({ queryKey: ["stored-in", i.ref], queryFn: () => locationsApi.storedIn(i.ref) })),
+    queries: items.map((i) => ({
+      queryKey: ["stored-in", i.ref],
+      queryFn: () => locationsApi.storedIn(i.ref),
+      staleTime: 0,
+      refetchOnMount: "always" as const,
+    })),
   });
-  const loaded = answers.every((a) => a.data);
+  const loaded = Boolean(tree) && answers.every((a) => a.isFetchedAfterMount && a.data);
   const rows = items
     .map((item, n) => ({ item, stored: answers[n].data as StoredIn | undefined }))
     .filter((r): r is { item: PutAwayItem; stored: StoredIn } =>
@@ -55,7 +69,7 @@ export function PutAwayModal({
         const primary = r.stored.placements.find((p) => p.is_primary)?.location_id ?? null;
         const where = n in chosen ? chosen[n] : primary;
         if (where == null) continue;
-        await locationsApi.place(r.item.ref, where, qtys[n] ?? r.stored.unassigned);
+        await locationsApi.place(r.item.ref, where, qtys[n] ?? suggestedQty(r.item, r.stored));
       }
     },
     onSuccess: () => {
@@ -114,7 +128,7 @@ export function PutAwayModal({
                   min="0"
                   max={Number(r.stored.unassigned)}
                   step="any"
-                  value={qtys[n] ?? displayQty(r.stored.unassigned)}
+                  value={qtys[n] ?? displayQty(suggestedQty(r.item, r.stored))}
                   onChange={(e) => setQtys((q) => ({ ...q, [n]: e.target.value }))}
                   className="w-24 rounded-md border border-slate-300 px-2 py-1.5 text-right text-sm tabular-nums"
                 />

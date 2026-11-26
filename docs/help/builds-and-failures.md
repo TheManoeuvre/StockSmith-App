@@ -10,6 +10,9 @@ Enter **Qty built** and press **Record**. StockSmith:
 - takes the recipe's materials out of stock (quantity per product × number built);
 - adds the finished products to stock.
 
+If you use [locations](locations.md#stock-that-follows-itself) and the product isn't kept in exactly
+one place, StockSmith asks where the finished units went.
+
 ## Failed units
 
 If some didn't come out right, enter **Qty failed** as well. That's the number of *products* that

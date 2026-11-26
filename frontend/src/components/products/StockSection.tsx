@@ -4,6 +4,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import { useMemo, useState } from "react";
 import { useMaterialCategories } from "../../hooks/useMaterialCategories";
 import { TakingFromSelect } from "../locations/TakingFromSelect";
+import { PutAwayModal, type PutAwayItem } from "../locations/PutAwayModal";
 import { buildsApi, productsApi, stockAdjustmentsApi } from "../../api/products";
 import { materialsApi } from "../../api/materials";
 import { materialSubstitutesApi } from "../../api/materialSubstitutes";
@@ -264,6 +265,7 @@ export function StockSection({
     return substitute ? [{ material, substitute, needed }] : [];
   });
 
+  const [putAway, setPutAway] = useState<PutAwayItem[] | null>(null);
   const buildMutation = useMutation({
     mutationFn: () =>
       buildsApi.create({
@@ -285,8 +287,20 @@ export function StockSection({
             : null,
         notes: notes || null,
       }),
-    onSuccess: () => {
+    onSuccess: (build) => {
       setSubstitutionConfirmOpen(false);
+      // A product kept in one place has already followed the build; otherwise ask where it went.
+      if (build.qty_built > 0) {
+        const variant = variants?.find((v) => v.id === build.variant_id);
+        const name = product?.name ?? "Product";
+        setPutAway([
+          {
+            ref: { product_id: productId, variant_id: build.variant_id },
+            name: variant ? `${name} — ${variant.variant_name}` : name,
+            qty: build.qty_built,
+          },
+        ]);
+      }
       queryClient.invalidateQueries({ queryKey: ["products", productId] });
       queryClient.invalidateQueries({ queryKey: ["products", productId, "variants"] });
       queryClient.invalidateQueries({ queryKey: ["products", productId, "stock-history"] });
@@ -585,6 +599,7 @@ export function StockSection({
         <ErrorBanner error={buildMutation.error} />
       </div>
 
+      {putAway && <PutAwayModal title="Where did these go?" items={putAway} onClose={() => setPutAway(null)} />}
       <ConfirmDialog
         open={substitutionConfirmOpen}
         title="Build with substitute materials?"

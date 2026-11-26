@@ -10,6 +10,8 @@ import { materialsApi } from "../../api/materials";
 import { purchasesApi } from "../../api/purchases";
 import type { Material, Purchase, PurchaseStatus } from "../../api/types";
 import { CsvImportExport } from "../../components/common/CsvImportExport";
+import { PutAwayModal, type PutAwayItem } from "../../components/locations/PutAwayModal";
+import { putAwayItemsFor } from "../../lib/putAway";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { FilterTabs } from "../../components/common/FilterTabs";
 import { Th } from "../../components/common/ListTable";
@@ -77,9 +79,17 @@ function PurchasesListContent() {
     [materials],
   );
 
+  const [putAway, setPutAway] = useState<PutAwayItem[] | null>(null);
   const receiveMutation = useMutation({
     mutationFn: (id: number) => purchasesApi.receive(id),
-    onSuccess: () => {
+    onSuccess: (_data, id) => {
+      // `purchases` is still the list from before the receipt, so "outstanding" is what just arrived.
+      const lines = (data ?? []).find((p) => p.id === id)?.lines ?? [];
+      const items = putAwayItemsFor(
+        lines.map((l) => ({ materialId: l.material_id, qty: Number(l.outstanding_qty) })),
+        materials,
+      );
+      if (items.length > 0) setPutAway(items);
       queryClient.invalidateQueries({ queryKey: ["purchases"] });
       queryClient.invalidateQueries({ queryKey: ["materials"] });
     },
@@ -127,6 +137,7 @@ function PurchasesListContent() {
       </div>
 
       <ErrorBanner error={receiveMutation.error} />
+      {putAway && <PutAwayModal title="Where did this go?" items={putAway} onClose={() => setPutAway(null)} />}
 
       <FilterTabs
         tabs={STATUS_TABS.map((t) => ({

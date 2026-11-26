@@ -78,9 +78,11 @@ Items placed in **several** places work like this:
   first, then from whichever other place holds the most, never taking a place below zero. On a
   manual adjustment you can choose **Taking from** to say which place instead.
 - **Stock coming in** isn't added anywhere, because StockSmith can't know which place a delivery
-  went to. It shows as **Unassigned** until you put it away. After you record a delivery,
-  StockSmith asks where each such item went, with the primary place filled in for you. **Not now**
-  leaves it Unassigned.
+  went to. It shows as **Unassigned** until you put it away. After you receive a purchase (one
+  delivery, or **Receive all** on the Purchases list) or record a build, StockSmith asks where each
+  such item went. It suggests the amount that just arrived and, for an item with several places,
+  its primary place. **Not now** leaves it Unassigned. Items you've never placed are asked about
+  too, so you can give them a first home.
 - When the **primary place runs out** but another still has some, the item's **Stored in** section
   offers to move that stock across, for example "Wax shelf is empty, but Loft still has 7 kg."
 

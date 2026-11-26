@@ -6,7 +6,8 @@ location (a scope on Stock Take, §7.1). The QR code option was left out because
 yet. **Phase 4 is built in part** (2026-11-25): automatic fallback for multi-placement items, the
 "Taking from" choice on manual adjustments, the replenishment nudge, the put-away prompt after a
 delivery, the pick location on order lines and the A4 label sheet. Not built: "Taking from" on
-builds and scrap, put-away after a build, and a pick list sorted by location (see §10).
+builds and scrap, and a pick list sorted by location (see §10). Put-away also follows builds and the
+whole-order receipt (2026-11-26).
 
 StockSmith tracks *how much* of everything there is, but not *where it is*. This plan adds
 **locations**: a free-form tree (`Office › Shelf 01 › Grey Box 03`, or just `Box A1`) that
@@ -433,10 +434,14 @@ was added. Order lines show *Pick from* (primary place, plus how many others). T
 mode on the print screen.
 
 **Not built, deliberately.** *Taking from* on a build or scrap (a build consumes many materials, so
-a per-material choice is heavy; builds take from the primary first). Put-away after a build.
+a per-material choice is heavy; builds take from the primary first).
 A pick list sorted by location (the order page shows the location per line, but lines stay in
-their natural order so substitutions keep their grouping). The whole-order **Receive** shorthand on
-the Purchases list does not prompt; use **Record a delivery** or the item's Put away.
+their natural order so substitutions keep their grouping).
+
+**Added 2026-11-26.** The same chooser opens after **Receive all / Receive rest** on the Purchases
+list and after a build that made at least one unit. It suggests what just arrived (never more than is
+unplaced) rather than everything unplaced, and always re-reads the placements first, so a cached
+answer from before the change can't suppress it.
 
 ---
 

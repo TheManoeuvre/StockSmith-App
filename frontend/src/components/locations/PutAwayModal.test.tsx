@@ -39,7 +39,7 @@ const stored = (o: Partial<StoredIn>): StoredIn => ({
   ...o,
 });
 
-function renderModal(answers: Record<number, StoredIn>, onClose = vi.fn()) {
+function renderModal(answers: Record<number, StoredIn>, onClose = vi.fn(), client = new QueryClient({ defaultOptions: { queries: { retry: false } } })) {
   setRoutes([
     { method: "GET", path: /^\/placements\/stored-in\?material_id=1$/, respond: () => answers[1] },
     { method: "GET", path: /^\/placements\/stored-in\?material_id=2$/, respond: () => answers[2] },
@@ -47,12 +47,12 @@ function renderModal(answers: Record<number, StoredIn>, onClose = vi.fn()) {
     { method: "POST", path: "/placements", respond: () => ({}) },
   ]);
   render(
-    <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+    <QueryClientProvider client={client}>
       <PutAwayModal
         title="Where did this go?"
         items={[
-          { ref: { material_id: 1 }, name: "Soy wax" },
-          { ref: { material_id: 2 }, name: "Wicks" },
+          { ref: { material_id: 1 }, name: "Soy wax", qty: 10 },
+          { ref: { material_id: 2 }, name: "Wicks", qty: 20 },
         ]}
         onClose={onClose}
       />
@@ -103,7 +103,8 @@ describe("PutAwayModal", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalled());
     const posts = calls.filter((c) => c.method === "POST" && c.path === "/placements");
     expect(posts).toHaveLength(1);
-    expect(posts[0].body).toMatchObject({ material_id: 2, location_id: 2, qty: "50" });
+    // 50 are unplaced, but only 20 just arrived.
+    expect(posts[0].body).toMatchObject({ material_id: 2, location_id: 2, qty: "20" });
   });
 
   it("closes itself when every item already follows its stock", async () => {
@@ -112,5 +113,15 @@ describe("PutAwayModal", () => {
       2: stored({ name: "Wicks", unassigned: "0", total: "0" }),
     });
     await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it("does not trust a cached answer from before the stock arrived", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 60_000 } } });
+    // What the page was showing before the receipt: nothing unplaced.
+    client.setQueryData(["stored-in", { material_id: 1 }], stored({ total: "0", unassigned: "0" }));
+    client.setQueryData(["stored-in", { material_id: 2 }], stored({ total: "0", unassigned: "0" }));
+    const onClose = renderModal({ 1: stored({}), 2: stored({ name: "Wicks", unassigned: "0" }) }, vi.fn(), client);
+    expect(await screen.findByText("Soy wax")).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
   });
 });

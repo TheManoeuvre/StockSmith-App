@@ -14,6 +14,7 @@ import { PurchaseStatusPill } from "../../components/purchases/PurchaseStatusPil
 import { ReceiptHistoryPanel } from "../../components/purchases/ReceiptHistoryPanel";
 import { ReceiveDialog } from "../../components/purchases/ReceiveDialog";
 import { PutAwayModal, type PutAwayItem } from "../../components/locations/PutAwayModal";
+import { putAwayItemsFor } from "../../lib/putAway";
 import { DetailPanel } from "../../components/common/DetailPanel";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { ConfirmDialog } from "../../components/common/ConfirmDialog";
@@ -252,14 +253,13 @@ function PurchaseDetail() {
       setReceiving(false);
       invalidate();
       // Items kept in one place follow the delivery on their own; the rest get asked where it went.
-      const seen = new Set<number>();
-      const items: PutAwayItem[] = [];
-      for (const r of variables.lines) {
-        const materialId = purchase?.lines.find((l) => l.id === r.line_id)?.material_id;
-        if (materialId == null || seen.has(materialId) || Number(r.qty) <= 0) continue;
-        seen.add(materialId);
-        items.push({ ref: { material_id: materialId }, name: materials?.find((m) => m.id === materialId)?.name ?? "Material" });
-      }
+      const items = putAwayItemsFor(
+        variables.lines.map((r) => ({
+          materialId: purchase?.lines.find((l) => l.id === r.line_id)?.material_id,
+          qty: Number(r.qty),
+        })),
+        materials,
+      );
       if (items.length > 0) setPutAway(items);
     },
   });
