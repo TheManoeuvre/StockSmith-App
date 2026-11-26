@@ -130,6 +130,24 @@ class StockPlacement(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class PutAwayOptOut(Base):
+    """"Don't ask me where this one goes." Only items with no place are ever opted out; giving the
+    item a place removes the row, so the choice never outlives the reason for it."""
+
+    __tablename__ = "put_away_opt_outs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    material_id: Mapped[int | None] = mapped_column(
+        ForeignKey("materials.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    product_id: Mapped[int | None] = mapped_column(
+        ForeignKey("products.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    variant_id: Mapped[int | None] = mapped_column(
+        ForeignKey("product_variants.id", ondelete="CASCADE"), nullable=True
+    )
+
+
 class PlacementEventKind(str, enum.Enum):
     place = "place"
     move = "move"

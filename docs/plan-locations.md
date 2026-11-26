@@ -443,6 +443,13 @@ list and after a build that made at least one unit. It suggests what just arrive
 unplaced) rather than everything unplaced, and always re-reads the placements first, so a cached
 answer from before the change can't suppress it.
 
+**After QA (2026-11-26).** The prompt asks about items in two or more places, and about items with
+none unless switched off for that item (`put_away_opt_outs`; placing the item removes the row). The
+replenishment nudge opens the move dialog pre-filled instead of moving everything. A by-location
+line stores what it did to the total (`stock_take_lines.stock_change`) and the sheet values that,
+not the difference in the place. Location summaries name a place that holds stock when the primary
+is empty.
+
 ---
 
 ## 11. Risks

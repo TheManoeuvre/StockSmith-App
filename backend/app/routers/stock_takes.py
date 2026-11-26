@@ -98,7 +98,9 @@ async def _name_lookups(session: AsyncSession, lines: list[StockTakeLine]) -> tu
     return materials, products, variants
 
 
-def _to_line_read(grouped: stock_takes.GroupedLine, unit_cost: Decimal | None = None) -> StockTakeLineRead:
+def _to_line_read(
+    grouped: stock_takes.GroupedLine, unit_cost: Decimal | None = None, unassigned: Decimal | None = None
+) -> StockTakeLineRead:
     line = grouped.line
     # Derived rather than stored so it can never disagree with the two numbers it comes
     # from; None when nothing was counted, which is not the same as a delta of zero.
@@ -111,6 +113,8 @@ def _to_line_read(grouped: stock_takes.GroupedLine, unit_cost: Decimal | None = 
         location_id=line.location_id,
         location_label=line.location_label,
         found=line.found,
+        stock_change=None if line.stock_change is None else Decimal(line.stock_change),
+        unassigned_qty=unassigned,
         name=grouped.name,
         unit=grouped.unit,
         section=grouped.section,
@@ -211,9 +215,12 @@ async def _read_take(session: AsyncSession, take: StockTake) -> StockTakeDetail:
     # through the same call, which is the only reason all three agree.
     grouped = stock_takes.group_lines(lines, materials, products, variants)
     costs = await stock_takes.line_unit_costs(session, lines, materials, products, variants)
+    unassigned = (
+        await stock_take_locations.unassigned_by_line(session, lines) if take.status is StockTakeStatus.open else {}
+    )
     return StockTakeDetail(
         **_take_fields(take, lines),
-        lines=[_to_line_read(g, costs[g.line.id]) for g in grouped],
+        lines=[_to_line_read(g, costs[g.line.id], unassigned.get(g.line.id)) for g in grouped],
     )
 
 

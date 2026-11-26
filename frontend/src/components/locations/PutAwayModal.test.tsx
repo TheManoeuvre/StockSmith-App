@@ -45,6 +45,7 @@ function renderModal(answers: Record<number, StoredIn>, onClose = vi.fn(), clien
     { method: "GET", path: /^\/placements\/stored-in\?material_id=2$/, respond: () => answers[2] },
     { method: "GET", path: "/locations", respond: () => TREE },
     { method: "POST", path: "/placements", respond: () => ({}) },
+    { method: "PUT", path: "/placements/put-away-preference", respond: () => undefined },
   ]);
   render(
     <QueryClientProvider client={client}>
@@ -123,5 +124,37 @@ describe("PutAwayModal", () => {
     const onClose = renderModal({ 1: stored({}), 2: stored({ name: "Wicks", unassigned: "0" }) }, vi.fn(), client);
     expect(await screen.findByText("Soy wax")).toBeInTheDocument();
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("says how much just arrived when more than that is unplaced", async () => {
+    renderModal({ 1: stored({ unassigned: "60", total: "60" }), 2: stored({ name: "Wicks", unassigned: "0" }) });
+    expect(await screen.findByText(/10 kg just added · 60 kg not placed yet/)).toBeInTheDocument();
+  });
+
+  it("lets an unplaced item be left alone for good, even on Not now", async () => {
+    const onClose = renderModal({ 1: stored({}), 2: stored({ name: "Wicks", unassigned: "0" }) });
+    fireEvent.click(await screen.findByLabelText("Don’t ask about Soy wax again"));
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(calls.find((c) => c.method === "PUT")?.body).toMatchObject({ material_id: 1, ask: false });
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+  });
+
+  it("does not ask about an unplaced item that was switched off, and offers no opt-out for a split one", async () => {
+    renderModal({
+      1: stored({ ask_to_put_away: false }),
+      2: stored({
+        name: "Wicks",
+        unassigned: "50",
+        ask_to_put_away: false,
+        placements: [
+          { id: 1, location_id: 2, location_path: ["Shelf"], qty: "5", is_primary: true },
+          { id: 2, location_id: 1, location_path: ["Loft"], qty: "5", is_primary: false },
+        ],
+      }),
+    });
+    expect(await screen.findByText("Wicks")).toBeInTheDocument();
+    expect(screen.queryByText("Soy wax")).not.toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
   });
 });

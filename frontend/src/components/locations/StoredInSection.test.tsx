@@ -165,10 +165,15 @@ describe("Restocking an empty primary place", () => {
     ]);
     renderSection();
     expect(await screen.findByText(/Wax shelf is empty/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Move 7 kg to Wax shelf" }));
+    // Opens the move window with everything filled in; the amount can be changed first.
+    fireEvent.click(screen.getByRole("button", { name: "Move stock to Wax shelf…" }));
+    const qty = await screen.findByDisplayValue("7");
+    expect(calls.some((c) => c.path === "/placements/move")).toBe(false);
+    fireEvent.change(qty, { target: { value: "3" } });
+    fireEvent.click(screen.getByRole("button", { name: "Move 3 kg" }));
     await waitFor(() => expect(calls.some((c) => c.method === "POST" && c.path === "/placements/move")).toBe(true));
     const move = calls.find((c) => c.path === "/placements/move");
-    expect(move?.body).toMatchObject({ material_id: 1, from_location_id: 1, to_location_id: 2, qty: "7" });
+    expect(move?.body).toMatchObject({ material_id: 1, from_location_id: 1, to_location_id: 2, qty: "3" });
   });
 
   it("says nothing when the primary still has stock", async () => {
@@ -176,5 +181,28 @@ describe("Restocking an empty primary place", () => {
     renderSection();
     await screen.findByText("Loft");
     expect(screen.queryByText(/is empty/)).not.toBeInTheDocument();
+  });
+});
+
+describe("Which card, and not being asked", () => {
+  it("names the variant on a page with one card per variant", async () => {
+    serve(stored({}));
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <StoredInSection item={{ product_id: 1, variant_id: 2 }} itemName="Candle — 30cl" variantLabel="30cl" />
+      </QueryClientProvider>,
+    );
+    expect(await screen.findByRole("heading", { name: "Stored in · 30cl" })).toBeInTheDocument();
+  });
+
+  it("offers to ask again once someone has switched asking off", async () => {
+    setRoutes([
+      { method: "GET", path: /^\/placements\/stored-in/, respond: () => stored({ ask_to_put_away: false }) },
+      { method: "GET", path: "/locations", respond: () => TREE },
+      { method: "PUT", path: "/placements/put-away-preference", respond: () => undefined },
+    ]);
+    renderSection();
+    fireEvent.click(await screen.findByRole("button", { name: "Ask again" }));
+    await waitFor(() => expect(calls.find((c) => c.method === "PUT")?.body).toMatchObject({ material_id: 1, ask: true }));
   });
 });

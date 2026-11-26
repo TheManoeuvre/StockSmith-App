@@ -418,6 +418,7 @@ export function StockSection({
               key={v.id}
               item={{ product_id: productId, variant_id: v.id }}
               itemName={`${product?.name ?? "Product"} — ${v.variant_name}`}
+              variantLabel={v.variant_name}
             />
           ))
         ) : (

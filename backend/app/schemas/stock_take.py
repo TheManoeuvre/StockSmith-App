@@ -100,6 +100,10 @@ class StockTakeLineRead(BaseModel):
     # it was added by hand because it turned up where it was not expected.
     location_id: int | None = None
     location_label: str | None = None
+    # By-location lines: what applying did to the item's total (null until applied), and, while it
+    # is still to apply, how much of the item is unplaced and so can absorb extra stock found.
+    stock_change: Decimal | None = None
+    unassigned_qty: Decimal | None = None
     found: bool = False
     expected_qty: Decimal
     # Finished-goods lines only: how much of expected_qty is picked for open orders and so

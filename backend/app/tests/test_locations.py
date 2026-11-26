@@ -678,3 +678,41 @@ class TestCsv:
         assert "/locations/export" in paths and "/locations/import" in paths
         # Declared after "/{location_id}", "export" would be read as an id and refused.
         assert paths.index("/locations/export") < paths.index("/locations/{location_id}")
+
+
+class TestPutAwayPreference:
+    async def test_asking_is_on_until_switched_off_and_placing_switches_it_back(self, session):
+        shelf = await locs.create_location(session, "Shelf", None)
+        item = await _material(session, qty=10)
+        assert (await placements.stored_in(session, item)).ask_to_put_away
+        await placements.set_ask_to_put_away(session, item, False)
+        await placements.set_ask_to_put_away(session, item, False)  # twice is harmless
+        assert not (await placements.stored_in(session, item)).ask_to_put_away
+        await placements.place(session, item, shelf.id, Decimal(1))
+        assert (await placements.stored_in(session, item)).ask_to_put_away
+
+    async def test_it_is_per_variant(self, session):
+        await _product(session)
+        session.add_all(
+            [
+                ProductVariant(id=1, product_id=1, variant_name="Small", current_stock=5),
+                ProductVariant(id=2, product_id=1, variant_name="Large", current_stock=5),
+            ]
+        )
+        await session.commit()
+        small, large = ItemRef(product_id=1, variant_id=1), ItemRef(product_id=1, variant_id=2)
+        await placements.set_ask_to_put_away(session, small, False)
+        assert not (await placements.stored_in(session, small)).ask_to_put_away
+        assert (await placements.stored_in(session, large)).ask_to_put_away
+
+
+class TestSummaryNamesWhereTheStockIs:
+    async def test_an_empty_primary_gives_way_to_a_place_that_holds_some(self, session):
+        a = await locs.create_location(session, "Jar store", None)
+        b = await locs.create_location(session, "Loft", None)
+        item = await _material(session, qty=9)
+        await placements.place(session, item, a.id, Decimal(2))
+        await placements.place(session, item, b.id, Decimal(7))
+        await create_adjustment(session, 1, MaterialAdjustmentMode.adjust, Decimal(-2), "used")
+        summary = (await placements.summaries(session))[(1, None, None)]
+        assert (summary.primary_path, summary.extra_places) == (["Loft"], 0)

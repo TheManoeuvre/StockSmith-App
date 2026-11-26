@@ -33,7 +33,7 @@ from app.models.order_parcel import (
 )
 from app.models.order_return import OrderLineReturn, ReturnDisposition, ReturnScope, ReturnSource
 from app.models.order_substitution import OrderLineSubstitution
-from app.models.location import Location, PlacementEvent, PlacementEventKind, StockPlacement
+from app.models.location import Location, PlacementEvent, PlacementEventKind, PutAwayOptOut, StockPlacement
 from app.models.manufacturer import Manufacturer
 from app.models.material import (
     LegacyMaterialCategory,
@@ -158,6 +158,7 @@ __all__ = [
     "PlacementEvent",
     "PlacementEventKind",
     "StockPlacement",
+    "PutAwayOptOut",
     "StockTake",
     "StockTakeLine",
     "StockTakeStatus",

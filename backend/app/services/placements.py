@@ -12,7 +12,7 @@ from fastapi import HTTPException, status
 from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.location import Location, PlacementEvent, PlacementEventKind, StockPlacement
+from app.models.location import Location, PlacementEvent, PlacementEventKind, PutAwayOptOut, StockPlacement
 from app.models.material import Material
 from app.models.product import Product
 from app.models.variant import ProductVariant
@@ -142,6 +142,7 @@ class ItemStoredView:
     drift: Decimal  # how much more is placed than exists; 0 when healthy
     follows_stock: bool  # exactly one placement: stock changes update it automatically
     replenish: "Replenishment | None" = None
+    ask_to_put_away: bool = True  # off once someone has said not to ask about this item
 
 
 async def stored_in(session: AsyncSession, ref: ItemRef) -> ItemStoredView:
@@ -169,7 +170,33 @@ async def stored_in(session: AsyncSession, ref: ItemRef) -> ItemStoredView:
         drift=max(placed - item.total, ZERO),
         follows_stock=len(rows) == 1,
         replenish=replenish,
+        ask_to_put_away=await _opt_out(session, ref) is None,
     )
+
+
+def _opt_out_filters(ref: ItemRef) -> tuple:
+    if ref.material_id is not None:
+        return (PutAwayOptOut.material_id == ref.material_id,)
+    if ref.variant_id is not None:
+        return (PutAwayOptOut.product_id == ref.product_id, PutAwayOptOut.variant_id == ref.variant_id)
+    return (PutAwayOptOut.product_id == ref.product_id, PutAwayOptOut.variant_id.is_(None))
+
+
+async def _opt_out(session: AsyncSession, ref: ItemRef) -> PutAwayOptOut | None:
+    return await session.scalar(select(PutAwayOptOut).where(*_opt_out_filters(ref)).limit(1))
+
+
+async def set_ask_to_put_away(session: AsyncSession, ref: ItemRef, ask: bool, *, commit: bool = True) -> None:
+    """Whether to ask where this item goes after a delivery or build."""
+    await resolve_item(session, ref)
+    existing = await _opt_out(session, ref)
+    if ask and existing is not None:
+        await session.delete(existing)
+    elif not ask and existing is None:
+        session.add(PutAwayOptOut(**ref.event_fields()))
+    await session.flush()
+    if commit:
+        await session.commit()
 
 
 # --- Placing and moving ---------------------------------------------------------------------
@@ -202,6 +229,9 @@ async def place(session: AsyncSession, ref: ItemRef, location_id: int, qty: Deci
         placement = StockPlacement(location_id=location_id, qty=qty, is_primary=not rows, **ref.event_fields())
         session.add(placement)
     session.add(_event(ref, PlacementEventKind.place, qty, to_id=location_id))
+    opted_out = await _opt_out(session, ref)
+    if opted_out is not None:
+        await session.delete(opted_out)
     await session.flush()
     if commit:
         await session.commit()
@@ -394,6 +424,12 @@ async def summaries(session: AsyncSession) -> dict[tuple, ItemSummary]:
     for key, item in items.items():
         rows = by_item.get(key, [])
         primary = next((r for r in rows if r.is_primary), rows[0] if rows else None)
+        # Name somewhere the item actually is: an empty primary with stock elsewhere would send
+        # someone to an empty shelf.
+        holding = [r for r in rows if Decimal(r.qty or 0) > 0]
+        if holding and (primary is None or Decimal(primary.qty or 0) <= 0):
+            primary = max(holding, key=lambda r: (Decimal(r.qty), -r.id))
+        others = len([r for r in holding if r is not primary])
         placed = _placed(rows)
         out[key] = ItemSummary(
             item.ref,
@@ -401,7 +437,7 @@ async def summaries(session: AsyncSession) -> dict[tuple, ItemSummary]:
             item.sku,
             item.unit,
             locs.path_names(nodes, primary.location_id) if primary else None,
-            max(len(rows) - 1, 0),
+            others,
             placed,
             item.total,
             max(placed - item.total, ZERO),
@@ -558,4 +594,5 @@ async def location_detail(session: AsyncSession, location_id: int, history_limit
 
 
 async def delete_owner_placements(session: AsyncSession, ref: ItemRef) -> None:
+    await session.execute(delete(PutAwayOptOut).where(*_opt_out_filters(ref)))
     await session.execute(delete(StockPlacement).where(*ref.owner_filters()))

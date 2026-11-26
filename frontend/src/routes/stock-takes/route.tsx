@@ -258,6 +258,9 @@ function StockTakesListContent() {
     onSuccess: (created) => {
       queryClient.invalidateQueries({ queryKey: ["stock-takes"] });
       queryClient.invalidateQueries({ queryKey: ["dashboard-summary"] });
+      // Otherwise the form stays above the new sheet with "Start counting" still live.
+      setShowPicker(false);
+      setLocationId(null);
       navigate({
         to: "/stock-takes/$stockTakeId",
         params: { stockTakeId: String(created.stock_take.id) },

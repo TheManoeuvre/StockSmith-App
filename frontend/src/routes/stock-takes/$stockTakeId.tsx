@@ -1,3 +1,4 @@
+import { stockChanges } from "../../lib/stockChange";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Fragment, useCallback, useMemo, useState } from "react";
@@ -213,6 +214,10 @@ function StockTakeDetailPage() {
       Number(l.counted_qty) !== Number(l.expected_qty),
   ).length;
   const confirmingLines = pendingApproval - changingLines;
+  const changes = stockChanges(take.lines, counts);
+  // A count by location moves stock between "in this place" and "not placed", so say separately
+  // how many lines change the total.
+  const stockChangingLines = countedLines.filter((l) => (changes.get(l.id) ?? 0) !== 0).length;
   const blanks = take.lines.filter(
     (l) => l.counted_qty === null && l.status === "pending",
   ).length;
@@ -227,7 +232,15 @@ function StockTakeDetailPage() {
     pendingApproval === 0
       ? `Nothing has been counted, so approving closes the take without changing any stock. ` +
         `${blanks} blank ${plural(blanks, "line is", "lines are")} left alone.`
-      : `Approving writes your counts to stock. Of ${pendingApproval} counted ` +
+      : take.location_id != null
+        ? `Approving sets each place to your count. Of ${pendingApproval} counted ` +
+          `${plural(pendingApproval, "line", "lines")}, ${changingLines} ` +
+          `${plural(changingLines, "changes", "change")} what a place holds and ${confirmingLines} ` +
+          `${plural(confirmingLines, "confirms", "confirm")} it. Your total stock changes on ${stockChangingLines} of them: ` +
+          `extra found is taken from stock you hadn't placed before it adds anything. ` +
+          `${blanks} blank ${plural(blanks, "line is", "lines are")} left alone. Any line that moved since the take ` +
+          `started, or is short with units allocated to open orders, is held for you to settle. The take closes either way.`
+        : `Approving writes your counts to stock. Of ${pendingApproval} counted ` +
         `${plural(pendingApproval, "line", "lines")}, ${changingLines} ` +
         `${plural(changingLines, "adjusts", "adjust")} the recorded quantity and ${confirmingLines} ` +
         `${plural(confirmingLines, "confirms", "confirm")} it unchanged. ${blanks} blank ` +
@@ -408,12 +421,14 @@ function StockTakeDetailPage() {
                               typed === ""
                                 ? null
                                 : Number(typed) - Number(line.expected_qty);
-                            // Money at stake: the delta priced at today's unit cost. Null
-                            // when there's no count yet or no cost to price it with.
+                            // Money at stake: what total stock changes by, priced at today's
+                            // unit cost. On a count by location that can be less than the
+                            // difference in the place. Null when there is nothing to price.
+                            const change = changes.get(line.id) ?? null;
                             const liveValue =
-                              liveDelta == null || line.unit_cost == null
+                              change == null || line.unit_cost == null
                                 ? null
-                                : liveDelta * Number(line.unit_cost);
+                                : change * Number(line.unit_cost);
                             // Nothing has touched this item since it was last counted, so
                             // it should already be at the figure on the sheet. Tinted rather
                             // than hidden or reordered: it is still a line to count, just a
@@ -483,6 +498,13 @@ function StockTakeDetailPage() {
                                     : liveDelta > 0
                                       ? `+${roundQty(String(liveDelta), line.unit)}`
                                       : roundQty(String(liveDelta), line.unit)}
+                                  {line.location_id != null && liveDelta != null && change != null && change !== liveDelta && (
+                                    <span className="block text-[11px] text-slate-500">
+                                      {change === 0
+                                        ? "total stock unchanged"
+                                        : `total stock +${roundQty(String(change), line.unit)}`}
+                                    </span>
+                                  )}
                                 </td>
                                 <td
                                   className={`p-2 text-right tabular-nums ${

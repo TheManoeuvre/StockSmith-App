@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { locationsApi, type ItemRef, type StoredIn } from "../../api/locations";
-import { qtyWithUnit } from "../../lib/format";
+import { displayQty, qtyWithUnit } from "../../lib/format";
 import { last, pathLabel } from "../../lib/locations";
 import { Badge } from "../common/Badge";
 import { ErrorBanner } from "../common/ErrorBanner";
@@ -20,11 +20,26 @@ const SMALL_BTN = "rounded-md border border-slate-300 px-2.5 py-1 text-xs hover:
  * Nothing here is alarming: unplaced stock and drift are routine, so they're amber with a clear
  * next action, never red.
  */
-export function StoredInSection({ item, itemName }: { item: ItemRef; itemName: string }) {
+export function StoredInSection({
+  item,
+  itemName,
+  variantLabel,
+}: {
+  item: ItemRef;
+  itemName: string;
+  /** Which variant this card is for, on a page that shows one card per variant. */
+  variantLabel?: string;
+}) {
+  const titleId = useId();
   const { data: stored } = useQuery({ queryKey: ["stored-in", item], queryFn: () => locationsApi.storedIn(item) });
   const { data: tree } = useLocationTree();
   const invalidate = useInvalidateLocations();
-  const [dialog, setDialog] = useState<null | { mode: "place" | "move"; fromId?: number | null }>(null);
+  const [dialog, setDialog] = useState<null | {
+    mode: "place" | "move";
+    fromId?: number | null;
+    toId?: number | null;
+    qty?: string;
+  }>(null);
 
   const makePrimary = useMutation({ mutationFn: locationsApi.makePrimary, onSuccess: invalidate });
   const reduce = useMutation({
@@ -32,11 +47,7 @@ export function StoredInSection({ item, itemName }: { item: ItemRef; itemName: s
     onSuccess: invalidate,
   });
   const unplace = useMutation({ mutationFn: locationsApi.unplace, onSuccess: invalidate });
-  const restock = useMutation({
-    mutationFn: (r: NonNullable<StoredIn["replenish"]>) =>
-      locationsApi.moveItem(item, r.from_location_id, r.to_location_id, r.qty),
-    onSuccess: invalidate,
-  });
+  const askAgain = useMutation({ mutationFn: () => locationsApi.setAskToPutAway(item, true), onSuccess: invalidate });
 
   // Renders nothing until a well-formed answer arrives, so a slow or unexpected response can never
   // get in the way of the material or product page it sits on.
@@ -57,10 +68,10 @@ export function StoredInSection({ item, itemName }: { item: ItemRef; itemName: s
     : undefined;
 
   return (
-    <section aria-labelledby="stored-in-title" className="flex flex-col gap-2.5 rounded-lg bg-white p-3.5 shadow-sm">
+    <section aria-labelledby={titleId} className="flex flex-col gap-2.5 rounded-lg bg-white p-3.5 shadow-sm">
       <div className="flex items-center gap-2">
-        <h3 id="stored-in-title" className="text-[13px] font-semibold">
-          Stored in
+        <h3 id={titleId} className="text-[13px] font-semibold">
+          Stored in{variantLabel ? ` · ${variantLabel}` : ""}
         </h3>
         <HelpLink doc="locations" anchor="placing-and-moving-stock" />
         <span className="flex-1" />
@@ -121,12 +132,19 @@ export function StoredInSection({ item, itemName }: { item: ItemRef; itemName: s
             <b className="font-semibold">{last(stored.replenish.to_path)} is empty</b>, but{" "}
             {last(stored.replenish.from_path)} still has {qtyWithUnit(stored.replenish.qty, stored.unit)}.
           </span>
+          {/* Opens the move window filled in, so the amount is the user's to change. */}
           <button
-            onClick={() => restock.mutate(stored.replenish!)}
-            disabled={restock.isPending}
+            onClick={() =>
+              setDialog({
+                mode: "move",
+                fromId: stored.replenish!.from_location_id,
+                toId: stored.replenish!.to_location_id,
+                qty: displayQty(stored.replenish!.qty),
+              })
+            }
             className="rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1 text-xs"
           >
-            Move {qtyWithUnit(stored.replenish.qty, stored.unit)} to {last(stored.replenish.to_path)}
+            Move stock to {last(stored.replenish.to_path)}…
           </button>
         </div>
       )}
@@ -165,7 +183,16 @@ export function StoredInSection({ item, itemName }: { item: ItemRef; itemName: s
         </p>
       )}
 
-      <ErrorBanner error={makePrimary.error ?? reduce.error ?? unplace.error ?? restock.error} />
+      {places.length === 0 && stored.ask_to_put_away === false && (
+        <p className="text-xs text-slate-500">
+          You aren’t asked where this goes after deliveries or builds.{" "}
+          <button onClick={() => askAgain.mutate()} className="text-blue-700 hover:underline">
+            Ask again
+          </button>
+        </p>
+      )}
+
+      <ErrorBanner error={makePrimary.error ?? reduce.error ?? unplace.error ?? askAgain.error} />
 
       {dialog && (
         <PlaceItemModal
@@ -175,6 +202,8 @@ export function StoredInSection({ item, itemName }: { item: ItemRef; itemName: s
           stored={stored}
           mode={dialog.mode}
           initialFromId={dialog.fromId}
+          initialToId={dialog.toId}
+          initialQty={dialog.qty}
           onClose={() => setDialog(null)}
         />
       )}

@@ -38,8 +38,9 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Stock kept in several places now follows builds and sales.** A decrease comes from the primary
   place first, then the fullest other, and manual adjustments can say **Taking from** which place.
   When the primary place runs out and another still has stock, the item offers to move it across.
-  After you receive a purchase or record a build, StockSmith asks where each item that has no single place went, with
-  the primary place filled in. Order lines show where to pick each item from.
+  After you receive a purchase or record a build, StockSmith asks where items kept in several
+  places (or none yet, unless you tell it not to) went. Order lines show where to pick each item
+  from.
 - **Print location labels several to a page on A4** for sticky label sheets, from the print screen.
 - **Import and export locations as a spreadsheet.** **Export CSV** on the Locations page saves your
   whole layout, one row per location with its path (`Workshop > Oils rack > Bin 1`), and

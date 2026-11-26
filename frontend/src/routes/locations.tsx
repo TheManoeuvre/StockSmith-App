@@ -765,7 +765,7 @@ function History({ entries, total }: { entries: LocationHistoryEntry[]; total: n
           ›
         </span>
         <b className="font-medium">History</b>
-        <span className="text-slate-500">{total} entries — moves, automatic deductions and additions</span>
+        <span className="text-slate-500">{total} {total === 1 ? "entry" : "entries"} — moves, automatic deductions and additions</span>
       </button>
       {open && (
         <ul className="divide-y divide-slate-100 border-t border-slate-100 text-[12.5px]">

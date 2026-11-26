@@ -437,3 +437,37 @@ class TestRouter:
         )
         found = next(l for l in after.lines if l.name == "Wicks")
         assert found.found and found.counted_qty == 4 and found.location_label == "Workshop › Shelf"
+
+
+class TestStockChange:
+    """The sheet must report what happens to stock, not just the difference in one place."""
+
+    async def test_extra_taken_from_unassigned_changes_no_stock_and_says_so(self, session, shelf):
+        from app.routers import stock_takes as router
+
+        wax = await _material(session, qty=32)
+        await placements.place(session, wax, shelf[1], Decimal(20))  # 12 unassigned
+        take_id = (await router.create_stock_take(scope(shelf[0]), session)).stock_take.id
+        line = (await router.get_stock_take(take_id, session)).lines[0]
+        assert (line.unassigned_qty, line.stock_change) == (12, None)
+
+        row = await session.get(StockTakeLine, line.id)
+        row.counted_qty = Decimal(25)
+        await session.commit()
+        await stock_takes.approve_stock_take(session, take_id)
+        applied = await session.get(StockTakeLine, line.id, populate_existing=True)
+        assert (applied.status, Decimal(applied.stock_change)) == (StockTakeLineStatus.applied, 0)
+
+    async def test_a_shortfall_records_the_loss(self, session, shelf):
+        from app.routers import stock_takes as router
+
+        wax = await _material(session, qty=10)
+        await placements.place(session, wax, shelf[1], Decimal(10))
+        take_id = (await router.create_stock_take(scope(shelf[0]), session)).stock_take.id
+        line = (await router.get_stock_take(take_id, session)).lines[0]
+        row = await session.get(StockTakeLine, line.id)
+        row.counted_qty = Decimal(7)
+        await session.commit()
+        await stock_takes.approve_stock_take(session, take_id)
+        applied = await session.get(StockTakeLine, line.id, populate_existing=True)
+        assert Decimal(applied.stock_change) == -3

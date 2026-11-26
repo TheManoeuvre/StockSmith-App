@@ -104,6 +104,8 @@ export interface StoredIn {
     from_path: string[];
     qty: string;
   } | null;
+  /** False once someone has said not to ask where this item goes. */
+  ask_to_put_away?: boolean;
   placements: StoredPlacement[];
 }
 
@@ -149,6 +151,7 @@ export const locationsApi = {
   emptyInto: (id: number, to_location_id: number) =>
     api.post<{ moved: number }>(`/locations/${id}/empty-into`, { to_location_id }),
 
+  setAskToPutAway: (ref: ItemRef, ask: boolean) => api.put<void>("/placements/put-away-preference", { ...ref, ask }),
   storedIn: (ref: ItemRef) => api.get<StoredIn>(`/placements/stored-in?${itemQuery(ref)}`),
   summaries: () => api.get<ItemLocationSummary[]>("/placements/summary"),
   place: (ref: ItemRef, location_id: number, qty: string) =>

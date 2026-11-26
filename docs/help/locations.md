@@ -78,13 +78,16 @@ Items placed in **several** places work like this:
   first, then from whichever other place holds the most, never taking a place below zero. On a
   manual adjustment you can choose **Taking from** to say which place instead.
 - **Stock coming in** isn't added anywhere, because StockSmith can't know which place a delivery
-  went to. It shows as **Unassigned** until you put it away. After you receive a purchase (one
-  delivery, or **Receive all** on the Purchases list) or record a build, StockSmith asks where each
-  such item went. It suggests the amount that just arrived and, for an item with several places,
-  its primary place. **Not now** leaves it Unassigned. Items you've never placed are asked about
-  too, so you can give them a first home.
+  went to. It shows as **Unassigned** until you put it away.
 - When the **primary place runs out** but another still has some, the item's **Stored in** section
-  offers to move that stock across, for example "Wax shelf is empty, but Loft still has 7 kg."
+  says so, for example "Jar store is empty, but Loft still has 20." **Move stock to Jar store…**
+  opens the move window filled in, so you can change how much goes back.
+
+After you receive a purchase (one delivery, or **Receive all** on the Purchases list) or record a
+build, StockSmith asks where items went if they're kept in several places, or have no place yet. It
+suggests the amount that just arrived, with the primary place filled in where there is one. **Not
+now** leaves it Unassigned. For an item with no place you can tick **Don't ask about this again**;
+its **Stored in** section then offers **Ask again**, and placing it switches asking back on.
 
 Items placed nowhere aren't changed automatically.
 
@@ -158,6 +161,8 @@ alone. If something turns up that the sheet doesn't list, use **Add an item foun
 When you approve:
 
 - Each place is set to the amount you counted.
+- Where counting more than expected doesn't add to your stock, the sheet says **total stock
+  unchanged** under the difference, and the **Value** column shows only what your stock gains or loses.
 - The item's **total** changes only by what the count proves. If you count fewer than expected,
   the shortfall comes off your stock. If you count more, StockSmith first assumes it is stock
   you hadn't placed anywhere yet (the **Unassigned** amount) and only adds to your stock for

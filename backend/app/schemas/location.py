@@ -140,6 +140,13 @@ class PlacementRead(BaseModel):
     is_primary: bool
 
 
+class PutAwayPreference(BaseModel):
+    material_id: int | None = None
+    product_id: int | None = None
+    variant_id: int | None = None
+    ask: bool
+
+
 class ReplenishRead(BaseModel):
     to_location_id: int
     to_path: list[str]
@@ -158,6 +165,7 @@ class StoredInRead(BaseModel):
     follows_stock: bool
     # Set when the primary place is empty but another still holds stock.
     replenish: ReplenishRead | None = None
+    ask_to_put_away: bool = True
     placements: list[PlacementRead]
 
 

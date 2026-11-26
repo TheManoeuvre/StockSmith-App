@@ -821,7 +821,7 @@ function OrderLineRow({
             {line.variant_name ? ` (${line.variant_name})` : ""}
           </span>
         )}
-        {toShip && pickFrom?.primary_path && (
+        {toShip && pickFrom?.primary_path && Number(pickFrom.placed) > 0 && (
           <div className="mt-0.5 text-[11px] text-slate-500">
             Pick from {pathLabel(pickFrom.primary_path)}
             {pickFrom.extra_places > 0 ? ` (+${pickFrom.extra_places} more place${pickFrom.extra_places === 1 ? "" : "s"})` : ""}

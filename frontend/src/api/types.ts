@@ -235,6 +235,10 @@ export interface StockTakeLine {
   /** By-location takes: the place this line is about, and its path ("Workshop › Shelf"). */
   location_id?: number | null;
   location_label?: string | null;
+  /** By-location lines: what applying did to the item's total; null until applied. */
+  stock_change?: string | null;
+  /** By-location lines on an open take: how much of the item is in no place at all. */
+  unassigned_qty?: string | null;
   /** Added by hand because it turned up where it wasn't expected. */
   found?: boolean;
   name: string;

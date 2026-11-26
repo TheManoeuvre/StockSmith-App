@@ -146,6 +146,9 @@ class StockTakeLine(Base):
     location_id: Mapped[int | None] = mapped_column(ForeignKey("locations.id", ondelete="SET NULL"), nullable=True)
     location_label: Mapped[str | None] = mapped_column(String, nullable=True)
     # Added to the sheet by hand because it was found in a place it wasn't expected.
+    # By-location lines only: what applying the count did to the item's total, which is not the
+    # place's difference when the extra came out of Unassigned. Null until applied.
+    stock_change: Mapped[float | None] = mapped_column(Numeric(14, 4), nullable=True)
     found: Mapped[bool] = mapped_column(default=False, nullable=False)
 
     # The snapshot taken when the take started — what the system believed then, not now.

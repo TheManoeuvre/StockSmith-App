@@ -22,6 +22,7 @@ from app.schemas.location import (
     RangePreviewName,
     RangePreviewRead,
     RangeRequest,
+    PutAwayPreference,
     ReplenishRead,
     StoredInRead,
 )
@@ -193,6 +194,13 @@ def _ref(p: ItemRefIn) -> ItemRef:
     return ItemRef(material_id=p.material_id, product_id=p.product_id, variant_id=p.variant_id)
 
 
+@placements_router.put("/put-away-preference", status_code=status.HTTP_204_NO_CONTENT)
+async def put_away_preference(payload: PutAwayPreference, session: AsyncSession = Depends(get_db)) -> None:
+    await placements.set_ask_to_put_away(
+        session, ItemRef(payload.material_id, payload.product_id, payload.variant_id), payload.ask
+    )
+
+
 @placements_router.get("/stored-in", response_model=StoredInRead)
 async def stored_in(
     material_id: int | None = Query(None),
@@ -209,6 +217,7 @@ async def stored_in(
         unassigned=v.unassigned,
         drift=v.drift,
         follows_stock=v.follows_stock,
+        ask_to_put_away=v.ask_to_put_away,
         replenish=ReplenishRead(**vars(v.replenish)) if v.replenish else None,
         placements=[
             PlacementRead(

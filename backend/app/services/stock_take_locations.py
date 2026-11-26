@@ -170,8 +170,29 @@ async def apply_location_line(session: AsyncSession, line: StockTakeLine, take_i
     plan = await _plan_line(session, line)
     if plan.conflict is not None:
         return plan.conflict
+    line.stock_change = plan.total_change
     await _apply_line(session, line, plan, take_id)
     return None
+
+
+async def unassigned_by_line(session: AsyncSession, lines: list[StockTakeLine]) -> dict[int, Decimal]:
+    """For each by-location line, how much of its item is in no place at all. The sheet needs it to
+    say what approving will really do: extra stock found comes out of this before the total moves."""
+    seen: dict[ItemRef, Decimal] = {}
+    out: dict[int, Decimal] = {}
+    for line in lines:
+        if line.location_id is None:
+            continue
+        ref = _ref(line)
+        if ref not in seen:
+            try:
+                item = await placements.resolve_item(session, ref)
+            except HTTPException:
+                continue  # the item has since been removed
+            rows = await placements.item_placements(session, ref)
+            seen[ref] = max(item.total - placements._placed(rows), ZERO)
+        out[line.id] = seen[ref]
+    return out
 
 
 async def rebaseline(session: AsyncSession, line: StockTakeLine) -> None:

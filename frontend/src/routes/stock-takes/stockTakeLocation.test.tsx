@@ -206,3 +206,18 @@ describe("Count on the Locations page", () => {
     expect(await screen.findByRole("heading", { name: /Stock take #5/ }, WAIT)).toBeInTheDocument();
   });
 });
+
+describe("What a by-location count does to stock", () => {
+  it("says total stock is unchanged when the extra was simply not placed yet", async () => {
+    renderAt("/stock-takes/5", [
+      { method: "GET", path: "/stock-takes", respond: () => [] },
+      {
+        method: "GET",
+        path: "/stock-takes/5",
+        respond: () => take([line(1, { counted_qty: "15", unassigned_qty: "12", unit_cost: "1.40" })]),
+      },
+    ]);
+    expect(await screen.findByText("total stock unchanged", undefined, WAIT)).toBeInTheDocument();
+    expect(screen.queryByText(/\+.7\.00/)).not.toBeInTheDocument();
+  });
+});

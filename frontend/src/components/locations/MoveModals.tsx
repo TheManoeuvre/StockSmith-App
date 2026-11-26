@@ -207,6 +207,7 @@ export function PlaceItemModal({
   mode,
   initialFromId,
   initialToId,
+  initialQty,
   onClose,
 }: {
   rows: LocationRow[];
@@ -216,6 +217,7 @@ export function PlaceItemModal({
   mode: "place" | "move";
   initialFromId?: number | null;
   initialToId?: number | null;
+  initialQty?: string;
   onClose: () => void;
 }) {
   const places = stored.placements;
@@ -223,7 +225,7 @@ export function PlaceItemModal({
   const [toId, setToId] = useState<number | null>(initialToId ?? null);
   const from = places.find((p) => p.location_id === fromId);
   const available = mode === "place" ? Number(stored.unassigned) : Number(from?.qty ?? 0);
-  const [qty, setQty] = useState(mode === "place" ? displayQty(stored.unassigned) : "");
+  const [qty, setQty] = useState(initialQty ?? (mode === "place" ? displayQty(stored.unassigned) : ""));
   const invalidate = useInvalidateLocations();
   const run = useMutation({
     mutationFn: () =>
