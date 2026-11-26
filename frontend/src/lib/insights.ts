@@ -170,7 +170,7 @@ export function num(value: string | number | null | undefined): number | null {
 export function gbp(value: string | number | null | undefined, decimals = 2): string {
   const n = num(value);
   if (n === null) return "-";
-  const text = Math.abs(n).toLocaleString("en-GB", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+  const text = Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
   return `${n < 0 ? "−" : ""}£${text}`;
 }
 
@@ -188,7 +188,7 @@ export function pct(value: string | number | null | undefined): string {
 }
 
 export function count(value: number): string {
-  return Math.round(value).toLocaleString("en-GB");
+  return Math.round(value).toLocaleString();
 }
 
 export type DeltaTone = "good" | "bad" | "flat";

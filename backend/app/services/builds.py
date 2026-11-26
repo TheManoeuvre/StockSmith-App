@@ -36,7 +36,7 @@ async def create_build(
 
     failed_consumption maps material_id -> whether that BOM line was actually consumed
     for the failed qty (a failed print may not have burned through the whole BOM). When
-    not given and qty_failed > 0, defaults to "filament consumed, everything else not" â€”
+    not given and qty_failed > 0, defaults to "filament consumed, everything else not" —
     the common case for a 3D-print failure, still overridable by passing an explicit map.
     Ignored entirely when qty_failed is 0.
 
@@ -67,7 +67,7 @@ async def create_build(
     if product is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
 
-    # Only *active* variants count â€” a product whose variants have all been disabled is
+    # Only *active* variants count — a product whose variants have all been disabled is
     # treated the same as a product with no variants at all: build against the base
     # product's own SKU/BOM/stock rather than forcing a (disabled) variant to be picked.
     has_active_variants = (
@@ -80,11 +80,11 @@ async def create_build(
 
     if has_active_variants and variant_id is None:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="This product has variants â€” specify a variant_id"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="This product has variants — specify a variant_id"
         )
     if not has_active_variants and variant_id is not None:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="This product has no active variants â€” omit variant_id"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="This product has no active variants — omit variant_id"
         )
 
     variant: ProductVariant | None = None
@@ -267,8 +267,8 @@ async def create_build(
         )
 
     if qty_failed > 0:
-        # A failed build never touches current_stock â€” material was consumed but no
-        # usable unit resulted â€” so qty_delta is 0 and running_balance is unchanged.
+        # A failed build never touches current_stock — material was consumed but no
+        # usable unit resulted — so qty_delta is 0 and running_balance is unchanged.
         # Still gets its own row so the failure (and the material burned on it) shows up
         # in the same timeline as everything else touching this product.
         record_stock_event(

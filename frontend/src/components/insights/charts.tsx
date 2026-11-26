@@ -282,7 +282,7 @@ export function Waterfall({ steps, ariaLabel }: { steps: WaterfallStep[]; ariaLa
 }
 
 function formatWhole(n: number): string {
-  return `£${Math.round(n).toLocaleString("en-GB")}`;
+  return `£${Math.round(n).toLocaleString()}`;
 }
 
 // --- Scatter ----------------------------------------------------------------------------
