@@ -19,6 +19,12 @@ Grouped by feature area; within each group, roughly most-valuable first.
 
 **Ask:** The §6c watchdog — a lightweight external check (Scheduled Task or a second tiny process) that relaunches StockSmith `--hidden` when it finds the shell gone *and* no `backend.stopped` marker present. Small, but it's the difference between "restarts a crash" and "restarts something the user closed on purpose".
 
+### An unreadable store token breaks pages that don't need it
+
+**Problem:** Stored tokens and secrets are decrypted as their rows are loaded, so if `token_encryption_key` is missing, wrong or rotated, anything that loads those rows fails with a bare 500. Seen on 2026-11-26, running against a copy of a real database with a stand-in key: `GET /onboarding/status`, `GET /settings/notifications` and `GET /shipping-profiles/refresh-status` all failed, though none of them needs the secret itself. All three loaded once the tokens were blanked. On a real install this could follow a restore or move that brings the database without its key.
+
+**Ask:** Don't decrypt until the value is used (deferred columns, or queries that select only what they need), and where it is needed, report "reconnect this store" rather than a 500.
+
 ---
 
 ## Stock-take workflow
@@ -192,7 +198,27 @@ Worth measuring first: run the dev build with the browser tools, capture per-rou
 
 ---
 
+## Test suite
+
+### Frontend tests that time out on a slow first render
+
+**Problem:** On a Windows development machine, a full `npm test` run often fails a few tests that wait for the first heading of a route: the help index (`help.test.tsx`), settings nav (`settings.test.tsx`) and product detail (`productDetail.test.tsx`), with others when the machine is busy. They generally pass when the file is run alone, and CI passes, so a real failure is easy to wave away.
+
+**Ask:** Find where the first render spends its time (the whole route tree and lazy chunks are loaded per file), then warm it up or give the first lookup a longer shared timeout.
+
+---
+
 ## Schema debt
+
+### Models and the migrated schema disagree in a few places
+
+**Problem:** `alembic check` fails on a database upgraded to head. Found on 2026-11-26 on a copy of a real database; none of it causes a known fault, but the noise would hide a real missing migration.
+
+- `notifications`: the migration creates `ix_notifications_created_at` and `ix_notifications_read_at`, which the model doesn't declare, so autogenerate would drop them.
+- `order_postage_charges.platform`: the column is `VARCHAR(4)`, narrower than the current platform names (`shopify`, `square`). SQLite doesn't enforce the length.
+- Nullable in the database but not in the model: `product_categories.created_at`; `stock_takes.started_at`, `created_at`, `updated_at`; `stock_take_lines.created_at`, `updated_at`.
+
+**Ask:** Declare the two indexes on the model, add one migration for the column width and the NOT NULLs (backfilling any nulls first), then run `alembic check` in CI so it stays clean.
 
 ### Drop the superseded `materials.colour` and `materials.category` columns
 
