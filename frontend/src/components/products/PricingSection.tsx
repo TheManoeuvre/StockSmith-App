@@ -17,7 +17,7 @@ import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { DirtyPath, useManagedSave } from "../../hooks/useDirtyRegistry";
 import { useGuard } from "../../hooks/useUnsavedChangesGuard";
-import { formatUnitCost } from "../../lib/money";
+import { currencySymbol, formatAmount, formatUnitCost } from "../../lib/money";
 import { shippingPriceForChannel } from "../../lib/shippingPrice";
 
 const INITIAL_LINE_LIMIT = 5;
@@ -99,10 +99,10 @@ function computeMargin(
 function MarginSummary({ margin }: { margin: MarginResult }) {
   return (
     <span className="text-sm">
-      Profit: <strong>£{margin.profit.toFixed(2)}</strong> · Margin: <strong>{margin.marginPercent.toFixed(1)}%</strong>
+      Profit: <strong>{formatAmount(margin.profit)}</strong> · Margin: <strong>{margin.marginPercent.toFixed(1)}%</strong>
       {margin.shippingPrice > 0 && (
         <span className="ml-2 text-xs text-slate-400" title="Margin is on the full amount the buyer pays, sale price plus postage charged. This is the same base an order's net profit uses.">
-          on £{margin.revenue.toFixed(2)} incl. £{margin.shippingPrice.toFixed(2)} postage
+          on {formatAmount(margin.revenue)} incl. {formatAmount(margin.shippingPrice)} postage
         </span>
       )}
       {margin.postageMissing && (
@@ -131,7 +131,7 @@ function RangeMarginSummary({ margins }: { margins: MarginResult[] }) {
   const anyPostageMissing = margins.some((m) => m.postageMissing);
 
   const profitLabel =
-    minProfit === maxProfit ? `£${minProfit.toFixed(2)}` : `£${minProfit.toFixed(2)}–£${maxProfit.toFixed(2)}`;
+    minProfit === maxProfit ? formatAmount(minProfit) : `${formatAmount(minProfit)}–${formatAmount(maxProfit)}`;
   const percentLabel =
     minPercent === maxPercent ? `${minPercent.toFixed(1)}%` : `${minPercent.toFixed(1)}%–${maxPercent.toFixed(1)}%`;
 
@@ -195,7 +195,7 @@ function ShippingProfileSelect({
       <option value="">{inheritLabel ?? "No shipping profile"}</option>
       {profiles.map((p) => (
         <option key={p.id} value={p.id}>
-          {p.name} (cost £{shippingCostForFeeSource(p, feeSource).toFixed(2)})
+          {p.name} (cost {formatAmount(shippingCostForFeeSource(p, feeSource))})
         </option>
       ))}
     </select>
@@ -286,7 +286,7 @@ function CogsBreakdown({ product }: { product: Product }) {
       ? ((revenue - totalCogs) / revenue) * 100
       : null;
 
-  const money = (n: number | null) => (n == null ? "-" : `£${n.toFixed(2)}`);
+  const money = (n: number | null) => formatAmount(n);
 
   return (
     <div className="flex flex-col gap-1 rounded bg-white p-4 text-sm shadow-sm">
@@ -405,8 +405,8 @@ function ChannelFeeComparison({
   return (
     <div className="flex flex-col gap-1 rounded bg-white p-4 text-sm shadow-sm">
       <h4 className="mb-1 text-sm font-medium text-slate-600">
-        Channel fees at £{salePrice.toFixed(2)}
-        {profile && !pricesDiffer && channelPostage("etsy").price > 0 && ` + £${channelPostage("etsy").price.toFixed(2)} postage`}
+        Channel fees at {formatAmount(salePrice)}
+        {profile && !pricesDiffer && channelPostage("etsy").price > 0 && ` + ${formatAmount(channelPostage("etsy").price)} postage`}
         {profile && pricesDiffer && " + each channel's own postage"}
       </h4>
       <table className="w-full text-left">
@@ -414,7 +414,7 @@ function ChannelFeeComparison({
           <tr className="text-xs text-slate-400">
             <th className="py-1 font-normal">Channel</th>
             <th className="py-1 text-right font-normal">Fee %</th>
-            <th className="py-1 text-right font-normal">Fee £</th>
+            <th className="py-1 text-right font-normal">Fee {currencySymbol()}</th>
             <th className="py-1 text-right font-normal">Margin</th>
           </tr>
         </thead>
@@ -445,11 +445,11 @@ function ChannelFeeComparison({
                 <td className="py-1">
                   {platform}
                   {pricesDiffer && (
-                    <span className="ml-1 text-xs text-slate-400">+ £{shippingPrice.toFixed(2)} postage</span>
+                    <span className="ml-1 text-xs text-slate-400">+ {formatAmount(shippingPrice)} postage</span>
                   )}
                 </td>
                 <td className="py-1 text-right tabular-nums">{feePct.toFixed(1)}%</td>
-                <td className="py-1 text-right tabular-nums">£{feeAmount.toFixed(2)}</td>
+                <td className="py-1 text-right tabular-nums">{formatAmount(feeAmount)}</td>
                 <td
                   className={`py-1 text-right tabular-nums ${marginToneClass(margin)}`}
                 >
@@ -695,11 +695,11 @@ export function PricingSection({ product }: { product: Product }) {
               // no per-variant history to fall back on, so they stay "-" as before.
               const isLatest = index === 0;
               const salePriceLabel = h.sale_price
-                ? `£${Number(h.sale_price).toFixed(2)}`
+                ? formatAmount(h.sale_price)
                 : isLatest && liveSalePriceRange
                   ? liveSalePriceRange.min === liveSalePriceRange.max
-                    ? `£${liveSalePriceRange.min.toFixed(2)}`
-                    : `£${liveSalePriceRange.min.toFixed(2)}–£${liveSalePriceRange.max.toFixed(2)}`
+                    ? formatAmount(liveSalePriceRange.min)
+                    : `${formatAmount(liveSalePriceRange.min)}–${formatAmount(liveSalePriceRange.max)}`
                   : "-";
               const marginLabel = h.margin_percent
                 ? `${Number(h.margin_percent).toFixed(1)}%`
@@ -848,7 +848,7 @@ function ProductPriceForm({
           saveMutation.mutate();
         }}
       >
-        <FieldRow label="Sale price (£)" align="right">
+        <FieldRow label={`Sale price (${currencySymbol()})`} align="right">
           <input
             className="w-28 rounded border border-slate-300 px-2 py-1 text-right tabular-nums"
             value={salePrice}
@@ -1016,7 +1016,7 @@ function VariableGroupRow({
         </span>
       </div>
       <label className="flex flex-col gap-1">
-        <span className="text-sm">Sale price (£)</span>
+        <span className="text-sm">Sale price ({currencySymbol()})</span>
         <input
           className="w-28 rounded border border-slate-300 px-2 py-1"
           placeholder={product.sale_price ?? ""}
@@ -1190,7 +1190,7 @@ function LineRow({
     >
       <span className="w-40 text-sm font-medium">{variant.variant_name}</span>
       <label className="flex flex-col gap-1">
-        <span className="text-sm">Sale price (£)</span>
+        <span className="text-sm">Sale price ({currencySymbol()})</span>
         <input
           className="w-28 rounded border border-slate-300 px-2 py-1"
           placeholder={product.sale_price ?? ""}

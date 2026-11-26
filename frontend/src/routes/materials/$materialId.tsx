@@ -38,7 +38,7 @@ import {
   unitSuffix,
   wholeNumberStepFor,
 } from "../../lib/format";
-import { formatUnitCost } from "../../lib/money";
+import { formatAmount, formatUnitCost } from "../../lib/money";
 import {
   formatLeadTime,
   formatWeeksShort,
@@ -559,10 +559,10 @@ function MaterialDetail() {
           <p className="text-[12px] text-slate-500">
             Used in {material.used_in_product_count ?? 0}{" "}
             {(material.used_in_product_count ?? 0) === 1 ? "product" : "products"}{" "}
-            · stock value £
-            {(
-              Number(material.current_qty) * Number(material.avg_unit_cost)
-            ).toFixed(2)}
+            · stock value{" "}
+            {formatAmount(
+              Number(material.current_qty) * Number(material.avg_unit_cost),
+            )}
           </p>
         </div>
 
@@ -1180,7 +1180,7 @@ function SlideOverFooter({ material }: { material: Material }) {
       <p className="text-[12px] text-slate-500">
         Used in {material.used_in_product_count ?? 0}{" "}
         {(material.used_in_product_count ?? 0) === 1 ? "product" : "products"} ·
-        stock value £{stockValue.toFixed(2)}
+        stock value {formatAmount(stockValue)}
       </p>
       <div className="flex items-center gap-2">
         <span className="text-[12px] text-slate-500">

@@ -8,7 +8,7 @@ import { SaveButton } from "../common/SaveButton";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { useManagedSave } from "../../hooks/useDirtyRegistry";
-import { formatMoney } from "../../lib/money";
+import { formatAmount } from "../../lib/money";
 import { BomLineTable, computeLineCosts } from "./BomLineTable";
 
 const toLines = (rows: { material_id: number; qty_required: string }[]): BomLine[] =>
@@ -68,7 +68,7 @@ export function BomEditor({ productId }: { productId: number }) {
         <h3 className="text-md font-semibold">Build BOM</h3>
         {total != null && (
           <span className="text-sm font-medium tabular-nums text-slate-600">
-            {formatMoney(String(total), "GBP")}
+            {formatAmount(total)}
           </span>
         )}
       </div>

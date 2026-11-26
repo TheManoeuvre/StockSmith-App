@@ -30,7 +30,7 @@ import {
   useDirtyRegistryApi,
   useManagedSave,
 } from "../../hooks/useDirtyRegistry";
-import { formatMoney } from "../../lib/money";
+import { currencySymbol, formatAmount } from "../../lib/money";
 import { displayQty, formatDayMonth } from "../../lib/format";
 
 const TAB_IDS = ["lines", "receiving"] as const;
@@ -397,10 +397,10 @@ function PurchaseDetail() {
             />
             <Stat
               label="Order total"
-              value={formatMoney(String(orderTotal), "GBP")}
+              value={formatAmount(orderTotal)}
               sub={
                 deliveryNum > 0
-                  ? `incl ${formatMoney(String(deliveryNum), "GBP")} delivery`
+                  ? `incl ${formatAmount(deliveryNum)} delivery`
                   : "no delivery charge"
               }
             />
@@ -466,7 +466,7 @@ function PurchaseDetail() {
           </FieldRow>
           <FieldRow label="Delivery cost">
             <div className="flex items-center gap-1">
-              <span className="text-[11px] text-slate-400">£</span>
+              <span className="text-[11px] text-slate-400">{currencySymbol()}</span>
               <input
                 type="number"
                 step="0.01"

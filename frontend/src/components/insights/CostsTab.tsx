@@ -4,6 +4,7 @@ import { CHANNEL_LABELS, count, gbp, num, pct } from "../../lib/insights";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { BarList, CHART_COLORS, StackedBar, Waterfall, type WaterfallStep } from "./charts";
 import { Card, EmptyState, SectionHead, Skeleton } from "./parts";
+import { formatAmount } from "../../lib/money";
 
 /** One channel's costs as shares of its revenue. Failed builds, packaging and resends are
  *  small next to the rest, so they share one "Other" segment. */
@@ -74,7 +75,7 @@ export function CostsTab({ scope }: { scope: InsightsScope }) {
       </div>
 
       <Card className="mt-3 p-3.5">
-        <p className="mb-2.5 text-[13px] font-semibold">Cost stack per £100 of revenue, by channel</p>
+        <p className="mb-2.5 text-[13px] font-semibold">Cost stack per {formatAmount(100, 0)} of revenue, by channel</p>
         <div className="flex flex-col gap-2.5">
           {data.channels.map((c) => {
             const segments = costStack(c);

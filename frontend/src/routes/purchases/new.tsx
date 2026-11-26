@@ -13,7 +13,7 @@ import { ErrorBanner } from "../../components/common/ErrorBanner";
 import { CreatableSelect } from "../../components/common/CreatableSelect";
 import { FieldRow } from "../../components/common/FieldRow";
 import { Stat } from "../../components/common/Stat";
-import { formatMoney } from "../../lib/money";
+import { currencySymbol, formatAmount } from "../../lib/money";
 import { displayQty, formatDayMonth, isLowStock } from "../../lib/format";
 import { addBusinessDays } from "../../lib/forecast";
 import { coverOnArrival, qtyToClearWarning } from "../../lib/reorder";
@@ -46,7 +46,7 @@ export const Route = createFileRoute("/purchases/new")({
   },
 });
 
-const money = (n: number) => formatMoney(String(n), "GBP");
+const money = (n: number) => formatAmount(n);
 
 function NewPurchase() {
   const navigate = useNavigate();
@@ -400,7 +400,7 @@ function NewPurchase() {
             <span className="text-[11px] text-slate-400">
               charged on the order, not allocated to unit costs
             </span>
-            <span className="ml-auto text-[11px] text-slate-400">£</span>
+            <span className="ml-auto text-[11px] text-slate-400">{currencySymbol()}</span>
             <input
               type="number"
               step="0.5"

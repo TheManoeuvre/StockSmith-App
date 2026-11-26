@@ -17,7 +17,7 @@ import { FilterTabs } from "../../components/common/FilterTabs";
 import { Th } from "../../components/common/ListTable";
 import { PurchaseStatusPill } from "../../components/purchases/PurchaseStatusPill";
 import { SupplierLogo } from "../../components/suppliers/SupplierLogo";
-import { formatMoney } from "../../lib/money";
+import { formatAmount } from "../../lib/money";
 import { formatDayMonth, qtyWithUnit } from "../../lib/format";
 import { HelpLink } from "../../components/help/HelpLink";
 import { PAGE_HELP } from "../../lib/help";
@@ -119,7 +119,7 @@ function PurchasesListContent() {
           </div>
           <p className="mt-0.5 text-[12.5px] text-slate-500">
             {openN} awaiting delivery · {partN} part received ·{" "}
-            {formatMoney(String(onOrderTotal), "GBP")} on order
+            {formatAmount(onOrderTotal)} on order
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -278,7 +278,7 @@ function PurchaseRow({
         <PurchaseStatusPill status={purchase.status} />
       </td>
       <td className="p-2 text-right align-top tabular-nums">
-        {formatMoney(String(lineTotal(purchase)), "GBP")}
+        {formatAmount(String(lineTotal(purchase)))}
       </td>
       <td className="p-2 text-right align-top">
         {purchase.status === "ordered" ? (

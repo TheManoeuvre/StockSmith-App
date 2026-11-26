@@ -4,6 +4,7 @@ import type { Material, PriceReference } from "../../api/types";
 import type { PurchaseLineInput } from "../../api/purchases";
 import { displayQty, formatDayMonth, isWholeNumberUnit, normalizeQtyForUnit, unitLabel, unitRule } from "../../lib/format";
 import { coverOnArrival, coverTone, projectedOnHand, type CoverTone } from "../../lib/reorder";
+import { currencySymbol, formatAmount } from "../../lib/money";
 
 const COVER_TEXT: Record<CoverTone, string> = {
   red: "text-red-600",
@@ -16,7 +17,7 @@ const COVER_TEXT: Record<CoverTone, string> = {
  *  Sub-£1 unit prices get 4 dp so a per-gram figure isn't rounded to nothing. */
 function unitPriceLabel(unitPrice: number, unit: Material["unit"]): string {
   if (!Number.isFinite(unitPrice) || unitPrice <= 0) return "-";
-  const money = `£${unitPrice.toFixed(unitPrice < 1 ? 4 : 2)}`;
+  const money = formatAmount(unitPrice, unitPrice < 1 ? 4 : 2);
   return unitRule(unit)?.show_suffix === false ? `${money} ${unit}` : `${money}/${unit}`;
 }
 
@@ -128,7 +129,7 @@ export function NewPurchaseLineEditor({
                   <span className="w-7 shrink-0 text-[11px] text-slate-400">
                     {unitLabel(material?.unit)}
                   </span>
-                  <span className="shrink-0 text-[11px] text-slate-400">£</span>
+                  <span className="shrink-0 text-[11px] text-slate-400">{currencySymbol()}</span>
                   <input
                     type="number"
                     step="0.01"

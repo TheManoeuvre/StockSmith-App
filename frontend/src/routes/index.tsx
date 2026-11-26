@@ -12,7 +12,7 @@ import { Badge } from "../components/common/Badge";
 import { Th } from "../components/common/ListTable";
 import { SubstituteSuggestions } from "../components/materials/SubstituteSuggestions";
 import { formatDayMonth, formatDayMonthRange, roundQty } from "../lib/format";
-import { formatMoney } from "../lib/money";
+import { formatAmount } from "../lib/money";
 import {
   formatLeadTime,
   formatWeeksShort,
@@ -383,12 +383,9 @@ function Dashboard() {
         >
           <KpiCard
             label="Inventory value"
-            value={formatMoney(data.total_inventory_value, "GBP")}
+            value={formatAmount(data.total_inventory_value)}
             unit="at cost"
-            note={`${formatMoney(data.material_value, "GBP")} materials · ${formatMoney(
-              data.finished_goods_value,
-              "GBP",
-            )} finished goods`}
+            note={`${formatAmount(data.material_value)} materials · ${formatAmount(data.finished_goods_value)} finished goods`}
             accent="border-l-blue-600"
           />
         </Link>

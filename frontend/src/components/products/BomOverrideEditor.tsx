@@ -9,7 +9,7 @@ import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { useManagedSave } from "../../hooks/useDirtyRegistry";
 import { useMaterialCategories } from "../../hooks/useMaterialCategories";
 import { displayQty, normalizeQtyForUnit, unitSuffix, wholeNumberStepFor } from "../../lib/format";
-import { formatMoney } from "../../lib/money";
+import { formatAmount } from "../../lib/money";
 
 /**
  * Whether two materials are in the same category, which is the rule the backend enforces on
@@ -216,7 +216,7 @@ export function BomOverrideEditor({
     if (!mat) return "-";
     const n = Number(qty);
     const unit = unitSuffix(mat.unit);
-    const cost = Number.isFinite(n) ? formatMoney(String(n * Number(mat.avg_unit_cost)), "GBP") : "-";
+    const cost = Number.isFinite(n) ? formatAmount(String(n * Number(mat.avg_unit_cost))) : "-";
     return `${qty}${unit} · ${cost}`;
   };
 
@@ -407,7 +407,7 @@ export function BomOverrideEditor({
               />
               <span className="w-20 shrink-0 text-right text-[11px] tabular-nums text-slate-500">
                 {mat && Number.isFinite(n)
-                  ? formatMoney(String(n * Number(mat.avg_unit_cost)), "GBP")
+                  ? formatAmount(String(n * Number(mat.avg_unit_cost)))
                   : "-"}
               </span>
               <button

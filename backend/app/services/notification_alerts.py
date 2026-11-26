@@ -31,6 +31,7 @@ from app.models.product import Product
 from app.services import platform_api_usage, product_platforms
 from app.services.buildability import get_orders_awaiting_inventory
 from app.services.forecasting import compute_material_forecasts
+from app.services.general_settings import get_default_currency_symbol
 from app.services.notifications import (
     dispatch_notification,
     get_notification_settings,
@@ -147,8 +148,10 @@ async def raise_shipping_price_changed_alert(
         return
     label = "Etsy" if platform == ListingPlatform.etsy else platform.value.capitalize()
 
+    symbol = await get_default_currency_symbol(session)
+
     def _fmt(value: object) -> str:
-        return "unset" if value is None else f"£{float(value):.2f}"
+        return "unset" if value is None else f"{symbol}{float(value):.2f}"
 
     lines = [f"{name}: {_fmt(old)} → {_fmt(new)}" for name, old, new in changes]
     count = len(changes)

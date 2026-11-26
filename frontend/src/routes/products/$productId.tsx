@@ -45,6 +45,7 @@ import { productCategoriesApi } from "../../api/productCategories";
 import { CreatableSelect } from "../../components/common/CreatableSelect";
 import { StockCountFields } from "../../components/common/StockCountFields";
 import type { ABCClass, Product } from "../../api/types";
+import { formatAmount } from "../../lib/money";
 
 interface DetailsForm {
   name: string;
@@ -531,7 +532,7 @@ function ProductDetail() {
                 ? "not costed"
                 : `${econ.marginPct.toFixed(0)}%${econ.missingPostage ? " (excl. postage)" : ""}`}
               {" · "}
-              COGS {econ.cogs == null ? "-" : `£${econ.cogs.toFixed(2)}`}
+              COGS {econ.cogs == null ? "-" : formatAmount(econ.cogs)}
             </p>
             {/* Toggleable from any tab, and through the guard, because flipping it rewrites
                 the tab set — a dirty editor on another tab still gets to warn. */}
@@ -903,7 +904,7 @@ function SlideOverFooter({
           ? "not costed"
           : `${econ.marginPct.toFixed(0)}%${econ.missingPostage ? " (excl. postage)" : ""}`}
         {" · "}
-        COGS {econ.cogs == null ? "-" : `£${econ.cogs.toFixed(2)}`}
+        COGS {econ.cogs == null ? "-" : formatAmount(econ.cogs)}
       </p>
       <div className="flex items-center gap-2">
         <span className="text-[12px] text-slate-500">

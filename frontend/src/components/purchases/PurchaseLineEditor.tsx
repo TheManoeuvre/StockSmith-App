@@ -3,6 +3,7 @@ import { MaterialSelect } from "../materials/MaterialSelect";
 import type { Material, PurchaseLine } from "../../api/types";
 import type { PurchaseLineInput } from "../../api/purchases";
 import { normalizeQtyForUnit, roundQty, wholeNumberStepFor } from "../../lib/format";
+import { currencySymbol } from "../../lib/money";
 
 /**
  * The order's lines, editable.
@@ -71,7 +72,7 @@ export function PurchaseLineEditor({
               <th className="w-20 p-2">Ordered</th>
               {showReceiving && <th className="w-16 p-2">Received</th>}
               {showReceiving && <th className="w-28 p-2">Outstanding</th>}
-              <th className="w-24 p-2">Total cost (£)</th>
+              <th className="w-24 p-2">Total cost ({currencySymbol()})</th>
               <th className="w-20 p-2" />
             </tr>
           </thead>

@@ -1,5 +1,6 @@
 import { useId, useRef, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { gbpCompact, niceScale } from "../../lib/insights";
+import { currencySymbol } from "../../lib/money";
 
 /**
  * The small chart set Insights needs, drawn as plain SVG: no chart library is installed and
@@ -282,7 +283,7 @@ export function Waterfall({ steps, ariaLabel }: { steps: WaterfallStep[]; ariaLa
 }
 
 function formatWhole(n: number): string {
-  return `£${Math.round(n).toLocaleString()}`;
+  return `${currencySymbol()}${Math.round(n).toLocaleString()}`;
 }
 
 // --- Scatter ----------------------------------------------------------------------------

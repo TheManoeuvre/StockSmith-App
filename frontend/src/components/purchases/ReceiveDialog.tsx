@@ -4,6 +4,7 @@ import { ErrorBanner } from "../common/ErrorBanner";
 import type { Material, Purchase, PurchaseLine } from "../../api/types";
 import type { ReceiptLineInput } from "../../api/purchases";
 import { normalizeQtyForUnit, roundQty, wholeNumberStepFor } from "../../lib/format";
+import { currencySymbol, formatAmount } from "../../lib/money";
 
 /**
  * Records one delivery: what turned up, of which lines, on what date.
@@ -121,7 +122,7 @@ export function ReceiveDialog({
                 <th className="p-2">Already in</th>
                 <th className="p-2">Outstanding</th>
                 <th className="p-2">Receiving now</th>
-                <th className="p-2">Cost of this delivery (£)</th>
+                <th className="p-2">Cost of this delivery ({currencySymbol()})</th>
               </tr>
             </thead>
             <tbody>
@@ -179,7 +180,7 @@ export function ReceiveDialog({
         {zeroCostLines.length > 0 && (
           <p className="rounded bg-amber-50 p-2 text-sm text-amber-800">
             {zeroCostLines.length === 1 ? "One line has" : `${zeroCostLines.length} lines have`} no cost on the order,
-            so receiving will book {zeroCostLines.length === 1 ? "it" : "them"} in at £0 and pull the material's average
+            so receiving will book {zeroCostLines.length === 1 ? "it" : "them"} in at {formatAmount(0, 0)} and pull the material's average
             cost down. Add the cost to the order first, or enter it here.
           </p>
         )}

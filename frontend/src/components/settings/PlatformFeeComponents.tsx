@@ -6,6 +6,7 @@ import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { PLATFORM_LABELS } from "../../lib/platforms";
 import { ErrorBanner } from "../common/ErrorBanner";
 import { SaveButton } from "../common/SaveButton";
+import { currencySymbol } from "../../lib/money";
 
 interface NewComponentForm {
   name: string;
@@ -105,7 +106,7 @@ export function PlatformFeeComponents({ platform }: { platform: ListingPlatform 
               <th className="p-1.5">Name</th>
               <th className="p-1.5">Applies to</th>
               <th className="p-1.5">Rate %</th>
-              <th className="p-1.5">Fixed £</th>
+              <th className="p-1.5">Fixed {currencySymbol()}</th>
               <th className="p-1.5">Enabled</th>
               <th className="p-1.5" />
             </tr>
@@ -171,8 +172,8 @@ export function PlatformFeeComponents({ platform }: { platform: ListingPlatform 
           onChange={(e) => setDraftField("rate", e.target.value)}
         />
         <input
-          placeholder="Fixed £"
-          aria-label="Fixed £"
+          placeholder={`Fixed ${currencySymbol()}`}
+          aria-label={`Fixed ${currencySymbol()}`}
           className="w-20 rounded border border-slate-300 px-2 py-1 text-sm"
           value={draft.fixed}
           onChange={(e) => setDraftField("fixed", e.target.value)}

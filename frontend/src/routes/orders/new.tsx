@@ -10,6 +10,7 @@ import { shippingProfilesApi } from "../../api/shippingProfiles";
 import { OrderLineEditor } from "../../components/orders/OrderLineEditor";
 import { DetailPanel } from "../../components/common/DetailPanel";
 import { ErrorBanner } from "../../components/common/ErrorBanner";
+import { currencySymbol } from "../../lib/money";
 
 export const Route = createFileRoute("/orders/new")({
   component: NewOrder,
@@ -163,7 +164,7 @@ function NewOrder() {
             </select>
           </label>
           <label className="flex flex-col gap-1">
-            <span className="text-sm">Shipping charged (£)</span>
+            <span className="text-sm">Shipping charged ({currencySymbol()})</span>
             <input
               className="w-28 rounded border border-slate-300 px-2 py-1"
               placeholder="0.00"

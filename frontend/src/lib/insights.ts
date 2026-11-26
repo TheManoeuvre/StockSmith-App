@@ -1,5 +1,6 @@
 import type { InsightsChannel, InsightsGranularity } from "../api/insights";
 import { saveBytesAs } from "./tauri";
+import { currencySymbol } from "./money";
 
 // --- Dates ------------------------------------------------------------------------------
 // ISO calendar days ("2026-10-25") throughout, handled in UTC so a day is never lost to a
@@ -171,15 +172,15 @@ export function gbp(value: string | number | null | undefined, decimals = 2): st
   const n = num(value);
   if (n === null) return "-";
   const text = Math.abs(n).toLocaleString(undefined, { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
-  return `${n < 0 ? "−" : ""}£${text}`;
+  return `${n < 0 ? "−" : ""}${currencySymbol()}${text}`;
 }
 
 /** Whole pounds for chart axes and tight labels: £12k above a thousand. */
 export function gbpCompact(value: number): string {
   const abs = Math.abs(value);
   const sign = value < 0 ? "−" : "";
-  if (abs >= 1000) return `${sign}£${(abs / 1000).toFixed(abs >= 10_000 ? 0 : 1)}k`;
-  return `${sign}£${Math.round(abs)}`;
+  if (abs >= 1000) return `${sign}${currencySymbol()}${(abs / 1000).toFixed(abs >= 10_000 ? 0 : 1)}k`;
+  return `${sign}${currencySymbol()}${Math.round(abs)}`;
 }
 
 export function pct(value: string | number | null | undefined): string {

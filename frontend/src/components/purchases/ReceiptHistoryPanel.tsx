@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { Material, Purchase } from "../../api/types";
 import { roundQty } from "../../lib/format";
+import { formatAmount } from "../../lib/money";
 
 /**
  * Every delivery recorded against this order, newest first, each undoable on its own.
@@ -82,7 +83,7 @@ export function ReceiptHistoryPanel({
                       <li key={line.receiptId}>
                         {roundQty(line.qty, line.unit)} × {line.materialName}
                         {line.cost !== null && (
-                          <span className="ml-2 text-xs text-slate-500">billed £{Number(line.cost).toFixed(2)}</span>
+                          <span className="ml-2 text-xs text-slate-500">billed {formatAmount(line.cost)}</span>
                         )}
                       </li>
                     ))}

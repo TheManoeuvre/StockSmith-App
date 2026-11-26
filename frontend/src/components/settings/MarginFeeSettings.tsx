@@ -8,6 +8,7 @@ import { ErrorBanner } from "../common/ErrorBanner";
 import { SaveIndicator } from "../common/SaveIndicator";
 import { SettingsCard } from "./SettingsCard";
 import { BASIS_LABELS } from "./PlatformFeeComponents";
+import { currencySymbol } from "../../lib/money";
 
 const SOURCE_LABELS: Record<MarginFeeSource, string> = {
   manual: "Manual: the flat % entered on each product",
@@ -114,7 +115,7 @@ function EffectiveFeeSummary({ platform }: { platform: ListingPlatform }) {
               <span className="whitespace-nowrap tabular-nums">
                 {c.rate_percent != null && `${c.rate_percent}%`}
                 {c.rate_percent != null && c.fixed_amount != null && " + "}
-                {c.fixed_amount != null && `£${c.fixed_amount}`}
+                {c.fixed_amount != null && `${currencySymbol()}${c.fixed_amount}`}
               </span>
             </li>
           ))}

@@ -1,6 +1,6 @@
 import type { Material } from "../../api/types";
 import { MaterialSelect } from "../materials/MaterialSelect";
-import { formatMoney } from "../../lib/money";
+import { formatAmount } from "../../lib/money";
 import { normalizeQtyForUnit, wholeNumberStepFor } from "../../lib/format";
 
 export interface BomLineTableRow {
@@ -160,7 +160,7 @@ export function BomLineTable({
               />
             </td>
             <td className="p-2 text-right tabular-nums">
-              {perLine[i]?.cost != null ? formatMoney(String(perLine[i].cost), "GBP") : "-"}
+              {perLine[i]?.cost != null ? formatAmount(perLine[i].cost) : "-"}
             </td>
             {showMaxFromFreeStock &&
               (() => {
@@ -196,7 +196,7 @@ export function BomLineTable({
             <td className="p-2">{isDirty ? "Total (unsaved)" : "Total"}</td>
             <td className="p-2" />
             <td className="p-2 text-right tabular-nums">
-              {total != null ? formatMoney(String(total), "GBP") : "-"}
+              {total != null ? formatAmount(total) : "-"}
             </td>
             {showMaxFromFreeStock && <td className="p-2" />}
             <td className="p-2" />

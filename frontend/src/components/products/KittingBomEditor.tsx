@@ -8,7 +8,7 @@ import { SaveButton } from "../common/SaveButton";
 import { useSaveStatus } from "../../hooks/useSaveStatus";
 import { useEditableCopy } from "../../hooks/useEditableCopy";
 import { useManagedSave } from "../../hooks/useDirtyRegistry";
-import { formatMoney } from "../../lib/money";
+import { formatAmount } from "../../lib/money";
 import { useMaterialCategories } from "../../hooks/useMaterialCategories";
 import { BomLineTable, computeLineCosts } from "./BomLineTable";
 
@@ -77,7 +77,7 @@ export function KittingBomEditor({ productId }: { productId: number }) {
         <h3 className="text-md font-semibold">Kitting BOM</h3>
         {total != null && (
           <span className="text-sm font-medium tabular-nums text-slate-600">
-            {formatMoney(String(total), "GBP")}
+            {formatAmount(total)}
           </span>
         )}
       </div>

@@ -12,6 +12,19 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Your currency setting now applies everywhere.** Settings → Default currency used to change
+  only the currency a new manual order started in, while every cost, price, profit and total
+  showed `£` regardless. Costs, prices, margins, stock values, Insights and postage alerts now
+  show your chosen currency's symbol. Nothing is converted: switching currency relabels your
+  existing figures, so set it once at the start. Orders keep the currency they were entered in.
+- Insights numbers (thousands separators) now follow your computer's regional settings.
+
+### Fixed
+
+- Two error messages when recording a build showed `â€”` instead of a dash.
+
 ### Added
 
 - **Locations: record where your stock is kept.** A new **Locations** page (under Stock) lets you

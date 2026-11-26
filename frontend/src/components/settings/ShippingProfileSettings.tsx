@@ -17,6 +17,7 @@ import {
   type ReferenceField,
   type ReferenceRow,
 } from "../reference/ReferenceDataTable";
+import { formatAmount } from "../../lib/money";
 
 type LinkedPlatform = "etsy" | "ebay";
 
@@ -31,7 +32,7 @@ const PRICE_KEY: Record<LinkedPlatform, "price_etsy" | "price_ebay"> = {
 };
 
 const money = (value: string | number | null | undefined) =>
-  value == null || value === "" ? null : `£${Number(value).toFixed(2)}`;
+  value == null || value === "" ? null : formatAmount(value);
 
 /** What one marketplace's picker knows: its options, and why it might not have any. */
 interface MarketplaceSource {

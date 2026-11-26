@@ -28,7 +28,7 @@ import {
   unitLabel,
   wholeNumberStepFor,
 } from "../../lib/format";
-import { formatUnitCost } from "../../lib/money";
+import { formatAmount, formatUnitCost } from "../../lib/money";
 import {
   formatLeadTime,
   formatWeeksShort,
@@ -381,8 +381,7 @@ function MaterialsListContent() {
             <HelpLink doc={PAGE_HELP.materials.doc} anchor={PAGE_HELP.materials.anchor} />
           </div>
           <p className="mt-0.5 text-[12.5px] text-slate-500">
-            {trackedCount} tracked · {atRiskCount} at risk · £
-            {onHandValue.toFixed(2)} on hand
+            {trackedCount} tracked · {atRiskCount} at risk · {formatAmount(onHandValue)} on hand
           </p>
         </div>
         <div className="flex items-center gap-2">

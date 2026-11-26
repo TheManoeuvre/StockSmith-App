@@ -26,7 +26,7 @@ import {
 } from "../../hooks/useDirtyRegistry";
 import { useSiblingNav } from "../../hooks/useSiblingNav";
 import { formatDayMonth, roundQty } from "../../lib/format";
-import { formatMoney } from "../../lib/money";
+import { formatAmount } from "../../lib/money";
 
 export const Route = createFileRoute("/stock-takes/$stockTakeId")({
   component: StockTakeDetailRoute,
@@ -522,7 +522,7 @@ function StockTakeDetailPage() {
                                 >
                                   {liveValue == null
                                     ? "-"
-                                    : `${liveValue < 0 ? "−" : liveValue > 0 ? "+" : ""}${formatMoney(String(Math.abs(liveValue)), "GBP")}`}
+                                    : `${liveValue < 0 ? "−" : liveValue > 0 ? "+" : ""}${formatAmount(String(Math.abs(liveValue)))}`}
                                 </td>
                                 <td className="p-2">
                                   <StatusBadge status={line.status} />

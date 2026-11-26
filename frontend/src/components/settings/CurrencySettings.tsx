@@ -27,7 +27,7 @@ export function CurrencySettings() {
   return (
     <SettingsCard
       title="Default currency"
-      help="Pre-fills the currency on a new manual order: you can still change it per order. No conversion is applied anywhere; this is a label only."
+      help="The currency symbol shown on costs, prices, profit and totals across StockSmith, and the currency a new manual order starts in (you can still change it per order). No conversion is applied: changing this relabels your existing figures, it does not convert them."
     >
       {/* Left on auto-save: a three-option select shows its whole value set, and undoing a
           mis-click costs one more click. What it lacked was any sign it had saved at all. */}

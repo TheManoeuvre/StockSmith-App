@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 import { createRootRoute, Link, Outlet, useMatchRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -23,6 +23,7 @@ import { UnsavedChangesDialog } from "../components/common/UnsavedChangesDialog"
 import { useRefreshOnSync } from "../hooks/useRefreshOnSync";
 import { useAppUpdate } from "../hooks/useAppUpdate";
 import { useMaterialUnits } from "../hooks/useMaterialUnits";
+import { useDisplayCurrency } from "../hooks/useDisplayCurrency";
 import { onCheckForUpdatesRequested } from "../lib/updater";
 import { DirtyRegistryProvider } from "../hooks/useDirtyRegistry";
 import { GuardProvider, useUnsavedChangesGuard } from "../hooks/useUnsavedChangesGuard";
@@ -219,6 +220,8 @@ function NavButton({ item }: { item: NavItem }) {
 }
 
 function RootChrome() {
+  // Same idea for the currency symbol; the page below is keyed on it so a change redraws every figure.
+  const currency = useDisplayCurrency();
   const badges = useNavBadges();
   // Mounted here, on every page, so the scheduled release check runs for as long as the app is
   // open rather than only while Settings is.
@@ -305,7 +308,9 @@ function RootChrome() {
       <div className="flex min-w-0 flex-1 flex-col">
         <SampleWorkspaceBanner />
         <main className="flex-1 overflow-auto p-6">
-          <Outlet />
+          <Fragment key={currency}>
+            <Outlet />
+          </Fragment>
         </main>
       </div>
     </div>

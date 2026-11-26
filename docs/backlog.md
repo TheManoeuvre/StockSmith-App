@@ -310,17 +310,15 @@ for handling time, and either wire it through or drop it.
 ### Currency: round prices to a nearest increment
 
 **Problem:** The mockup's Currency card adds a "Round prices to" dropdown (0.01/0.05/
-0.50/1.00). Investigated during the redesign: there is no single centralised
-currency-formatting call site to hang this off — `lib/money.ts`'s `formatMoney`/
-`formatUnitCost` cover some places, but roughly two dozen components still hardcode `£`
-literals directly. A rounding setting added only to the centralised helpers would be
-inconsistently applied and worse than not having it.
+0.50/1.00) and a "Symbol position" (Before/After) field.
 
-**Ask:** First do a pass centralising money *display* through one formatter (a separate,
-smaller piece of work), then add symbol-position and rounding as settings on top of that —
-otherwise this ships half-working. Note the "Symbol position" (Before/After) field from the
-same mockup card was **not** added for the identical reason, and should be picked up
-together with this one.
+**Status:** The prerequisite is done: the currency *symbol* now comes from one place
+(`lib/money.ts` — `currencySymbol` / `formatAmount` / `formatMoney`, fed by Settings > Default
+currency via `hooks/useDisplayCurrency.ts`), and no component hard-codes `£` any more. Rounding
+and symbol position can now be added to those helpers. Still open: amounts are always
+`symbol + number` (not locale-formatted grouping or decimal separators), and every call site
+that builds its own `toFixed(2)` string rather than calling `formatAmount` would need moving
+over for rounding to apply everywhere.
 
 ### Pricing & fees: target margin threshold and extra fee-source modes
 
