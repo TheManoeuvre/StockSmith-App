@@ -12,6 +12,8 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-11-26
+
 ### Added
 
 - **Locations: record where your stock is kept.** A new **Locations** page (under Stock) lets you
