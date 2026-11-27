@@ -265,7 +265,7 @@ function LocationsPage() {
                     <ActionButton onClick={() => setDialog({ kind: "moveMany" })}>Move selected…</ActionButton>
                     <ActionButton onClick={() => setMulti(new Set())}>Clear selection</ActionButton>
                   </div>
-                  <p className="text-xs text-slate-500">Ctrl-click (Cmd-click on a Mac) to add or remove locations.</p>
+                  <p className="text-xs text-slate-500">Anything inside a selected location moves with it. Ctrl-click (Cmd-click on a Mac) to add or remove locations.</p>
                 </div>
               ) : selectedId != null ? (
                 <LocationPane

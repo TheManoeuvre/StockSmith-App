@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { LocationRow } from "../../api/locations";
-import { buildTree, visibleRows, type TreeFilter } from "../../lib/locations";
+import { buildTree, subtreeIds, visibleRows, type TreeFilter } from "../../lib/locations";
 
 function Chevron({ open, hidden }: { open: boolean; hidden: boolean }) {
   return (
@@ -70,6 +70,12 @@ export function LocationTree({
     }
     return next;
   }, [expanded, rows, selectedId]);
+  // Everything inside a ticked location moves with it, so show it as selected too (lighter).
+  const inside = useMemo(() => {
+    const out = new Set<number>();
+    for (const id of multiSelected ?? []) for (const d of subtreeIds(rows, id)) if (d !== id) out.add(d);
+    return out;
+  }, [multiSelected, rows]);
   const shown = useMemo(
     () => visibleRows(forest, { query, filter, expanded: open }),
     [forest, query, filter, open],
@@ -106,7 +112,11 @@ export function LocationTree({
             aria-expanded={children.length ? isOpen : undefined}
             aria-disabled={reason ? true : undefined}
             className={`flex h-7 items-center gap-1.5 rounded-md pr-2.5 text-[13px] ${
-              isSelected ? "bg-slate-100 font-medium text-slate-900" : "text-slate-700"
+              isSelected
+                ? "bg-slate-100 font-medium text-slate-900"
+                : inside.has(row.id) && !isMulti
+                  ? "bg-slate-50 text-slate-900"
+                  : "text-slate-700"
             } ${dimmed || reason ? "text-slate-400" : ""} ${reason ? "cursor-not-allowed" : "hover:bg-slate-50"}`}
             style={{ paddingLeft: 4 + depth * 16 }}
           >
