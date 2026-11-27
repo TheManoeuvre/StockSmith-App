@@ -172,6 +172,8 @@ export interface MaterialType {
 export interface ProductCategory {
   id: number;
   name: string;
+  /** The work-flow route products in this category follow; null = the shop default. */
+  work_route_id: number | null;
   /** How many records reference this. Computed per request — see the backend's list_with_usage. */
   usage_count: number;
   created_at: string;
@@ -499,6 +501,8 @@ export interface Product {
   id: number;
   name: string;
   sku: string | null;
+  /** The work-flow route this product follows; null inherits its category's, then the shop default. */
+  work_route_id: number | null;
   description: string | null;
   barcode: string | null;
   is_active: boolean;

@@ -22,6 +22,7 @@ import {
 } from "../lib/forecast";
 import { PLATFORM_COLORS, PLATFORM_LABELS } from "../lib/platforms";
 import { SetupChecklist } from "../components/onboarding/SetupChecklist";
+import { WorkTodayTile } from "../components/work/WorkTodayTile";
 
 function groupBySupplier(
   materials: LowStockMaterial[],
@@ -319,6 +320,7 @@ function Dashboard() {
     <div className="flex flex-col gap-6">
       {/* New installs only: hides itself once every step is done, or when dismissed. */}
       <SetupChecklist />
+      <WorkTodayTile />
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Link
           to="/orders"

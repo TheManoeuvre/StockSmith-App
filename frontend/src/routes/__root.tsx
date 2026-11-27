@@ -12,6 +12,7 @@ import {
   PurchasesIcon,
   SettingsIcon,
   StockTakeIcon,
+  WorkIcon,
 } from "../components/common/NavIcons";
 import { NavTip } from "../components/common/NavTip";
 import { SyncStatusIndicator } from "../components/common/SyncStatusIndicator";
@@ -30,6 +31,7 @@ import { dashboardApi } from "../api/dashboard";
 import { ordersApi } from "../api/orders";
 import { purchasesApi } from "../api/purchases";
 import appIcon from "../assets/app-icon.png";
+import { useWorkFlowEnabled } from "../hooks/useWorkFlow";
 
 export const Route = createRootRoute({
   component: RootLayout,
@@ -220,6 +222,7 @@ function NavButton({ item }: { item: NavItem }) {
 
 function RootChrome() {
   const badges = useNavBadges();
+  const workFlowEnabled = useWorkFlowEnabled();
   // Mounted here, on every page, so the scheduled release check runs for as long as the app is
   // open rather than only while Settings is.
   const { available: updateAvailable } = useAppUpdate();
@@ -236,6 +239,10 @@ function RootChrome() {
     {
       label: "Sell",
       items: [
+        // Only once the seller has opted in (Settings → Work flow); until then the app is unchanged.
+        ...(workFlowEnabled
+          ? [{ label: "Work", to: "/work", icon: <WorkIcon />, tone: "neutral" as const, hint: "What to prepare, make and pack next" }]
+          : []),
         { label: "Orders", to: "/orders", icon: <OrdersIcon />, hint: "Orders from your stores, awaiting shipment", ...badges.orders },
         { label: "Products", to: "/products", icon: <ProductsIcon />, tone: "neutral", hint: "What you make, with recipes and listings" },
       ],

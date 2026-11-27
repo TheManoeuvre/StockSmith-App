@@ -542,7 +542,13 @@ async def compute_work_list(
     ]
     station_reads.sort(key=lambda s: (s.earliest_due is None, s.earliest_due or now, s.name or ""))
     return WorkListRead(
-        enabled=True, generated_at=now, stations=station_reads, cards=cards, ship_cards=ship_cards, waiting_orders=waiting
+        enabled=True,
+        generated_at=now,
+        stations=station_reads,
+        ship_station=state.ship_station,
+        cards=cards,
+        ship_cards=ship_cards,
+        waiting_orders=waiting,
     )
 
 

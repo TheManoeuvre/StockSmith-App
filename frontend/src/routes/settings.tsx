@@ -17,6 +17,7 @@ import { BackupSettings } from "../components/settings/BackupSettings";
 import { NotificationSettings } from "../components/settings/NotificationSettings";
 import { ConnectionSettings } from "../components/settings/ConnectionSettings";
 import { AboutSettings } from "../components/settings/AboutSettings";
+import { WorkflowSettings } from "../components/settings/WorkflowSettings";
 import { useAppUpdate } from "../hooks/useAppUpdate";
 import { SettingsNav, type SettingsNavGroup } from "../components/settings/SettingsNav";
 import { StoresHub } from "../components/settings/stores/StoresHub";
@@ -33,6 +34,7 @@ const PAGE_IDS = [
   "shipping-packaging",
   "forecasting",
   "stock-counts",
+  "workflow",
   "lists",
   "labels",
   "backup-restore",
@@ -57,6 +59,7 @@ function navGroups(updateAvailable: boolean): SettingsNavGroup[] {
       items: [
         { id: "forecasting", label: "Forecasting" },
         { id: "stock-counts", label: "Stock counts" },
+        { id: "workflow", label: "Work flow" },
         { id: "lists", label: "Lists" },
         { id: "labels", label: "Labels" },
       ],
@@ -154,6 +157,7 @@ function Settings() {
           {activePage === "shipping-packaging" && <ShippingPackagingPage />}
           {activePage === "forecasting" && <ForecastSettings />}
           {activePage === "stock-counts" && <StockCountSettings />}
+          {activePage === "workflow" && <WorkflowSettings />}
           {activePage === "lists" && <ListsMasterDetail />}
           {activePage === "labels" && <LabelSettings />}
           {activePage === "backup-restore" && <BackupSettings />}

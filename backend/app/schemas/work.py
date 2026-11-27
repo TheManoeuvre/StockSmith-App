@@ -161,6 +161,9 @@ class WorkListRead(BaseModel):
     enabled: bool
     generated_at: datetime
     stations: list[WorkStationRead]
+    # The station the Ship step belongs to, so a client filtering by station knows where "ready to
+    # ship" and "waiting" sit.
+    ship_station: str | None = None
     cards: list[WorkCard]
     ship_cards: list[WorkOrderCard]
     waiting_orders: list[WorkOrderCard]

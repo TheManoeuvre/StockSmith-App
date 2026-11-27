@@ -44,6 +44,7 @@ import { inclFallbacksNote, sellableSummary } from "../../lib/format";
 import { productCategoriesApi } from "../../api/productCategories";
 import { CreatableSelect } from "../../components/common/CreatableSelect";
 import { StockCountFields } from "../../components/common/StockCountFields";
+import { WorkRouteField } from "../../components/products/WorkRouteField";
 import type { ABCClass, Product } from "../../api/types";
 
 interface DetailsForm {
@@ -53,6 +54,7 @@ interface DetailsForm {
   barcode: string;
   productCategory: string;
   productCategoryId: number | null;
+  workRouteId: number | null;
   abcClass: ABCClass | null;
   stockTakeIntervalDays: string;
 }
@@ -64,6 +66,7 @@ const EMPTY_DETAILS: DetailsForm = {
   barcode: "",
   productCategory: "",
   productCategoryId: null,
+  workRouteId: null,
   abcClass: null,
   stockTakeIntervalDays: "",
 };
@@ -226,6 +229,7 @@ function ProductDetail() {
             barcode: product.barcode ?? "",
             productCategory: product.product_category_name ?? "",
             productCategoryId: product.product_category_id,
+            workRouteId: product.work_route_id ?? null,
             abcClass: product.abc_class,
             stockTakeIntervalDays:
               product.stock_take_interval_days === null
@@ -255,6 +259,7 @@ function ProductDetail() {
     barcode,
     productCategory,
     productCategoryId,
+    workRouteId,
     abcClass,
     stockTakeIntervalDays,
   } = details;
@@ -286,6 +291,7 @@ function ProductDetail() {
         product_category_id: productCategory.trim()
           ? resolvedProductCategoryId
           : null,
+        work_route_id: workRouteId,
         abc_class: abcClass,
         stock_take_interval_days:
           stockTakeIntervalDays === "" ? null : Number(stockTakeIntervalDays),
@@ -643,6 +649,12 @@ function ProductDetail() {
                   placeholder="Keyring, Coaster…"
                 />
               </FieldRow>
+              <WorkRouteField
+                value={workRouteId}
+                onChange={(next) => setDetailsField("workRouteId", next)}
+                categoryId={productCategoryId}
+                label={(text, control) => <FieldRow label={text}>{control}</FieldRow>}
+              />
               {/* An immediate-save toggle rather than part of the buffered copy — the
                   reviewed design lists it among the Details fields. */}
               {!product.is_bundle && (

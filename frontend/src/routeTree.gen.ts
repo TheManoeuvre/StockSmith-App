@@ -20,6 +20,7 @@ import { Route as ProductsRouteRouteImport } from './routes/products/route'
 import { Route as PurchasesRouteRouteImport } from './routes/purchases/route'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as StockTakesRouteRouteImport } from './routes/stock-takes/route'
+import { Route as WorkRouteImport } from './routes/work'
 import { Route as DevBomPreviewRouteImport } from './routes/dev.bom-preview'
 import { Route as ManufacturersIndexRouteImport } from './routes/manufacturers/index'
 import { Route as MaterialLabelMaterialIdRouteImport } from './routes/material-label.$materialId'
@@ -93,6 +94,11 @@ const SettingsRoute = SettingsRouteImport.update({
 const StockTakesRouteRoute = StockTakesRouteRouteImport.update({
   id: '/stock-takes',
   path: '/stock-takes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WorkRoute = WorkRouteImport.update({
+  id: '/work',
+  path: '/work',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DevBomPreviewRoute = DevBomPreviewRouteImport.update({
@@ -203,6 +209,7 @@ export interface FileRoutesByFullPath {
   '/location-labels': typeof LocationLabelsRoute
   '/locations': typeof LocationsRoute
   '/settings': typeof SettingsRoute
+  '/work': typeof WorkRoute
   '/dev/bom-preview': typeof DevBomPreviewRoute
   '/material-label/$materialId': typeof MaterialLabelMaterialIdRoute
   '/materials/$materialId': typeof MaterialsMaterialIdRoute
@@ -230,6 +237,7 @@ export interface FileRoutesByTo {
   '/location-labels': typeof LocationLabelsRoute
   '/locations': typeof LocationsRoute
   '/settings': typeof SettingsRoute
+  '/work': typeof WorkRoute
   '/dev/bom-preview': typeof DevBomPreviewRoute
   '/material-label/$materialId': typeof MaterialLabelMaterialIdRoute
   '/materials/$materialId': typeof MaterialsMaterialIdRoute
@@ -263,6 +271,7 @@ export interface FileRoutesById {
   '/location-labels': typeof LocationLabelsRoute
   '/locations': typeof LocationsRoute
   '/settings': typeof SettingsRoute
+  '/work': typeof WorkRoute
   '/dev/bom-preview': typeof DevBomPreviewRoute
   '/material-label/$materialId': typeof MaterialLabelMaterialIdRoute
   '/materials/$materialId': typeof MaterialsMaterialIdRoute
@@ -297,6 +306,7 @@ export interface FileRouteTypes {
     | '/location-labels'
     | '/locations'
     | '/settings'
+    | '/work'
     | '/dev/bom-preview'
     | '/material-label/$materialId'
     | '/materials/$materialId'
@@ -324,6 +334,7 @@ export interface FileRouteTypes {
     | '/location-labels'
     | '/locations'
     | '/settings'
+    | '/work'
     | '/dev/bom-preview'
     | '/material-label/$materialId'
     | '/materials/$materialId'
@@ -356,6 +367,7 @@ export interface FileRouteTypes {
     | '/location-labels'
     | '/locations'
     | '/settings'
+    | '/work'
     | '/dev/bom-preview'
     | '/material-label/$materialId'
     | '/materials/$materialId'
@@ -389,6 +401,7 @@ export interface RootRouteChildren {
   LocationLabelsRoute: typeof LocationLabelsRoute
   LocationsRoute: typeof LocationsRoute
   SettingsRoute: typeof SettingsRoute
+  WorkRoute: typeof WorkRoute
   DevBomPreviewRoute: typeof DevBomPreviewRoute
   MaterialLabelMaterialIdRoute: typeof MaterialLabelMaterialIdRoute
   ProductLabelProductIdRoute: typeof ProductLabelProductIdRoute
@@ -474,6 +487,13 @@ declare module '@tanstack/react-router' {
       path: '/stock-takes'
       fullPath: '/stock-takes'
       preLoaderRoute: typeof StockTakesRouteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/work': {
+      id: '/work'
+      path: '/work'
+      fullPath: '/work'
+      preLoaderRoute: typeof WorkRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/dev/bom-preview': {
@@ -700,6 +720,7 @@ const rootRouteChildren: RootRouteChildren = {
   LocationLabelsRoute: LocationLabelsRoute,
   LocationsRoute: LocationsRoute,
   SettingsRoute: SettingsRoute,
+  WorkRoute: WorkRoute,
   DevBomPreviewRoute: DevBomPreviewRoute,
   MaterialLabelMaterialIdRoute: MaterialLabelMaterialIdRoute,
   ProductLabelProductIdRoute: ProductLabelProductIdRoute,

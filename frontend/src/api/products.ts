@@ -44,6 +44,8 @@ export interface ProductInput {
   pricing_mode?: PricingMode;
   pricing_variable_attribute?: number | null;
   product_category_id?: number | null;
+  /** The work-flow route this product follows; null inherits its category's, then the shop default. */
+  work_route_id?: number | null;
   /** Null means "inherit" for both — the backend resolves through the product category then the
    * shop-wide default (services/abc.py). */
   abc_class?: ABCClass | null;
