@@ -1,7 +1,6 @@
-"""Work flow: stage library, routes, and the on/off switch.
+"""Work flow: stage library, routes, the on/off switch, and the Work list (what to do next).
 
-The Work list itself (what to do next) is added to this router in the second half of the feature;
-see docs/plan-workflow.md.
+See docs/plan-workflow.md.
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -10,6 +9,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.deps import get_db, require_auth
 from app.models.work import WorkRoute, WorkRouteStep, WorkStage
 from app.schemas.work import (
+    WorkEventRead,
+    WorkListRead,
+    WorkProgressCreate,
     WorkRouteCreate,
     WorkRouteRead,
     WorkRouteUpdate,
@@ -18,8 +20,9 @@ from app.schemas.work import (
     WorkStageCreate,
     WorkStageRead,
     WorkStageUpdate,
+    WorkSummaryRead,
 )
-from app.services import work_routes
+from app.services import work, work_routes
 from app.services.work_routes import StepInput, WorkConfigError
 
 router = APIRouter(prefix="/work", tags=["work"], dependencies=[Depends(require_auth)])
@@ -178,3 +181,45 @@ async def delete_route(route_id: int, session: AsyncSession = Depends(get_db)) -
         await work_routes.delete_route(session, route_id)
     except WorkConfigError as exc:
         raise _http(exc) from exc
+
+
+# ---- the Work list --------------------------------------------------------------------------
+
+
+@router.get("/list", response_model=WorkListRead)
+async def get_work_list(session: AsyncSession = Depends(get_db)) -> WorkListRead:
+    return await work.compute_work_list(session)
+
+
+@router.get("/summary", response_model=WorkSummaryRead)
+async def get_work_summary(session: AsyncSession = Depends(get_db)) -> WorkSummaryRead:
+    return await work.compute_work_summary(session)
+
+
+@router.post("/progress", response_model=list[WorkEventRead], status_code=status.HTTP_201_CREATED)
+async def record_progress(payload: WorkProgressCreate, session: AsyncSession = Depends(get_db)) -> list[WorkEventRead]:
+    try:
+        events = await work.record_progress(session, **payload.model_dump())
+    except WorkConfigError as exc:
+        raise _http(exc) from exc
+    return [WorkEventRead.model_validate(e) for e in events]
+
+
+@router.post("/progress/{event_id}/undo", response_model=WorkEventRead, status_code=status.HTTP_201_CREATED)
+async def undo_progress(event_id: int, session: AsyncSession = Depends(get_db)) -> WorkEventRead:
+    try:
+        event = await work.undo_event(session, event_id)
+    except WorkConfigError as exc:
+        raise _http(exc) from exc
+    return WorkEventRead.model_validate(event)
+
+
+@router.get("/events", response_model=list[WorkEventRead])
+async def list_recent_events(limit: int = 20, session: AsyncSession = Depends(get_db)) -> list[WorkEventRead]:
+    rows = await work.recent_events(session, max(1, min(limit, 100)))
+    out = []
+    for event, stage_name, product_name, variant_name in rows:
+        read = WorkEventRead.model_validate(event)
+        read.stage_name, read.product_name, read.variant_name = stage_name, product_name, variant_name
+        out.append(read)
+    return out

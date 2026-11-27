@@ -287,6 +287,13 @@ async def _validate_steps(session: AsyncSession, steps: list[StepInput]) -> list
     if ordered[-1].kind != WorkStageKind.ship:
         raise WorkConfigError("Ship has to be the last step in a route.")
 
+    make_at = next(i for i, s in enumerate(ordered) if s.kind == WorkStageKind.make)
+    for i, stage in enumerate(ordered):
+        if stage.per_order and i > make_at:
+            # Work tied to one buyer is something you do *before* making (a personalised file).
+            # After Make the items are pooled stock, so there is no order to tie it to.
+            raise WorkConfigError(f'"{stage.name}" is tied to a single order, so it has to come before Make.')
+
     category_ids = {s.qty_category_id for s in steps if s.qty_category_id is not None}
     if category_ids:
         found = set(

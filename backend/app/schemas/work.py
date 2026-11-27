@@ -91,3 +91,111 @@ class WorkRouteRead(BaseModel):
     steps: list[WorkRouteStepRead]
     product_count: int = 0
     category_count: int = 0
+
+
+# ---- the Work list ----------------------------------------------------------------------------
+
+
+class WorkVariantPart(BaseModel):
+    """One variant's share of a (possibly mixed) batch card, for "3 x Design A, 3 x Design B"."""
+
+    variant_id: int | None
+    variant_name: str | None
+    qty: int
+    # What each of those stage units is for: how many finished items it represents.
+    finished_units: int
+
+
+class WorkCard(BaseModel):
+    key: str
+    stage_id: int
+    stage_name: str
+    stage_kind: WorkStageKind
+    station: str | None
+    product_id: int
+    product_name: str
+    parts: list[WorkVariantPart]
+    # In the stage's own units (blanks for a count-by-category stage, finished items otherwise).
+    qty: int
+    unit_label: str | None = None
+    due: datetime | None = None
+    late: bool = False
+    order_ids: list[int]
+    # Set for a per-order stage (e.g. "make the file"): the one order line this card is for.
+    order_line_id: int | None = None
+    # Whether progress can be recorded here with the Done control. Make is recorded as a build, and
+    # Ship happens on the order, so neither is.
+    can_record: bool
+    # Whether the Make card's finished items are ready to be built from prepared parts or from scratch.
+    batch_note: str | None = None
+
+
+class WorkShipLine(BaseModel):
+    product_id: int
+    product_name: str
+    variant_name: str | None
+    qty: int
+    ready: bool
+
+
+class WorkOrderCard(BaseModel):
+    order_id: int
+    platform: str | None
+    buyer_name: str | None
+    due: datetime | None = None
+    late: bool = False
+    lines: list[WorkShipLine]
+    ready_lines: int
+    total_lines: int
+    ready: bool
+    waiting_for: list[str]
+
+
+class WorkStationRead(BaseModel):
+    name: str | None
+    count: int
+    earliest_due: datetime | None = None
+
+
+class WorkListRead(BaseModel):
+    enabled: bool
+    generated_at: datetime
+    stations: list[WorkStationRead]
+    cards: list[WorkCard]
+    ship_cards: list[WorkOrderCard]
+    waiting_orders: list[WorkOrderCard]
+
+
+class WorkSummaryRead(BaseModel):
+    enabled: bool
+    late: int
+    due_today: int
+    open_cards: int
+    ready_to_ship: int
+
+
+class WorkProgressCreate(BaseModel):
+    product_id: int
+    # NULL on a product with variants means "spread this across the variants the card covers".
+    variant_id: int | None = None
+    stage_id: int
+    qty: int
+    order_line_id: int | None = None
+    note: str | None = None
+
+
+class WorkEventRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    product_id: int
+    variant_id: int | None
+    order_line_id: int | None
+    stage_id: int
+    qty: int
+    note: str | None
+    created_at: datetime
+    # Filled in by the router for the history list.
+    stage_name: str | None = None
+    product_name: str | None = None
+    variant_name: str | None = None
