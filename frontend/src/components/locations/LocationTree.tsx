@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import type { LocationRow } from "../../api/locations";
-import { buildTree, visibleRows, type TreeFilter } from "../../lib/locations";
+import { buildTree, subtreeIds, visibleRows, type TreeFilter } from "../../lib/locations";
 
 function Chevron({ open, hidden }: { open: boolean; hidden: boolean }) {
   return (
@@ -25,7 +25,7 @@ function Chevron({ open, hidden }: { open: boolean; hidden: boolean }) {
  * Counts roll up, so a collapsed branch still says what's inside. Search and filters keep the
  * parents of whatever matched (dimmed), so a result is never shown without the branch that leads
  * to it. `disabled` marks rows that can't be chosen and says why ("it's inside Box01") — used by
- * the move dialogs.
+ * the move dialogs. Ctrl/Cmd-click ticks several rows at once when `onToggleMulti` is given.
  */
 export function LocationTree({
   rows,
@@ -37,6 +37,8 @@ export function LocationTree({
   disabled,
   defaultExpandAll = false,
   ariaLabel = "Locations",
+  multiSelected,
+  onToggleMulti,
 }: {
   rows: LocationRow[];
   selectedId: number | null;
@@ -48,6 +50,9 @@ export function LocationTree({
   disabled?: Map<number, string>;
   defaultExpandAll?: boolean;
   ariaLabel?: string;
+  /** Locations ticked with Ctrl/Cmd-click, for bulk actions. Only the Locations page passes these. */
+  multiSelected?: Set<number>;
+  onToggleMulti?: (id: number) => void;
 }) {
   const forest = useMemo(() => buildTree(rows, showArchived), [rows, showArchived]);
   const [expanded, setExpanded] = useState<Set<number>>(
@@ -65,6 +70,12 @@ export function LocationTree({
     }
     return next;
   }, [expanded, rows, selectedId]);
+  // Everything inside a ticked location moves with it, so show it as selected too (lighter).
+  const inside = useMemo(() => {
+    const out = new Set<number>();
+    for (const id of multiSelected ?? []) for (const d of subtreeIds(rows, id)) if (d !== id) out.add(d);
+    return out;
+  }, [multiSelected, rows]);
   const shown = useMemo(
     () => visibleRows(forest, { query, filter, expanded: open }),
     [forest, query, filter, open],
@@ -89,7 +100,8 @@ export function LocationTree({
       {shown.map(({ node, dimmed }) => {
         const { row, depth, children } = node;
         const reason = disabled?.get(row.id);
-        const isSelected = row.id === selectedId;
+        const isMulti = multiSelected?.has(row.id) ?? false;
+        const isSelected = multiSelected && multiSelected.size > 0 ? isMulti : row.id === selectedId;
         const isOpen = open.has(row.id);
         return (
           <div
@@ -100,7 +112,11 @@ export function LocationTree({
             aria-expanded={children.length ? isOpen : undefined}
             aria-disabled={reason ? true : undefined}
             className={`flex h-7 items-center gap-1.5 rounded-md pr-2.5 text-[13px] ${
-              isSelected ? "bg-slate-100 font-medium text-slate-900" : "text-slate-700"
+              isSelected
+                ? "bg-slate-100 font-medium text-slate-900"
+                : inside.has(row.id) && !isMulti
+                  ? "bg-slate-50 text-slate-900"
+                  : "text-slate-700"
             } ${dimmed || reason ? "text-slate-400" : ""} ${reason ? "cursor-not-allowed" : "hover:bg-slate-50"}`}
             style={{ paddingLeft: 4 + depth * 16 }}
           >
@@ -116,7 +132,7 @@ export function LocationTree({
             <button
               type="button"
               disabled={!!reason}
-              onClick={() => onSelect(row.id)}
+              onClick={(e) => (onToggleMulti && (e.ctrlKey || e.metaKey) ? onToggleMulti(row.id) : onSelect(row.id))}
               className={`flex min-w-0 flex-1 items-center gap-1.5 text-left ${row.archived ? "italic text-slate-500" : ""}`}
             >
               <span className="truncate">{row.name}</span>

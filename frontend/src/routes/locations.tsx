@@ -11,7 +11,7 @@ import { stockTakesApi } from "../api/stockTakes";
 import { AddLocationModal } from "../components/locations/AddLocationModal";
 import { GenerateRangeModal } from "../components/locations/GenerateRangeModal";
 import { LocationTree } from "../components/locations/LocationTree";
-import { EmptyIntoModal, MoveLocationModal, PlaceItemModal } from "../components/locations/MoveModals";
+import { EmptyIntoModal, MoveLocationModal, MoveLocationsModal, PlaceItemModal } from "../components/locations/MoveModals";
 import { PlaceHereModal } from "../components/locations/PlaceHereModal";
 import { useInvalidateLocations, useLocationTree } from "../components/locations/useLocations";
 import { Badge } from "../components/common/Badge";
@@ -53,6 +53,7 @@ type Dialog =
   | { kind: "add"; parentId: number | null }
   | { kind: "range"; parentId: number | null }
   | { kind: "move" }
+  | { kind: "moveMany" }
   | { kind: "empty" }
   | { kind: "placeHere" }
   | { kind: "moveItem"; item: LocationContent }
@@ -73,8 +74,12 @@ function LocationsPage() {
 
   const rows = useMemo(() => tree?.locations ?? [], [tree]);
   const live = rows.filter((r) => !r.archived);
-  const select = (id: number | null) =>
+  // Ctrl/Cmd-click ticks locations for bulk actions; a plain click goes back to a single selection.
+  const [multi, setMulti] = useState<Set<number>>(new Set());
+  const select = (id: number | null) => {
+    setMulti(new Set());
     void navigate({ search: id == null ? {} : { loc: id }, replace: false });
+  };
 
   // Land on something: the first top-level location, so the page is never an empty right pane.
   const firstId = useMemo(
@@ -82,6 +87,16 @@ function LocationsPage() {
     [live],
   );
   const selectedId = loc != null && rows.some((r) => r.id === loc) ? loc : firstId;
+  // Ctrl-clicking while nothing is ticked starts from the location already open.
+  const toggleMulti = (id: number) => {
+    if (rows.find((r) => r.id === id)?.archived) return;
+    const next = new Set(multi);
+    if (next.size === 0 && selectedId != null && selectedId !== id) next.add(selectedId);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setMulti(next.size < 2 ? new Set() : next);
+  };
+  const multiIds = [...multi].filter((id) => rows.some((r) => r.id === id));
 
   // Scan or type a LOC- code: a scanner types the code and presses Enter, which jumps to it.
   const goToCode = () => {
@@ -219,6 +234,8 @@ function LocationsPage() {
                   query={query}
                   filter={filter}
                   showArchived={showArchived}
+                  multiSelected={multi}
+                  onToggleMulti={toggleMulti}
                 />
               </div>
               <div className="flex items-center justify-between gap-2 border-t border-slate-200 px-3 py-2 text-xs text-slate-500">
@@ -236,7 +253,21 @@ function LocationsPage() {
             </section>
 
             <section className="min-w-0 flex-1 overflow-y-auto">
-              {selectedId != null ? (
+              {multiIds.length > 1 ? (
+                <div className="flex flex-col gap-2.5 rounded-lg bg-white p-4 shadow-sm">
+                  <h2 className="text-base font-semibold">{multiIds.length} locations selected</h2>
+                  <ul className="text-[13px] text-slate-700">
+                    {multiIds.map((id) => (
+                      <li key={id}>{rows.find((r) => r.id === id)?.name}</li>
+                    ))}
+                  </ul>
+                  <div className="flex gap-2">
+                    <ActionButton onClick={() => setDialog({ kind: "moveMany" })}>Move selected…</ActionButton>
+                    <ActionButton onClick={() => setMulti(new Set())}>Clear selection</ActionButton>
+                  </div>
+                  <p className="text-xs text-slate-500">Anything inside a selected location moves with it. Ctrl-click (Cmd-click on a Mac) to add or remove locations.</p>
+                </div>
+              ) : selectedId != null ? (
                 <LocationPane
                   key={selectedId}
                   locationId={selectedId}
@@ -263,6 +294,17 @@ function LocationsPage() {
           onCreated={(created) => {
             setDialog(null);
             select(created.id);
+          }}
+        />
+      )}
+      {dialog?.kind === "moveMany" && (
+        <MoveLocationsModal
+          rows={rows}
+          ids={multiIds}
+          onClose={() => setDialog(null)}
+          onMoved={() => {
+            setDialog(null);
+            setMulti(new Set());
           }}
         />
       )}

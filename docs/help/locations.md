@@ -62,6 +62,9 @@ A product that has variants is placed per variant, because the variants hold the
   one item's stock between two locations. The item's total never changes.
 - **Move location** puts a location inside a different one: Box01 from Shelf 1 to Shelf 2. Everything
   in it comes along.
+- **Move several locations** at once: Ctrl-click (Cmd-click on a Mac) locations in the tree to
+  select them, then choose **Move selected…** and pick the new parent. Click any location without
+  Ctrl to go back to a single selection.
 - **Empty into…** takes everything out of one location and merges it into another. The first
   location stays, empty.
 
