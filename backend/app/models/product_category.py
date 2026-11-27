@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import DateTime, String, func
+from sqlalchemy import DateTime, ForeignKey, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.models.base import Base
@@ -20,4 +20,10 @@ class ProductCategory(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    # The route every product in this category follows unless it names its own. NULL = the shop
+    # default. An attribute of the category, not a use of the route in the reference-count sense —
+    # see services/work_routes.py for how deleting a route is refused while anything names it.
+    work_route_id: Mapped[int | None] = mapped_column(
+        ForeignKey("work_routes.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

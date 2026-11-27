@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db, require_auth
 from app.models.product_category import ProductCategory
 from app.routers._reference_crud import MergeRequest, delete_row, list_with_usage, merge_rows, patch_row
+from app.services import work_routes
 from app.schemas.product_category import ProductCategoryCreate, ProductCategoryFindOrCreate, ProductCategoryRead, ProductCategoryUpdate
 
 router = APIRouter(prefix="/product-categories", tags=["product-categories"], dependencies=[Depends(require_auth)])
@@ -43,6 +44,11 @@ async def find_or_create_product_category(
 async def update_product_category(
     row_id: int, payload: ProductCategoryUpdate, session: AsyncSession = Depends(get_db)
 ) -> ProductCategory:
+    if payload.work_route_id is not None:
+        try:
+            await work_routes.require_route_exists(session, payload.work_route_id)
+        except work_routes.WorkConfigError as exc:
+            raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
     return await patch_row(session, ProductCategory, row_id, payload)
 
 

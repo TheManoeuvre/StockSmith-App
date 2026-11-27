@@ -227,6 +227,15 @@ async def _ensure_shipping_profiles(session: AsyncSession) -> None:
         session.add(ShippingProfile(name=name, price=value, cost_manual=value, cost_etsy=value, cost_ebay=value))
 
 
+async def _ensure_work_defaults(session: AsyncSession) -> None:
+    """The built-in Make and Ship stages and a default Make -> Ship route. The work-flow feature itself
+    ships switched off (general_settings.work_flow_enabled), so seeding these changes nothing a user
+    can see until they opt in. Logic lives in services/work_routes.py."""
+    from app.services.work_routes import ensure_work_defaults
+
+    await ensure_work_defaults(session)
+
+
 async def ensure_seed_data(session: AsyncSession) -> None:
     """Idempotent — safe to call on every startup, only inserts what's missing."""
     await _ensure_general_settings(session)
@@ -238,4 +247,5 @@ async def ensure_seed_data(session: AsyncSession) -> None:
     await _ensure_material_units(session)
     await _ensure_material_categories(session)
     await _ensure_shipping_profiles(session)
+    await _ensure_work_defaults(session)
     await session.commit()

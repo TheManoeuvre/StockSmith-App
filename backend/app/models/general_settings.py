@@ -66,6 +66,12 @@ class GeneralSettings(Base):
     # The Dashboard's setup checklist (services/onboarding.py) shows until every step is done or
     # this is set. Settable both ways: Help offers "show the setup checklist again".
     setup_checklist_dismissed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # The work-flow feature (docs/plan-workflow.md) is opt-in: off, the app behaves exactly as it did
+    # before it existed. `work_flow_enabled_at` is when it was first switched on, and is what
+    # bounds the builds counted as "made" — work done before the seller started using the feature
+    # must not appear as outstanding finishing.
+    work_flow_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    work_flow_enabled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

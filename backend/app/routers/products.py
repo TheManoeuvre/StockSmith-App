@@ -59,7 +59,7 @@ from app.services.buildability import (
     get_ready_to_ship_by_bundle,
 )
 from app.services import abc, attribute_values, listing_push, platform_fees, product_platforms, variant_merge, variant_platform_conflicts
-from app.services import catalogue_csv
+from app.services import catalogue_csv, work_routes
 from app.services.csv_io import export_products_csv, import_products_csv
 from app.services.kitting import (
     _clamp_value_to_ceiling,
@@ -496,6 +496,7 @@ async def import_boms(file: UploadFile, session: AsyncSession = Depends(get_db))
 async def create_product(payload: ProductCreate, session: AsyncSession = Depends(get_db)) -> Product:
     data = payload.model_dump()
     sku = data.pop("sku", None)
+    await _require_work_route(session, data.get("work_route_id"))
     product = Product(**data)
     session.add(product)
     await session.flush()  # assigns product.id without a second commit round-trip
@@ -513,6 +514,14 @@ async def get_product(product_id: int, session: AsyncSession = Depends(get_db)) 
     await sync_listing_ceiling_qty(session, product_id, None, read.expected_max_sellable)
     await session.commit()
     return read
+
+
+async def _require_work_route(session: AsyncSession, route_id: int | None) -> None:
+    """A 404 naming the route rather than a foreign-key error when a stale picker sends a deleted one."""
+    try:
+        await work_routes.require_route_exists(session, route_id)
+    except work_routes.WorkConfigError as exc:
+        raise HTTPException(status_code=exc.status, detail=str(exc)) from exc
 
 
 _PRICING_FIELDS = {"sale_price", "shipping_profile_id", "platform_fee_percent"}
@@ -564,6 +573,8 @@ async def update_product(product_id: int, payload: ProductUpdate, session: Async
     if product is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Product not found")
     changed_fields = set(payload.model_dump(exclude_unset=True).keys())
+    if "work_route_id" in changed_fields:
+        await _require_work_route(session, payload.work_route_id)
     if changed_fields & _ATTRIBUTE_NAME_FIELDS:
         await _validate_attribute_names(session, product, payload)
     for field, value in payload.model_dump(exclude_unset=True).items():

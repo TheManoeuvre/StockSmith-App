@@ -76,6 +76,7 @@ from app.models.stock_adjustment import StockAdjustment, StockAdjustmentMode
 from app.models.stock_take import StockTake, StockTakeLine, StockTakeLineStatus, StockTakeStatus
 from app.models.supplier import Supplier
 from app.models.variant import ProductVariant, ProductVariantMaterial
+from app.models.work import WorkEvent, WorkQtyBasis, WorkRoute, WorkRouteStep, WorkStage, WorkStageKind
 
 __all__ = [
     "Base",
@@ -182,6 +183,12 @@ __all__ = [
     "SummaryFrequency",
     "ALERT_TYPES",
     "DEFAULT_IMMEDIATE_ALERT_TYPES",
+    "WorkEvent",
+    "WorkQtyBasis",
+    "WorkRoute",
+    "WorkRouteStep",
+    "WorkStage",
+    "WorkStageKind",
 ]
 
 # Registers the before_flush listener that keeps single-placement items' location quantities in

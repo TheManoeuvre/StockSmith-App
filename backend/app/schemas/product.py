@@ -21,6 +21,8 @@ class ProductBase(BaseModel):
     platform_ceiling_qty: int | None = None
     push_buildable_capacity: bool = True
     product_category_id: int | None = None
+    # NULL inherits: the category's route, then the shop default (services/work_routes.py).
+    work_route_id: int | None = None
     made_to_order: bool = False
     # NULL means "inherit" for both — see services/abc.py. A product's tier and cadence
     # cover all of its variants; last_stock_take_at is per stock-holding row and is written
@@ -49,6 +51,7 @@ class ProductUpdate(BaseModel):
     pricing_mode: PricingMode | None = None
     pricing_variable_attribute: int | None = None
     product_category_id: int | None = None
+    work_route_id: int | None = None
     abc_class: ABCClass | None = None
     stock_take_interval_days: int | None = Field(default=None, gt=0)
     # The variant attribute names ("Size", "Colour"). Editable here so a label can be

@@ -102,6 +102,11 @@ class Product(Base):
     product_category_id: Mapped[int | None] = mapped_column(
         ForeignKey("product_categories.id", ondelete="SET NULL"), nullable=True
     )
+    # The work-flow route this product follows (docs/plan-workflow.md). NULL means "inherit": the
+    # category's route, then the shop default. Resolution lives in services/work_routes.py.
+    work_route_id: Mapped[int | None] = mapped_column(
+        ForeignKey("work_routes.id", ondelete="SET NULL"), nullable=True
+    )
     # Built against an order and never held, so there is no shelf to count and a count line
     # for it is noise on somebody's sheet. Excluded from stock take scopes and from the
     # due-for-counting list (services/stock_takes.py, services/abc.py) — the same two places
