@@ -375,3 +375,15 @@ run a backup on quit.
 verifying Tauri actually exposes a reliable on-quit hook before promising this — the app is
 also designed to keep running in the background/tray (see `BackgroundSyncSettings`), which
 may make "on quit" a rarer event than the mockup assumes.
+
+---
+
+## Terminology
+
+### Rename "build" to "make" throughout the app
+
+**Problem:** StockSmith is meant for makers of all kinds, and "build" reads as manufacturing or software. The work-flow plan (`docs/plan-workflow.md`) names its built-in production step **Make** (Make → Ship), so the stage would say "Make" while the page it opens says "Build". Decided 2026-11-27.
+
+**Ask:** Rename the user-facing word everywhere: the Builds page, "Build now" links, "buildable" / "amount we can build" (→ "can make"), the build form and its failed-quantity wording, notifications, CSV headers, dashboard text, empty states, and the help pages (`docs/help/builds-and-failures.md` and every mention in `concepts.md`, `getting-started.md` and the rest — about 28 lines today). Keep database table names, API paths and code identifiers as they are unless there is a separate reason to migrate them; a UI/docs rename needs no schema change. Rename the help file with its slug in `HELP_SECTIONS` and its link in `docs/help/README.md` (`frontend/src/lib/help.test.ts` fails otherwise), and keep a redirect or anchor for old links.
+
+Best done **before or alongside phase 2** of the work-flow plan, so the Work page never shows both words. Update the sample workspace's wording too.

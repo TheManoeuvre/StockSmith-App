@@ -48,6 +48,16 @@ their own steps and routes.
 7. **Machine integration (Bambuddy, "what's printing now") is out of scope here.** It needs an
    API / add-on framework, which is a bigger piece. This plan leaves the door open (§7) and
    names it as a separate follow-on plan.
+8. **Make → Ship is the standard route.** Renaming "build" to "make" across the app is a
+   separate backlog item (`docs/backlog.md`, "Terminology"), best done before or alongside
+   phase 2 so the Work page never shows both words. Until then this plan says "Make" for the
+   stage and "build" for the existing record it writes.
+9. **Colour follows the BOM** (§6.1), so black PETG is never batched with black PLA.
+10. **Prep can run ahead of orders** (§4.3, §5): the down-time suggestion can be "prep 6
+    coasters ready for the next order", and the same pool absorbs prep left over from a
+    cancellation.
+11. **Orders ship whole** — one shipment per order (§6.5).
+12. **Stock targets are per product / variant only** — no category level.
 
 ## 3. What the codebase already gives us
 
@@ -75,7 +85,10 @@ Reuse these; every one was read in the source.
 A named step with: a **name**, a **station** (a free-text grouping the seller defines — "Desk",
 "Bench", "Printers", "Pack" are the suggested starters; stations exist only to group the work
 list so the seller isn't switching places), an optional **wait** (drying/curing time before the
-next stage can start), and an optional **typical time** (used only for hints, §6.4).
+next stage can start), an optional **typical time** (used only for hints, §6.4), and a
+**per-order** flag. A per-order stage is work that only makes sense for one buyer — "make the
+file" for a personalised item. It can never be done ahead and never pools (§4.3). Everything
+else defaults to *can be done ahead*.
 
 Two stages are **built in and not deletable**, because they connect to logic that already exists:
 
@@ -97,21 +110,27 @@ route = product.route_id ?? product_category.route_id ?? shop default route (Mak
 Variants do **not** get their own routes in v1. Pack sizes differ in *quantity*, not in steps
 (§4.4), so a per-variant route would be configuration with no job to do.
 
-### 4.3 Demand and progress
+### 4.3 Demand, progress and the prep pool
 - A **demand** is "N units of product/variant V are needed". It comes from either an
   **order line's shortfall** (ordered − allocated − already shipped; items already in stock
   skip straight to Ship) or a **top-up** (§5).
-- **Progress** is an append-only **event ledger**: `(demand, stage, qty, at, note)`. A stage's
-  done quantity is the sum; an undo is a negative event. This follows the codebase's ledger
-  convention and gives timestamps for free (needed for wait times).
-- A stage's **available** quantity = done at the previous stage (and past its wait) − done at
-  this stage. **The next-action list is that, grouped and sorted** — nothing is stored beyond
-  events.
+- **Progress** is an append-only **event ledger**: `(demand or none, product/variant, stage,
+  qty, at, note)`. A stage's done quantity is the sum; an undo is a negative event. This follows
+  the codebase's ledger convention and gives timestamps for free (needed for wait times).
+- The **prep pool** is progress recorded with **no demand** — "masked 6 ceramic coasters"
+  ahead of any order. Pool quantity sits at a stage and is **consumed by the next demand for
+  that product/variant that needs that stage**, earliest ship-by first, before any new work is
+  asked of the seller. Only stages that *can be done ahead* pool; per-order stages cannot.
+- A stage's **available** quantity = (done at the previous stage for this demand, plus pooled
+  quantity at the previous stage, past its wait) − done at this stage. **The next-action list
+  is that, grouped and sorted** — nothing is stored beyond events.
+- **Cancellation:** when a demand disappears, whatever it had done at a *can-be-done-ahead*
+  stage moves into the pool, so masked coasters aren't wasted. Per-order progress (a
+  personalised file) is dropped — it was for that buyer. Cancellations are rare for this
+  seller, so the pool is mainly the prep-ahead mechanism and cancellation is a free side effect.
 
-Progress attaches to the **demand**, not to a pool of generic WIP. That costs a little more
-than a pooled count but means personalised items (a file made *for this order*) and ordinary
-items behave identically. A bulk tick ("masked 12") is allocated to demands in **ship-by
-order**, earliest first, and the seller can override.
+A bulk tick ("masked 12") is applied to demands in **ship-by order**, earliest first, and any
+excess goes to the pool. The seller can override.
 
 ### 4.4 Quantity per stage (the pack-size rule)
 Each stage has a **quantity basis**:
@@ -134,6 +153,11 @@ uses; bundles excluded; `made_to_order` excluded):
 - `target_mode` — `none` | `fixed` | `suggested`. NULL inherits a shop-wide default
   (initially `none`, so nothing changes for anyone who doesn't opt in).
 - `batch_size` — nullable int. The natural run (e.g. 6 on a plate; 3 or 8 for overnight).
+- `top_up_through_stage` — nullable stage. How far down the route a top-up goes. NULL = all the
+  way through Make, i.e. finished stock. Set to a prep stage (say, *Mask*) and the top-up
+  prepares items **ready for the next order** and stops there — the right setting for coasters,
+  where the printers are the bottleneck but bench time during downtime is free. Prepped items
+  land in the prep pool (§4.3). `target_on_hand` then means "on hand at that stage".
 
 **Suggested target** = sales per day over a lookback × cover days, using forecasting's existing
 sales aggregation. Both numbers are shop settings (initially 30-day lookback, 3 days cover).
@@ -141,6 +165,8 @@ sales aggregation. Both numbers are shop settings (initially 30-day lookback, 3 
 `batch_size`. It appears in the work list as a low-priority "top up" demand for use when
 there's downtime; it never outranks an order. The seller accepts it (creating a top-up demand
 that flows through the same route) or dismisses it.
+
+Targets are on the product or variant only — there is deliberately no category level.
 
 The suggestion is explained on screen — "sold 4.6/day over 30 days; 2 on hand; batch of 6" —
 because a number the seller can't audit is a number they'll ignore.
@@ -151,8 +177,12 @@ A new page, **Work**, plus a dashboard tile (late / due today).
 
 ### 6.1 Layout
 Grouped by **station**, then within a station sorted by ship-by date, then **batched**:
-cards for the same product (and the same colour — see §10) are merged into one batch with a
-total quantity. Each card shows stage, product/variant, quantity, earliest due date, and the
+cards for the same product and variants are merged into one batch with a total quantity — but
+only when they would print from the **same materials**. The batch key is the product plus the
+**materials in the resolved BOM that carry the colour** (filament). Colour is a variant
+attribute in this seller's catalogue *and* is in the BOM, and the BOM is the one that is
+authoritative: it is what the printer is actually loaded with, so black PETG and black PLA can
+never merge. Each card shows stage, product/variant, quantity, earliest due date, and the
 **Done** control.
 
 ### 6.2 Done control
@@ -172,6 +202,14 @@ the seller's current station. Switching station changes the list. This is the di
   elapses.
 - **Typical times** → "you can fit three of these before the 2pm cut-off" hints.
 - Orders with no `ship_by_date` (manual) fall back to placed-date plus a handling-days setting.
+
+### 6.5 Orders ship whole
+Single shipment is the normal case, so the unit of "done" the seller cares about is the
+**order**, not the line. A line that is ready while its siblings are not shows
+**"waiting for: <line>"**, and **Ship** appears as a card only once every line is ready. Each
+card shows "order #123: 2 of 3 lines ready" so a nearly-complete order is visible and can be
+finished first. Existing partial-shipping support (`shipped_qty`) is untouched; the Work list
+simply doesn't encourage it.
 
 ## 7. Leaving the door open for machines and integrations
 
@@ -199,7 +237,8 @@ not researched Bambuddy's interface; that is the first task of that plan.
 - **Sample workspace.** Give the sample shop a route using its own words (Ember & Fig Candle
   Co. → a pour/cure route exercises the wait time well).
 - **Help.** New `docs/help/workflow.md`, its slug in `HELP_SECTIONS`, a link from
-  `docs/help/README.md`; update `concepts.md` and `builds-and-failures.md`. `<HelpLink>` from
+  `docs/help/README.md`; update `concepts.md` and `builds-and-failures.md` (and see the backlog's build → make rename,
+which touches the same pages). `<HelpLink>` from
   Settings → Workflow and the Work page.
 - **UK-specific flags.** None in the model. Two things to keep locale-neutral: business days
   (Mon–Fri is assumed by the existing forecasting helpers — make the working week a setting if
@@ -214,10 +253,12 @@ Each phase ships on its own and leaves the app consistent.
    product assignment, shop default, the enable toggle, Settings → Workflow UI, help page,
    sample route. Route shown read-only on products and order lines.
 2. **Work list.** Demand derivation from order shortfalls, event ledger, bulk tick, quantity
-   basis, station grouping, batch-by-product, Make linked to the build form, Work page,
-   dashboard tile, tests.
+   basis, station grouping, batch by product + BOM colour materials, whole-order readiness,
+   Make linked to the build form, Work page, dashboard tile, tests. Do the backlog's
+   build → make rename first or in step.
 3. **Stock targets & top-ups.** Fields, shop settings, suggestion with its explanation, accept
-   / dismiss, top-up demands through the same route.
+   / dismiss, top-up demands through the same route, prep-ahead (`top_up_through_stage`) and
+   the prep pool.
 4. **Batching rules & timing.** Pull-forward rule, wait gating, typical times, handling-days
    fallback.
 5. **Separate plan:** API / add-on framework; Bambuddy.
@@ -225,21 +266,20 @@ Each phase ships on its own and leaves the app consistent.
 **Gate:** phases 1–3 touch `products` and the dashboard schema, which the roadmap holds until
 PR #22 and PR #23 merge. Planning and review can proceed now.
 
-## 10. Open questions — need an answer before phase 1
+## 10. Questions
 
-1. **"Make" vs "Assemble" for the anchor.** Decision 6 says the default production step is
-   assemble-or-make. Is **Make** (the step that records a build) the right single anchor, with
-   "assemble" as an ordinary seller-defined stage after it? That is how this plan reads it.
-2. **Colour as a batch key.** Batching "same product, same colour" needs the app to know the
-   colour. Is it a variant attribute, or only visible through the filament in the BOM? If the
-   latter, the batch key is derived from the resolved BOM's colour, which is workable but
-   should be confirmed against real products.
-3. **Leftover work when demand disappears** (order cancelled after masking). Plan: the finished
-   prep is simply credited to the next demand for that product at that stage (so it isn't
-   wasted), but this is the weakest part of attaching progress to demands rather than to a
-   pool — check it against how often cancellations really happen.
-4. **Multi-item orders.** An order ships when its last line is ready. Is waiting for the whole
-   order the usual case, or do you partly ship? (Existing `shipped_qty` handles partials; the
-   question is what the Work list should *encourage*.)
-5. **Per-category target defaults.** Fixed/suggested mode inherits item → shop. Do you also want
-   a category level, as ABC has? Cheap to add, and more to configure.
+### Answered (2026-11-27)
+1. **Anchor naming** — Make → Ship is standard; "assemble" is an ordinary stage after Make.
+   Renaming "build" to "make" across the app is in the backlog.
+2. **Colour** — typically a variant attribute *and* in the BOM; follow the BOM (§6.1).
+3. **Cancelled orders** — rare; wanted prep-ahead for coasters anyway, which also solves it
+   (§4.3, §5).
+4. **Multi-item orders** — single shipment (§6.5).
+5. **Category-level targets** — no, product only (§5).
+
+### Still open — for phase 2
+1. **Which BOM materials carry colour?** The batch key needs "the filament lines" of a resolved
+   BOM. Confirm whether materials already have a category or type that identifies filament
+   cleanly (`material_categories`, `material_types`), or whether a flag is needed.
+2. **Per-order stage defaults.** Only *make the file* is obviously per-order today. Does any
+   other step in your four routes need to be tied to one buyer?
