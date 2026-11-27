@@ -17,7 +17,7 @@ const MAKE = { id: 1, name: "Make", station: "Making", kind: "make", per_order: 
 const SHIP = { id: 2, name: "Ship", station: "Packing", kind: "ship", per_order: false, wait_minutes: null, typical_minutes: null, created_at: "", route_count: 1, event_count: 0 };
 const MASK = { id: 3, name: "Mask", station: "Bench", kind: "custom", per_order: false, wait_minutes: 20, typical_minutes: null, created_at: "", route_count: 0, event_count: 0 };
 
-function step(stage: typeof MAKE, position: number) {
+function step(stage: { id: number; name: string; kind: string; station: string | null; per_order: boolean }, position: number) {
   return { id: position, stage_id: stage.id, position, mix_variants: false, qty_basis: "unit", qty_category_id: null, stage_name: stage.name, stage_kind: stage.kind, station: stage.station, per_order: stage.per_order };
 }
 
