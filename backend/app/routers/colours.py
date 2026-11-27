@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db, require_auth
 from app.models.colour import Colour
-from app.routers._reference_crud import MergeRequest, delete_row, list_with_usage, merge_rows, patch_row
+from app.routers._reference_crud import ensure_name_free, MergeRequest, delete_row, list_with_usage, merge_rows, patch_row
 from app.schemas.colour import ColourCreate, ColourFindOrCreate, ColourRead, ColourUpdate
 
 router = APIRouter(prefix="/colours", tags=["colours"], dependencies=[Depends(require_auth)])
@@ -17,6 +17,7 @@ async def list_colours(session: AsyncSession = Depends(get_db)) -> list[Colour]:
 
 @router.post("", response_model=ColourRead, status_code=status.HTTP_201_CREATED)
 async def create_colour(payload: ColourCreate, session: AsyncSession = Depends(get_db)) -> Colour:
+    await ensure_name_free(session, Colour, payload.name)
     colour = Colour(**payload.model_dump())
     session.add(colour)
     await session.commit()
@@ -33,8 +34,13 @@ async def find_or_create_colour(payload: ColourFindOrCreate, session: AsyncSessi
     the duplication the migration just cleaned up start over through the API.
     """
     existing = (
-        await session.execute(select(Colour).where(func.lower(Colour.name) == payload.name.strip().lower()))
-    ).scalar_one_or_none()
+        await session.execute(
+            select(Colour)
+            .where(func.lower(Colour.name) == payload.name.strip().lower())
+            .order_by(Colour.id)
+            .limit(1)
+        )
+    ).scalars().first()
     if existing is not None:
         return existing
     colour = Colour(name=payload.name.strip())

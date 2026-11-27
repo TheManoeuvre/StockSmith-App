@@ -27,8 +27,9 @@ async def find_or_create(session: AsyncSession, name: str | None) -> Colour | No
         return None
 
     existing = (
-        await session.execute(select(Colour).where(func.lower(Colour.name) == cleaned.lower()))
-    ).scalar_one_or_none()
+        await session.execute(select(Colour).where(func.lower(Colour.name) == cleaned.lower()).order_by(Colour.id).limit(1)
+        )
+    ).scalars().first()
     if existing is not None:
         return existing
 

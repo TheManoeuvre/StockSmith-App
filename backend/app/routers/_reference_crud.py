@@ -60,6 +60,15 @@ async def list_with_usage(
     return rows
 
 
+async def ensure_name_free(session: AsyncSession, model: type[Base], name: str) -> None:
+    """Call before inserting. 409 instead of a unique-constraint 500 (or, for the tables that
+    match names case-insensitively, a row that later breaks lookups)."""
+    try:
+        await reference_data.ensure_name_free(session, model, name)
+    except ReferenceDataError as exc:
+        raise _http_error(exc) from exc
+
+
 async def patch_row(session: AsyncSession, model: type[Base], row_id: int, payload) -> object:
     """PATCH one row.
 

@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db, require_auth
 from app.models.material_category import MaterialCategory
-from app.routers._reference_crud import MergeRequest, delete_row, list_with_usage, merge_rows, patch_row
+from app.routers._reference_crud import ensure_name_free, MergeRequest, delete_row, list_with_usage, merge_rows, patch_row
 from app.schemas.material_category import (
     MaterialCategoryCreate,
     MaterialCategoryFindOrCreate,
@@ -32,6 +32,7 @@ async def list_material_categories(session: AsyncSession = Depends(get_db)) -> l
 async def create_material_category(
     payload: MaterialCategoryCreate, session: AsyncSession = Depends(get_db)
 ) -> MaterialCategory:
+    await ensure_name_free(session, MaterialCategory, payload.name)
     data = payload.model_dump()
     if not data.get("sort_order"):
         data["sort_order"] = await material_categories.next_sort_order(session)

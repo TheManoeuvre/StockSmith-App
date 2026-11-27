@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db, require_auth
 from app.models.material_type import MaterialType
-from app.routers._reference_crud import MergeRequest, delete_row, list_with_usage, merge_rows, patch_row
+from app.routers._reference_crud import ensure_name_free, MergeRequest, delete_row, list_with_usage, merge_rows, patch_row
 from app.schemas.material_type import MaterialTypeCreate, MaterialTypeFindOrCreate, MaterialTypeRead, MaterialTypeUpdate
 
 router = APIRouter(prefix="/material-types", tags=["material-types"], dependencies=[Depends(require_auth)])
@@ -17,6 +17,7 @@ async def list_material_types(session: AsyncSession = Depends(get_db)) -> list[M
 
 @router.post("", response_model=MaterialTypeRead, status_code=status.HTTP_201_CREATED)
 async def create_material_type(payload: MaterialTypeCreate, session: AsyncSession = Depends(get_db)) -> MaterialType:
+    await ensure_name_free(session, MaterialType, payload.name)
     row = MaterialType(**payload.model_dump())
     session.add(row)
     await session.commit()
