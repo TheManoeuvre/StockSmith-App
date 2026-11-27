@@ -1,8 +1,40 @@
 # StockSmith — Work flow: routes, "next action" list & stock top-ups
 
-**Status:** Planned 2026-11-27. Nothing built. No sequencing blocker: PR #22 and PR #23, which
-the roadmap fenced `products` and the dashboard schema behind, both merged on 2026-08-16 and
-no PRs are open (see §9).
+**Status:** Phases 1 and 2 built 2026-11-27 (backend, frontend, help, sample data, tests). Phases 3
+and 4 not started. See "As built" below for where the build differs from the design in this document.
+Sequencing was never a blocker: PR #22 and PR #23 merged on 2026-08-16.
+
+## As built — where the code differs from §4–§6
+
+The first two phases follow the plan, with these deliberate changes. They are recorded here because
+the sections below still describe the original design.
+
+1. **Progress is pooled per product/variant and stage, not attached to demands (§4.3).** Attaching
+   progress to each order line fought the existing allocation, which hands built stock to the
+   *oldest* order rather than the earliest due. So progress is a signed event ledger keyed by
+   product, variant and stage, and "made" is read from `builds` (since work flow was first switched
+   on). Everything else is derived. The prep pool and cancellation reuse (decisions 10) fall out of
+   this for free — prepared items simply aren't tied to anyone — and "bulk tick applied to demands
+   in ship-by order" became "a tick on a mixed batch is spread over its variants, most urgent
+   first". Per-order stages are the one exception: their progress is recorded against the line.
+2. **A stage counts by a material *category*, not a specific material (§4.4).** "Per unit of blanks
+   in the recipe" survives a variant swapping one blank for another and reads the same across
+   routes. It is set on the route step, as are "mix designs".
+3. **Make appears once its preparation is done.** The list shows what can be done *now*, so Make
+   is hidden until prepared units exist, and each prep step waits for the one before it. A step
+   ticked out of order never leaves ghost work (a unit that completed a later step counts as having
+   completed the earlier ones).
+4. **Make is recorded as a build, not ticked.** A Make card links to the existing build form
+   (including the variant), and a build recorded there counts. Ship happens on the order.
+5. **Preparation is per variant.** Six cleaned blanks for a 2-pack don't count toward a 6-pack. A
+   shared blank pool is the obvious next refinement if it matters in practice.
+6. **Phase 3 hook:** `compute_work_list(extra_demand=…)` already accepts demand that isn't an order
+   (stock top-ups). Nothing sets it yet.
+7. **Stored but not yet used:** `wait_minutes` and `typical_minutes` on a stage (phase 4), and
+   `source` / `external_ref` on events (§7).
+
+Known limitations, also in `docs/backlog.md`: a build allocates to the oldest order rather than the
+most urgent; "due today" uses the UTC date; an order with no ship-by date sorts last.
 
 ## 1. Context
 
@@ -292,10 +324,10 @@ which touches the same pages). `<HelpLink>` from
 
 Each phase ships on its own and leaves the app consistent.
 
-1. **Stages & routes (config only).** Stage and route tables, built-in Make/Ship, category and
+1. ✅ **Stages & routes (config only).** Stage and route tables, built-in Make/Ship, category and
    product assignment, shop default, the enable toggle, Settings → Workflow UI, help page,
    sample route. Route shown read-only on products and order lines.
-2. **Work list.** Demand derivation from order shortfalls, event ledger, bulk tick, quantity
+2. ✅ **Work list.** Demand derivation from order shortfalls, event ledger, bulk tick, quantity
    basis, station grouping, batch by product + BOM colour materials, whole-order readiness,
    Make linked to the build form, Work page, dashboard tile, tests. Do the backlog's
    build → make rename first or in step.

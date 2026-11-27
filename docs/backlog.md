@@ -387,3 +387,25 @@ may make "on quit" a rarer event than the mockup assumes.
 **Ask:** Rename the user-facing word everywhere: the Builds page, "Build now" links, "buildable" / "amount we can build" (→ "can make"), the build form and its failed-quantity wording, notifications, CSV headers, dashboard text, empty states, and the help pages (`docs/help/builds-and-failures.md` and every mention in `concepts.md`, `getting-started.md` and the rest — about 28 lines today). Keep database table names, API paths and code identifiers as they are unless there is a separate reason to migrate them; a UI/docs rename needs no schema change. Rename the help file with its slug in `HELP_SECTIONS` and its link in `docs/help/README.md` (`frontend/src/lib/help.test.ts` fails otherwise), and keep a redirect or anchor for old links.
 
 Best done **before or alongside phase 2** of the work-flow plan, so the Work page never shows both words. Update the sample workspace's wording too.
+
+---
+
+## Work flow
+
+### A build allocates to the oldest order, not the most urgent
+
+**Problem:** The Work page orders tasks by due date, but `allocation.auto_allocate_after_build` hands newly built stock to the oldest order (`order_placed_at`), as it always has. A seller who builds for an urgent order can find the units went to an older, less urgent one, which then shows as ready to ship while the urgent one stays short.
+
+**Ask:** Allocate by due date (ship-by / collect-by) with placed date as the tie-break, or make it a setting. This changes existing behaviour for everyone, so it wants its own look — hence not done with work flow.
+
+### Work flow: shared preparation across pack sizes
+
+**Problem:** Preparation is counted per variant, so six cleaned and masked blanks recorded against a 2-pack variant don't count toward a 6-pack, even though a blank is a blank.
+
+**Ask:** For a step that counts by a material category, keep one pool per product in blanks and let any variant draw from it. Needs an allocation rule for which variant gets the blanks first.
+
+### Work flow: due dates for orders with none, and local "today"
+
+**Problem:** Manual orders have no ship-by date, so they sort last and never show as late. "Due today" on the dashboard tile uses the UTC date rather than the seller's.
+
+**Ask:** A handling-days setting as a fallback (placed date plus N days), and compare against the computer's local date. Part of work-flow phase 4.

@@ -31,7 +31,7 @@ Written 2026-08-15, against 0.6.3.
 | Always-on sync | **Next up** — tray chosen as first step; `plan-background-sync.md` now carries the build plan and the Windows 11 uptime design | `plan-background-sync.md` §6-8, `plan-always-on-sync.md` |
 | **New-user onboarding** | **Planned** (2026-11-19) — public distribution, UK-first, sample workspace, in-app docs decided | `plan-onboarding.md` |
 | Storage locations (multi-level, ranges, moves, labels, count by location) | **Phases 1–4 built** (4 in part, 2026-11-25) — tree, range generator, placements, moves, auto-follow for single-placement items, labels (51×25 mm and 6×4 in), scan-to-jump, CSV, onboarding, sample data and help; count by location (a scope on Stock Take, found items, delta against the placement); phase 4 built in part: primary-first deduction for several places, put-away prompt after a receipt or build, replenishment nudge, pick location on orders, A4 label sheet (a location-sorted pick list and "taking from" on builds not built) | `plan-locations.md` |
-| Work flow — configurable routes, "next action" list, stock top-ups (the print-queue theme, widened) | **Planned** (2026-11-27) — nothing built; no blockers (PR #22/#23 merged 2026-08-16). Machine integration (Bambuddy) is a separate, later plan | `plan-workflow.md` |
+| Work flow — configurable routes, "next action" list, stock top-ups (the print-queue theme, widened) | **Phases 1–2 built** (2026-11-27): stages, routes, Work page, progress, help, sample data. Phase 3 (stock targets and top-ups) and 4 (batching rules, timing) planned. Machine integration (Bambuddy) is a separate, later plan | `plan-workflow.md` |
 | Shipping automation | Parked deliberately, not deferred | `plan-marketplace-integrations.md` §2 |
 
 ---
