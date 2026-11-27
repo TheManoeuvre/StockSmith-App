@@ -12,6 +12,28 @@ project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Work flow: a to-do list of what to do next.** Optional and off until you turn it on under
+  **Settings › Work flow**. Define your own steps — pre-clean, mask, sand, assemble, make the file —
+  and the order they happen in for each kind of product, then a new **Work** page (under Sell) shows
+  what to prepare, make, finish and pack next, grouped by where you do it and most urgent first.
+  - Each product follows a route; choose one per product category, with an override on any product.
+    Everything follows a plain **Make → Ship** route until you say otherwise.
+  - Record progress as a number — "masked 4" — rather than ticking each order. A step can count by a
+    material in the recipe, so a 6-pack needs six coasters prepared and a 2-pack needs two.
+  - Prepare ahead: work recorded before any order needs it is used by the next order, and survives a
+    cancellation.
+  - Printing several designs on one plate? **Mix designs** is off by default; turn it on for a route
+    step to batch designs that print from the same materials. Different materials are never mixed,
+    and each order's Ship card lists exactly what goes in its box.
+  - Work that is only for one buyer, like a personalised file, is tracked per order and holds up
+    making until it is done.
+  - An order ships whole: it appears under **Ready to ship** only when every item in it is ready, and
+    under **Waiting** with the reason until then.
+  - A **Work to do** tile on the Dashboard, the sample data includes a candle route, and there is a
+    new help page.
+
 ## [0.30.0] - 2026-11-26
 
 ### Added

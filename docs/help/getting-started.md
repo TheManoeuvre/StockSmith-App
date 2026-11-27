@@ -126,5 +126,7 @@ computer doesn't take your records with it. See [Backups](backup-and-restore.md)
 ## What next
 
 - [How StockSmith thinks](concepts.md) explains the ideas behind each page.
+- Juggling several kinds of product with different steps before they ship? [Work flow](workflow.md) is
+  an optional to-do list that tells you what to do next.
 - The **Dashboard** shows what needs doing today: orders short of stock, materials running low,
   and items due for counting.

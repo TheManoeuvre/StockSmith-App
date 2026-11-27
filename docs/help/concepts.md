@@ -99,6 +99,12 @@ From recent orders, StockSmith works out how fast each material is being used an
 weeks your stock will last. The Materials page and Dashboard warn you when a material is running
 low. The thresholds are in **Settings › Forecasting**.
 
+## Work flow
+
+**Work flow** is an optional to-do list built from your orders. You define the steps your products go
+through — clean, mask, sand, make, assemble, ship — and the **Work** page shows what to do next at each
+one, most urgent first. It only reads your orders, builds and stock. See [Work flow](workflow.md).
+
 ## Locations
 
 A **location** is a place you keep stock: a shelf, a box, a room. Locations nest, so a box can sit on

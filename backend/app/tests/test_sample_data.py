@@ -71,3 +71,30 @@ async def test_the_sample_has_a_storage_layout_that_followed_its_builds_and_orde
     assert len(jar_view.placements) == 2 and jar_view.unassigned > 0
     labels = (await session.scalars(select(Material).where(Material.name == "Product label"))).one()
     assert (await placements.stored_in(session, ItemRef(material_id=labels.id))).placements == []
+
+
+async def test_the_sample_shows_work_flow_with_a_route_in_the_shops_own_words(session, pushes):
+    from app.services import work, work_routes
+
+    await ensure_seed_data(session)
+    await build_sample(session)
+
+    assert (await work_routes.get_work_settings(session)).work_flow_enabled is True
+    routes = {r.name: r for r in await work_routes.list_routes(session)}
+    assert [s.stage.name for s in routes["Container candle"].steps] == ["Prepare jar", "Make", "Cure", "Ship"]
+
+    listing = await work.compute_work_list(session)
+    # The pending order for 3 large sea-salt candles has 2 on the shelf, so one is short: it starts with preparing a jar; pouring comes
+    # once they're ready, because the list shows what can be done now.
+    [prepare] = [c for c in listing.cards if c.stage_name == "Prepare jar"]
+    assert prepare.qty == 1 and "Make" not in {c.stage_name for c in listing.cards}
+    # The stock built before work flow was switched on is not waiting to cure.
+    assert "Cure" not in {c.stage_name for c in listing.cards}
+    # The one open order is the short one, so it is waiting rather than ready to pack.
+    assert not listing.ship_cards and len(listing.waiting_orders) == 1
+
+    await work.record_progress(
+        session, product_id=prepare.product_id, variant_id=prepare.parts[0].variant_id, stage_id=prepare.stage_id, qty=1
+    )
+    listing = await work.compute_work_list(session)
+    assert [c.stage_name for c in listing.cards] == ["Make"]

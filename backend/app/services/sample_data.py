@@ -367,3 +367,33 @@ async def build_sample(session: AsyncSession) -> None:
     # A small counting discrepancy, as a real shelf would have.
     await create_adjustment(session, ids["Product label"], MaterialAdjustmentMode.adjust, Decimal(-6), "Spoiled in the printer")
     await session.commit()
+
+    await _sample_work_flow(session, candle.id)
+
+
+async def _sample_work_flow(session: AsyncSession, candle_id: int) -> None:
+    """Switch work flow on with a route in the shop's own words: prepare the jar, pour (Make), let it
+    cure, then ship. The pending order for large sea-salt candles then shows up on the Work page as
+    something to prepare and pour. Done last, so the builds above predate the feature and none of that
+    stock is waiting to cure — see GeneralSettings.work_flow_enabled_at."""
+    from app.models.work import WorkStageKind
+    from app.services import work_routes
+    from app.services.work_routes import StepInput
+
+    prepare = await work_routes.create_stage(
+        session, name="Prepare jar", station="Bench", per_order=False, wait_minutes=None, typical_minutes=10
+    )
+    cure = await work_routes.create_stage(
+        session, name="Cure", station="Shelf", per_order=False, wait_minutes=2880, typical_minutes=None
+    )
+    make = await work_routes._first_stage_of_kind(session, WorkStageKind.make)
+    ship = await work_routes._first_stage_of_kind(session, WorkStageKind.ship)
+    route = await work_routes.create_route(
+        session,
+        name="Container candle",
+        steps=[StepInput(stage_id=s.id) for s in (prepare, make, cure, ship)],
+    )
+    candle = await session.get(Product, candle_id)
+    candle.work_route_id = route.id
+    await session.commit()
+    await work_routes.set_work_flow_enabled(session, True)

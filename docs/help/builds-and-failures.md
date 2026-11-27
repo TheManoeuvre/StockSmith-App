@@ -5,6 +5,9 @@ variants, pick the one you made first.
 
 ## A successful build
 
+If you use [Work flow](workflow.md), a **Make** task on the Work page opens this same form, and a
+build recorded here counts there too.
+
 Enter **Qty built** and press **Record**. StockSmith:
 
 - takes the recipe's materials out of stock (quantity per product × number built);
