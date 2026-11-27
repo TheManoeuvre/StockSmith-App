@@ -109,6 +109,105 @@ export function MoveLocationModal({
   );
 }
 
+/**
+ * Re-parents several locations at once. A selected location whose ancestor is also selected just
+ * travels with that ancestor, so only the outermost ones are moved.
+ */
+export function MoveLocationsModal({
+  rows,
+  ids,
+  onClose,
+  onMoved,
+}: {
+  rows: LocationRow[];
+  ids: number[];
+  onClose: () => void;
+  onMoved: () => void;
+}) {
+  const [parentId, setParentId] = useState<number | null>(null);
+  const [chosen, setChosen] = useState(false);
+  const invalidate = useInvalidateLocations();
+  const roots = useMemo(() => {
+    const byId = new Map(rows.map((r) => [r.id, r]));
+    const picked = new Set(ids);
+    return ids
+      .map((id) => byId.get(id))
+      .filter((r): r is LocationRow => {
+        if (!r) return false;
+        for (let cur = r.parent_id != null ? byId.get(r.parent_id) : undefined; cur; cur = cur.parent_id != null ? byId.get(cur.parent_id) : undefined) {
+          if (picked.has(cur.id)) return false;
+        }
+        return true;
+      });
+  }, [rows, ids]);
+  const todo = roots.filter((r) => r.parent_id !== parentId);
+  const move = useMutation({
+    mutationFn: async () => {
+      // One at a time, so a failure (say, a name already used in the new parent) stops cleanly.
+      for (const r of todo) await locationsApi.update(r.id, { parent_id: parentId });
+    },
+    onSuccess: onMoved,
+    onSettled: invalidate,
+  });
+  const blocked = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const r of roots) {
+      for (const id of subtreeIds(rows, r.id)) m.set(id, id === r.id ? "being moved" : "inside one being moved");
+    }
+    for (const r of rows) if (r.archived) m.set(r.id, "archived");
+    return m;
+  }, [rows, roots]);
+  const items = roots.reduce((n, r) => n + r.rolled_up_items, 0);
+  const destName = parentId != null ? last(pathNames(rows, parentId)) : "the top level";
+
+  return (
+    <Modal
+      title={`Move ${roots.length} locations`}
+      maxWidth="max-w-md"
+      onClose={onClose}
+      footer={
+        <>
+          <button onClick={onClose} className={BTN}>
+            Cancel
+          </button>
+          <button onClick={() => move.mutate()} disabled={!chosen || todo.length === 0 || move.isPending} className={PRIMARY}>
+            {chosen ? `Move ${todo.length} to ${destName}` : "Choose where to move them"}
+          </button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-3">
+        <KindTag>Moves the locations</KindTag>
+        <ul className="max-h-32 overflow-y-auto rounded-md bg-slate-50 px-2.5 py-2 font-mono text-xs">
+          {roots.map((r) => (
+            <li key={r.id}>{pathLabel(pathNames(rows, r.id))}</li>
+          ))}
+        </ul>
+        <div className="flex flex-col gap-1 text-xs font-medium text-slate-700">
+          New parent
+          <LocationPicker
+            rows={rows}
+            value={parentId}
+            onChange={(id) => {
+              setParentId(id);
+              setChosen(true);
+            }}
+            allowTopLevel
+            disabled={blocked}
+            label="New parent"
+          />
+        </div>
+        <Note>
+          They and the <b className="font-semibold">{items} item{items === 1 ? "" : "s"}</b> in them move together.
+          Item totals don’t change.
+          {roots.length < ids.length && " Locations inside another selected one come along with it."}
+        </Note>
+        <ErrorBanner error={move.error} />
+      </div>
+    </Modal>
+  );
+}
+
 /** Takes everything out of one location and merges it into another. The source stays, empty. */
 export function EmptyIntoModal({
   rows,

@@ -25,7 +25,7 @@ function Chevron({ open, hidden }: { open: boolean; hidden: boolean }) {
  * Counts roll up, so a collapsed branch still says what's inside. Search and filters keep the
  * parents of whatever matched (dimmed), so a result is never shown without the branch that leads
  * to it. `disabled` marks rows that can't be chosen and says why ("it's inside Box01") — used by
- * the move dialogs.
+ * the move dialogs. Ctrl/Cmd-click ticks several rows at once when `onToggleMulti` is given.
  */
 export function LocationTree({
   rows,
@@ -37,6 +37,8 @@ export function LocationTree({
   disabled,
   defaultExpandAll = false,
   ariaLabel = "Locations",
+  multiSelected,
+  onToggleMulti,
 }: {
   rows: LocationRow[];
   selectedId: number | null;
@@ -48,6 +50,9 @@ export function LocationTree({
   disabled?: Map<number, string>;
   defaultExpandAll?: boolean;
   ariaLabel?: string;
+  /** Locations ticked with Ctrl/Cmd-click, for bulk actions. Only the Locations page passes these. */
+  multiSelected?: Set<number>;
+  onToggleMulti?: (id: number) => void;
 }) {
   const forest = useMemo(() => buildTree(rows, showArchived), [rows, showArchived]);
   const [expanded, setExpanded] = useState<Set<number>>(
@@ -89,7 +94,8 @@ export function LocationTree({
       {shown.map(({ node, dimmed }) => {
         const { row, depth, children } = node;
         const reason = disabled?.get(row.id);
-        const isSelected = row.id === selectedId;
+        const isMulti = multiSelected?.has(row.id) ?? false;
+        const isSelected = multiSelected && multiSelected.size > 0 ? isMulti : row.id === selectedId;
         const isOpen = open.has(row.id);
         return (
           <div
@@ -116,7 +122,7 @@ export function LocationTree({
             <button
               type="button"
               disabled={!!reason}
-              onClick={() => onSelect(row.id)}
+              onClick={(e) => (onToggleMulti && (e.ctrlKey || e.metaKey) ? onToggleMulti(row.id) : onSelect(row.id))}
               className={`flex min-w-0 flex-1 items-center gap-1.5 text-left ${row.archived ? "italic text-slate-500" : ""}`}
             >
               <span className="truncate">{row.name}</span>

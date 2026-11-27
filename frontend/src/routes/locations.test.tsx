@@ -153,4 +153,42 @@ describe("Locations page", () => {
     expect(await screen.findByRole("heading", { name: "Place your stock" }, WAIT)).toBeInTheDocument();
     expect(screen.getByText("38 items unplaced")).toBeInTheDocument();
   });
+  it("Ctrl-click selects several locations and moves them together", async () => {
+    const a = row(1, "Shelf A", null);
+    const b = row(2, "Box 1", null);
+    const c = row(3, "Box 2", null);
+    const patched: { path: string; body: unknown }[] = [];
+    renderAt("/locations?loc=1", [
+      {
+        method: "GET",
+        path: "/locations",
+        respond: () => ({
+          locations: [a, b, c],
+          total_locations: 3,
+          attention_locations: 0,
+          empty_locations: 3,
+          unplaced_items: 0,
+          placeable_items: 0,
+        }),
+      },
+      {
+        method: "GET",
+        path: /^\/locations\/\d+$/,
+        respond: () => ({ ...a, path: [{ id: 1, name: "Shelf A" }], contents: [], children: [], history: [], history_count: 0 }),
+      },
+      {
+        method: "PATCH",
+        path: /^\/locations\/\d+$/,
+        respond: (body: unknown) => {
+          patched.push({ path: "", body });
+          return a;
+        },
+      },
+    ]);
+    fireEvent.click(await screen.findByRole("button", { name: /^Box 1/ }, WAIT), { ctrlKey: true });
+    fireEvent.click(screen.getByRole("button", { name: /^Box 2/ }), { ctrlKey: true });
+    expect(await screen.findByRole("heading", { name: "3 locations selected" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Move selected…" }));
+    expect(await screen.findByRole("dialog", { name: "Move 3 locations" })).toBeInTheDocument();
+  });
 });
