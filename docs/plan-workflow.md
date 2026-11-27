@@ -1,8 +1,8 @@
 # StockSmith — Work flow: routes, "next action" list & stock top-ups
 
-**Status:** Planned 2026-11-27. Nothing built. Sequencing: starts only after PR #22 and PR #23
-land (see §9) — it adds columns to `products` and a section to the dashboard, both of which the
-roadmap fences off while those are in flight.
+**Status:** Planned 2026-11-27. Nothing built. No sequencing blocker: PR #22 and PR #23, which
+the roadmap fenced `products` and the dashboard schema behind, both merged on 2026-08-16 and
+no PRs are open (see §9).
 
 ## 1. Context
 
@@ -306,8 +306,9 @@ Each phase ships on its own and leaves the app consistent.
    fallback.
 5. **Separate plan:** API / add-on framework; Bambuddy.
 
-**Gate:** phases 1–3 touch `products` and the dashboard schema, which the roadmap holds until
-PR #22 and PR #23 merge. Planning and review can proceed now.
+**Gate:** none. Phases 1–3 touch `products` and the dashboard schema, which the roadmap held
+until PR #22 and PR #23 merged — both did, on 2026-08-16. Check for newly opened work against
+those areas before starting.
 
 ## 10. Questions
 
@@ -331,4 +332,4 @@ PR #22 and PR #23 merge. Planning and review can proceed now.
    plate sheet (§4.6).
 
 ### Still open
-None. The plan is ready for review; building waits on PR #22 and PR #23 (§9).
+None. The plan is ready for review; it can be built from phase 1 (§9).
