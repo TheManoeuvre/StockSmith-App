@@ -58,8 +58,9 @@ their own steps and routes.
     cancellation.
 11. **Orders ship whole** — one shipment per order (§6.5).
 12. **Stock targets are per product / variant only** — no category level.
-13. **Mixing is a choice, per route step** (§4.5): efficient to print several designs on one
-    plate, but the seller may prefer not to, so mixed items can't be picked wrongly.
+13. **Mixing is a choice, per route step, default off** (§4.5): efficient to print several
+    designs on one plate, but the seller may prefer not to, so mixed items can't be picked
+    wrongly. Sorting help for plates that are mixed is §4.6.
 
 ## 3. What the codebase already gives us
 
@@ -160,8 +161,25 @@ Two independent controls, because "efficient" and "safe" pull in opposite direct
   inheritance with no new mechanism.
 
 The cost of mixing is the pick-out afterwards, so a mixed batch's card carries its breakdown
-and the order(s) each item is for. Suggested default: **mixing on** — it's the efficient
-choice and the seller can turn it off per route. (Open question 1 below.)
+and the order(s) each item is for. **Default: mixing off** (decided 2026-11-27) — safe unless
+the seller opts in per route. How much help a *mixed* plate needs is §4.6.
+
+### 4.6 Sorting a mixed plate (only matters where mixing is on)
+The risk: a plate comes off with designs A, A, B, C, C, C for orders #101–#104. The items are
+loose and look alike at a glance, and the order each belongs to is only in the seller's head.
+Three levels of help, each building on the last:
+
+- **A. Breakdown on the card (phase 2).** Totals by design, and which orders they serve. No
+  extra steps; relies on the seller to sort correctly.
+- **B. The pack card names the exact item (phase 2, falls out of §4.3).** Progress is already
+  attributed to specific orders, so each order's **Pack** card lists precisely what goes in
+  *that* box — "2 × Design A, 1 × Design C". Packing is where a wrong item would actually leave
+  the building, so this is the real safety net, and it costs nothing extra.
+- **C. A plate sheet and sort checklist (phase 4, only if needed).** Before printing, a
+  printable sheet of what's on the plate, grouped by order, and a tick-as-you-sort list after.
+  A genuine extra step, so worth building only if A and B still leave mix-ups.
+
+Recommendation: ship A and B, hold C until there is evidence it's needed.
 
 ## 5. Stock targets and top-ups
 
@@ -306,9 +324,8 @@ PR #22 and PR #23 merge. Planning and review can proceed now.
 7. **Per-order stages** — only *make the file*, but keep it flexible. That led to §4.5: a
    per-order flag on any stage, plus a per-route-step "mix variants" setting.
 
+8. **Default for "mix variants"** — off.
+
 ### Still open
-1. **Default for "mix variants".** Suggested on (efficient); safer is off. Which should a new
-   route start with?
-2. **How much of a mixed batch's detail must the Work card show?** The plan shows the breakdown
-   by variant and by order. Is that enough to pick a mixed plate out safely, or do you want a
-   separate per-plate checklist at the Make step?
+1. **Sorting a mixed plate (§4.6).** Are A (breakdown) and B (pack card names the exact item)
+   enough, or do you want C (printable plate sheet and sort checklist) built too?
