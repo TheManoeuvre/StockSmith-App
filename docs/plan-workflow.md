@@ -175,11 +175,12 @@ Three levels of help, each building on the last:
   attributed to specific orders, so each order's **Pack** card lists precisely what goes in
   *that* box — "2 × Design A, 1 × Design C". Packing is where a wrong item would actually leave
   the building, so this is the real safety net, and it costs nothing extra.
-- **C. A plate sheet and sort checklist (phase 4, only if needed).** Before printing, a
-  printable sheet of what's on the plate, grouped by order, and a tick-as-you-sort list after.
-  A genuine extra step, so worth building only if A and B still leave mix-ups.
+- **C. A plate sheet and sort checklist.** Before printing, a printable sheet of what's on the
+  plate, grouped by order, and a tick-as-you-sort list after. **Decided 2026-11-27: not
+  built.** It is a genuine extra step on every mixed plate, and A and B are enough. Revisit
+  only if mix-ups actually happen.
 
-Recommendation: ship A and B, hold C until there is evidence it's needed.
+Decision: ship A and B.
 
 ## 5. Stock targets and top-ups
 
@@ -326,6 +327,8 @@ PR #22 and PR #23 merge. Planning and review can proceed now.
 
 8. **Default for "mix variants"** — off.
 
+9. **Mixed-plate sorting** — A (breakdown) and B (pack card names the exact item) only; no
+   plate sheet (§4.6).
+
 ### Still open
-1. **Sorting a mixed plate (§4.6).** Are A (breakdown) and B (pack card names the exact item)
-   enough, or do you want C (printable plate sheet and sort checklist) built too?
+None. The plan is ready for review; building waits on PR #22 and PR #23 (§9).
