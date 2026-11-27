@@ -58,6 +58,8 @@ their own steps and routes.
     cancellation.
 11. **Orders ship whole** — one shipment per order (§6.5).
 12. **Stock targets are per product / variant only** — no category level.
+13. **Mixing is a choice, per route step** (§4.5): efficient to print several designs on one
+    plate, but the seller may prefer not to, so mixed items can't be picked wrongly.
 
 ## 3. What the codebase already gives us
 
@@ -75,6 +77,7 @@ Reuse these; every one was read in the source.
 | Orders short on stock | dashboard summary | `schemas/dashboard.py`, `routers/dashboard.py` |
 | Sales rate per product/variant | forecasting's sales-history aggregation (30-day style lookbacks, business-day helpers) | `services/forecasting.py` |
 | Append-only ledger convention | `ProductStockEvent`, `StockAdjustment` | `models/product_stock_event.py` |
+| "Is this material colour-bearing?" | `MaterialCategory.tracks_colour` (and `tracks_material_type`), set per category | `models/material_category.py` |
 | Made-to-order exclusion | `Product.made_to_order` | `models/product.py` |
 | Sparse settings (code defaults win, table ships empty) | `ABCTierSetting` | `models/abc_classification.py` |
 | Onboarding checklist, sample data, presets, help system | `services/onboarding.py`, `sample_data.py`, `business_presets.py`, `docs/help/` | see `docs/plan-onboarding.md` |
@@ -143,6 +146,23 @@ Each stage has a **quantity basis**:
 Recommendation: ship both. The default needs no configuration; the BOM basis is what makes
 multi-packs correct.
 
+### 4.5 Flexibility: what may be combined
+Two independent controls, because "efficient" and "safe" pull in opposite directions:
+
+- **Per-order (a stage property, §4.1).** The work is for one buyer. Never merged across
+  orders, never done ahead. *Make the file* is the only one today, but any step can be flagged.
+- **Mix variants (a setting on the step within a route).** When on, one batch may combine
+  variants of the same product that share the batch key — several designs on one coaster
+  plate, in one run. When off, the batch key also includes the variant, so each design is its
+  own batch and cannot be confused with another afterwards. It sits on the route's step rather
+  than the stage itself, because the same "Make" is mixed for one product and not for another.
+  Routes already attach at category with a per-product deviation, so this follows the same
+  inheritance with no new mechanism.
+
+The cost of mixing is the pick-out afterwards, so a mixed batch's card carries its breakdown
+and the order(s) each item is for. Suggested default: **mixing on** — it's the efficient
+choice and the seller can turn it off per route. (Open question 1 below.)
+
 ## 5. Stock targets and top-ups
 
 Today: `current_stock`, `allocated_qty`, and buildability. New, on the item that holds stock
@@ -176,14 +196,18 @@ because a number the seller can't audit is a number they'll ignore.
 A new page, **Work**, plus a dashboard tile (late / due today).
 
 ### 6.1 Layout
-Grouped by **station**, then within a station sorted by ship-by date, then **batched**:
-cards for the same product and variants are merged into one batch with a total quantity — but
-only when they would print from the **same materials**. The batch key is the product plus the
-**materials in the resolved BOM that carry the colour** (filament). Colour is a variant
-attribute in this seller's catalogue *and* is in the BOM, and the BOM is the one that is
-authoritative: it is what the printer is actually loaded with, so black PETG and black PLA can
-never merge. Each card shows stage, product/variant, quantity, earliest due date, and the
-**Done** control.
+Grouped by **station**, then within a station sorted by ship-by date, then **batched**: cards
+for the same product are merged into one batch with a total quantity, within the limits in
+§4.5. Each card shows stage, product/variant, quantity, earliest due date, and the **Done**
+control. A batch of several variants shows its breakdown ("3 × Design A, 3 × Design B").
+
+**Batch key.** Items merge only when they would print from the **same materials**. The key is
+the product plus the **materials in the resolved BOM whose category has `tracks_colour`**
+(filament, in this seller's setup). Colour is a variant attribute in the catalogue *and* is in
+the BOM; the BOM is authoritative because it is what the printer is actually loaded with, so
+black PETG and black PLA never merge — they are different materials, whatever their colour
+name says. This needs no new flag, and a category the seller adds later (resin, vinyl) works
+as soon as they tick "tracks colour" on it.
 
 ### 6.2 Done control
 A number field defaulting to the card's full quantity, with a single click to confirm. Entering
@@ -277,9 +301,14 @@ PR #22 and PR #23 merge. Planning and review can proceed now.
 4. **Multi-item orders** — single shipment (§6.5).
 5. **Category-level targets** — no, product only (§5).
 
-### Still open — for phase 2
-1. **Which BOM materials carry colour?** The batch key needs "the filament lines" of a resolved
-   BOM. Confirm whether materials already have a category or type that identifies filament
-   cleanly (`material_categories`, `material_types`), or whether a flag is needed.
-2. **Per-order stage defaults.** Only *make the file* is obviously per-order today. Does any
-   other step in your four routes need to be tied to one buyer?
+### Answered (2026-11-27, second round)
+6. **Which materials carry colour** — the existing per-category `tracks_colour` flag (§6.1).
+7. **Per-order stages** — only *make the file*, but keep it flexible. That led to §4.5: a
+   per-order flag on any stage, plus a per-route-step "mix variants" setting.
+
+### Still open
+1. **Default for "mix variants".** Suggested on (efficient); safer is off. Which should a new
+   route start with?
+2. **How much of a mixed batch's detail must the Work card show?** The plan shows the breakdown
+   by variant and by order. Is that enough to pick a mixed plate out safely, or do you want a
+   separate per-plate checklist at the Make step?
