@@ -24,7 +24,7 @@ from app.models.material import LegacyMaterialCategory, Material, MaterialUnit
 from app.models.material_category import MaterialCategory
 from app.routers import material_categories as material_categories_router
 from app.routers._reference_crud import MergeRequest
-from app.schemas.material_category import MaterialCategoryReorder, MaterialCategoryUpdate
+from app.schemas.material_category import MaterialCategoryCreate, MaterialCategoryReorder, MaterialCategoryUpdate
 from app.services import material_categories
 from app.services.csv_io import export_materials_csv, import_materials_csv
 
@@ -233,6 +233,25 @@ class TestCategoryFlag:
         assert material.category_id is None
         assert material_categories.category_flag(material, "consumed_on_failed_build") is True
         assert material_categories.category_flag(material, "auto_kitting_per_order") is False
+
+
+class TestCaseVariantDuplicates:
+    async def test_creating_a_case_variant_of_an_existing_category_is_a_409(self, session):
+        with pytest.raises(HTTPException) as caught:
+            await material_categories_router.create_material_category(
+                MaterialCategoryCreate(name="Blanks"), session
+            )
+        assert caught.value.status_code == 409
+        assert isinstance(caught.value.detail, str)
+
+    async def test_find_or_create_survives_existing_twins_and_picks_the_oldest(self, session):
+        """Databases that predate the create-time check may already hold "blanks" and "Blanks"."""
+        original = await material_categories.find_or_create(session, "blanks")
+        session.add(MaterialCategory(name="Blanks", sort_order=999))
+        await session.commit()
+
+        found = await material_categories.find_or_create(session, "BLANKS")
+        assert found.id == original.id
 
 
 class TestRouterGuards:

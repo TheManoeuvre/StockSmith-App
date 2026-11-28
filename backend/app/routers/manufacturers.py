@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db, require_auth
 from app.models.manufacturer import Manufacturer
-from app.routers._reference_crud import MergeRequest, delete_row, list_with_usage, merge_rows, patch_row
+from app.routers._reference_crud import ensure_name_free, MergeRequest, delete_row, list_with_usage, merge_rows, patch_row
 from app.schemas.manufacturer import ManufacturerCreate, ManufacturerFindOrCreate, ManufacturerRead, ManufacturerUpdate
 
 router = APIRouter(prefix="/manufacturers", tags=["manufacturers"], dependencies=[Depends(require_auth)])
@@ -17,6 +17,7 @@ async def list_manufacturers(session: AsyncSession = Depends(get_db)) -> list[Ma
 
 @router.post("", response_model=ManufacturerRead, status_code=status.HTTP_201_CREATED)
 async def create_manufacturer(payload: ManufacturerCreate, session: AsyncSession = Depends(get_db)) -> Manufacturer:
+    await ensure_name_free(session, Manufacturer, payload.name)
     row = Manufacturer(**payload.model_dump())
     session.add(row)
     await session.commit()

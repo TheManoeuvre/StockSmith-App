@@ -147,9 +147,14 @@ async def find_or_create(session: AsyncSession, name: str | None) -> MaterialCat
 
     existing = (
         await session.execute(
-            select(MaterialCategory).where(func.lower(MaterialCategory.name) == cleaned.lower())
+            select(MaterialCategory)
+            .where(func.lower(MaterialCategory.name) == cleaned.lower())
+            # A database can already hold case-variant twins (the create endpoint used to allow
+            # it). Take the oldest rather than crash; the user can merge the pair in Settings.
+            .order_by(MaterialCategory.id)
+            .limit(1)
         )
-    ).scalar_one_or_none()
+    ).scalars().first()
     if existing is not None:
         return existing
 

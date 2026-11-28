@@ -302,3 +302,41 @@ class TestProductCategories:
         await reference_data.merge(session, ProductCategory, dupe.id, keep.id)
 
         assert (await reference_data.usage_counts(session, ProductCategory))[keep.id] == 1
+
+
+class TestCreateRefusesDuplicates:
+    """The create endpoints were bare inserts: a clash was either a 500 from the unique
+    constraint, or — for the case-insensitive tables — a twin row that broke later lookups."""
+
+    async def test_an_exact_duplicate_manufacturer_is_a_409(self, session):
+        from fastapi import HTTPException
+
+        from app.routers import manufacturers as router
+        from app.schemas.manufacturer import ManufacturerCreate
+
+        await _manufacturer(session, "Prusa")
+        with pytest.raises(HTTPException) as caught:
+            await router.create_manufacturer(ManufacturerCreate(name="Prusa"), session)
+        assert caught.value.status_code == 409
+        assert isinstance(caught.value.detail, str)
+
+    async def test_a_case_variant_colour_is_a_409(self, session):
+        from fastapi import HTTPException
+
+        from app.routers import colours as router
+        from app.schemas.colour import ColourCreate
+
+        session.add(Colour(name="Black"))
+        await session.commit()
+        with pytest.raises(HTTPException) as caught:
+            await router.create_colour(ColourCreate(name="black"), session)
+        assert caught.value.status_code == 409
+
+    async def test_case_variants_of_exact_match_tables_are_still_allowed(self, session):
+        """Manufacturers match exactly everywhere else, so "prusa" is legitimately distinct."""
+        from app.routers import manufacturers as router
+        from app.schemas.manufacturer import ManufacturerCreate
+
+        await _manufacturer(session, "Prusa")
+        created = await router.create_manufacturer(ManufacturerCreate(name="prusa"), session)
+        assert created.name == "prusa"

@@ -147,7 +147,18 @@ _CASE_INSENSITIVE_NAMES: frozenset[type[Base]] = frozenset({Colour, MaterialCate
 async def _find_by_name(session: AsyncSession, model: type[Base], name: str):
     column = func.lower(model.name) if model in _CASE_INSENSITIVE_NAMES else model.name
     target = name.lower() if model in _CASE_INSENSITIVE_NAMES else name
-    return (await session.execute(select(model).where(column == target))).scalar_one_or_none()
+    # Oldest first, and tolerant of more than one: a database can already hold case-variant twins.
+    return (
+        await session.execute(select(model).where(column == target).order_by(model.id).limit(1))
+    ).scalars().first()
+
+
+async def ensure_name_free(session: AsyncSession, model: type[Base], name: str) -> None:
+    """Refuse a create whose name is already taken, by the same rule `rename` applies."""
+    cleaned = name.strip()
+    clash = await _find_by_name(session, model, cleaned)
+    if clash is not None:
+        raise NameConflictError(f'Another entry is already called "{cleaned}".', existing_id=clash.id)
 
 
 async def get_or_404(session: AsyncSession, model: type[Base], row_id: int):

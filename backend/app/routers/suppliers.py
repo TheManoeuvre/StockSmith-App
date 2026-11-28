@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db, require_auth
 from app.models.supplier import Supplier
-from app.routers._reference_crud import MergeRequest, delete_row, list_with_usage, merge_rows, patch_row
+from app.routers._reference_crud import ensure_name_free, MergeRequest, delete_row, list_with_usage, merge_rows, patch_row
 from app.schemas.supplier import SupplierCreate, SupplierFindOrCreate, SupplierRead, SupplierUpdate
 from app.services import reference_data, supplier_logo
 from app.services.file_storage import resolve_asset_path
@@ -66,6 +66,7 @@ async def list_suppliers(session: AsyncSession = Depends(get_db)) -> list[Suppli
 
 @router.post("", response_model=SupplierRead, status_code=status.HTTP_201_CREATED)
 async def create_supplier(payload: SupplierCreate, session: AsyncSession = Depends(get_db)) -> Supplier:
+    await ensure_name_free(session, Supplier, payload.name)
     row = Supplier(**payload.model_dump())
     session.add(row)
     await session.flush()

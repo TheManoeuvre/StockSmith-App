@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.deps import get_db, require_auth
 from app.models.product_category import ProductCategory
-from app.routers._reference_crud import MergeRequest, delete_row, list_with_usage, merge_rows, patch_row
+from app.routers._reference_crud import ensure_name_free, MergeRequest, delete_row, list_with_usage, merge_rows, patch_row
 from app.schemas.product_category import ProductCategoryCreate, ProductCategoryFindOrCreate, ProductCategoryRead, ProductCategoryUpdate
 
 router = APIRouter(prefix="/product-categories", tags=["product-categories"], dependencies=[Depends(require_auth)])
@@ -17,6 +17,7 @@ async def list_product_categories(session: AsyncSession = Depends(get_db)) -> li
 
 @router.post("", response_model=ProductCategoryRead, status_code=status.HTTP_201_CREATED)
 async def create_product_category(payload: ProductCategoryCreate, session: AsyncSession = Depends(get_db)) -> ProductCategory:
+    await ensure_name_free(session, ProductCategory, payload.name)
     row = ProductCategory(**payload.model_dump())
     session.add(row)
     await session.commit()
